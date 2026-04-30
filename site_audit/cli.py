@@ -37,6 +37,7 @@ def _run_command(args: argparse.Namespace) -> int:
         model=args.model,
         max_pages=args.max_pages,
         max_workers=args.workers,
+        request_delay=args.request_delay,
         duplicate_threshold=args.duplicate_threshold,
         duplicate_knn=args.duplicate_knn,
         scatter_clusters=args.scatter_clusters,
@@ -121,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
     run_p.add_argument("--max-pages", type=int, default=2000)
     run_p.add_argument("--workers", type=int, default=8)
+    run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)
     run_p.add_argument("--duplicate-knn", type=int, default=10)
     run_p.add_argument("--scatter-clusters", type=int, default=30)

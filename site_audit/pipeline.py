@@ -59,6 +59,7 @@ class PipelineConfig:
     model: str = DEFAULT_MODEL
     max_pages: int = 2000
     max_workers: int = 8
+    request_delay: float = 0.0
     duplicate_threshold: float = 0.92
     duplicate_knn: int = 10
     scatter_clusters: int = 30
@@ -120,6 +121,7 @@ def run(config: PipelineConfig) -> dict:
         domain=config.domain,
         max_pages=config.max_pages,
         max_workers=config.max_workers,
+        request_delay=config.request_delay,
         follow_subdomains=config.follow_subdomains,
         respect_robots=config.respect_robots,
         use_cache=config.use_http_cache,
