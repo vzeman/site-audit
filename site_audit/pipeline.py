@@ -26,11 +26,11 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from .analyzer import PageInfo, analyze, section_for_url
+from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
-from .cache import EmbeddingCache, HttpCache, domain_slug
-from .cluster_labels import label_clusters
+from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
+from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .crawler import Crawler, CrawlConfig
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
 from .external_links import analyze as analyze_external
@@ -42,6 +42,8 @@ from .keyword_coverage import (
 )
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import to_payload as linkgraph_payload
+from .paragraph_links import recommend as recommend_paragraph_links
+from .paragraph_links import to_payload as paragraph_links_payload
 from .report import write_all
 from .scatter import project
 
@@ -76,7 +78,12 @@ class PipelineConfig:
     enable_answerability: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
+    enable_paragraph_links: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
+    paragraph_link_top_k: int = 200
+    paragraph_link_per_page: int = 8
+    paragraph_similarity_floor: float = 0.65
+    paragraph_lift_floor: float = 0.05
     queries_file: Optional[Path] = None
     auto_queries_max: int = 200
     coverage_threshold: float = 0.55
@@ -174,6 +181,17 @@ def run(config: PipelineConfig) -> dict:
     )
     LOG.info("  embeddings shape: %s", embeddings.shape)
 
+    # Drop URL duplicates that snuck in via redirect collapses (different
+    # request URLs that resolved to the same canonical URL).
+    deduped_pages, deduped_embs, kept_idx = deduplicate_pages_by_url(pages, embeddings)
+    if len(deduped_pages) != len(pages):
+        LOG.info("  deduped %d → %d unique URLs", len(pages), len(deduped_pages))
+        pages = deduped_pages
+        embeddings = deduped_embs
+        extracted_pages = [extracted_pages[i] for i in kept_idx]
+        embed_inputs = [embed_inputs[i] for i in kept_idx]
+        # outlinks / external maps are url-keyed, so they don't need filtering
+
     # 4) Core analysis
     result = analyze(
         pages,
@@ -199,6 +217,7 @@ def run(config: PipelineConfig) -> dict:
             cluster_texts=[ei.text for ei in embed_inputs],
         )
         LOG.info("  labelled %d clusters", len(cluster_summaries))
+    cluster_overlap = cluster_overlap_matrix(cluster_summaries) if cluster_summaries else {}
 
     # 7) Keyword coverage
     coverage_payload: list[dict] = []
@@ -272,7 +291,71 @@ def run(config: PipelineConfig) -> dict:
             "checked" if config.check_external_links else "not checked",
         )
 
-    # 11) Reports
+    # 11) Paragraph-level link recommendations
+    paragraph_recs_payload: list[dict] = []
+    paragraph_records = None  # populated on demand for visualizations later
+    if config.enable_paragraph_links:
+        paragraph_cache = ParagraphEmbeddingCache(
+            cache_dir / f"paragraphs_{config.model.replace('/', '_').replace('-', '_')}.npz"
+        )
+        # Collect (page_index, para_index, text) and compute hashes
+        triples: list[tuple[int, int, str]] = []
+        hashes: list[str] = []
+        for i, ext in enumerate(extracted_pages):
+            for j, para in enumerate(ext.paragraphs or []):
+                triples.append((i, j, para))
+                hashes.append(content_hash(f"{para}|{config.model}"))
+
+        if triples:
+            cached_idx: list[int] = []
+            misses_idx: list[int] = []
+            cached_embs: dict[int, np.ndarray] = {}
+            for k, ((page_i, _, _), h) in enumerate(zip(triples, hashes)):
+                src_url = pages[page_i].url
+                cached = paragraph_cache.get(src_url, h) if config.use_embedding_cache else None
+                if cached is not None:
+                    cached_embs[k] = cached
+                    cached_idx.append(k)
+                else:
+                    misses_idx.append(k)
+
+            LOG.info(
+                "  paragraphs: %d total | %d cached | %d to embed",
+                len(triples), len(cached_idx), len(misses_idx),
+            )
+
+            if misses_idx:
+                miss_texts = [triples[k][2] for k in misses_idx]
+                new_embs = embedder.encode(miss_texts, batch_size=64, show_progress=True)
+                for slot, k in enumerate(misses_idx):
+                    page_i, _, _ = triples[k]
+                    src_url = pages[page_i].url
+                    paragraph_cache.put(src_url, hashes[k], new_embs[slot])
+                    cached_embs[k] = new_embs[slot]
+                paragraph_cache.save()
+
+            paragraph_records = [
+                (triples[k][0], triples[k][1], triples[k][2], cached_embs[k])
+                for k in range(len(triples))
+            ]
+
+            ans_lookup = {a["url"]: a["score"] for a in ans_payload} if ans_payload else None
+            recs = recommend_paragraph_links(
+                pages,
+                embeddings,
+                paragraph_records,
+                pages_with_outlinks=[(p.url, outlinks_map.get(p.url, [])) for p in pages],
+                answerability_by_url=ans_lookup,
+                embedder=embedder,
+                similarity_floor=config.paragraph_similarity_floor,
+                lift_floor=config.paragraph_lift_floor,
+                top_k_per_page=config.paragraph_link_per_page,
+                top_k_total=config.paragraph_link_top_k,
+            )
+            paragraph_recs_payload = paragraph_links_payload(recs)
+            LOG.info("  paragraph link recs: %d", len(paragraph_recs_payload))
+
+    # 12) Reports
     summary = write_all(
         report_dir,
         result,
@@ -285,6 +368,8 @@ def run(config: PipelineConfig) -> dict:
         answerability=ans_payload,
         linkgraph=link_payload,
         external_links=external_payload_data,
+        paragraph_link_recs=paragraph_recs_payload,
+        cluster_overlap=cluster_overlap,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -303,6 +388,8 @@ def run(config: PipelineConfig) -> dict:
             answerability=ans_payload,
             linkgraph=link_payload,
             external_links=external_payload_data,
+            paragraph_link_recs=paragraph_recs_payload,
+            cluster_overlap=cluster_overlap,
         )
         LOG.info("  HTML report: %s", html_path)
 

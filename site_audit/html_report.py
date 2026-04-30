@@ -28,6 +28,8 @@ _PLACEHOLDERS = {
     "__ANSWERABILITY_JSON__": "answerability",
     "__LINKGRAPH_JSON__": "linkgraph",
     "__EXTERNAL_JSON__": "external",
+    "__PARAGRAPH_LINKS_JSON__": "paragraph_links",
+    "__CLUSTER_OVERLAP_JSON__": "cluster_overlap",
 }
 
 
@@ -202,6 +204,8 @@ def write_html_report(
     answerability: Optional[list] = None,
     linkgraph: Optional[dict] = None,
     external_links: Optional[dict] = None,
+    paragraph_link_recs: Optional[list] = None,
+    cluster_overlap: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -216,6 +220,8 @@ def write_html_report(
         "answerability": answerability or [],
         "linkgraph": linkgraph or {},
         "external": external_links or {},
+        "paragraph_links": paragraph_link_recs or [],
+        "cluster_overlap": cluster_overlap or {},
     }
 
     rendered = template

@@ -330,6 +330,26 @@ def find_near_duplicates(
     return pairs
 
 
+def deduplicate_pages_by_url(pages, embeddings: np.ndarray):
+    """Drop rows where the same URL appears twice (e.g. from redirect collapses).
+
+    Returns ``(unique_pages, unique_embeddings, kept_indices)`` so callers
+    can also filter associated structures (paragraphs, outlinks).
+    """
+    seen: dict[str, int] = {}
+    kept: list[int] = []
+    for i, p in enumerate(pages):
+        if p.url in seen:
+            continue
+        seen[p.url] = i
+        kept.append(i)
+    if len(kept) == len(pages):
+        return pages, embeddings, kept
+    new_pages = [pages[i] for i in kept]
+    new_embs = embeddings[kept]
+    return new_pages, new_embs, kept
+
+
 def recommend_action(
     page: PageInfo,
     dist_site: float,

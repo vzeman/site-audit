@@ -266,6 +266,8 @@ def write_all(
     answerability: Optional[list] = None,
     linkgraph: Optional[dict] = None,
     external_links: Optional[dict] = None,
+    paragraph_link_recs: Optional[list] = None,
+    cluster_overlap: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -285,4 +287,8 @@ def write_all(
         _write_json(output_dir / "linkgraph.json", linkgraph)
     if external_links is not None:
         _write_json(output_dir / "external_links.json", external_links)
+    if paragraph_link_recs is not None:
+        _write_json(output_dir / "paragraph_link_recommendations.json", paragraph_link_recs)
+    if cluster_overlap is not None:
+        _write_json(output_dir / "cluster_overlap.json", cluster_overlap)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

@@ -140,6 +140,24 @@
       </div>
     </div>
 
+    <!-- Cluster treemap -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="treemap-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Topic mass — cluster treemap</h3>
+        <span class="text-xs text-gray-500">size = pages, color = cohesion</span>
+      </div>
+      <div id="audit-treemap" class="w-full" style="height: 360px;"></div>
+    </div>
+
+    <!-- Cluster overlap heatmap -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Cluster overlap heatmap</h3>
+        <span class="text-xs text-gray-500">strong diagonal = clean separation; off-diagonal heat = topic overlap → cannibalization</span>
+      </div>
+      <div id="audit-heatmap" class="overflow-auto"></div>
+    </div>
+
     <!-- Keyword coverage -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="coverage-block">
       <div class="flex items-center justify-between mb-3">
@@ -189,6 +207,17 @@
         <span class="text-xs text-gray-500">try the top 10 first</span>
       </div>
       <div id="audit-link-recs" class="text-sm max-h-96 overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- In-paragraph link recommendations -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-links-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">In-paragraph link recommendations</h3>
+        <span class="text-xs text-gray-500">add a link to <em>this exact paragraph</em>, with this exact anchor</span>
+      </div>
+      <div id="audit-para-links" class="text-sm max-h-[36rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
     </div>
@@ -280,6 +309,8 @@
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
 <script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
+<script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
+<script type="application/json" id="data-cluster-overlap">__CLUSTER_OVERLAP_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -346,8 +377,10 @@
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedLinkgraph = readInlined('data-linkgraph');
       const inlinedExternal = readInlined('data-external');
+      const inlinedParaLinks = readInlined('data-paragraph-links');
+      const inlinedClusterOverlap = readInlined('data-cluster-overlap');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -359,8 +392,10 @@
         answerability = inlinedAnswerability || [];
         linkgraph = inlinedLinkgraph || {};
         external = inlinedExternal || {};
+        paraLinks = inlinedParaLinks || [];
+        clusterOverlap = inlinedClusterOverlap || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -371,6 +406,8 @@
           loadJSON('answerability.json').catch(() => []),
           loadJSON('linkgraph.json').catch(() => ({})),
           loadJSON('external_links.json').catch(() => ({})),
+          loadJSON('paragraph_link_recommendations.json').catch(() => []),
+          loadJSON('cluster_overlap.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -384,6 +421,8 @@
       state.answerability = answerability;
       state.linkgraph = linkgraph;
       state.external = external;
+      state.paraLinks = paraLinks;
+      state.clusterOverlap = clusterOverlap;
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
@@ -397,9 +436,12 @@
       renderOutliers();
       renderDuplicates();
       renderClusters();
+      renderTreemap();
+      renderHeatmap();
       renderCoverage('all');
       renderAnswerability();
       renderLinkgraph();
+      renderParaLinks();
       renderHits();
       renderDeep();
       renderClusterAuth();
@@ -963,6 +1005,114 @@
             ${b.anchor ? `<div class="text-xs text-gray-500">anchor: "${escapeHtml(b.anchor)}"</div>` : ''}
           </div>`).join('');
     }
+  }
+
+  function renderTreemap() {
+    const block = document.getElementById('treemap-block');
+    const data = state.clusters || [];
+    if (!data.length) { block.style.display = 'none'; return; }
+    const el = document.getElementById('audit-treemap');
+    el.innerHTML = '';
+    const width = el.offsetWidth || 900;
+    const height = 360;
+    const root = d3.hierarchy({ children: data })
+      .sum(d => d.page_count || 0)
+      .sort((a, b) => (b.value || 0) - (a.value || 0));
+    d3.treemap().size([width, height]).padding(2)(root);
+
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height);
+    const colorScale = d3.scaleSequential(d3.interpolateBlues)
+      .domain([0.5, 1]);
+    const cells = svg.selectAll('g').data(root.leaves()).join('g').attr('transform', d => `translate(${d.x0},${d.y0})`);
+    cells.append('rect')
+      .attr('width', d => d.x1 - d.x0).attr('height', d => d.y1 - d.y0)
+      .attr('fill', d => colorScale(d.data.cohesion || 0.6))
+      .attr('stroke', 'white').attr('stroke-width', 1);
+    cells.append('title').text(d => `${d.data.label}\n${d.data.page_count} pages\ncohesion ${(d.data.cohesion || 0).toFixed(3)}\nsite-alignment ${(d.data.site_alignment || 0).toFixed(3)}`);
+    cells.append('text')
+      .attr('x', 6).attr('y', 14)
+      .attr('font-size', 11)
+      .attr('fill', d => (d.data.cohesion || 0) > 0.85 ? 'white' : '#1f2937')
+      .text(d => {
+        const w = d.x1 - d.x0;
+        const label = d.data.label || '';
+        const max = Math.floor(w / 6.5);
+        return label.length > max ? label.slice(0, max - 1) + '…' : label;
+      })
+      .style('display', d => (d.x1 - d.x0) < 60 || (d.y1 - d.y0) < 22 ? 'none' : null);
+  }
+
+  function renderHeatmap() {
+    const block = document.getElementById('heatmap-block');
+    const co = state.clusterOverlap || {};
+    const cs = co.clusters || [];
+    const matrix = co.matrix || [];
+    if (!cs.length || !matrix.length) { block.style.display = 'none'; return; }
+
+    const el = document.getElementById('audit-heatmap');
+    el.innerHTML = '';
+    const cell = 18;
+    const labelWidth = 180;
+    const labelHeight = 110;
+    const n = cs.length;
+    const width = labelWidth + n * cell + 20;
+    const height = labelHeight + n * cell + 20;
+
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height);
+    const color = d3.scaleSequential(d3.interpolateRdYlBu).domain([1.0, 0.3]);
+
+    // column labels (rotated)
+    svg.append('g').attr('transform', `translate(${labelWidth},${labelHeight})`)
+      .selectAll('text').data(cs).join('text')
+      .attr('x', (_, i) => i * cell + cell / 2)
+      .attr('y', -4)
+      .attr('transform', (_, i) => `rotate(-45, ${i * cell + cell / 2}, -4)`)
+      .attr('font-size', 10)
+      .attr('text-anchor', 'start')
+      .text(d => d.label.length > 18 ? d.label.slice(0, 17) + '…' : d.label);
+
+    // row labels
+    svg.append('g').attr('transform', `translate(${labelWidth - 6},${labelHeight + cell / 2 + 3})`)
+      .selectAll('text').data(cs).join('text')
+      .attr('y', (_, i) => i * cell)
+      .attr('font-size', 10)
+      .attr('text-anchor', 'end')
+      .text(d => d.label.length > 22 ? d.label.slice(0, 21) + '…' : d.label);
+
+    // cells
+    const g = svg.append('g').attr('transform', `translate(${labelWidth},${labelHeight})`);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const v = matrix[i][j];
+        g.append('rect')
+          .attr('x', j * cell).attr('y', i * cell)
+          .attr('width', cell - 1).attr('height', cell - 1)
+          .attr('fill', color(v))
+          .append('title').text(`${cs[i].label} ↔ ${cs[j].label}\nsim ${v.toFixed(3)}`);
+      }
+    }
+  }
+
+  function renderParaLinks() {
+    const block = document.getElementById('para-links-block');
+    const recs = state.paraLinks || [];
+    if (!recs.length) {
+      block.style.display = 'none';
+      return;
+    }
+    const summary = `<div class="text-xs text-gray-500 mb-2">${recs.length} suggestions · sorted by lift (paragraph specificity over page average)</div>`;
+    const rows = recs.slice(0, 200).map((r, i) => `
+      <div class="py-3 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="text-xs text-gray-500">#${i + 1} · fit ${r.fit} · lift +${r.lift}</div>
+          <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">para ${r.paragraph_index}</span>
+        </div>
+        <div class="text-xs italic text-gray-600 mb-2">"${escapeHtml(r.paragraph_excerpt)}"</div>
+        <div class="text-xs"><span class="text-gray-500">on </span><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url)}" target="_blank" rel="noopener">${escapeHtml(r.source_url)}</a></div>
+        <div class="text-xs mt-1"><span class="text-gray-500">→ link to </span><a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(r.target_url)}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a></div>
+        <div class="text-xs mt-1"><span class="text-gray-500">suggested anchor: </span><span class="font-mono bg-yellow-50 px-1 rounded">${escapeHtml(r.suggested_anchor)}</span> <span class="text-gray-400">(confidence ${r.anchor_confidence})</span></div>
+      </div>`).join('');
+    document.getElementById('audit-para-links').innerHTML = summary + rows;
   }
 
   boot();

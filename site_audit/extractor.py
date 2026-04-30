@@ -49,6 +49,7 @@ class ExtractedPage:
     external_link_count: int = 0
     has_dates: bool = False
     stat_count: int = 0  # numbers with units / percentages
+    paragraphs: list[str] = field(default_factory=list)  # body broken into clean paragraph blocks
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -92,6 +93,35 @@ def _strip_to_text(html_body: str) -> str:
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
         tag.decompose()
     return _clean(soup.get_text(" "))
+
+
+def _extract_paragraphs(html_body: str, min_chars: int = 120, max_chars: int = 1200) -> list[str]:
+    """Pull paragraph-sized blocks of running text from the HTML.
+
+    We prefer ``<p>`` and ``<li>`` tags inside the main content; we filter
+    nav/footer/aside upfront. Each block is normalized to single-space
+    whitespace, length-bounded, and de-duplicated. Blocks shorter than
+    ``min_chars`` are usually nav fragments, so they're dropped.
+    """
+    soup = BeautifulSoup(html_body, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe", "form"]):
+        tag.decompose()
+
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for el in soup.find_all(["p", "li", "blockquote", "h2", "h3", "h4"]):
+        text = _clean(el.get_text(" "))
+        if not text:
+            continue
+        if len(text) < min_chars:
+            continue
+        text = text[:max_chars]
+        key = text[:200].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append(text)
+    return blocks
 
 
 def _extract_schema_types(soup: BeautifulSoup) -> list[str]:
@@ -200,6 +230,7 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
     external_link_count = _count_external_links(soup, url)
     has_dates = bool(_DATE_RE.search(body_text))
     stat_count = len(_STAT_RE.findall(body_text))
+    paragraphs = _extract_paragraphs(html_body)
 
     return ExtractedPage(
         url=url,
@@ -216,4 +247,5 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
         external_link_count=external_link_count,
         has_dates=has_dates,
         stat_count=stat_count,
+        paragraphs=paragraphs,
     )

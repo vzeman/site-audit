@@ -201,3 +201,54 @@ class EmbeddingCache:
             "entries": len(self._cache),
             "size_bytes": self.npz_path.stat().st_size if self.npz_path.exists() else 0,
         }
+
+
+class ParagraphEmbeddingCache:
+    """NPZ cache of paragraph embeddings keyed by ``(url, paragraph_hash)``.
+
+    A page typically has ~15-50 paragraphs, so for a 1 000-page site we're
+    storing ~30 000 vectors. Lookups are by ``(url, hash(text|model))`` so
+    re-runs only re-embed paragraphs whose text changed.
+    """
+
+    def __init__(self, npz_path: Path):
+        self.npz_path = Path(npz_path)
+        self.npz_path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache: dict[tuple[str, str], np.ndarray] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.npz_path.exists():
+            return
+        try:
+            data = np.load(self.npz_path, allow_pickle=False)
+            urls = data["urls"]
+            hashes = data["hashes"]
+            embs = data["embeddings"]
+            self._cache = {
+                (str(urls[i]), str(hashes[i])): embs[i] for i in range(len(urls))
+            }
+        except Exception as exc:  # pragma: no cover
+            print(f"  paragraph cache read failed ({exc}); starting clean")
+            self._cache = {}
+
+    def get(self, url: str, hash_: str) -> Optional[np.ndarray]:
+        return self._cache.get((url, hash_))
+
+    def put(self, url: str, hash_: str, embedding: np.ndarray) -> None:
+        self._cache[(url, hash_)] = embedding.astype(np.float32)
+
+    def save(self) -> None:
+        if not self._cache:
+            return
+        items = list(self._cache.items())
+        urls = np.array([k[0] for k, _ in items])
+        hashes = np.array([k[1] for k, _ in items])
+        embs = np.stack([v for _, v in items]).astype(np.float32)
+        np.savez_compressed(self.npz_path, urls=urls, hashes=hashes, embeddings=embs)
+
+    def stats(self) -> dict:
+        return {
+            "entries": len(self._cache),
+            "size_bytes": self.npz_path.stat().st_size if self.npz_path.exists() else 0,
+        }

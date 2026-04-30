@@ -45,6 +45,7 @@ class ClusterSummary:
     top_pages: list[dict]           # [{title, url, similarity}]
     cohesion: float
     site_alignment: float
+    _centroid: np.ndarray | None = None  # internal: used by overlap matrix
 
 
 def _aggregate_texts(texts: Sequence[str], cluster_labels: np.ndarray, n_clusters: int) -> list[str]:
@@ -178,8 +179,42 @@ def label_clusters(
             top_pages=top_pages_payload,
             cohesion=cohesion,
             site_alignment=site_alignment,
+            _centroid=centroid,
         ))
 
     # Rank: bigger + more cohesive clusters first; site-aligned ones break ties.
     summaries.sort(key=lambda s: (s.page_count * s.cohesion, s.site_alignment), reverse=True)
     return summaries
+
+
+def cluster_overlap_matrix(cluster_summaries: list[ClusterSummary]) -> dict:
+    """Cosine matrix between cluster centroids — visualizes topical overlap.
+
+    Strong diagonal + low off-diagonal = clean topical separation.
+    Lots of off-diagonal heat = clusters are talking about overlapping
+    things, which is the structural cause of cannibalization.
+    """
+    if not cluster_summaries:
+        return {"clusters": [], "matrix": []}
+    centroids = []
+    for s in cluster_summaries:
+        # store centroid back via re-derivation: we don't keep the
+        # array on ClusterSummary, so look it up downstream — handled
+        # below by passing centroid in.
+        centroids.append(getattr(s, "_centroid", None))
+    if any(c is None for c in centroids):
+        # fall back to no matrix if centroids weren't attached
+        return {"clusters": [], "matrix": []}
+    M = np.stack(centroids).astype(np.float32)
+    sim = np.clip(M @ M.T, -1.0, 1.0)
+    return {
+        "clusters": [
+            {
+                "cluster_id": s.cluster_id,
+                "label": ", ".join(k["keyword"] for k in s.keywords[:3]) or f"cluster {s.cluster_id}",
+                "page_count": s.page_count,
+            }
+            for s in cluster_summaries
+        ],
+        "matrix": [[float(round(v, 4)) for v in row] for row in sim],
+    }

@@ -289,7 +289,8 @@ class Crawler:
         return False
 
     def _bfs(self, seeds: Iterable[str]) -> list[FetchResult]:
-        seen: Set[str] = set()
+        seen: Set[str] = set()                # URLs we've enqueued (request-time)
+        result_urls: Set[str] = set()         # URLs we've already kept (post-redirect)
         frontier: collections.deque[str] = collections.deque()
         for u in seeds:
             n = normalize_url(u)
@@ -325,6 +326,16 @@ class Crawler:
                         continue
                     if result is None:
                         continue
+                    # Skip duplicates that arise when several request URLs
+                    # redirect to the same canonical (with/without trailing
+                    # slash, with/without www, redirected query params).
+                    if result.url in result_urls:
+                        # Still mark the pre-redirect URL as seen so we
+                        # don't try it again.
+                        seen.add(url)
+                        continue
+                    result_urls.add(result.url)
+                    seen.add(result.url)
                     results.append(result)
 
                     if "html" in result.content_type:
