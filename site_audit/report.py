@@ -1,0 +1,249 @@
+"""Serialize an ``AuditResult`` (+ optional UMAP projection) to disk.
+
+Output paths mirror the Hugo audit pipeline so the existing D3
+viewer template can render against either source unchanged:
+
+::
+
+    out/
+      <domain>/
+        site_metrics.json
+        section_report.json
+        page_drift.csv
+        outliers.csv
+        duplicates.csv
+        scatterplot.json
+        pages.json
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from .analyzer import AuditResult, recommend_action
+
+
+def _write_csv(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("")
+        return
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def write_site_metrics(path: Path, result: AuditResult, model_name: str, domain: str) -> None:
+    sm = result.site_metrics
+    payload = {
+        "domain": domain,
+        "model": model_name,
+        "page_count": sm["count"],
+        "site_focus_score": sm["focus_score"],
+        "site_radius": sm["radius"],
+        "mean_distance_to_centroid": sm["mean_distance"],
+        "p95_distance_to_centroid": sm["p95_distance"],
+        "max_distance_to_centroid": sm["max_distance"],
+        "sections": sorted(
+            [
+                {
+                    "section": s.name,
+                    "page_count": s.metrics["count"],
+                    "focus_score": s.metrics["focus_score"],
+                    "radius": s.metrics["radius"],
+                    "p95_distance": s.metrics["p95_distance"],
+                }
+                for s in result.sections.values()
+            ],
+            key=lambda x: x["focus_score"],
+            reverse=True,
+        ),
+        "interpretation": {
+            "site_focus_score": "1.0 = all pages share the same meaning; lower = more topical spread.",
+            "site_radius": "Std-dev of per-page cosine distance to the site centroid. Lower is tighter.",
+            "section_focus_score": "Same metric restricted to pages inside a section.",
+        },
+    }
+    _write_json(path, payload)
+
+
+def write_section_report(path: Path, result: AuditResult) -> None:
+    out = []
+    for s in result.sections.values():
+        section_pages = [result.pages[i] for i in s.indices]
+        out.append({
+            "section": s.name,
+            "page_count": s.metrics["count"],
+            "focus_score": s.metrics["focus_score"],
+            "radius": s.metrics["radius"],
+            "p95_distance_to_section_centroid": s.metrics["p95_distance"],
+            "example_titles": [p.title for p in section_pages[:5]],
+        })
+    out.sort(key=lambda x: x["focus_score"])
+    _write_json(path, out)
+
+
+def write_page_drift(path: Path, result: AuditResult) -> None:
+    rows = []
+    for i, p in enumerate(result.pages):
+        rows.append({
+            "url": p.url,
+            "section": p.section,
+            "title": p.title,
+            "word_count": p.word_count,
+            "distance_to_site_centroid": round(float(result.dist_to_site[i]), 4),
+            "distance_to_section_centroid": round(float(result.dist_to_section[i]), 4),
+        })
+    rows.sort(key=lambda r: r["distance_to_section_centroid"], reverse=True)
+    _write_csv(path, rows)
+
+
+def write_outliers(path: Path, result: AuditResult) -> list[dict]:
+    duplicate_set = {i for pair in result.duplicate_pairs for i in pair[:2]}
+    section_size = {s.name: s.metrics["count"] for s in result.sections.values()}
+    section_p95 = {s.name: s.metrics["p95_distance"] for s in result.sections.values()}
+
+    rows = []
+    for i, p in enumerate(result.pages):
+        ds = float(result.dist_to_section[i])
+        d_all = float(result.dist_to_site[i])
+        sec_p95 = section_p95.get(p.section, 1.0)
+        is_outlier = ds > sec_p95 or d_all > 0.65
+        if not is_outlier and i not in duplicate_set:
+            continue
+        action = recommend_action(
+            p,
+            dist_site=d_all,
+            dist_section=ds,
+            section_p95=sec_p95,
+            section_size=section_size.get(p.section, 0),
+            has_duplicate=i in duplicate_set,
+        )
+        if not action:
+            continue
+        rows.append({
+            "url": p.url,
+            "section": p.section,
+            "title": p.title,
+            "word_count": p.word_count,
+            "distance_to_site_centroid": round(d_all, 4),
+            "distance_to_section_centroid": round(ds, 4),
+            "section_p95_distance": round(sec_p95, 4),
+            "recommendation": action,
+        })
+    rows.sort(key=lambda r: r["distance_to_section_centroid"], reverse=True)
+    _write_csv(path, rows)
+    return rows
+
+
+def write_duplicates(path: Path, result: AuditResult) -> None:
+    rows = []
+    for i, j, sim in result.duplicate_pairs:
+        a = result.pages[i]
+        b = result.pages[j]
+        same_section = a.section == b.section
+        if sim >= 0.97:
+            action = "merge (duplicate)"
+        elif sim >= 0.94:
+            action = "consolidate or canonicalize"
+        else:
+            action = "review — strong overlap"
+        rows.append({
+            "similarity": round(sim, 4),
+            "same_section": same_section,
+            "section_a": a.section,
+            "url_a": a.url,
+            "title_a": a.title,
+            "section_b": b.section,
+            "url_b": b.url,
+            "title_b": b.title,
+            "recommendation": action,
+        })
+    _write_csv(path, rows)
+
+
+def write_scatterplot(
+    path: Path,
+    result: AuditResult,
+    coords: Optional[np.ndarray],
+    cluster_labels: Optional[np.ndarray],
+) -> None:
+    if coords is None or cluster_labels is None:
+        return
+    pages_payload = []
+    sm = result.site_metrics
+    max_drift = float(max(
+        sm["max_distance"],
+        float(np.max(result.dist_to_site)) if len(result.dist_to_site) else 0,
+        float(np.max(result.dist_to_section)) if len(result.dist_to_section) else 0,
+        1e-9,
+    ))
+    for i, p in enumerate(result.pages):
+        pages_payload.append({
+            "title": p.title,
+            "url": p.url,
+            "section": p.section,
+            "x": float(coords[i, 0]),
+            "y": float(coords[i, 1]),
+            "cluster": int(cluster_labels[i]),
+            "drift_site": round(float(result.dist_to_site[i]), 4),
+            "drift_section": round(float(result.dist_to_section[i]), 4),
+            "drift_norm": round(float(result.dist_to_section[i]) / max_drift, 4),
+            "word_count": p.word_count,
+            "duplicate_of": result.duplicate_partners.get(i, []),
+        })
+    num_clusters = int(max(cluster_labels) + 1) if len(cluster_labels) else 0
+    payload = {
+        "total_pages": len(result.pages),
+        "num_clusters": num_clusters,
+        "max_drift": max_drift,
+        "site_focus_score": sm["focus_score"],
+        "site_radius": sm["radius"],
+        "pages": pages_payload,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False))
+
+
+def write_pages(path: Path, result: AuditResult) -> None:
+    payload = [
+        {
+            "url": p.url,
+            "title": p.title,
+            "description": p.description,
+            "section": p.section,
+            "word_count": p.word_count,
+            "language": p.language,
+        }
+        for p in result.pages
+    ]
+    _write_json(path, payload)
+
+
+def write_all(
+    output_dir: Path,
+    result: AuditResult,
+    model_name: str,
+    domain: str,
+    coords: Optional[np.ndarray] = None,
+    cluster_labels: Optional[np.ndarray] = None,
+) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
+    write_section_report(output_dir / "section_report.json", result)
+    write_page_drift(output_dir / "page_drift.csv", result)
+    outliers = write_outliers(output_dir / "outliers.csv", result)
+    write_duplicates(output_dir / "duplicates.csv", result)
+    write_pages(output_dir / "pages.json", result)
+    write_scatterplot(output_dir / "scatterplot.json", result, coords, cluster_labels)
+    return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

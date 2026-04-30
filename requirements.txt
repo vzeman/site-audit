@@ -1,0 +1,8 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+trafilatura>=1.12.0
+numpy>=1.24.0
+sentence-transformers>=2.6.0
+faiss-cpu>=1.7.4
+umap-learn>=0.5.5

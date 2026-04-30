@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.python-version
+
+# Caches & outputs (per-domain)
+cache/
+output/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.env
+.envrc
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

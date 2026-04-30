@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site Audit Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  </style>
+</head>
+<body class="bg-white text-gray-900">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+
+    <header class="text-center mb-8">
+      <h1 class="text-4xl font-bold mb-2">Site Audit</h1>
+      <p id="header-domain" class="text-lg text-gray-600">Loading…</p>
+    </header>
+
+    <!-- Headline metrics -->
+    <div id="audit-metrics" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <div class="text-sm text-gray-500">siteFocusScore</div>
+        <div id="m-focus" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">1.0 = laser focused</div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <div class="text-sm text-gray-500">siteRadius</div>
+        <div id="m-radius" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">lower = tighter spread</div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <div class="text-sm text-gray-500">Outlier pages</div>
+        <div id="m-outliers" class="text-3xl font-bold text-orange-600">—</div>
+        <div class="text-xs text-gray-500 mt-1">refocus or remove</div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <div class="text-sm text-gray-500">Near-duplicates</div>
+        <div id="m-dupes" class="text-3xl font-bold text-red-600">—</div>
+        <div class="text-xs text-gray-500 mt-1">merge candidates</div>
+      </div>
+    </div>
+
+    <!-- Scatterplot -->
+    <div class="bg-gray-50 rounded-lg shadow p-6 mb-6">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div>
+          <h2 class="text-2xl font-bold">Semantic Scatterplot</h2>
+          <p class="text-sm text-gray-500 mt-1">
+            Each dot is a page. 2D UMAP projection of content embeddings. Hover for details, click to open, scroll to zoom.
+          </p>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Color mode">
+          <span class="text-sm text-gray-500 mr-2">Color by:</span>
+          <button data-mode="section" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Section</button>
+          <button data-mode="cluster" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Cluster</button>
+          <button data-mode="drift" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Drift (heatmap)</button>
+          <button data-mode="flags" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Outliers + duplicates</button>
+        </div>
+      </div>
+      <div id="audit-scatter-container" class="w-full" style="min-height: 640px;">
+        <div class="flex items-center justify-center h-96">
+          <div class="text-center">
+            <svg class="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="text-gray-600">Loading audit data…</p>
+          </div>
+        </div>
+      </div>
+      <div id="audit-legend" class="mt-4 flex flex-wrap gap-2"></div>
+    </div>
+
+    <!-- Side panels -->
+    <div class="grid md:grid-cols-2 gap-6 mb-8">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-3">Weakest sections (lowest cohesion)</h3>
+        <div id="audit-sections" class="text-sm">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-3">Top outliers (highest drift)</h3>
+        <div id="audit-outliers" class="text-sm max-h-96 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <h3 class="text-lg font-semibold mb-3">Top duplicate pairs (merge candidates)</h3>
+      <div id="audit-duplicates" class="text-sm max-h-96 overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <div class="bg-blue-50 rounded-lg p-5 text-sm text-gray-700">
+      <strong>How to read:</strong> the scatterplot shows topical clustering of every crawled page. Tightly-packed dots = similar content. Pages in the <em>Drift</em> view colored orange/red are furthest from their section centroid — refocus or removal candidates. The <em>Outliers + duplicates</em> view highlights pages flagged as off-topic (orange) or near-duplicate (red ring).
+    </div>
+  </div>
+
+<script>
+(function() {
+  const basePath = '/data';
+
+  const palette = [
+    '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+    '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+    '#aec7e8','#ffbb78','#98df8a','#ff9896','#c5b0d5',
+    '#c49c94','#f7b6d2','#c7c7c7','#dbdb8d','#9edae5',
+    '#393b79','#637939','#8c6d31','#843c39','#7b4173',
+    '#5254a3','#8ca252','#bd9e39','#ad494a','#a55194'
+  ];
+
+  const state = {
+    pages: [],
+    scatter: null,
+    metrics: null,
+    sections: [],
+    outliers: [],
+    duplicates: [],
+    mode: 'section',
+    dots: null,
+    sectionColor: null,
+    clusterColor: null,
+    driftColor: null,
+  };
+
+  function fixUrl(url) {
+    if (!url) return '#';
+    return url;
+  }
+
+  async function loadJSON(path) {
+    const r = await fetch(`${basePath}/${path}`);
+    if (!r.ok) throw new Error(`${path} ${r.status}`);
+    return r.json();
+  }
+
+  async function loadCSV(path) {
+    const r = await fetch(`${basePath}/${path}`);
+    if (!r.ok) return [];
+    const text = await r.text();
+    if (!text.trim()) return [];
+    return d3.csvParse(text);
+  }
+
+  async function boot() {
+    try {
+      const [scatter, metrics, sections, outliers, duplicates] = await Promise.all([
+        loadJSON('scatterplot.json').catch(() => null),
+        loadJSON('site_metrics.json'),
+        loadJSON('section_report.json').catch(() => []),
+        loadCSV('outliers.csv'),
+        loadCSV('duplicates.csv'),
+      ]);
+      state.scatter = scatter;
+      state.pages = scatter ? scatter.pages : [];
+      state.metrics = metrics;
+      state.sections = sections;
+      state.outliers = outliers;
+      state.duplicates = duplicates;
+      document.getElementById('header-domain').textContent =
+        `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
+      renderMetrics();
+      if (state.pages.length) {
+        renderScatter();
+      } else {
+        document.getElementById('audit-scatter-container').innerHTML =
+          `<div class="text-center py-12 text-gray-600">Scatterplot was skipped (run without <code>--no-scatterplot</code> to enable).</div>`;
+      }
+      renderSections();
+      renderOutliers();
+      renderDuplicates();
+      wireModeButtons();
+    } catch (e) {
+      console.error(e);
+      document.getElementById('audit-scatter-container').innerHTML = `
+        <div class="text-center py-12">
+          <p class="text-gray-700 mb-2">Audit data not found.</p>
+          <p class="text-sm text-gray-500">Run <code>site-audit run &lt;domain&gt;</code> first, then <code>site-audit serve &lt;domain&gt;</code>.</p>
+          <p class="text-xs text-gray-400 mt-2">${e.message || e}</p>
+        </div>`;
+    }
+  }
+
+  function renderMetrics() {
+    const m = state.metrics;
+    document.getElementById('m-focus').textContent = (m.site_focus_score || 0).toFixed(4);
+    document.getElementById('m-radius').textContent = (m.site_radius || 0).toFixed(4);
+    document.getElementById('m-outliers').textContent = state.outliers.length.toLocaleString();
+    document.getElementById('m-dupes').textContent = state.duplicates.length.toLocaleString();
+  }
+
+  function renderSections() {
+    const el = document.getElementById('audit-sections');
+    if (!Array.isArray(state.sections) || !state.sections.length) {
+      el.innerHTML = '<div class="text-gray-500">No section data.</div>';
+      return;
+    }
+    const rows = state.sections.slice(0, 20).map(s => `
+      <div class="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
+        <div class="truncate"><span class="font-medium">${s.section}</span> <span class="text-gray-400">(${s.page_count})</span></div>
+        <div class="text-right">
+          <span class="text-gray-700">focus: ${(s.focus_score || 0).toFixed(3)}</span>
+          <span class="text-gray-400 ml-2">radius: ${(s.radius || 0).toFixed(3)}</span>
+        </div>
+      </div>`).join('');
+    el.innerHTML = rows;
+  }
+
+  function renderOutliers() {
+    const el = document.getElementById('audit-outliers');
+    if (!state.outliers.length) {
+      el.innerHTML = '<div class="text-gray-500">None — site is tightly focused.</div>';
+      return;
+    }
+    const top = state.outliers.slice(0, 100);
+    el.innerHTML = top.map(r => `
+      <div class="py-1.5 border-b border-gray-100 last:border-0">
+        <a href="${r.url}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium">${r.title || r.url}</a>
+        <span class="text-gray-400 ml-2">(${r.section})</span>
+        <div class="text-xs text-gray-500">drift: ${r.distance_to_section_centroid} · ${r.recommendation || ''}</div>
+      </div>`).join('');
+  }
+
+  function renderDuplicates() {
+    const el = document.getElementById('audit-duplicates');
+    if (!state.duplicates.length) {
+      el.innerHTML = '<div class="text-gray-500">No duplicates above threshold.</div>';
+      return;
+    }
+    const top = state.duplicates.slice(0, 100);
+    el.innerHTML = `
+      <table class="min-w-full text-sm">
+        <thead class="text-xs text-gray-500">
+          <tr><th class="text-left py-1">Similarity</th><th class="text-left py-1">Page A</th><th class="text-left py-1">Page B</th><th class="text-left py-1">Action</th></tr>
+        </thead>
+        <tbody>
+          ${top.map(r => `
+            <tr class="border-b border-gray-100">
+              <td class="py-1.5 font-mono">${(+r.similarity).toFixed(3)}</td>
+              <td class="py-1.5"><a class="text-blue-600 hover:underline" href="${r.url_a}" target="_blank" rel="noopener">${r.title_a || r.url_a}</a><div class="text-xs text-gray-400">${r.section_a}</div></td>
+              <td class="py-1.5"><a class="text-blue-600 hover:underline" href="${r.url_b}" target="_blank" rel="noopener">${r.title_b || r.url_b}</a><div class="text-xs text-gray-400">${r.section_b}</div></td>
+              <td class="py-1.5 text-gray-700">${r.recommendation}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  function renderScatter() {
+    const container = document.getElementById('audit-scatter-container');
+    container.innerHTML = '';
+
+    const margin = { top: 20, right: 20, bottom: 40, left: 40 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 640 - margin.top - margin.bottom;
+
+    const svgOuter = d3.select(container).append('svg')
+      .attr('width', container.offsetWidth).attr('height', 640);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xExt = d3.extent(state.pages, d => d.x);
+    const yExt = d3.extent(state.pages, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
+    const xScale = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
+    const yScale = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
+
+    const sections = Array.from(new Set(state.pages.map(p => p.section))).sort();
+    const sectionColor = d3.scaleOrdinal().domain(sections).range(palette);
+    const clusterColor = d3.scaleOrdinal().domain(d3.range(state.scatter.num_clusters || 1)).range(palette);
+    const maxDrift = state.scatter.max_drift || 1;
+    const driftColor = d3.scaleSequential(d3.interpolateRgbBasis(['#16a34a', '#f59e0b', '#dc2626']))
+      .domain([0, maxDrift]);
+
+    state.sectionColor = sectionColor;
+    state.clusterColor = clusterColor;
+    state.driftColor = driftColor;
+
+    const clip = svg.append('defs').append('clipPath').attr('id', 'audit-clip');
+    clip.append('rect').attr('width', width).attr('height', height);
+
+    const dotsGroup = svg.append('g').attr('clip-path', 'url(#audit-clip)');
+    const dots = dotsGroup.selectAll('circle')
+      .data(state.pages)
+      .join('circle')
+      .attr('cx', d => xScale(d.x))
+      .attr('cy', d => yScale(d.y))
+      .attr('r', 4)
+      .attr('fill-opacity', 0.75)
+      .attr('stroke', 'white')
+      .attr('stroke-width', 0.5)
+      .style('cursor', 'pointer')
+      .on('click', (e, d) => { e.stopPropagation(); window.open(fixUrl(d.url), '_blank', 'noopener'); });
+    state.dots = dots;
+
+    const tooltip = d3.select('body').append('div')
+      .style('position', 'absolute').style('visibility', 'hidden')
+      .style('background', 'rgba(0,0,0,.9)').style('color', 'white')
+      .style('padding', '8px 12px').style('border-radius', '6px')
+      .style('font-size', '13px').style('pointer-events', 'none')
+      .style('z-index', '1000').style('max-width', '340px');
+
+    dots.on('mouseover', function(event, d) {
+      d3.select(this).attr('r', 7).attr('stroke', '#000').attr('stroke-width', 1.5);
+      const dupLine = (d.duplicate_of && d.duplicate_of.length)
+        ? `<br><span style="font-size:12px;color:#fca5a5">↔ duplicate of: ${d.duplicate_of.slice(0,2).map(x => `${x.title} (${x.similarity})`).join('; ')}</span>` : '';
+      tooltip.style('visibility', 'visible').html(`
+        <strong>${d.title}</strong>
+        <br><span style="font-size:12px;color:#93c5fd">${d.url}</span>
+        <br><span style="font-size:12px;color:#9ca3af">Section: ${d.section || '(root)'} · Cluster ${d.cluster}</span>
+        <br><span style="font-size:12px;color:#fbbf24">drift to section: ${d.drift_section} · to site: ${d.drift_site}</span>
+        <br><span style="font-size:12px;color:#9ca3af">${d.word_count} words</span>
+        ${dupLine}
+        <br><span style="font-size:11px;color:#60a5fa">Click to open</span>
+      `);
+    }).on('mousemove', event => {
+      tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px');
+    }).on('mouseout', function() {
+      d3.select(this).attr('r', 4).attr('stroke', 'white').attr('stroke-width', 0.5);
+      tooltip.style('visibility', 'hidden');
+    });
+
+    const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(8));
+    const yAxis = svg.append('g').call(d3.axisLeft(yScale).ticks(8));
+
+    const zoom = d3.zoom().scaleExtent([0.5, 20])
+      .filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(xScale);
+        const ny = e.transform.rescaleY(yScale);
+        xAxis.call(d3.axisBottom(nx).ticks(8));
+        yAxis.call(d3.axisLeft(ny).ticks(8));
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+    svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
+
+    applyMode('section');
+  }
+
+  function applyMode(mode) {
+    if (!state.dots) return;
+    state.mode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+
+    state.dots
+      .attr('fill', d => colorFor(d, mode))
+      .attr('stroke', d => strokeFor(d, mode))
+      .attr('stroke-width', d => strokeWidthFor(d, mode))
+      .attr('fill-opacity', d => opacityFor(d, mode));
+    renderLegend(mode);
+  }
+
+  function colorFor(d, mode) {
+    if (mode === 'section') return state.sectionColor(d.section);
+    if (mode === 'cluster') return state.clusterColor(d.cluster);
+    if (mode === 'drift') return state.driftColor(d.drift_section);
+    if (mode === 'flags') {
+      const isDup = d.duplicate_of && d.duplicate_of.length;
+      const isOut = d.drift_section > (state.metrics.p95_distance_to_centroid || 0.3);
+      if (isDup) return '#dc2626';
+      if (isOut) return '#f59e0b';
+      return '#94a3b8';
+    }
+    return '#1f77b4';
+  }
+
+  function strokeFor(d, mode) {
+    if (mode === 'flags' && d.duplicate_of && d.duplicate_of.length) return '#7f1d1d';
+    return 'white';
+  }
+
+  function strokeWidthFor(d, mode) {
+    if (mode === 'flags' && d.duplicate_of && d.duplicate_of.length) return 1.5;
+    return 0.5;
+  }
+
+  function opacityFor(d, mode) {
+    if (mode === 'flags') {
+      const isDup = d.duplicate_of && d.duplicate_of.length;
+      const isOut = d.drift_section > (state.metrics.p95_distance_to_centroid || 0.3);
+      return (isDup || isOut) ? 0.95 : 0.25;
+    }
+    return 0.75;
+  }
+
+  function renderLegend(mode) {
+    const el = document.getElementById('audit-legend');
+    el.innerHTML = '';
+    if (mode === 'section') {
+      const sections = state.sectionColor.domain();
+      el.innerHTML = sections.map(s => `
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200">
+          <span class="w-3 h-3 rounded-full mr-1.5" style="background:${state.sectionColor(s)}"></span>${s || '(root)'}
+        </span>`).join('');
+    } else if (mode === 'cluster') {
+      el.innerHTML = `<span class="text-xs text-gray-500">${state.scatter.num_clusters} semantic clusters — hover dots for details.</span>`;
+    } else if (mode === 'drift') {
+      el.innerHTML = `
+        <span class="text-xs text-gray-500">Drift from section centroid:</span>
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#16a34a"></span>low (on-topic)</span>
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#f59e0b"></span>medium</span>
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#dc2626"></span>high (outlier)</span>`;
+    } else if (mode === 'flags') {
+      el.innerHTML = `
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#dc2626;border:1.5px solid #7f1d1d"></span>near-duplicate (merge)</span>
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#f59e0b"></span>outlier (refocus)</span>
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#94a3b8"></span>normal</span>`;
+    }
+  }
+
+  function wireModeButtons() {
+    document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => applyMode(b.dataset.mode)));
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
