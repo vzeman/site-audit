@@ -96,8 +96,72 @@
       </div>
     </div>
 
+    <!-- Topic clusters -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="clusters-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Topic clusters (auto-labeled)</h3>
+        <span class="text-xs text-gray-500">ranked by size × cohesion</span>
+      </div>
+      <div id="audit-clusters" class="grid md:grid-cols-2 gap-4 text-sm">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Keyword coverage -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="coverage-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Keyword coverage</h3>
+        <div class="flex gap-2 text-xs" role="group">
+          <button data-coverage="all" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
+          <button data-coverage="gap" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">Gaps</button>
+          <button data-coverage="cannibalized" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">Cannibalized</button>
+          <button data-coverage="covered" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">Covered</button>
+        </div>
+      </div>
+      <div id="audit-coverage" class="text-sm max-h-[28rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Answerability -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">GEO answer-ability score</h3>
+        <span class="text-xs text-gray-500">weakest pages first</span>
+      </div>
+      <div id="audit-answerability" class="text-sm max-h-[28rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Link graph -->
+    <div class="grid md:grid-cols-2 gap-6 mb-8" id="linkgraph-block">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-3">Top authority pages (PageRank)</h3>
+        <div id="audit-pagerank" class="text-sm max-h-96 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-3">Orphan pages (no inbound links)</h3>
+        <div id="audit-orphans" class="text-sm max-h-96 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Suggested internal links (high similarity, no current link)</h3>
+        <span class="text-xs text-gray-500">try the top 10 first</span>
+      </div>
+      <div id="audit-link-recs" class="text-sm max-h-96 overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
     <div class="bg-blue-50 rounded-lg p-5 text-sm text-gray-700">
-      <strong>How to read:</strong> the scatterplot shows topical clustering of every crawled page. Tightly-packed dots = similar content. Pages in the <em>Drift</em> view colored orange/red are furthest from their section centroid — refocus or removal candidates. The <em>Outliers + duplicates</em> view highlights pages flagged as off-topic (orange) or near-duplicate (red ring).
+      <strong>How to read:</strong> the scatterplot shows topical clustering of every crawled page. Tightly-packed dots = similar content. Pages in the <em>Drift</em> view colored orange/red are furthest from their section centroid — refocus or removal candidates. The <em>Outliers + duplicates</em> view highlights pages flagged as off-topic (orange) or near-duplicate (red ring). The <em>GEO answer-ability</em> score is a coarse 0–10 estimate of how cite-able a page is to AI answer engines (FAQ schema, question-form headings, statistics, citations).
     </div>
   </div>
 
@@ -107,6 +171,10 @@
 <script type="application/json" id="data-sections">__SECTIONS_JSON__</script>
 <script type="application/json" id="data-outliers">__OUTLIERS_JSON__</script>
 <script type="application/json" id="data-duplicates">__DUPLICATES_JSON__</script>
+<script type="application/json" id="data-clusters">__CLUSTERS_JSON__</script>
+<script type="application/json" id="data-coverage">__COVERAGE_JSON__</script>
+<script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
+<script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -168,22 +236,45 @@
       const inlinedSections = readInlined('data-sections');
       const inlinedOutliers = readInlined('data-outliers');
       const inlinedDuplicates = readInlined('data-duplicates');
+      const inlinedClusters = readInlined('data-clusters');
+      const inlinedCoverage = readInlined('data-coverage');
+      const inlinedAnswerability = readInlined('data-answerability');
+      const inlinedLinkgraph = readInlined('data-linkgraph');
 
-      const [scatter, metrics, sections, outliers, duplicates] = inlinedMetrics
-        ? [inlinedScatter, inlinedMetrics, inlinedSections || [], inlinedOutliers || [], inlinedDuplicates || []]
-        : await Promise.all([
-            loadJSON('scatterplot.json').catch(() => null),
-            loadJSON('site_metrics.json'),
-            loadJSON('section_report.json').catch(() => []),
-            loadCSV('outliers.csv'),
-            loadCSV('duplicates.csv'),
-          ]);
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph;
+      if (inlinedMetrics) {
+        scatter = inlinedScatter;
+        metrics = inlinedMetrics;
+        sections = inlinedSections || [];
+        outliers = inlinedOutliers || [];
+        duplicates = inlinedDuplicates || [];
+        clusters = inlinedClusters || [];
+        coverage = inlinedCoverage || [];
+        answerability = inlinedAnswerability || [];
+        linkgraph = inlinedLinkgraph || {};
+      } else {
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph] = await Promise.all([
+          loadJSON('scatterplot.json').catch(() => null),
+          loadJSON('site_metrics.json'),
+          loadJSON('section_report.json').catch(() => []),
+          loadCSV('outliers.csv'),
+          loadCSV('duplicates.csv'),
+          loadJSON('clusters.json').catch(() => []),
+          loadJSON('keyword_coverage.json').catch(() => []),
+          loadJSON('answerability.json').catch(() => []),
+          loadJSON('linkgraph.json').catch(() => ({})),
+        ]);
+      }
       state.scatter = scatter;
       state.pages = scatter ? scatter.pages : [];
       state.metrics = metrics;
       state.sections = sections;
       state.outliers = outliers;
       state.duplicates = duplicates;
+      state.clusters = clusters;
+      state.coverage = coverage;
+      state.answerability = answerability;
+      state.linkgraph = linkgraph;
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
@@ -196,7 +287,12 @@
       renderSections();
       renderOutliers();
       renderDuplicates();
+      renderClusters();
+      renderCoverage('all');
+      renderAnswerability();
+      renderLinkgraph();
       wireModeButtons();
+      wireCoverageButtons();
     } catch (e) {
       console.error(e);
       document.getElementById('audit-scatter-container').innerHTML = `
@@ -442,6 +538,155 @@
 
   function wireModeButtons() {
     document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => applyMode(b.dataset.mode)));
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function renderClusters() {
+    const el = document.getElementById('audit-clusters');
+    const block = document.getElementById('clusters-block');
+    if (!Array.isArray(state.clusters) || !state.clusters.length) {
+      block.style.display = 'none';
+      return;
+    }
+    el.innerHTML = state.clusters.slice(0, 20).map(c => {
+      const kws = (c.keywords || []).slice(0, 6).map(k => `<span class="inline-block bg-gray-100 text-gray-800 text-xs px-2 py-0.5 rounded mr-1 mb-1">${escapeHtml(k.keyword)}</span>`).join('');
+      const pages = (c.top_pages || []).slice(0, 3).map(p => `<li class="truncate"><a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a></li>`).join('');
+      return `
+        <div class="border border-gray-200 rounded p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="font-semibold text-gray-900">${escapeHtml(c.label || ('cluster ' + c.cluster_id))}</div>
+            <div class="text-xs text-gray-500">#${c.cluster_id} · ${c.page_count} pages</div>
+          </div>
+          <div class="text-xs text-gray-500 mb-2">cohesion ${c.cohesion} · site-alignment ${c.site_alignment}</div>
+          <div class="mb-2">${kws}</div>
+          <ul class="text-xs list-disc list-inside text-gray-700">${pages}</ul>
+        </div>`;
+    }).join('');
+  }
+
+  function renderCoverage(filter) {
+    const el = document.getElementById('audit-coverage');
+    const block = document.getElementById('coverage-block');
+    if (!Array.isArray(state.coverage) || !state.coverage.length) {
+      block.style.display = 'none';
+      return;
+    }
+    state.coverageFilter = filter;
+    document.querySelectorAll('.cov-btn').forEach(b => {
+      const on = b.dataset.coverage === filter;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const counts = state.coverage.reduce((acc, q) => { acc[q.status] = (acc[q.status] || 0) + 1; return acc; }, {});
+    const summary = `<div class="text-xs text-gray-500 mb-2">${state.coverage.length} queries · ${counts.gap || 0} gaps · ${counts.cannibalized || 0} cannibalized · ${counts.covered || 0} covered</div>`;
+    const filtered = filter === 'all' ? state.coverage : state.coverage.filter(q => q.status === filter);
+    if (!filtered.length) { el.innerHTML = summary + '<div class="text-gray-500">None.</div>'; return; }
+    const rows = filtered.slice(0, 200).map(q => {
+      const badge = q.status === 'gap' ? 'bg-red-100 text-red-800'
+                  : q.status === 'cannibalized' ? 'bg-orange-100 text-orange-800'
+                  : 'bg-green-100 text-green-800';
+      return `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-medium text-gray-900 truncate">${escapeHtml(q.query)}</div>
+            <span class="text-xs px-2 py-0.5 rounded ${badge} whitespace-nowrap">${q.status}</span>
+          </div>
+          <div class="text-xs text-gray-500">source: ${q.source} · best sim ${q.best_similarity} · ${q.candidates_above_threshold} candidates above threshold</div>
+          <div class="text-xs"><a class="text-blue-600 hover:underline" href="${escapeHtml(q.best_url)}" target="_blank" rel="noopener">${escapeHtml(q.best_title || q.best_url)}</a></div>
+        </div>`;
+    }).join('');
+    el.innerHTML = summary + rows;
+  }
+
+  function wireCoverageButtons() {
+    document.querySelectorAll('.cov-btn').forEach(b => b.addEventListener('click', () => renderCoverage(b.dataset.coverage)));
+  }
+
+  function renderAnswerability() {
+    const el = document.getElementById('audit-answerability');
+    const block = document.getElementById('answerability-block');
+    if (!Array.isArray(state.answerability) || !state.answerability.length) {
+      block.style.display = 'none';
+      return;
+    }
+    const avg = state.answerability.reduce((a, b) => a + (b.score || 0), 0) / state.answerability.length;
+    const summary = `<div class="text-xs text-gray-500 mb-2">${state.answerability.length} pages scored · average ${avg.toFixed(2)} / 10</div>`;
+    const rows = state.answerability.slice(0, 200).map(p => {
+      const s = p.score || 0;
+      const color = s >= 7 ? 'text-green-700' : s >= 4 ? 'text-yellow-700' : 'text-red-700';
+      const flags = (p.flags || []).map(f => `<span class="inline-block bg-gray-100 text-gray-700 text-xs px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(f)}</span>`).join('');
+      return `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.url)}</a>
+            <span class="font-mono ${color}">${s.toFixed(1)}</span>
+          </div>
+          <div class="mt-1">${flags}</div>
+        </div>`;
+    }).join('');
+    el.innerHTML = summary + rows;
+  }
+
+  function renderLinkgraph() {
+    const block = document.getElementById('linkgraph-block');
+    const lg = state.linkgraph || {};
+    if (!lg.edge_count && !(lg.top_authority_pages && lg.top_authority_pages.length)) {
+      block.style.display = 'none';
+      const recBlock = document.getElementById('audit-link-recs');
+      if (recBlock) recBlock.parentElement.style.display = 'none';
+      return;
+    }
+    const prEl = document.getElementById('audit-pagerank');
+    const orphEl = document.getElementById('audit-orphans');
+    const recsEl = document.getElementById('audit-link-recs');
+
+    const top = lg.top_authority_pages || [];
+    if (!top.length) {
+      prEl.innerHTML = '<div class="text-gray-500">No data.</div>';
+    } else {
+      prEl.innerHTML = top.map(p => `
+        <div class="py-1.5 border-b border-gray-100">
+          <a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a>
+          <span class="text-gray-400 text-xs ml-1">(${escapeHtml(p.section || '')})</span>
+          <div class="text-xs text-gray-500">PR ${(p.pagerank * 100).toFixed(3)} · in:${p.in_degree} out:${p.out_degree}</div>
+        </div>`).join('');
+    }
+
+    const orph = lg.orphans || [];
+    if (!orph.length) {
+      orphEl.innerHTML = '<div class="text-gray-500">No orphans — every page has at least one inbound link.</div>';
+    } else {
+      orphEl.innerHTML = `<div class="text-xs text-gray-500 mb-2">${lg.orphan_count} total · showing first ${orph.length}</div>` + orph.map(p => `
+        <div class="py-1.5 border-b border-gray-100">
+          <a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a>
+          <span class="text-gray-400 text-xs ml-1">(${escapeHtml(p.section || '')})</span>
+        </div>`).join('');
+    }
+
+    const recs = lg.recommendations || [];
+    if (!recs.length) {
+      recsEl.innerHTML = '<div class="text-gray-500">No high-similarity unlinked pairs found.</div>';
+    } else {
+      recsEl.innerHTML = `
+        <table class="min-w-full text-sm">
+          <thead class="text-xs text-gray-500"><tr>
+            <th class="text-left py-1">Sim</th><th class="text-left py-1">Page A</th><th class="text-left py-1">Page B</th>
+          </tr></thead>
+          <tbody>${recs.slice(0, 75).map(r => `
+            <tr class="border-b border-gray-100">
+              <td class="py-1 font-mono">${(+r.similarity).toFixed(3)}</td>
+              <td class="py-1"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url_a)}" target="_blank" rel="noopener">${escapeHtml(r.title_a)}</a><div class="text-xs text-gray-400">${escapeHtml(r.section_a)}</div></td>
+              <td class="py-1"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url_b)}" target="_blank" rel="noopener">${escapeHtml(r.title_b)}</a><div class="text-xs text-gray-400">${escapeHtml(r.section_b)}</div></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
   }
 
   boot();

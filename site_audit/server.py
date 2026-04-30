@@ -1,9 +1,9 @@
-"""Tiny static server that serves the UI plus the report directory.
+"""Tiny static server that serves the UI plus a report directory.
 
 Run ``site-audit serve <domain>`` and we expose:
 
   /              → ``ui/index.html``
-  /data/...      → files under ``output/<domain_slug>/``
+  /data/...      → files under ``projects/<domain>/report/``
 
 The server is ``http.server`` only — no Flask, no Django, just enough
 glue so the D3 viewer can fetch JSON/CSV from the same origin.
@@ -17,18 +17,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-from .cache import domain_slug
-
 LOG = logging.getLogger(__name__)
 
 
 def _build_handler(ui_dir: Path, data_dir: Path):
     class Handler(BaseHTTPRequestHandler):
-        # quieter logs
         def log_message(self, format, *args):
             LOG.debug("%s - %s", self.address_string(), format % args)
 
-        def do_GET(self):  # noqa: N802 (stdlib API)
+        def do_GET(self):  # noqa: N802
             path = unquote(self.path.split("?", 1)[0])
             if path == "/":
                 self._serve_file(ui_dir / "index.html")
@@ -65,19 +62,18 @@ def _build_handler(ui_dir: Path, data_dir: Path):
     return Handler
 
 
-def serve(domain: str, output_root: Path, ui_dir: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
-    slug = domain_slug(domain.replace("https://", "").replace("http://", "").split("/")[0])
-    data_dir = Path(output_root) / slug
-    if not data_dir.exists():
-        raise FileNotFoundError(f"No report at {data_dir}. Run `site-audit run {domain}` first.")
+def serve(report_dir: Path, ui_dir: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
+    report_dir = Path(report_dir)
     ui_dir = Path(ui_dir)
+    if not report_dir.exists():
+        raise FileNotFoundError(f"No report at {report_dir}. Run `site-audit run <domain>` first.")
     if not (ui_dir / "index.html").is_file():
         raise FileNotFoundError(f"UI assets missing: {ui_dir}/index.html")
 
-    handler = _build_handler(ui_dir, data_dir)
+    handler = _build_handler(ui_dir, report_dir)
     httpd = ThreadingHTTPServer((host, port), handler)
     print(f"\n  ➜  Site-audit viewer ready: http://{host}:{port}/")
-    print(f"     serving report: {data_dir}\n")
+    print(f"     serving report: {report_dir}\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

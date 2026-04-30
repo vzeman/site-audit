@@ -13,6 +13,7 @@ venv/
 # Caches & outputs (per-domain)
 cache/
 output/
+projects/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

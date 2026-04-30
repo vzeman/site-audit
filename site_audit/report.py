@@ -230,6 +230,23 @@ def write_pages(path: Path, result: AuditResult) -> None:
     _write_json(path, payload)
 
 
+def write_clusters(path: Path, summaries) -> None:
+    if summaries is None:
+        return
+    payload = []
+    for s in summaries:
+        payload.append({
+            "cluster_id": s.cluster_id,
+            "page_count": s.page_count,
+            "cohesion": round(s.cohesion, 4),
+            "site_alignment": round(s.site_alignment, 4),
+            "label": ", ".join(k["keyword"] for k in s.keywords[:4]),
+            "keywords": s.keywords,
+            "top_pages": s.top_pages,
+        })
+    _write_json(path, payload)
+
+
 def write_all(
     output_dir: Path,
     result: AuditResult,
@@ -237,6 +254,10 @@ def write_all(
     domain: str,
     coords: Optional[np.ndarray] = None,
     cluster_labels: Optional[np.ndarray] = None,
+    cluster_summaries=None,
+    coverage: Optional[list] = None,
+    answerability: Optional[list] = None,
+    linkgraph: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -246,4 +267,12 @@ def write_all(
     write_duplicates(output_dir / "duplicates.csv", result)
     write_pages(output_dir / "pages.json", result)
     write_scatterplot(output_dir / "scatterplot.json", result, coords, cluster_labels)
+    if cluster_summaries:
+        write_clusters(output_dir / "clusters.json", cluster_summaries)
+    if coverage is not None:
+        _write_json(output_dir / "keyword_coverage.json", coverage)
+    if answerability is not None:
+        _write_json(output_dir / "answerability.json", answerability)
+    if linkgraph is not None:
+        _write_json(output_dir / "linkgraph.json", linkgraph)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

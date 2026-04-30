@@ -23,6 +23,10 @@ _PLACEHOLDERS = {
     "__SECTIONS_JSON__": "sections",
     "__OUTLIERS_JSON__": "outliers",
     "__DUPLICATES_JSON__": "duplicates",
+    "__CLUSTERS_JSON__": "clusters",
+    "__COVERAGE_JSON__": "coverage",
+    "__ANSWERABILITY_JSON__": "answerability",
+    "__LINKGRAPH_JSON__": "linkgraph",
 }
 
 
@@ -162,6 +166,23 @@ def _safe_json(payload) -> str:
     return json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
 
 
+def _clusters_payload(cluster_summaries) -> list:
+    if not cluster_summaries:
+        return []
+    out = []
+    for s in cluster_summaries:
+        out.append({
+            "cluster_id": s.cluster_id,
+            "page_count": s.page_count,
+            "cohesion": round(s.cohesion, 4),
+            "site_alignment": round(s.site_alignment, 4),
+            "label": ", ".join(k["keyword"] for k in s.keywords[:4]) or f"cluster {s.cluster_id}",
+            "keywords": s.keywords,
+            "top_pages": s.top_pages,
+        })
+    return out
+
+
 def write_html_report(
     output_dir: Path,
     template_path: Path,
@@ -170,6 +191,10 @@ def write_html_report(
     domain: str,
     coords: Optional[np.ndarray] = None,
     cluster_labels: Optional[np.ndarray] = None,
+    cluster_summaries=None,
+    coverage: Optional[list] = None,
+    answerability: Optional[list] = None,
+    linkgraph: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -179,6 +204,10 @@ def write_html_report(
         "sections": _sections_payload(result),
         "outliers": _outliers_payload(result),
         "duplicates": _duplicates_payload(result),
+        "clusters": _clusters_payload(cluster_summaries),
+        "coverage": coverage or [],
+        "answerability": answerability or [],
+        "linkgraph": linkgraph or {},
     }
 
     rendered = template

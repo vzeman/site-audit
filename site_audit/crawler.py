@@ -82,6 +82,7 @@ class FetchResult:
     body: str
     content_type: str
     from_cache: bool
+    outlinks: list = field(default_factory=list)  # same-site URLs linked from this page
 
 
 def normalize_url(url: str) -> str:
@@ -275,13 +276,19 @@ class Crawler:
                     results.append(result)
 
                     if "html" in result.content_type:
+                        page_outlinks: list[str] = []
                         for link in self._extract_links(result.url, result.body):
+                            if not self._same_site(urlparse(link).netloc):
+                                continue
+                            page_outlinks.append(link)
                             if link in seen:
                                 continue
                             if not self._allowed(link):
                                 continue
                             seen.add(link)
                             frontier.append(link)
+                        # de-dup, drop self-loops
+                        result.outlinks = sorted({u for u in page_outlinks if u != result.url})
 
                     if len(results) % 25 == 0:
                         LOG.info("crawled %d / queue %d / cache %s",

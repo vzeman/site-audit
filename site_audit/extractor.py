@@ -1,17 +1,28 @@
-"""Extract clean title + body text from raw HTML.
+"""Extract clean title + body text + structural signals from raw HTML.
 
 We try ``trafilatura`` first because it routinely beats hand-rolled
 heuristics on real-world pages, then fall back to a BeautifulSoup
-strip when trafilatura returns nothing. Returning ``None`` for the
-body signals the caller to skip the page (login walls, JS-only apps).
+strip when trafilatura returns nothing.
+
+Beyond the body text we also pull a few structural signals that
+downstream analyses want to see:
+
+* heading text (H1–H3) — used by keyword-coverage to auto-mine queries
+* counts of lists / tables — feeds the answerability score
+* JSON-LD types — detects FAQPage, HowTo, Article, Product schema
+* outbound links to external domains — used as a citation signal
+
+Returning ``None`` for the body signals the caller to skip the page.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -30,9 +41,28 @@ class ExtractedPage:
     body: str
     word_count: int
     language: Optional[str]
+    headings: list[str] = field(default_factory=list)  # H2 + H3 text, in order
+    h1: str = ""
+    list_count: int = 0
+    table_count: int = 0
+    schema_types: list[str] = field(default_factory=list)  # JSON-LD @type values
+    external_link_count: int = 0
+    has_dates: bool = False
+    stat_count: int = 0  # numbers with units / percentages
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_DATE_RE = re.compile(
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b"
+    r"|\b\d{1,2}/\d{1,2}/\d{4}\b",
+    re.I,
+)
+_STAT_RE = re.compile(
+    r"\b\d+(?:[,.]\d+)*\s*(?:%|percent|million|billion|thousand|users?|customers?|clients?|"
+    r"\$|€|£|kg|kilograms?|grams?|hours?|minutes?|days?|weeks?|months?|years?)\b",
+    re.I,
+)
 
 
 def _clean(text: str) -> str:
@@ -64,8 +94,70 @@ def _strip_to_text(html_body: str) -> str:
     return _clean(soup.get_text(" "))
 
 
+def _extract_schema_types(soup: BeautifulSoup) -> list[str]:
+    types: list[str] = []
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # malformed JSON-LD blocks are common; ignore them
+            continue
+        for item in (data if isinstance(data, list) else [data]):
+            if isinstance(item, dict):
+                t = item.get("@type")
+                if isinstance(t, list):
+                    types.extend(str(x) for x in t)
+                elif t:
+                    types.append(str(t))
+                graph = item.get("@graph")
+                if isinstance(graph, list):
+                    for g in graph:
+                        if isinstance(g, dict):
+                            t = g.get("@type")
+                            if isinstance(t, list):
+                                types.extend(str(x) for x in t)
+                            elif t:
+                                types.append(str(t))
+    return types
+
+
+def _extract_headings(soup: BeautifulSoup) -> tuple[str, list[str]]:
+    h1_tag = soup.find("h1")
+    h1 = _clean(h1_tag.get_text(" ")) if h1_tag else ""
+    headings = []
+    for tag in soup.find_all(["h2", "h3"]):
+        text = _clean(tag.get_text(" "))
+        if text and len(text) <= 200:
+            headings.append(text)
+    return h1, headings
+
+
+def _count_external_links(soup: BeautifulSoup, page_url: str) -> int:
+    try:
+        host = urlparse(page_url).netloc.lower()
+    except Exception:
+        host = ""
+    host_root = host[4:] if host.startswith("www.") else host
+    count = 0
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href.startswith(("http://", "https://")):
+            continue
+        try:
+            other = urlparse(href).netloc.lower()
+        except Exception:
+            continue
+        other_root = other[4:] if other.startswith("www.") else other
+        if other_root and other_root != host_root:
+            count += 1
+    return count
+
+
 def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[ExtractedPage]:
-    """Return cleaned text + metadata, or None when the page is unusable."""
+    """Return cleaned text + structural signals, or None when unusable."""
     if not html_body:
         return None
 
@@ -99,8 +191,15 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
     word_count = len(body_text.split())
 
     if not title:
-        # last-resort: first 12 words of the body
         title = " ".join(body_text.split()[:12])
+
+    h1, headings = _extract_headings(soup)
+    list_count = len(soup.find_all(["ul", "ol"]))
+    table_count = len(soup.find_all("table"))
+    schema_types = _extract_schema_types(soup)
+    external_link_count = _count_external_links(soup, url)
+    has_dates = bool(_DATE_RE.search(body_text))
+    stat_count = len(_STAT_RE.findall(body_text))
 
     return ExtractedPage(
         url=url,
@@ -109,4 +208,12 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
         body=truncated,
         word_count=word_count,
         language=language,
+        headings=headings,
+        h1=h1,
+        list_count=list_count,
+        table_count=table_count,
+        schema_types=schema_types,
+        external_link_count=external_link_count,
+        has_dates=has_dates,
+        stat_count=stat_count,
     )
