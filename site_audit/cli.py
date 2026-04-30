@@ -52,7 +52,11 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_answerability=not args.no_answerability,
         enable_linkgraph=not args.no_linkgraph,
         enable_external_links=not args.no_external_links,
+        enable_paragraph_clustering=not args.no_paragraph_clustering,
+        enable_content_quality=not args.no_content_quality,
+        enable_paragraph_fanout=not args.no_paragraph_fanout,
         check_external_links=args.check_external,
+        competitive_pairs_file=Path(args.competitive) if args.competitive else None,
         queries_file=Path(args.queries_file) if args.queries_file else None,
         auto_queries_max=args.auto_queries_max,
         coverage_threshold=args.coverage_threshold,
@@ -137,7 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-answerability", action="store_true")
     run_p.add_argument("--no-linkgraph", action="store_true")
     run_p.add_argument("--no-external-links", action="store_true")
+    run_p.add_argument("--no-paragraph-clustering", action="store_true")
+    run_p.add_argument("--no-content-quality", action="store_true")
+    run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
+    run_p.add_argument("--competitive", default=None, help="TSV file with `query<TAB>competitor_url` per line")
     run_p.add_argument("--queries-file", default=None, help="Optional file: one target query per line")
     run_p.add_argument("--auto-queries-max", type=int, default=200)
     run_p.add_argument("--coverage-threshold", type=float, default=0.55, help="Min similarity for query→page to count as 'covered'")

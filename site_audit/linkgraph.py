@@ -468,6 +468,20 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
         key=lambda kv: kv[1], reverse=True,
     )
 
+    # Per-page in/out degree for the full crawled set — drives the
+    # "internal links per page" chart on the UI side. We keep just url +
+    # title + degrees + click_depth so the JSON stays small even on big sites.
+    page_link_counts: list[dict] = []
+    for p in pages:
+        page_link_counts.append({
+            "url": p.url,
+            "title": p.title,
+            "section": p.section,
+            "in_degree": int(result.in_degree.get(p.url, 0)),
+            "out_degree": int(result.out_degree.get(p.url, 0)),
+            "click_depth": int(result.click_depth.get(p.url, -1)) if p.url in result.click_depth else None,
+        })
+
     return {
         "edge_count": result.edge_count,
         "node_count": len(set(list(result.in_degree.keys()) + list(result.out_degree.keys()))),
@@ -484,4 +498,5 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
         "cluster_authorities": result.cluster_authorities,
         "anchor_analysis": result.anchor_analysis,
         "recommendations": result.recommendations,
+        "page_link_counts": page_link_counts,
     }

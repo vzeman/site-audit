@@ -81,7 +81,6 @@ DEFAULT_EXCLUDE_PATTERNS = [
     r"/wp-json",
     r"/cgi-bin",
     r"/xmlrpc\.php",
-    r"\.(jpg|jpeg|png|gif|svg|webp|ico|pdf|zip|gz|tar|mp3|mp4|avi|mov|wmv|css|js|woff2?|ttf|eot|json|xml)$",
     r"/feed/?$",
     r"/rss/?$",
     r"/comments/feed",
@@ -89,6 +88,22 @@ DEFAULT_EXCLUDE_PATTERNS = [
     r"/page/\d+/",
     r"/cdn-cgi/",
 ]
+
+# Applied to ``urlparse(url).path`` (so query strings/fragments don't mask
+# the extension, e.g. ``/img/foo.jpg?v=2`` still fails). Catches every common
+# binary/asset extension we never want to treat as a crawled page.
+_NON_HTML_EXTENSIONS = re.compile(
+    r"\.(?:jpe?g|png|gif|svg|webp|avif|bmp|ico|heic|tiff?|"   # images
+    r"pdf|zip|gz|tgz|tar|7z|rar|"                              # archives / docs
+    r"mp3|mp4|m4a|m4v|avi|mov|wmv|webm|ogg|wav|flac|"          # audio/video
+    r"css|js|mjs|map|"                                          # web assets
+    r"woff2?|ttf|otf|eot|"                                      # fonts
+    r"json|xml|rss|atom|csv|tsv|"                               # data
+    r"exe|dmg|pkg|deb|rpm|apk|msi|"                             # installers
+    r"doc|docx|xls|xlsx|ppt|pptx)"                              # office
+    r"(?:$|/)",                                                # boundary
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -169,10 +184,53 @@ class Crawler:
         return self._bfs(frontier_seed)
 
     def _warm_session(self) -> None:
-        """Fetch the homepage so CDNs hand us their bot-challenge cookie."""
-        r = self._request_with_retry(self.base_url + "/")
-        if r is not None and r.status_code < 400:
-            LOG.debug("session warmed at %s (status %d)", r.url, r.status_code)
+        """Fetch the homepage so CDNs hand us their bot-challenge cookie.
+
+        Also detect canonical-host redirects (apex → www, http → https) and
+        switch ``self.base_url`` and ``self.host`` to the post-redirect form
+        — otherwise everything keyed by the original base_url misses cache
+        and the same-site filter rejects internal links.
+
+        We try cache before hitting the network: a previous run on the same
+        domain has already paid the redirect cost, and re-warming over the
+        wire just risks tripping bot detection on subsequent fetches.
+        """
+        canonical_url: Optional[str] = None
+
+        # 1) cache lookup for either the apex or www form of the homepage
+        if self.config.use_cache:
+            for guess in [self.base_url + "/", self.base_url, self.base_url.replace("://", "://www.") + "/"]:
+                cached = self.cache.get(guess)
+                if cached and 200 <= cached.status < 400:
+                    canonical_url = guess
+                    LOG.debug("warm session served from cache: %s", guess)
+                    break
+
+        # 2) fall back to the network when cache misses
+        final_url: Optional[str] = canonical_url
+        if final_url is None:
+            r = self._request_with_retry(self.base_url + "/")
+            if r is None or r.status_code >= 400:
+                return
+            final_url = str(r.url)
+            if self.config.use_cache and "html" in (r.headers.get("Content-Type") or "").lower():
+                try:
+                    self.cache.put(normalize_url(final_url), r.status_code, dict(r.headers), r.content)
+                except Exception:
+                    pass
+
+        try:
+            final = urlparse(final_url)
+        except Exception:
+            return
+        if not final.netloc:
+            return
+        canonical_base = f"{final.scheme}://{final.netloc}".rstrip("/")
+        if canonical_base != self.base_url.rstrip("/"):
+            LOG.info("canonical host: %s → %s", self.base_url, canonical_base)
+            self.base_url = canonical_base
+            self.host = final.netloc
+        LOG.debug("session warmed at %s", final_url)
 
     # --- robots & sitemaps --------------------------------------------
 
@@ -261,6 +319,8 @@ class Crawler:
         if not parsed.netloc:
             return False
         if not self._same_site(parsed.netloc):
+            return False
+        if _NON_HTML_EXTENSIONS.search(parsed.path or ""):
             return False
         for rx in self._exclude_re:
             if rx.search(url):
@@ -399,7 +459,20 @@ class Crawler:
         We're persistent on retries because Shopify / Cloudflare bot-managed
         sites issue lots of transient 429s under burst traffic — they almost
         always recover within ~15 s if we slow down.
+
+        For metadata-style fetches (robots.txt, sitemap.xml) we check the
+        HTTP cache first so re-runs on the same domain stay offline.
         """
+        if method == "GET" and self.config.use_cache:
+            cached = self.cache.get(url)
+            if cached and 200 <= cached.status < 400:
+                resp = requests.Response()
+                resp.status_code = cached.status
+                resp._content = cached.body
+                resp.url = url
+                resp.headers.update(cached.headers or {})
+                return resp
+
         max_attempts = 6
         for attempt in range(max_attempts):
             try:
@@ -422,6 +495,17 @@ class Crawler:
                          r.status_code, url, delay, attempt + 1, max_attempts)
                 time.sleep(delay)
                 continue
+            # Cache successful GET responses transparently so re-runs (and
+            # other helpers like sitemap discovery) can stay offline.
+            if (
+                method == "GET"
+                and self.config.use_cache
+                and 200 <= r.status_code < 400
+            ):
+                try:
+                    self.cache.put(url, r.status_code, dict(r.headers), r.content)
+                except Exception:
+                    pass
             return r
         LOG.warning("giving up on %s after %d 429/503 retries", url, max_attempts)
         return r  # last response (still 429)
@@ -451,6 +535,11 @@ class Crawler:
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
             self.cache.put(final_url, r.status_code, dict(r.headers), body_bytes)
+            # Also cache under the original request URL when it differs
+            # (e.g. apex → www redirect) so a future fetch of the same
+            # request URL hits cache directly.
+            if url != final_url:
+                self.cache.put(url, r.status_code, dict(r.headers), body_bytes)
 
         if "html" not in ctype:
             return None

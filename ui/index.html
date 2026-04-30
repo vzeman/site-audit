@@ -75,21 +75,76 @@
       <div id="audit-hist" class="text-sm"></div>
     </div>
 
+    <!-- Action plan: prioritized recommendations synthesised from every analysis below -->
+    <div class="bg-white border-2 border-blue-200 rounded-lg shadow-sm p-5 mb-8" id="action-plan-block">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Action plan — top recommendations</h3>
+          <p class="text-xs text-gray-500" id="action-plan-meta">prioritised concrete next steps drawn from every analysis below</p>
+        </div>
+        <div class="flex gap-2 text-xs flex-wrap" role="group" aria-label="Filter actions">
+          <button data-rec-pri="all" class="rec-pri-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
+          <button data-rec-pri="high" class="rec-pri-btn px-2 py-1 rounded border border-gray-300 bg-white">High</button>
+          <button data-rec-pri="medium" class="rec-pri-btn px-2 py-1 rounded border border-gray-300 bg-white">Medium</button>
+          <button data-rec-pri="low" class="rec-pri-btn px-2 py-1 rounded border border-gray-300 bg-white">Low</button>
+          <span class="border-l border-gray-300 mx-1"></span>
+          <button data-rec-cat="all" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
+          <button data-rec-cat="content_debt" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Content debt</button>
+          <button data-rec-cat="coverage" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Coverage</button>
+          <button data-rec-cat="geo" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">GEO</button>
+          <button data-rec-cat="linking" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Linking</button>
+          <button data-rec-cat="onpage" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">On-page</button>
+        </div>
+      </div>
+      <div id="audit-action-plan" class="text-sm">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- GEO: pages most in need of editing -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="improvement-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">GEO: pages most in need of editing</h3>
+        <span class="text-xs text-gray-500">composite score combines title-content fit, answer-ability, drift, duplicates, wrong-home paragraphs, citations</span>
+      </div>
+      <div id="audit-improvement" class="text-sm max-h-[40rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Title ↔ content mismatch -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="title-mismatch-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Title doesn't match content</h3>
+        <span class="text-xs text-gray-500">cosine of page title to its paragraph centroid — lower = bigger mismatch</span>
+      </div>
+      <div id="audit-title-mismatch" class="text-sm max-h-96 overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
     <!-- Scatterplot -->
     <div class="bg-gray-50 rounded-lg shadow p-6 mb-6">
       <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
         <div>
           <h2 class="text-2xl font-bold">Semantic Scatterplot</h2>
-          <p class="text-sm text-gray-500 mt-1">
+          <p class="text-sm text-gray-500 mt-1" id="scatter-subtitle">
             Each dot is a page. 2D UMAP projection of content embeddings. Hover for details, click to open, scroll to zoom.
           </p>
         </div>
-        <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Color mode">
-          <span class="text-sm text-gray-500 mr-2">Color by:</span>
-          <button data-mode="section" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Section</button>
-          <button data-mode="cluster" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Cluster</button>
-          <button data-mode="drift" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Drift (heatmap)</button>
-          <button data-mode="flags" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Outliers + duplicates</button>
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Dataset">
+            <span class="text-sm text-gray-500 mr-2">Show:</span>
+            <button data-dataset="pages" class="ds-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Pages</button>
+            <button data-dataset="paragraphs" class="ds-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Paragraphs</button>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Color mode">
+            <span class="text-sm text-gray-500 mr-2">Color by:</span>
+            <button data-mode="section" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Section</button>
+            <button data-mode="cluster" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Cluster</button>
+            <button data-mode="drift" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Drift (heatmap)</button>
+            <button data-mode="flags" class="mode-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Outliers + duplicates</button>
+          </div>
         </div>
       </div>
       <div id="audit-scatter-container" class="w-full" style="min-height: 640px;">
@@ -211,6 +266,45 @@
       </div>
     </div>
 
+    <!-- Internal links per page (in/out degree distribution + table) -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-counts-block">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Internal links per page (in / out)</h3>
+          <p class="text-xs text-gray-500" id="link-counts-meta">distribution of inbound + outbound internal links across every crawled page</p>
+        </div>
+        <div class="flex gap-2 text-xs" role="group" aria-label="Link count chart">
+          <button data-linkmode="hist" class="lc-btn px-2 py-1 rounded border border-gray-300 bg-white">Histogram</button>
+          <button data-linkmode="scatter" class="lc-btn px-2 py-1 rounded border border-gray-300 bg-white">Scatter (in vs out)</button>
+        </div>
+      </div>
+      <div id="audit-link-counts-chart" class="w-full" style="min-height: 320px;"></div>
+      <details class="mt-3 text-xs text-gray-600">
+        <summary class="cursor-pointer">Show top pages by in-degree</summary>
+        <div id="audit-link-counts-table" class="mt-2 max-h-72 overflow-y-auto"></div>
+      </details>
+    </div>
+
+    <!-- Paragraph link density -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-density-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Paragraph link density</h3>
+        <p class="text-xs text-gray-500" id="para-density-meta">internal + external <code>&lt;a href&gt;</code> per 100 words, per paragraph</p>
+      </div>
+      <div id="audit-para-density-summary" class="text-sm grid sm:grid-cols-3 gap-3 mb-4"></div>
+      <div id="audit-para-density-hist" class="w-full mb-4" style="min-height: 180px;"></div>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Link-stuffed paragraphs (clean up)</h4>
+          <div id="audit-para-density-spammy" class="text-xs max-h-80 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Long unlinked paragraphs (could host an inline link)</h4>
+          <div id="audit-para-density-unlinked" class="text-xs max-h-80 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- In-paragraph link recommendations -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-links-block">
       <div class="flex items-center justify-between mb-3">
@@ -219,6 +313,56 @@
       </div>
       <div id="audit-para-links" class="text-sm max-h-[36rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Wrong-home paragraphs -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="wrong-home-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Paragraphs that belong on a different page</h3>
+        <span class="text-xs text-gray-500">paragraph fits another page meaningfully better than its host</span>
+      </div>
+      <div id="audit-wrong-home" class="text-sm max-h-[40rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Paragraph topic clusters -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-clusters-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Paragraph topic clusters</h3>
+        <span class="text-xs text-gray-500">sub-topics that exist on the site at the granularity LLMs retrieve at</span>
+      </div>
+      <div id="audit-para-clusters" class="grid md:grid-cols-2 gap-4 text-sm">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Paragraph-level query fanout -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="fanout-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Query → paragraph fanout</h3>
+        <div class="flex gap-2 text-xs">
+          <button data-fanout="all" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
+          <button data-fanout="gap" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">Gaps</button>
+          <button data-fanout="scattered" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">Scattered</button>
+          <button data-fanout="focused" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">Focused</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">For each query: top paragraphs site-wide. Status — gap = no chunk above floor; scattered = answer fragmented across pages; focused = top 3 paragraphs on the same page (best for AI citation).</p>
+      <div id="audit-fanout" class="text-sm max-h-[44rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Competitive analysis -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="competitive-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Competitor comparison: why they rank, why we don't</h3>
+        <span class="text-xs text-gray-500">supply <code>--competitive query.tsv</code> to populate</span>
+      </div>
+      <div id="audit-competitive" class="text-sm">
+        <div class="text-gray-500">Run with <code>--competitive my_targets.tsv</code> (one <code>query &lt;TAB&gt; competitor_url</code> per line).</div>
       </div>
     </div>
 
@@ -311,6 +455,15 @@
 <script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
 <script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
 <script type="application/json" id="data-cluster-overlap">__CLUSTER_OVERLAP_JSON__</script>
+<script type="application/json" id="data-paragraph-clusters">__PARAGRAPH_CLUSTERS_JSON__</script>
+<script type="application/json" id="data-paragraph-scatter">__PARAGRAPH_SCATTER_JSON__</script>
+<script type="application/json" id="data-paragraph-fanout">__PARAGRAPH_FANOUT_JSON__</script>
+<script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
+<script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
+<script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
+<script type="application/json" id="data-competitive">__COMPETITIVE_JSON__</script>
+<script type="application/json" id="data-recommendations">__RECOMMENDATIONS_JSON__</script>
+<script type="application/json" id="data-paragraph-density">__PARAGRAPH_DENSITY_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -379,8 +532,17 @@
       const inlinedExternal = readInlined('data-external');
       const inlinedParaLinks = readInlined('data-paragraph-links');
       const inlinedClusterOverlap = readInlined('data-cluster-overlap');
+      const inlinedParaClusters = readInlined('data-paragraph-clusters');
+      const inlinedParaScatter = readInlined('data-paragraph-scatter');
+      const inlinedFanout = readInlined('data-paragraph-fanout');
+      const inlinedTitleMismatch = readInlined('data-title-mismatch');
+      const inlinedWrongHome = readInlined('data-wrong-home');
+      const inlinedImprovement = readInlined('data-page-improvement');
+      const inlinedCompetitive = readInlined('data-competitive');
+      const inlinedRecommendations = readInlined('data-recommendations');
+      const inlinedParaDensity = readInlined('data-paragraph-density');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -394,8 +556,17 @@
         external = inlinedExternal || {};
         paraLinks = inlinedParaLinks || [];
         clusterOverlap = inlinedClusterOverlap || {};
+        paraClusters = inlinedParaClusters || [];
+        paraScatter = inlinedParaScatter || {};
+        fanout = inlinedFanout || [];
+        titleMismatch = inlinedTitleMismatch || [];
+        wrongHome = inlinedWrongHome || [];
+        improvement = inlinedImprovement || [];
+        competitive = inlinedCompetitive || [];
+        recommendations = inlinedRecommendations || {};
+        paraDensity = inlinedParaDensity || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -408,6 +579,15 @@
           loadJSON('external_links.json').catch(() => ({})),
           loadJSON('paragraph_link_recommendations.json').catch(() => []),
           loadJSON('cluster_overlap.json').catch(() => ({})),
+          loadJSON('paragraph_clusters.json').catch(() => []),
+          loadJSON('paragraph_scatter.json').catch(() => ({})),
+          loadJSON('paragraph_fanout.json').catch(() => []),
+          loadJSON('title_mismatch.json').catch(() => []),
+          loadJSON('wrong_home_paragraphs.json').catch(() => []),
+          loadJSON('page_improvement.json').catch(() => []),
+          loadJSON('competitive_analysis.json').catch(() => []),
+          loadJSON('recommendations.json').catch(() => ({})),
+          loadJSON('paragraph_density.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -423,9 +603,23 @@
       state.external = external;
       state.paraLinks = paraLinks;
       state.clusterOverlap = clusterOverlap;
+      state.paraClusters = paraClusters;
+      state.paraScatter = paraScatter;
+      state.fanout = fanout;
+      state.titleMismatch = titleMismatch;
+      state.wrongHome = wrongHome;
+      state.improvement = improvement;
+      state.competitive = competitive;
+      state.recommendations = recommendations || {};
+      state.recPriFilter = 'all';
+      state.recCatFilter = 'all';
+      state.paraDensity = paraDensity || {};
+      state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
+      renderActionPlan();
+      wireActionPlanButtons();
       if (state.pages.length) {
         renderScatter();
       } else {
@@ -441,14 +635,25 @@
       renderCoverage('all');
       renderAnswerability();
       renderLinkgraph();
+      renderLinkCounts();
+      renderParaDensity();
+      wireLinkCountButtons();
       renderParaLinks();
       renderHits();
       renderDeep();
       renderClusterAuth();
       renderAnchors();
       renderExternal();
+      renderImprovement();
+      renderTitleMismatch();
+      renderWrongHome();
+      renderParaClusters();
+      renderFanout('all');
+      renderCompetitive();
       wireModeButtons();
+      wireDatasetButtons();
       wireCoverageButtons();
+      wireFanoutButtons();
     } catch (e) {
       console.error(e);
       document.getElementById('audit-scatter-container').innerHTML = `
@@ -458,6 +663,295 @@
           <p class="text-xs text-gray-400 mt-2">${e.message || e}</p>
         </div>`;
     }
+  }
+
+  const REC_CAT_LABELS = {
+    content_debt: 'Content debt',
+    coverage: 'Coverage',
+    geo: 'GEO',
+    linking: 'Linking',
+    onpage: 'On-page',
+  };
+
+  function renderActionPlan() {
+    const block = document.getElementById('action-plan-block');
+    const r = state.recommendations || {};
+    const items = (r.items || []);
+    if (!items.length) { block.style.display = 'none'; return; }
+
+    const meta = document.getElementById('action-plan-meta');
+    const counts = r.by_priority || {};
+    const catCounts = r.by_category || {};
+    const catParts = Object.keys(REC_CAT_LABELS)
+      .filter(k => catCounts[k])
+      .map(k => `${REC_CAT_LABELS[k]} ${catCounts[k]}`)
+      .join(' · ');
+    meta.textContent = `${r.total} actions · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} — ${catParts}`;
+
+    document.querySelectorAll('.rec-pri-btn').forEach(b => {
+      const on = b.dataset.recPri === state.recPriFilter;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    document.querySelectorAll('.rec-cat-btn').forEach(b => {
+      const on = b.dataset.recCat === state.recCatFilter;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+
+    let filtered = items;
+    if (state.recPriFilter !== 'all') filtered = filtered.filter(x => x.priority === state.recPriFilter);
+    if (state.recCatFilter !== 'all') filtered = filtered.filter(x => x.category === state.recCatFilter);
+
+    if (!filtered.length) {
+      document.getElementById('audit-action-plan').innerHTML =
+        '<div class="text-gray-500 text-xs py-3">No actions match this filter.</div>';
+      return;
+    }
+
+    const html = filtered.map(rec => {
+      const priClass = rec.priority === 'high' ? 'bg-red-100 text-red-800'
+        : rec.priority === 'medium' ? 'bg-orange-100 text-orange-800'
+        : 'bg-gray-100 text-gray-700';
+      const effortClass = rec.effort === 'quick' ? 'bg-green-50 text-green-700'
+        : rec.effort === 'deep' ? 'bg-purple-50 text-purple-700'
+        : 'bg-blue-50 text-blue-700';
+      const targets = (rec.targets || []).filter(Boolean).slice(0, 3).map(u =>
+        `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`
+      ).join(' · ');
+      const evidenceBits = [];
+      const ev = rec.evidence || {};
+      if (ev.similarity != null) evidenceBits.push(`sim ${Number(ev.similarity).toFixed(3)}`);
+      if (ev.lift_to_suggested != null) evidenceBits.push(`lift +${Number(ev.lift_to_suggested).toFixed(3)}`);
+      if (ev.lift != null) evidenceBits.push(`lift +${Number(ev.lift).toFixed(3)}`);
+      if (ev.fit != null) evidenceBits.push(`fit ${Number(ev.fit).toFixed(3)}`);
+      if (ev.answerability_score != null) evidenceBits.push(`answerability ${Number(ev.answerability_score).toFixed(1)}/10`);
+      if (ev.click_depth != null) evidenceBits.push(`depth ${ev.click_depth}`);
+      if (ev.candidates_above_threshold != null) evidenceBits.push(`${ev.candidates_above_threshold} pages competing`);
+      if (ev.title_to_content != null) evidenceBits.push(`title↔content ${Number(ev.title_to_content).toFixed(2)}`);
+      if (ev.generic_anchor_share != null) evidenceBits.push(`generic anchors ${Math.round(Number(ev.generic_anchor_share)*100)}%`);
+      if (ev.pagerank != null) evidenceBits.push(`PR ${Number(ev.pagerank).toFixed(5)}`);
+      if (ev.is_cluster_authority) evidenceBits.push(`cluster authority`);
+      if (ev.query) evidenceBits.push(`query "${ev.query}"`);
+      if (ev.paragraph_excerpt) evidenceBits.push(`para: "${String(ev.paragraph_excerpt).slice(0, 140)}…"`);
+      const evidenceLine = evidenceBits.length
+        ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(evidenceBits.join(' · '))}</div>` : '';
+      return `
+        <div class="py-3 border-b border-gray-100">
+          <div class="flex items-start gap-2 flex-wrap">
+            <span class="text-xs px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${rec.priority}</span>
+            <span class="text-xs px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${rec.effort}</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${REC_CAT_LABELS[rec.category] || rec.category}</span>
+            <span class="font-medium text-gray-900">${escapeHtml(rec.title)}</span>
+          </div>
+          <div class="text-sm text-gray-700 mt-1.5">${escapeHtml(rec.instruction)}</div>
+          ${targets ? `<div class="text-xs mt-1">${targets}</div>` : ''}
+          ${evidenceLine}
+        </div>`;
+    }).join('');
+    document.getElementById('audit-action-plan').innerHTML =
+      `<div class="text-xs text-gray-500 mb-2">${filtered.length}/${items.length} actions shown</div>` + html;
+  }
+
+  function wireActionPlanButtons() {
+    document.querySelectorAll('.rec-pri-btn').forEach(b => b.addEventListener('click', () => {
+      state.recPriFilter = b.dataset.recPri;
+      renderActionPlan();
+    }));
+    document.querySelectorAll('.rec-cat-btn').forEach(b => b.addEventListener('click', () => {
+      state.recCatFilter = b.dataset.recCat;
+      renderActionPlan();
+    }));
+  }
+
+  function renderLinkCounts() {
+    const block = document.getElementById('link-counts-block');
+    const rows = (state.linkgraph && state.linkgraph.page_link_counts) || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.querySelectorAll('.lc-btn').forEach(b => {
+      const on = b.dataset.linkmode === state.linkCountMode;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const meta = document.getElementById('link-counts-meta');
+    const totalIn = rows.reduce((a,r)=>a+r.in_degree,0);
+    const totalOut = rows.reduce((a,r)=>a+r.out_degree,0);
+    const orphans = rows.filter(r => r.in_degree === 0).length;
+    const deadends = rows.filter(r => r.out_degree === 0).length;
+    meta.textContent = `${rows.length} pages · ${totalIn} inbound + ${totalOut} outbound internal links · ${orphans} orphan (in=0) · ${deadends} dead-end (out=0)`;
+
+    const container = document.getElementById('audit-link-counts-chart');
+    container.innerHTML = '';
+    const margin = { top: 10, right: 20, bottom: 40, left: 50 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 320 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 320);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    if (state.linkCountMode === 'scatter') {
+      const x = d3.scaleSqrt().domain([0, d3.max(rows, r => r.in_degree) || 1]).range([0, width]);
+      const y = d3.scaleSqrt().domain([0, d3.max(rows, r => r.out_degree) || 1]).range([height, 0]);
+      svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+      svg.append('g').call(d3.axisLeft(y).ticks(8));
+      svg.append('text').attr('x', width/2).attr('y', height + 32).attr('text-anchor','middle')
+        .style('font-size','11px').style('fill','#6b7280').text('inbound internal links');
+      svg.append('text').attr('transform','rotate(-90)').attr('x', -height/2).attr('y', -36)
+        .attr('text-anchor','middle').style('font-size','11px').style('fill','#6b7280').text('outbound internal links');
+      const tooltip = d3.select('body').append('div').attr('class','lc-tt')
+        .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.9)')
+        .style('color','white').style('padding','6px 10px').style('border-radius','6px')
+        .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','340px');
+      svg.append('g').selectAll('circle').data(rows).join('circle')
+        .attr('cx', d => x(d.in_degree))
+        .attr('cy', d => y(d.out_degree))
+        .attr('r', 2.5)
+        .attr('fill', d => d.in_degree === 0 ? '#dc2626' : (d.out_degree === 0 ? '#f59e0b' : '#3b82f6'))
+        .attr('fill-opacity', 0.55)
+        .style('cursor','pointer')
+        .on('click', (e,d) => { e.stopPropagation(); window.open(d.url,'_blank','noopener'); })
+        .on('mouseover', function(e,d){
+          d3.select(this).attr('r',5).attr('stroke','#000').attr('stroke-width',1);
+          tooltip.style('visibility','visible').html(`<strong>${escapeHtml(d.title||d.url)}</strong>
+            <br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url)}</span>
+            <br><span style="font-size:11px;color:#9ca3af">in ${d.in_degree} · out ${d.out_degree}${d.click_depth!=null?` · depth ${d.click_depth}`:''}</span>`);
+        })
+        .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+        .on('mouseout', function(){ d3.select(this).attr('r',2.5).attr('stroke',null); tooltip.style('visibility','hidden'); });
+    } else {
+      // Histogram (overlapping bars: in vs out)
+      const maxV = Math.max(d3.max(rows, r => r.in_degree) || 1, d3.max(rows, r => r.out_degree) || 1);
+      const numBins = Math.min(40, Math.max(10, Math.round(Math.sqrt(rows.length))));
+      const binner = d3.bin().domain([0, maxV]).thresholds(numBins);
+      const inBins = binner.value(r => r.in_degree)(rows);
+      const outBins = binner.value(r => r.out_degree)(rows);
+      const x = d3.scaleLinear().domain([0, maxV]).range([0, width]);
+      const yMax = Math.max(d3.max(inBins, b => b.length) || 1, d3.max(outBins, b => b.length) || 1);
+      const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
+      svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+      svg.append('g').call(d3.axisLeft(y).ticks(6));
+      svg.append('text').attr('x', width/2).attr('y', height + 32).attr('text-anchor','middle')
+        .style('font-size','11px').style('fill','#6b7280').text('links per page');
+      svg.append('text').attr('transform','rotate(-90)').attr('x', -height/2).attr('y', -36)
+        .attr('text-anchor','middle').style('font-size','11px').style('fill','#6b7280').text('# pages');
+      svg.append('g').selectAll('rect.in').data(inBins).join('rect')
+        .attr('x', d => x(d.x0) + 1).attr('y', d => y(d.length))
+        .attr('width', d => Math.max(0, x(d.x1) - x(d.x0) - 2))
+        .attr('height', d => height - y(d.length))
+        .attr('fill', '#3b82f6').attr('fill-opacity', 0.65);
+      svg.append('g').selectAll('rect.out').data(outBins).join('rect')
+        .attr('x', d => x(d.x0) + 1).attr('y', d => y(d.length))
+        .attr('width', d => Math.max(0, x(d.x1) - x(d.x0) - 2))
+        .attr('height', d => height - y(d.length))
+        .attr('fill', '#10b981').attr('fill-opacity', 0.55);
+      const legend = svg.append('g').attr('transform', `translate(${width - 160}, 4)`);
+      legend.append('rect').attr('width',12).attr('height',12).attr('fill','#3b82f6').attr('fill-opacity',0.65);
+      legend.append('text').attr('x',16).attr('y',10).style('font-size','11px').style('fill','#374151').text('inbound (in_degree)');
+      legend.append('rect').attr('y',16).attr('width',12).attr('height',12).attr('fill','#10b981').attr('fill-opacity',0.55);
+      legend.append('text').attr('x',16).attr('y',26).style('font-size','11px').style('fill','#374151').text('outbound (out_degree)');
+    }
+
+    // Top pages by in-degree
+    const topIn = rows.slice().sort((a,b) => b.in_degree - a.in_degree).slice(0, 30);
+    document.getElementById('audit-link-counts-table').innerHTML =
+      `<table class="w-full text-xs"><thead><tr class="text-left text-gray-500 border-b border-gray-200">
+        <th class="py-1 pr-2">Page</th><th class="text-right">in</th><th class="text-right">out</th><th class="text-right">depth</th></tr></thead><tbody>` +
+      topIn.map(r => `<tr class="border-b border-gray-100">
+        <td class="py-1 pr-2 truncate max-w-md"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a></td>
+        <td class="text-right font-mono">${r.in_degree}</td>
+        <td class="text-right font-mono text-gray-600">${r.out_degree}</td>
+        <td class="text-right font-mono text-gray-500">${r.click_depth==null?'—':r.click_depth}</td>
+      </tr>`).join('') + '</tbody></table>';
+  }
+
+  function wireLinkCountButtons() {
+    document.querySelectorAll('.lc-btn').forEach(b => b.addEventListener('click', () => {
+      state.linkCountMode = b.dataset.linkmode;
+      renderLinkCounts();
+    }));
+  }
+
+  function renderParaDensity() {
+    const block = document.getElementById('para-density-block');
+    const d = state.paraDensity || {};
+    const summary = d.summary || {};
+    const spammy = d.spammy || [];
+    const unlinked = d.unlinked_long || [];
+    if (!summary.total_paragraphs) { block.style.display = 'none'; return; }
+
+    const meta = document.getElementById('para-density-meta');
+    meta.textContent = `${summary.total_paragraphs.toLocaleString()} paragraphs · ${summary.total_internal_links.toLocaleString()} internal + ${summary.total_external_links.toLocaleString()} external links · ${(summary.zero_link_share*100).toFixed(0)}% have zero links`;
+
+    const card = (label, value, hint) => `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="text-2xl font-semibold text-gray-900">${value}</div>
+        <div class="text-xs text-gray-500">${label}</div>
+        ${hint ? `<div class="text-xs text-gray-400 mt-0.5">${hint}</div>` : ''}
+      </div>`;
+    document.getElementById('audit-para-density-summary').innerHTML =
+      card('median links / 100w', summary.median_density_per_100w.toFixed(2), 'half of paragraphs are below this') +
+      card('p90 links / 100w', summary.p90_density_per_100w.toFixed(2), 'top 10% of paragraphs') +
+      card('spammy paragraphs', summary.spammy_count.toLocaleString(), `≥ ${summary.spammy_threshold_per_100w} links per 100 words`);
+
+    // Histogram of densities (cap x at p99 to keep it readable)
+    const perPage = d.per_page || [];
+    const histContainer = document.getElementById('audit-para-density-hist');
+    histContainer.innerHTML = '';
+    if (perPage.length) {
+      const margin = { top: 8, right: 12, bottom: 36, left: 40 };
+      const width = histContainer.offsetWidth - margin.left - margin.right;
+      const height = 180 - margin.top - margin.bottom;
+      const svgOuter = d3.select(histContainer).append('svg').attr('width', histContainer.offsetWidth).attr('height', 180);
+      const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+      const xMax = Math.max(summary.p99_density_per_100w || 0, summary.spammy_threshold_per_100w * 1.5, 2);
+      const values = perPage.map(p => Math.min(p.links_per_100w, xMax));
+      const bins = d3.bin().domain([0, xMax]).thresholds(24)(values);
+      const x = d3.scaleLinear().domain([0, xMax]).range([0, width]);
+      const y = d3.scaleLinear().domain([0, d3.max(bins, b => b.length) || 1]).range([height, 0]);
+      svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+      svg.append('g').call(d3.axisLeft(y).ticks(4));
+      svg.append('text').attr('x', width/2).attr('y', height + 28).attr('text-anchor','middle')
+        .style('font-size','11px').style('fill','#6b7280').text('avg links per 100 words (per page)');
+      svg.append('g').selectAll('rect').data(bins).join('rect')
+        .attr('x', d => x(d.x0) + 1).attr('y', d => y(d.length))
+        .attr('width', d => Math.max(0, x(d.x1) - x(d.x0) - 2))
+        .attr('height', d => height - y(d.length))
+        .attr('fill', '#6366f1').attr('fill-opacity', 0.7);
+      // spammy threshold line
+      const xt = x(summary.spammy_threshold_per_100w);
+      if (xt >= 0 && xt <= width) {
+        svg.append('line').attr('x1', xt).attr('x2', xt).attr('y1', 0).attr('y2', height)
+          .attr('stroke', '#dc2626').attr('stroke-dasharray', '4 3').attr('stroke-width', 1.5);
+        svg.append('text').attr('x', xt + 3).attr('y', 10).style('font-size','10px').style('fill','#dc2626')
+          .text(`spammy ≥ ${summary.spammy_threshold_per_100w}`);
+      }
+    }
+
+    document.getElementById('audit-para-density-spammy').innerHTML = spammy.length
+      ? spammy.map(r => `
+          <div class="py-2 border-b border-gray-100">
+            <div class="flex items-center justify-between gap-2">
+              <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+              <span class="font-mono text-red-700 text-xs">${r.density_per_100w}/100w</span>
+            </div>
+            <div class="text-xs text-gray-500">para ${r.paragraph_index} · ${r.words}w · ${r.internal_links}i + ${r.external_links}e links</div>
+            <div class="text-xs italic text-gray-700 mt-0.5">"${escapeHtml(r.excerpt)}"</div>
+          </div>`).join('')
+      : '<div class="text-gray-500">No paragraphs above threshold.</div>';
+
+    document.getElementById('audit-para-density-unlinked').innerHTML = unlinked.length
+      ? unlinked.map(r => `
+          <div class="py-2 border-b border-gray-100">
+            <div class="flex items-center justify-between gap-2">
+              <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+              <span class="font-mono text-gray-600 text-xs">${r.words}w</span>
+            </div>
+            <div class="text-xs text-gray-500">para ${r.paragraph_index} · 0 links</div>
+            <div class="text-xs italic text-gray-700 mt-0.5">"${escapeHtml(r.excerpt)}"</div>
+          </div>`).join('')
+      : '<div class="text-gray-500">No long unlinked paragraphs.</div>';
   }
 
   function renderMetrics() {
@@ -557,8 +1051,41 @@
   }
 
   function renderScatter() {
+    state.urlToSection = new Map((state.pages || []).map(p => [p.url, p.section || '']));
+    state.urlToPage = new Map((state.pages || []).map(p => [p.url, p]));
+    const sections = Array.from(new Set((state.pages || []).map(p => p.section))).sort();
+    state.sectionColor = d3.scaleOrdinal().domain(sections).range(palette);
+    state.scatterDataset = 'pages';
+    drawScatter();
+  }
+
+  function currentScatterRows() {
+    if (state.scatterDataset === 'paragraphs') {
+      return (state.paraScatter && state.paraScatter.paragraphs) || [];
+    }
+    return state.pages || [];
+  }
+
+  function drawScatter() {
     const container = document.getElementById('audit-scatter-container');
     container.innerHTML = '';
+    const data = currentScatterRows();
+
+    const subtitle = document.getElementById('scatter-subtitle');
+    if (subtitle) {
+      if (state.scatterDataset === 'paragraphs') {
+        const total = (state.paraScatter && state.paraScatter.total_paragraphs) || data.length;
+        const shown = (state.paraScatter && state.paraScatter.shown) || data.length;
+        subtitle.textContent = `Each dot is a paragraph. ${shown}/${total} shown · UMAP cosine projection. Hover for excerpt, click to open the parent page.`;
+      } else {
+        subtitle.textContent = 'Each dot is a page. 2D UMAP projection of content embeddings. Hover for details, click to open, scroll to zoom.';
+      }
+    }
+
+    if (!data.length) {
+      container.innerHTML = `<div class="text-center py-12 text-gray-600">No ${state.scatterDataset} data.</div>`;
+      return;
+    }
 
     const margin = { top: 20, right: 20, bottom: 40, left: 40 };
     const width = container.offsetWidth - margin.left - margin.right;
@@ -568,37 +1095,41 @@
       .attr('width', container.offsetWidth).attr('height', 640);
     const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-    const xExt = d3.extent(state.pages, d => d.x);
-    const yExt = d3.extent(state.pages, d => d.y);
+    const xExt = d3.extent(data, d => d.x);
+    const yExt = d3.extent(data, d => d.y);
     const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
     const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
     const xScale = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
     const yScale = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
 
-    const sections = Array.from(new Set(state.pages.map(p => p.section))).sort();
-    const sectionColor = d3.scaleOrdinal().domain(sections).range(palette);
-    const clusterColor = d3.scaleOrdinal().domain(d3.range(state.scatter.num_clusters || 1)).range(palette);
-    const maxDrift = state.scatter.max_drift || 1;
-    const driftColor = d3.scaleSequential(d3.interpolateRgbBasis(['#16a34a', '#f59e0b', '#dc2626']))
+    const numClusters = state.scatterDataset === 'paragraphs'
+      ? ((state.paraScatter && state.paraScatter.num_clusters) || 1)
+      : ((state.scatter && state.scatter.num_clusters) || 1);
+    state.clusterColor = d3.scaleOrdinal().domain(d3.range(numClusters)).range(palette);
+    const maxDrift = (state.scatter && state.scatter.max_drift) || 1;
+    state.driftColor = d3.scaleSequential(d3.interpolateRgbBasis(['#16a34a', '#f59e0b', '#dc2626']))
       .domain([0, maxDrift]);
 
-    state.sectionColor = sectionColor;
-    state.clusterColor = clusterColor;
-    state.driftColor = driftColor;
+    const clipId = 'audit-clip-' + Date.now();
+    svg.append('defs').append('clipPath').attr('id', clipId)
+      .append('rect').attr('width', width).attr('height', height);
 
-    const clip = svg.append('defs').append('clipPath').attr('id', 'audit-clip');
-    clip.append('rect').attr('width', width).attr('height', height);
+    const isPara = state.scatterDataset === 'paragraphs';
+    const baseR = isPara ? 2.5 : 4;
+    const hoverR = isPara ? 5 : 7;
+    const baseOpacity = isPara ? 0.65 : 0.75;
+    const baseStroke = isPara ? 0.3 : 0.5;
 
-    const dotsGroup = svg.append('g').attr('clip-path', 'url(#audit-clip)');
+    const dotsGroup = svg.append('g').attr('clip-path', `url(#${clipId})`);
     const dots = dotsGroup.selectAll('circle')
-      .data(state.pages)
+      .data(data)
       .join('circle')
       .attr('cx', d => xScale(d.x))
       .attr('cy', d => yScale(d.y))
-      .attr('r', 4)
-      .attr('fill-opacity', 0.75)
+      .attr('r', baseR)
+      .attr('fill-opacity', baseOpacity)
       .attr('stroke', 'white')
-      .attr('stroke-width', 0.5)
+      .attr('stroke-width', baseStroke)
       .style('cursor', 'pointer')
       .on('click', (e, d) => { e.stopPropagation(); window.open(fixUrl(d.url), '_blank', 'noopener'); });
     state.dots = dots;
@@ -608,32 +1139,43 @@
       .style('background', 'rgba(0,0,0,.9)').style('color', 'white')
       .style('padding', '8px 12px').style('border-radius', '6px')
       .style('font-size', '13px').style('pointer-events', 'none')
-      .style('z-index', '1000').style('max-width', '340px');
+      .style('z-index', '1000').style('max-width', '380px');
 
     dots.on('mouseover', function(event, d) {
-      d3.select(this).attr('r', 7).attr('stroke', '#000').attr('stroke-width', 1.5);
-      const dupLine = (d.duplicate_of && d.duplicate_of.length)
-        ? `<br><span style="font-size:12px;color:#fca5a5">↔ duplicate of: ${d.duplicate_of.slice(0,2).map(x => `${x.title} (${x.similarity})`).join('; ')}</span>` : '';
-      tooltip.style('visibility', 'visible').html(`
-        <strong>${d.title}</strong>
-        <br><span style="font-size:12px;color:#93c5fd">${d.url}</span>
-        <br><span style="font-size:12px;color:#9ca3af">Section: ${d.section || '(root)'} · Cluster ${d.cluster}</span>
-        <br><span style="font-size:12px;color:#fbbf24">drift to section: ${d.drift_section} · to site: ${d.drift_site}</span>
-        <br><span style="font-size:12px;color:#9ca3af">${d.word_count} words</span>
-        ${dupLine}
-        <br><span style="font-size:11px;color:#60a5fa">Click to open</span>
-      `);
+      d3.select(this).attr('r', hoverR).attr('stroke', '#000').attr('stroke-width', 1.5);
+      let body;
+      if (isPara) {
+        const sec = state.urlToSection.get(d.url) || '(root)';
+        body = `
+          <strong>${escapeHtml(d.title || '(untitled)')}</strong>
+          <br><span style="font-size:12px;color:#93c5fd">${escapeHtml(d.url)}</span>
+          <br><span style="font-size:12px;color:#9ca3af">Section: ${escapeHtml(sec)} · Paragraph cluster ${d.cluster}${d.cluster_label ? ' — ' + escapeHtml(d.cluster_label) : ''}</span>
+          <br><span style="font-size:12px;color:#fbbf24;font-style:italic">"${escapeHtml(d.excerpt || '')}"</span>
+          <br><span style="font-size:11px;color:#60a5fa">Click to open page</span>`;
+      } else {
+        const dupLine = (d.duplicate_of && d.duplicate_of.length)
+          ? `<br><span style="font-size:12px;color:#fca5a5">↔ duplicate of: ${d.duplicate_of.slice(0,2).map(x => `${escapeHtml(x.title)} (${x.similarity})`).join('; ')}</span>` : '';
+        body = `
+          <strong>${escapeHtml(d.title)}</strong>
+          <br><span style="font-size:12px;color:#93c5fd">${escapeHtml(d.url)}</span>
+          <br><span style="font-size:12px;color:#9ca3af">Section: ${escapeHtml(d.section || '(root)')} · Cluster ${d.cluster}</span>
+          <br><span style="font-size:12px;color:#fbbf24">drift to section: ${d.drift_section} · to site: ${d.drift_site}</span>
+          <br><span style="font-size:12px;color:#9ca3af">${d.word_count} words</span>
+          ${dupLine}
+          <br><span style="font-size:11px;color:#60a5fa">Click to open</span>`;
+      }
+      tooltip.style('visibility', 'visible').html(body);
     }).on('mousemove', event => {
       tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px');
     }).on('mouseout', function() {
-      d3.select(this).attr('r', 4).attr('stroke', 'white').attr('stroke-width', 0.5);
+      d3.select(this).attr('r', baseR).attr('stroke', 'white').attr('stroke-width', baseStroke);
       tooltip.style('visibility', 'hidden');
     });
 
     const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(8));
     const yAxis = svg.append('g').call(d3.axisLeft(yScale).ticks(8));
 
-    const zoom = d3.zoom().scaleExtent([0.5, 20])
+    const zoom = d3.zoom().scaleExtent([0.5, 25])
       .filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
         const nx = e.transform.rescaleX(xScale);
@@ -645,17 +1187,24 @@
     svgOuter.call(zoom);
     svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
 
-    applyMode('section');
+    applyMode(isPara ? 'cluster' : (state.mode || 'section'));
   }
 
   function applyMode(mode) {
     if (!state.dots) return;
+    const isPara = state.scatterDataset === 'paragraphs';
+    // Paragraphs only support section + cluster; force cluster fallback for drift/flags.
+    if (isPara && (mode === 'drift' || mode === 'flags')) mode = 'cluster';
     state.mode = mode;
     document.querySelectorAll('.mode-btn').forEach(b => {
       const on = b.dataset.mode === mode;
+      const disabled = isPara && (b.dataset.mode === 'drift' || b.dataset.mode === 'flags');
       b.classList.toggle('bg-blue-600', on);
       b.classList.toggle('text-white', on);
       b.classList.toggle('border-blue-600', on);
+      b.classList.toggle('opacity-40', disabled);
+      b.classList.toggle('cursor-not-allowed', disabled);
+      b.disabled = disabled;
     });
 
     state.dots
@@ -666,8 +1215,13 @@
     renderLegend(mode);
   }
 
+  function sectionFor(d) {
+    if (state.scatterDataset === 'paragraphs') return state.urlToSection.get(d.url) || '';
+    return d.section;
+  }
+
   function colorFor(d, mode) {
-    if (mode === 'section') return state.sectionColor(d.section);
+    if (mode === 'section') return state.sectionColor(sectionFor(d));
     if (mode === 'cluster') return state.clusterColor(d.cluster);
     if (mode === 'drift') return state.driftColor(d.drift_section);
     if (mode === 'flags') {
@@ -686,17 +1240,19 @@
   }
 
   function strokeWidthFor(d, mode) {
+    const isPara = state.scatterDataset === 'paragraphs';
     if (mode === 'flags' && d.duplicate_of && d.duplicate_of.length) return 1.5;
-    return 0.5;
+    return isPara ? 0.3 : 0.5;
   }
 
   function opacityFor(d, mode) {
+    const isPara = state.scatterDataset === 'paragraphs';
     if (mode === 'flags') {
       const isDup = d.duplicate_of && d.duplicate_of.length;
       const isOut = d.drift_section > (state.metrics.p95_distance_to_centroid || 0.3);
       return (isDup || isOut) ? 0.95 : 0.25;
     }
-    return 0.75;
+    return isPara ? 0.65 : 0.75;
   }
 
   function renderLegend(mode) {
@@ -709,7 +1265,9 @@
           <span class="w-3 h-3 rounded-full mr-1.5" style="background:${state.sectionColor(s)}"></span>${s || '(root)'}
         </span>`).join('');
     } else if (mode === 'cluster') {
-      el.innerHTML = `<span class="text-xs text-gray-500">${state.scatter.num_clusters} semantic clusters — hover dots for details.</span>`;
+      const isPara = state.scatterDataset === 'paragraphs';
+      const n = isPara ? (state.paraScatter.num_clusters || 0) : (state.scatter.num_clusters || 0);
+      el.innerHTML = `<span class="text-xs text-gray-500">${n} ${isPara ? 'paragraph' : 'semantic'} clusters — hover dots for details.</span>`;
     } else if (mode === 'drift') {
       el.innerHTML = `
         <span class="text-xs text-gray-500">Drift from section centroid:</span>
@@ -725,7 +1283,36 @@
   }
 
   function wireModeButtons() {
-    document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => applyMode(b.dataset.mode)));
+    document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      applyMode(b.dataset.mode);
+    }));
+  }
+
+  function wireDatasetButtons() {
+    const btns = document.querySelectorAll('.ds-btn');
+    btns.forEach(b => {
+      const on = b.dataset.dataset === state.scatterDataset;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+      const hasParas = ((state.paraScatter && state.paraScatter.paragraphs) || []).length > 0;
+      if (b.dataset.dataset === 'paragraphs' && !hasParas) {
+        b.classList.add('opacity-40', 'cursor-not-allowed');
+        b.disabled = true;
+      }
+    });
+    btns.forEach(b => b.addEventListener('click', () => {
+      if (b.disabled || b.dataset.dataset === state.scatterDataset) return;
+      state.scatterDataset = b.dataset.dataset;
+      btns.forEach(x => {
+        const on = x.dataset.dataset === state.scatterDataset;
+        x.classList.toggle('bg-blue-600', on);
+        x.classList.toggle('text-white', on);
+        x.classList.toggle('border-blue-600', on);
+      });
+      drawScatter();
+    }));
   }
 
   function escapeHtml(s) {
@@ -1113,6 +1700,151 @@
         <div class="text-xs mt-1"><span class="text-gray-500">suggested anchor: </span><span class="font-mono bg-yellow-50 px-1 rounded">${escapeHtml(r.suggested_anchor)}</span> <span class="text-gray-400">(confidence ${r.anchor_confidence})</span></div>
       </div>`).join('');
     document.getElementById('audit-para-links').innerHTML = summary + rows;
+  }
+
+  function renderImprovement() {
+    const block = document.getElementById('improvement-block');
+    const rows = state.improvement || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-improvement').innerHTML = `
+      <div class="text-xs text-gray-500 mb-2">${rows.length} pages with at least one issue · sorted by composite score</div>` +
+      rows.slice(0, 100).map(r => `
+        <div class="py-3 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+            <span class="font-mono text-red-700">${r.score}</span>
+          </div>
+          <ul class="list-disc list-inside text-xs text-gray-700 ml-2">
+            ${r.reasons.map(x => `<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>
+        </div>`).join('');
+  }
+
+  function renderTitleMismatch() {
+    const block = document.getElementById('title-mismatch-block');
+    const rows = (state.titleMismatch || []).filter(r => r.title_to_content < 0.6);
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-title-mismatch').innerHTML =
+      `<div class="text-xs text-gray-500 mb-2">${rows.length} pages with title-content cosine &lt; 0.6 · lower = more misleading</div>` +
+      rows.slice(0, 60).map(r => `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <a class="text-blue-600 hover:underline font-medium truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+            <span class="font-mono text-orange-700">${r.title_to_content}</span>
+          </div>
+          ${r.suggested_keywords && r.suggested_keywords.length
+            ? `<div class="text-xs text-gray-500 mt-1">try keywords: ${r.suggested_keywords.slice(0, 4).map(k => `<span class="bg-yellow-50 px-1 rounded mr-1">${escapeHtml(k)}</span>`).join('')}</div>`
+            : ''}
+        </div>`).join('');
+  }
+
+  function renderWrongHome() {
+    const block = document.getElementById('wrong-home-block');
+    const rows = state.wrongHome || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-wrong-home').innerHTML =
+      `<div class="text-xs text-gray-500 mb-2">${rows.length} paragraphs with lift ≥ 0.10 vs their host page</div>` +
+      rows.slice(0, 80).map(r => `
+        <div class="py-3 border-b border-gray-100">
+          <div class="text-xs text-gray-500 mb-1">para ${r.paragraph_index} · sim to suggested ${r.sim_to_suggested} · lift +${r.lift}</div>
+          <div class="text-xs italic text-gray-700 mb-2">"${escapeHtml(r.paragraph_excerpt)}"</div>
+          <div class="text-xs"><span class="text-gray-500">currently on </span><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url)}" target="_blank" rel="noopener">${escapeHtml(r.source_url)}</a></div>
+          <div class="text-xs mt-0.5"><span class="text-gray-500">would fit better on </span><a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(r.suggested_home_url)}" target="_blank" rel="noopener">${escapeHtml(r.suggested_home_title || r.suggested_home_url)}</a></div>
+        </div>`).join('');
+  }
+
+  function renderParaClusters() {
+    const block = document.getElementById('para-clusters-block');
+    const rows = state.paraClusters || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-para-clusters').innerHTML = rows.slice(0, 24).map(c => {
+      const kws = (c.keywords || []).slice(0, 6).map(k => `<span class="inline-block bg-gray-100 text-gray-800 text-xs px-2 py-0.5 rounded mr-1 mb-1">${escapeHtml(k.keyword)}</span>`).join('');
+      const examples = (c.top_paragraphs || []).slice(0, 2).map(p => `
+        <div class="text-xs mt-1">
+          <a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.page_title)}</a>
+          <div class="text-gray-600 italic">"${escapeHtml(p.excerpt)}"</div>
+        </div>`).join('');
+      return `
+        <div class="border border-gray-200 rounded p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="font-semibold">${escapeHtml(c.label)}</div>
+            <div class="text-xs text-gray-500">${c.paragraph_count} paras · ${c.distinct_pages} pages · cohesion ${c.cohesion}</div>
+          </div>
+          <div class="mb-2">${kws}</div>
+          ${examples}
+        </div>`;
+    }).join('');
+  }
+
+  function renderFanout(filter) {
+    const block = document.getElementById('fanout-block');
+    const all = state.fanout || [];
+    if (!all.length) { block.style.display = 'none'; return; }
+    state.fanoutFilter = filter;
+    document.querySelectorAll('.fan-btn').forEach(b => {
+      const on = b.dataset.fanout === filter;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const counts = all.reduce((a, q) => { a[q.status] = (a[q.status] || 0) + 1; return a; }, {});
+    const summary = `<div class="text-xs text-gray-500 mb-2">${all.length} queries · gaps ${counts.gap || 0} · scattered ${counts.scattered || 0} · focused ${counts.focused || 0} · covered ${counts.covered || 0}</div>`;
+    const filtered = filter === 'all' ? all : all.filter(q => q.status === filter);
+    if (!filtered.length) { document.getElementById('audit-fanout').innerHTML = summary + '<div class="text-gray-500">None.</div>'; return; }
+
+    const rows = filtered.slice(0, 200).map(q => {
+      const badge = q.status === 'gap' ? 'bg-red-100 text-red-800'
+                  : q.status === 'scattered' ? 'bg-orange-100 text-orange-800'
+                  : q.status === 'focused' ? 'bg-green-100 text-green-800'
+                  : 'bg-blue-100 text-blue-800';
+      const paras = (q.top_paragraphs || []).slice(0, 5).map(p => `
+        <div class="text-xs py-1 border-l-2 border-gray-200 pl-2 my-1">
+          <div class="text-gray-500">sim ${p.similarity} · <a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.page_title || p.url)}</a></div>
+          <div class="italic text-gray-700">"${escapeHtml(p.excerpt)}"</div>
+        </div>`).join('');
+      return `
+        <div class="py-3 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="font-medium">${escapeHtml(q.query)}</div>
+            <span class="text-xs px-2 py-0.5 rounded ${badge} whitespace-nowrap">${q.status}</span>
+          </div>
+          ${paras || '<div class="text-xs text-gray-500">No paragraph above floor.</div>'}
+        </div>`;
+    }).join('');
+    document.getElementById('audit-fanout').innerHTML = summary + rows;
+  }
+
+  function wireFanoutButtons() {
+    document.querySelectorAll('.fan-btn').forEach(b => b.addEventListener('click', () => renderFanout(b.dataset.fanout)));
+  }
+
+  function renderCompetitive() {
+    const block = document.getElementById('competitive-block');
+    const rows = state.competitive || [];
+    if (!rows.length) return;  // keep the "Run with --competitive…" placeholder
+    document.getElementById('audit-competitive').innerHTML = rows.map(r => {
+      if (r.error) {
+        return `<div class="py-2 border-b border-gray-100">
+          <div class="font-medium">${escapeHtml(r.query)}</div>
+          <div class="text-xs text-red-700">error: ${escapeHtml(r.error)} (${escapeHtml(r.competitor_url)})</div>
+        </div>`;
+      }
+      const gaps = (r.structural_gaps || []).map(g => `
+        <li><strong>${escapeHtml(g.signal)}</strong>: ours <code>${escapeHtml(String(g.ours))}</code> vs theirs <code>${escapeHtml(String(g.theirs))}</code> — <span class="text-gray-700">${escapeHtml(g.advice)}</span></li>`).join('');
+      const topics = (r.missing_topics || []).map(t => `
+        <li>
+          <strong>${escapeHtml(t.label)}</strong> <span class="text-gray-500">(best paragraph we have ${t.best_similarity_we_have})</span>
+          <div class="text-xs italic text-gray-700">"${escapeHtml(t.sample_competitor_paragraph)}"</div>
+        </li>`).join('');
+      return `
+        <div class="py-4 border-b border-gray-100">
+          <div class="font-medium mb-1">${escapeHtml(r.query)}</div>
+          <div class="text-xs text-gray-700 mb-2">our best: <a class="text-blue-600 hover:underline" href="${escapeHtml(r.our_best_url)}" target="_blank" rel="noopener">${escapeHtml(r.our_best_title || r.our_best_url)}</a> (sim ${r.our_best_similarity}) · competitor: <a class="text-blue-600 hover:underline" href="${escapeHtml(r.competitor_url)}" target="_blank" rel="noopener">${escapeHtml(r.competitor_title || r.competitor_url)}</a></div>
+          <div class="text-xs text-gray-500 mb-2">answer-ability ours <strong>${r.answerability_ours}</strong> · theirs <strong>${r.answerability_theirs}</strong> · paragraphs ours ${r.paragraph_count_ours} vs theirs ${r.paragraph_count_theirs}</div>
+          ${gaps ? `<div class="text-xs font-semibold mt-3 mb-1">Structural gaps:</div><ul class="list-disc list-inside text-xs space-y-1">${gaps}</ul>` : ''}
+          ${topics ? `<div class="text-xs font-semibold mt-3 mb-1">Sub-topics they cover, we don't:</div><ul class="list-disc list-inside text-xs space-y-1">${topics}</ul>` : ''}
+        </div>`;
+    }).join('');
   }
 
   boot();

@@ -30,6 +30,15 @@ _PLACEHOLDERS = {
     "__EXTERNAL_JSON__": "external",
     "__PARAGRAPH_LINKS_JSON__": "paragraph_links",
     "__CLUSTER_OVERLAP_JSON__": "cluster_overlap",
+    "__PARAGRAPH_CLUSTERS_JSON__": "paragraph_clusters",
+    "__PARAGRAPH_SCATTER_JSON__": "paragraph_scatter",
+    "__PARAGRAPH_FANOUT_JSON__": "paragraph_fanout",
+    "__TITLE_MISMATCH_JSON__": "title_mismatch",
+    "__WRONG_HOME_JSON__": "wrong_home",
+    "__PAGE_IMPROVEMENT_JSON__": "page_improvement",
+    "__COMPETITIVE_JSON__": "competitive",
+    "__RECOMMENDATIONS_JSON__": "recommendations",
+    "__PARAGRAPH_DENSITY_JSON__": "paragraph_density",
 }
 
 
@@ -206,6 +215,15 @@ def write_html_report(
     external_links: Optional[dict] = None,
     paragraph_link_recs: Optional[list] = None,
     cluster_overlap: Optional[dict] = None,
+    paragraph_clusters: Optional[list] = None,
+    paragraph_scatter: Optional[dict] = None,
+    paragraph_fanout: Optional[list] = None,
+    title_mismatch: Optional[list] = None,
+    wrong_home: Optional[list] = None,
+    page_improvement: Optional[list] = None,
+    competitive: Optional[list] = None,
+    recommendations: Optional[dict] = None,
+    paragraph_density: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -222,6 +240,15 @@ def write_html_report(
         "external": external_links or {},
         "paragraph_links": paragraph_link_recs or [],
         "cluster_overlap": cluster_overlap or {},
+        "paragraph_clusters": paragraph_clusters or [],
+        "paragraph_scatter": paragraph_scatter or {},
+        "paragraph_fanout": paragraph_fanout or [],
+        "title_mismatch": title_mismatch or [],
+        "wrong_home": wrong_home or [],
+        "page_improvement": page_improvement or [],
+        "competitive": competitive or [],
+        "recommendations": recommendations or {},
+        "paragraph_density": paragraph_density or {},
     }
 
     rendered = template

@@ -14,6 +14,7 @@ Caching is per-page only (queries are usually < 1 000, not worth a cache).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Iterable, List
 
@@ -50,7 +51,10 @@ class Embedder:
             return
         from sentence_transformers import SentenceTransformer  # lazy
 
-        self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
+        device = os.environ.get("SITE_AUDIT_DEVICE") or None
+        self._model = SentenceTransformer(
+            self.model_name, trust_remote_code=True, device=device
+        )
 
     def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
         if not texts:

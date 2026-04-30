@@ -116,7 +116,7 @@ def write_page_drift(path: Path, result: AuditResult) -> None:
     _write_csv(path, rows)
 
 
-def write_outliers(path: Path, result: AuditResult) -> list[dict]:
+def build_outlier_rows(result: AuditResult) -> list[dict]:
     duplicate_set = {i for pair in result.duplicate_pairs for i in pair[:2]}
     section_size = {s.name: s.metrics["count"] for s in result.sections.values()}
     section_p95 = {s.name: s.metrics["p95_distance"] for s in result.sections.values()}
@@ -150,11 +150,16 @@ def write_outliers(path: Path, result: AuditResult) -> list[dict]:
             "recommendation": action,
         })
     rows.sort(key=lambda r: r["distance_to_section_centroid"], reverse=True)
+    return rows
+
+
+def write_outliers(path: Path, result: AuditResult) -> list[dict]:
+    rows = build_outlier_rows(result)
     _write_csv(path, rows)
     return rows
 
 
-def write_duplicates(path: Path, result: AuditResult) -> None:
+def build_duplicate_rows(result: AuditResult) -> list[dict]:
     rows = []
     for i, j, sim in result.duplicate_pairs:
         a = result.pages[i]
@@ -177,7 +182,13 @@ def write_duplicates(path: Path, result: AuditResult) -> None:
             "title_b": b.title,
             "recommendation": action,
         })
+    return rows
+
+
+def write_duplicates(path: Path, result: AuditResult) -> list[dict]:
+    rows = build_duplicate_rows(result)
     _write_csv(path, rows)
+    return rows
 
 
 def write_scatterplot(
@@ -268,13 +279,22 @@ def write_all(
     external_links: Optional[dict] = None,
     paragraph_link_recs: Optional[list] = None,
     cluster_overlap: Optional[dict] = None,
+    paragraph_clusters: Optional[list] = None,
+    paragraph_scatter: Optional[dict] = None,
+    paragraph_fanout: Optional[list] = None,
+    title_mismatch: Optional[list] = None,
+    wrong_home: Optional[list] = None,
+    page_improvement: Optional[list] = None,
+    competitive: Optional[list] = None,
+    recommendations: Optional[dict] = None,
+    paragraph_density: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
     write_section_report(output_dir / "section_report.json", result)
     write_page_drift(output_dir / "page_drift.csv", result)
     outliers = write_outliers(output_dir / "outliers.csv", result)
-    write_duplicates(output_dir / "duplicates.csv", result)
+    duplicates = write_duplicates(output_dir / "duplicates.csv", result)
     write_pages(output_dir / "pages.json", result)
     write_scatterplot(output_dir / "scatterplot.json", result, coords, cluster_labels)
     if cluster_summaries:
@@ -291,4 +311,22 @@ def write_all(
         _write_json(output_dir / "paragraph_link_recommendations.json", paragraph_link_recs)
     if cluster_overlap is not None:
         _write_json(output_dir / "cluster_overlap.json", cluster_overlap)
+    if paragraph_clusters is not None:
+        _write_json(output_dir / "paragraph_clusters.json", paragraph_clusters)
+    if paragraph_scatter is not None:
+        _write_json(output_dir / "paragraph_scatter.json", paragraph_scatter)
+    if paragraph_fanout is not None:
+        _write_json(output_dir / "paragraph_fanout.json", paragraph_fanout)
+    if title_mismatch is not None:
+        _write_json(output_dir / "title_mismatch.json", title_mismatch)
+    if wrong_home is not None:
+        _write_json(output_dir / "wrong_home_paragraphs.json", wrong_home)
+    if page_improvement is not None:
+        _write_json(output_dir / "page_improvement.json", page_improvement)
+    if competitive is not None:
+        _write_json(output_dir / "competitive_analysis.json", competitive)
+    if recommendations is not None:
+        _write_json(output_dir / "recommendations.json", recommendations)
+    if paragraph_density is not None:
+        _write_json(output_dir / "paragraph_density.json", paragraph_density)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

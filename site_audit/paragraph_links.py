@@ -122,6 +122,8 @@ def recommend(
     pages_with_outlinks: list[tuple[str, list[tuple[str, str]]]],
     answerability_by_url: dict[str, float] | None = None,
     embedder=None,                          # used for anchor scoring
+    paragraph_saturation: dict[tuple[int, int], float] | None = None,
+    saturation_floor_per_100w: float = 5.0,
     similarity_floor: float = 0.65,
     lift_floor: float = 0.05,
     top_k_per_page: int = 8,
@@ -168,16 +170,23 @@ def recommend(
     # anchor scoring: we batch-encode candidate n-grams per paragraph
     can_score_anchors = embedder is not None
 
-    raw_recs: list[ParagraphLinkRec] = []
+    # Pass 1: pick accepted (paragraph, target) pairs without anchor scoring.
+    accepted: list[tuple[int, int, float, float]] = []  # (pi, tgt_i, fit, lift)
     page_target_seen: set[tuple[int, int]] = set()  # one rec per (source_page, target_page)
+    saturated_skipped = 0
 
-    for pi, (page_i, para_i, para_text, _) in enumerate(paragraph_records):
+    for pi, (page_i, para_i, _, _) in enumerate(paragraph_records):
+        # Already link-saturated paragraphs don't get new recommendations.
+        if paragraph_saturation is not None:
+            density = paragraph_saturation.get((page_i, para_i), 0.0)
+            if density >= saturation_floor_per_100w:
+                saturated_skipped += 1
+                continue
         row = sims[pi]
         page_avg = page_avg_sims[page_i]
-
         order = np.argsort(-row)
-        page_recs_count = 0
-        for tgt_i in order[:30]:  # explore top 30 candidates
+        para_recs_count = 0
+        for tgt_i in order[:30]:
             tgt_i = int(tgt_i)
             if tgt_i == page_i or tgt_i in drop_target_idx:
                 continue
@@ -194,37 +203,65 @@ def recommend(
             if (page_i, tgt_i) in page_target_seen:
                 continue
             page_target_seen.add((page_i, tgt_i))
-
-            # anchor selection
-            if can_score_anchors:
-                ngrams = _candidate_ngrams(para_text)
-                if ngrams:
-                    ng_embs = embedder.encode(ngrams, batch_size=128, show_progress=False)
-                    ng_sims = ng_embs @ page_embeddings[tgt_i]
-                    best_idx = int(np.argmax(ng_sims))
-                    suggested_anchor = ngrams[best_idx]
-                    anchor_conf = float(ng_sims[best_idx])
-                else:
-                    suggested_anchor = pages[tgt_i].title[:60]
-                    anchor_conf = 0.0
-            else:
-                suggested_anchor = pages[tgt_i].title[:60]
-                anchor_conf = 0.0
-
-            raw_recs.append(ParagraphLinkRec(
-                source_url=src_url,
-                paragraph_index=para_i,
-                paragraph_excerpt=para_text[:280],
-                target_url=tgt_url,
-                target_title=pages[tgt_i].title,
-                fit=round(fit, 4),
-                lift=round(lift, 4),
-                suggested_anchor=suggested_anchor,
-                anchor_confidence=round(anchor_conf, 4),
-            ))
-            page_recs_count += 1
-            if page_recs_count >= top_k_per_page:
+            accepted.append((pi, tgt_i, fit, lift))
+            para_recs_count += 1
+            if para_recs_count >= top_k_per_page:
                 break
+
+    if saturated_skipped:
+        LOG.info(
+            "  paragraph link recs: %d paragraphs skipped as link-saturated (>= %.1f links per 100w)",
+            saturated_skipped, saturation_floor_per_100w,
+        )
+
+    # Pass 2: encode every needed ngram in one batched call.
+    para_ngrams: dict[int, list[str]] = {}
+    para_ng_offsets: dict[int, tuple[int, int]] = {}
+    all_ng_embs: np.ndarray = np.zeros((0, page_embeddings.shape[1]), dtype=np.float32)
+    if can_score_anchors and accepted:
+        unique_pis = sorted({pi for pi, _, _, _ in accepted})
+        for pi in unique_pis:
+            _, _, para_text, _ = paragraph_records[pi]
+            para_ngrams[pi] = _candidate_ngrams(para_text)
+        all_ngrams: list[str] = []
+        for pi in unique_pis:
+            ngrams = para_ngrams[pi]
+            start = len(all_ngrams)
+            all_ngrams.extend(ngrams)
+            para_ng_offsets[pi] = (start, start + len(ngrams))
+        if all_ngrams:
+            LOG.info(
+                "  paragraph link recs: encoding %d ngrams from %d paragraphs",
+                len(all_ngrams), len(unique_pis),
+            )
+            all_ng_embs = embedder.encode(all_ngrams, batch_size=256, show_progress=True)
+
+    # Pass 3: build records, anchor selection is now a numpy dot product.
+    raw_recs: list[ParagraphLinkRec] = []
+    for pi, tgt_i, fit, lift in accepted:
+        page_i, para_i, para_text, _ = paragraph_records[pi]
+        src_url = pages[page_i].url
+        tgt_url = pages[tgt_i].url
+        suggested_anchor = pages[tgt_i].title[:60]
+        anchor_conf = 0.0
+        if can_score_anchors and pi in para_ng_offsets:
+            start, end = para_ng_offsets[pi]
+            if end > start:
+                ng_sims = all_ng_embs[start:end] @ page_embeddings[tgt_i]
+                best_idx = int(np.argmax(ng_sims))
+                suggested_anchor = para_ngrams[pi][best_idx]
+                anchor_conf = float(ng_sims[best_idx])
+        raw_recs.append(ParagraphLinkRec(
+            source_url=src_url,
+            paragraph_index=para_i,
+            paragraph_excerpt=para_text[:280],
+            target_url=tgt_url,
+            target_title=pages[tgt_i].title,
+            fit=round(fit, 4),
+            lift=round(lift, 4),
+            suggested_anchor=suggested_anchor,
+            anchor_confidence=round(anchor_conf, 4),
+        ))
 
     # sort by lift then fit; keep top_k_total
     raw_recs.sort(key=lambda r: (r.lift, r.fit), reverse=True)

@@ -50,6 +50,7 @@ class ExtractedPage:
     has_dates: bool = False
     stat_count: int = 0  # numbers with units / percentages
     paragraphs: list[str] = field(default_factory=list)  # body broken into clean paragraph blocks
+    paragraph_link_counts: list[tuple[int, int]] = field(default_factory=list)  # (internal, external) per paragraph, aligned with .paragraphs
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -95,19 +96,38 @@ def _strip_to_text(html_body: str) -> str:
     return _clean(soup.get_text(" "))
 
 
-def _extract_paragraphs(html_body: str, min_chars: int = 120, max_chars: int = 1200) -> list[str]:
-    """Pull paragraph-sized blocks of running text from the HTML.
+def _extract_paragraphs(
+    html_body: str,
+    page_url: str = "",
+    min_chars: int = 120,
+    max_chars: int = 1200,
+) -> tuple[list[str], list[tuple[int, int]]]:
+    """Pull paragraph-sized blocks + per-paragraph (internal, external) link counts.
 
     We prefer ``<p>`` and ``<li>`` tags inside the main content; we filter
     nav/footer/aside upfront. Each block is normalized to single-space
     whitespace, length-bounded, and de-duplicated. Blocks shorter than
     ``min_chars`` are usually nav fragments, so they're dropped.
+
+    Link counts: every ``<a href>`` directly inside the paragraph element is
+    classified — same registrable host = internal, different host = external,
+    on-page anchors / mailto / javascript / tel are ignored. Useful both as
+    an editorial signal (link spam vs. orphaned text) and as a filter for
+    the paragraph-link-recommendations stage (don't suggest links into
+    already-saturated paragraphs).
     """
     soup = BeautifulSoup(html_body, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe", "form"]):
         tag.decompose()
 
+    try:
+        host = urlparse(page_url).netloc.lower() if page_url else ""
+    except Exception:
+        host = ""
+    host_root = host[4:] if host.startswith("www.") else host
+
     blocks: list[str] = []
+    counts: list[tuple[int, int]] = []
     seen: set[str] = set()
     for el in soup.find_all(["p", "li", "blockquote", "h2", "h3", "h4"]):
         text = _clean(el.get_text(" "))
@@ -120,8 +140,30 @@ def _extract_paragraphs(html_body: str, min_chars: int = 120, max_chars: int = 1
         if key in seen:
             continue
         seen.add(key)
+
+        internal = 0
+        external = 0
+        for a in el.find_all("a", href=True):
+            href = (a["href"] or "").strip()
+            if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
+                continue
+            if href.startswith(("http://", "https://")):
+                try:
+                    other = urlparse(href).netloc.lower()
+                except Exception:
+                    continue
+                other_root = other[4:] if other.startswith("www.") else other
+                if not other_root:
+                    continue
+                if host_root and other_root == host_root:
+                    internal += 1
+                else:
+                    external += 1
+            else:
+                internal += 1
         blocks.append(text)
-    return blocks
+        counts.append((internal, external))
+    return blocks, counts
 
 
 def _extract_schema_types(soup: BeautifulSoup) -> list[str]:
@@ -230,7 +272,7 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
     external_link_count = _count_external_links(soup, url)
     has_dates = bool(_DATE_RE.search(body_text))
     stat_count = len(_STAT_RE.findall(body_text))
-    paragraphs = _extract_paragraphs(html_body)
+    paragraphs, paragraph_link_counts = _extract_paragraphs(html_body, url)
 
     return ExtractedPage(
         url=url,
@@ -248,4 +290,5 @@ def extract(url: str, html_body: str, max_chars: int = 4000) -> Optional[Extract
         has_dates=has_dates,
         stat_count=stat_count,
         paragraphs=paragraphs,
+        paragraph_link_counts=paragraph_link_counts,
     )

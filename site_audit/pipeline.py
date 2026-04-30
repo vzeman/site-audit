@@ -26,11 +26,32 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+import numpy as np
+
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
 from .cluster_labels import cluster_overlap_matrix, label_clusters
+from .competitive_analysis import (
+    compare_one as compare_competitor,
+    load_competitive_pairs,
+    to_payload as competitive_payload,
+)
+from .content_quality import (
+    improvement_payload,
+    per_page_improvement,
+    title_mismatch,
+    title_mismatch_payload,
+    wrong_home_paragraphs,
+    wrong_home_payload,
+)
+from .paragraph_clustering import (
+    cluster_and_label as cluster_paragraphs,
+    project_paragraphs,
+    to_scatter_payload as paragraph_scatter_payload,
+    to_summary_payload as paragraph_clusters_payload,
+)
 from .crawler import Crawler, CrawlConfig
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
 from .external_links import analyze as analyze_external
@@ -38,13 +59,20 @@ from .external_links import to_payload as external_payload
 from .extractor import extract
 from .html_report import write_html_report
 from .keyword_coverage import (
-    auto_mine_queries, load_queries_from_file, match_queries, to_payload as queries_payload,
+    auto_mine_queries, load_queries_from_file, match_queries,
+    match_queries_to_paragraphs, paragraph_match_payload,
+    to_payload as queries_payload,
 )
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import to_payload as linkgraph_payload
+from .paragraph_density import compute_rows as compute_paragraph_density_rows
+from .paragraph_density import density_lookup as paragraph_density_lookup
+from .paragraph_density import to_payload as paragraph_density_payload
 from .paragraph_links import recommend as recommend_paragraph_links
 from .paragraph_links import to_payload as paragraph_links_payload
-from .report import write_all
+from .recommendations import synthesize as synthesize_recommendations
+from .recommendations import to_payload as recommendations_payload
+from .report import build_duplicate_rows, build_outlier_rows, write_all
 from .scatter import project
 
 LOG = logging.getLogger(__name__)
@@ -79,11 +107,17 @@ class PipelineConfig:
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
+    enable_paragraph_clustering: bool = True
+    enable_content_quality: bool = True
+    enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
     paragraph_link_top_k: int = 200
     paragraph_link_per_page: int = 8
     paragraph_similarity_floor: float = 0.65
     paragraph_lift_floor: float = 0.05
+    paragraph_scatter_sample: int = 5000
+    paragraph_num_clusters: int = 60
+    competitive_pairs_file: Optional[Path] = None
     queries_file: Optional[Path] = None
     auto_queries_max: int = 200
     coverage_threshold: float = 0.55
@@ -291,14 +325,12 @@ def run(config: PipelineConfig) -> dict:
             "checked" if config.check_external_links else "not checked",
         )
 
-    # 11) Paragraph-level link recommendations
-    paragraph_recs_payload: list[dict] = []
-    paragraph_records = None  # populated on demand for visualizations later
-    if config.enable_paragraph_links:
+    # 11) Paragraph extraction + embedding (shared by every paragraph-level analysis below)
+    paragraph_records: list = []
+    if config.enable_paragraph_links or config.enable_paragraph_clustering or config.enable_content_quality or config.enable_paragraph_fanout:
         paragraph_cache = ParagraphEmbeddingCache(
             cache_dir / f"paragraphs_{config.model.replace('/', '_').replace('-', '_')}.npz"
         )
-        # Collect (page_index, para_index, text) and compute hashes
         triples: list[tuple[int, int, str]] = []
         hashes: list[str] = []
         for i, ext in enumerate(extracted_pages):
@@ -307,7 +339,6 @@ def run(config: PipelineConfig) -> dict:
                 hashes.append(content_hash(f"{para}|{config.model}"))
 
         if triples:
-            cached_idx: list[int] = []
             misses_idx: list[int] = []
             cached_embs: dict[int, np.ndarray] = {}
             for k, ((page_i, _, _), h) in enumerate(zip(triples, hashes)):
@@ -315,13 +346,12 @@ def run(config: PipelineConfig) -> dict:
                 cached = paragraph_cache.get(src_url, h) if config.use_embedding_cache else None
                 if cached is not None:
                     cached_embs[k] = cached
-                    cached_idx.append(k)
                 else:
                     misses_idx.append(k)
 
             LOG.info(
                 "  paragraphs: %d total | %d cached | %d to embed",
-                len(triples), len(cached_idx), len(misses_idx),
+                len(triples), len(triples) - len(misses_idx), len(misses_idx),
             )
 
             if misses_idx:
@@ -329,8 +359,7 @@ def run(config: PipelineConfig) -> dict:
                 new_embs = embedder.encode(miss_texts, batch_size=64, show_progress=True)
                 for slot, k in enumerate(misses_idx):
                     page_i, _, _ = triples[k]
-                    src_url = pages[page_i].url
-                    paragraph_cache.put(src_url, hashes[k], new_embs[slot])
+                    paragraph_cache.put(pages[page_i].url, hashes[k], new_embs[slot])
                     cached_embs[k] = new_embs[slot]
                 paragraph_cache.save()
 
@@ -339,23 +368,166 @@ def run(config: PipelineConfig) -> dict:
                 for k in range(len(triples))
             ]
 
-            ans_lookup = {a["url"]: a["score"] for a in ans_payload} if ans_payload else None
-            recs = recommend_paragraph_links(
-                pages,
-                embeddings,
-                paragraph_records,
-                pages_with_outlinks=[(p.url, outlinks_map.get(p.url, [])) for p in pages],
-                answerability_by_url=ans_lookup,
-                embedder=embedder,
-                similarity_floor=config.paragraph_similarity_floor,
-                lift_floor=config.paragraph_lift_floor,
-                top_k_per_page=config.paragraph_link_per_page,
-                top_k_total=config.paragraph_link_top_k,
-            )
-            paragraph_recs_payload = paragraph_links_payload(recs)
-            LOG.info("  paragraph link recs: %d", len(paragraph_recs_payload))
+    # 11.a-pre) Paragraph link density — counts internal vs external <a href>
+    # inside each paragraph at extraction time. Cheap (no embeddings) and
+    # used both as a standalone editorial signal and as a saturation filter
+    # for the link-recommendation step that follows.
+    paragraph_density_rows: list = []
+    paragraph_density_data: dict = {}
+    paragraph_saturation: dict[tuple[int, int], float] = {}
+    if paragraph_records:
+        paragraph_density_rows = compute_paragraph_density_rows(pages, paragraph_records, extracted_pages)
+        paragraph_density_data = paragraph_density_payload(paragraph_density_rows)
+        paragraph_saturation = paragraph_density_lookup(paragraph_density_rows)
+        s = paragraph_density_data.get("summary", {})
+        LOG.info(
+            "  paragraph density: median %.2f / p90 %.2f / p99 %.2f links per 100w · "
+            "%d spammy · %.0f%% with zero links",
+            s.get("median_density_per_100w", 0.0),
+            s.get("p90_density_per_100w", 0.0),
+            s.get("p99_density_per_100w", 0.0),
+            s.get("spammy_count", 0),
+            (s.get("zero_link_share", 0.0) or 0.0) * 100,
+        )
 
-    # 12) Reports
+    # 11a) Paragraph-level link recommendations
+    paragraph_recs_payload: list[dict] = []
+    if config.enable_paragraph_links and paragraph_records:
+        ans_lookup = {a["url"]: a["score"] for a in ans_payload} if ans_payload else None
+        recs = recommend_paragraph_links(
+            pages,
+            embeddings,
+            paragraph_records,
+            pages_with_outlinks=[(p.url, outlinks_map.get(p.url, [])) for p in pages],
+            answerability_by_url=ans_lookup,
+            embedder=embedder,
+            paragraph_saturation=paragraph_saturation,
+            similarity_floor=config.paragraph_similarity_floor,
+            lift_floor=config.paragraph_lift_floor,
+            top_k_per_page=config.paragraph_link_per_page,
+            top_k_total=config.paragraph_link_top_k,
+        )
+        paragraph_recs_payload = paragraph_links_payload(recs)
+        LOG.info("  paragraph link recs: %d", len(paragraph_recs_payload))
+
+    # 11b) Paragraph topic clustering + scatter
+    paragraph_clusters_data: list = []
+    paragraph_scatter_data: dict = {}
+    if config.enable_paragraph_clustering and paragraph_records and len(paragraph_records) >= 8:
+        para_cluster_labels, para_cluster_summaries = cluster_paragraphs(
+            paragraph_records, pages, result.site_centroid,
+            num_clusters=config.paragraph_num_clusters,
+        )
+        paragraph_clusters_data = paragraph_clusters_payload(para_cluster_summaries)
+        cluster_label_lookup = {
+            s.cluster_id: ", ".join(k["keyword"] for k in s.keywords[:3])
+            for s in para_cluster_summaries
+        }
+
+        para_embs = np.stack([r[3] for r in paragraph_records]).astype(np.float32)
+        chosen, coords_p = project_paragraphs(para_embs, sample_cap=config.paragraph_scatter_sample)
+        paragraph_scatter_data = paragraph_scatter_payload(
+            paragraph_records, pages, para_cluster_labels, chosen, coords_p, cluster_label_lookup,
+        )
+        LOG.info(
+            "  paragraph clusters: %d (over %d paragraphs, %d shown in scatter)",
+            len(paragraph_clusters_data), len(paragraph_records), paragraph_scatter_data.get("shown", 0),
+        )
+
+    # 11c) Paragraph-level query fanout
+    paragraph_fanout_payload: list[dict] = []
+    if config.enable_paragraph_fanout and paragraph_records and coverage_payload:
+        # reuse the queries from coverage_payload so we share embeddings work
+        # (the queries are auto-mined or from --queries-file)
+        queries_for_fanout: list[tuple[str, str]] = [(q["query"], q["source"]) for q in coverage_payload]
+        if queries_for_fanout:
+            q_embs_fanout = embedder.encode([q for q, _ in queries_for_fanout], show_progress=False)
+            from .keyword_coverage import match_queries_to_paragraphs as _match
+            fanout = _match(
+                queries_for_fanout, q_embs_fanout, pages, paragraph_records,
+                paragraph_floor=config.paragraph_similarity_floor,
+            )
+            paragraph_fanout_payload = paragraph_match_payload(fanout)
+            LOG.info(
+                "  paragraph fanout: %d queries → %d gaps, %d scattered, %d focused",
+                len(paragraph_fanout_payload),
+                sum(1 for q in paragraph_fanout_payload if q["status"] == "gap"),
+                sum(1 for q in paragraph_fanout_payload if q["status"] == "scattered"),
+                sum(1 for q in paragraph_fanout_payload if q["status"] == "focused"),
+            )
+
+    # 11d) Title embeddings + content-quality diagnostics
+    title_mismatch_data: list[dict] = []
+    wrong_home_data: list[dict] = []
+    page_improvement_data: list[dict] = []
+    if config.enable_content_quality:
+        title_texts = [p.title or p.url for p in pages]
+        title_embeds = embedder.encode(title_texts, batch_size=64, show_progress=False)
+        section_centroids = {s.name: s.centroid for s in result.sections.values()}
+        title_results = title_mismatch(
+            pages, embeddings, title_embeds, paragraph_records,
+            section_centroids, labels, cluster_summaries,
+        )
+        title_mismatch_data = title_mismatch_payload(title_results, top_n=80)
+
+        wrong_home_results = wrong_home_paragraphs(pages, embeddings, paragraph_records)
+        wrong_home_data = wrong_home_payload(wrong_home_results)
+
+        improvement_results = per_page_improvement(
+            pages, title_results, ans_payload,
+            result.dist_to_section, result.duplicate_pairs, wrong_home_results,
+            (external_payload_data or {}).get("per_page", []),
+            top_n=120,
+        )
+        page_improvement_data = improvement_payload(improvement_results)
+        LOG.info(
+            "  content quality: %d title mismatches, %d wrong-home paragraphs, %d pages flagged for editing",
+            sum(1 for r in title_mismatch_data if r["title_to_content"] < 0.55),
+            len(wrong_home_data),
+            len(page_improvement_data),
+        )
+
+    # 11e) Competitive analysis (optional, takes a query/url file)
+    competitive_data: list[dict] = []
+    if config.competitive_pairs_file and config.competitive_pairs_file.is_file():
+        pairs = load_competitive_pairs(config.competitive_pairs_file)
+        if pairs:
+            LOG.info("  competitive: comparing against %d competitor URLs", len(pairs))
+            comparisons = []
+            for q, url in pairs:
+                cmp_result = compare_competitor(
+                    q, url, pages, embeddings, paragraph_records,
+                    extracted_pages, embedder, http_cache,
+                    user_agent=crawl_config.user_agent,
+                )
+                comparisons.append(cmp_result)
+            competitive_data = competitive_payload(comparisons)
+
+    # 12) Action plan: synthesise prioritised recommendations from the
+    # already-built payloads. Cheap (no embeddings), pure aggregation.
+    duplicate_rows = build_duplicate_rows(result)
+    outlier_rows = build_outlier_rows(result)
+    recommendations = synthesize_recommendations(
+        duplicates_rows=duplicate_rows,
+        outliers_rows=outlier_rows,
+        coverage_payload=coverage_payload,
+        answerability_payload=ans_payload,
+        linkgraph_payload=link_payload,
+        paragraph_links=paragraph_recs_payload,
+        wrong_home_payload=wrong_home_data,
+        title_mismatch=title_mismatch_data,
+        external_links_payload=external_payload_data,
+    )
+    recommendations_data = recommendations_payload(recommendations)
+    LOG.info(
+        "  recommendations: %d actions (high %d / med %d / low %d)",
+        recommendations_data["total"],
+        recommendations_data["by_priority"].get("high", 0),
+        recommendations_data["by_priority"].get("medium", 0),
+        recommendations_data["by_priority"].get("low", 0),
+    )
+
+    # 13) Reports
     summary = write_all(
         report_dir,
         result,
@@ -370,6 +542,15 @@ def run(config: PipelineConfig) -> dict:
         external_links=external_payload_data,
         paragraph_link_recs=paragraph_recs_payload,
         cluster_overlap=cluster_overlap,
+        paragraph_clusters=paragraph_clusters_data,
+        paragraph_scatter=paragraph_scatter_data,
+        paragraph_fanout=paragraph_fanout_payload,
+        title_mismatch=title_mismatch_data,
+        wrong_home=wrong_home_data,
+        page_improvement=page_improvement_data,
+        competitive=competitive_data,
+        recommendations=recommendations_data,
+        paragraph_density=paragraph_density_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -390,6 +571,15 @@ def run(config: PipelineConfig) -> dict:
             external_links=external_payload_data,
             paragraph_link_recs=paragraph_recs_payload,
             cluster_overlap=cluster_overlap,
+            paragraph_clusters=paragraph_clusters_data,
+            paragraph_scatter=paragraph_scatter_data,
+            paragraph_fanout=paragraph_fanout_payload,
+            title_mismatch=title_mismatch_data,
+            wrong_home=wrong_home_data,
+            page_improvement=page_improvement_data,
+            competitive=competitive_data,
+            recommendations=recommendations_data,
+            paragraph_density=paragraph_density_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

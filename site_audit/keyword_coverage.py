@@ -171,3 +171,114 @@ def to_payload(matches: Iterable[QueryMatch]) -> list[dict]:
         }
         for m in matches
     ]
+
+
+@dataclass
+class ParagraphQueryMatch:
+    query: str
+    source: str
+    best_similarity: float
+    best_url: str
+    best_paragraph: str
+    distinct_pages_above_floor: int    # # of distinct pages that have ≥1 paragraph above the floor
+    status: str                        # 'gap', 'scattered', 'focused', 'covered'
+    top_paragraphs: list[dict]         # [{url, page_title, excerpt, similarity}]
+
+
+def match_queries_to_paragraphs(
+    queries_with_source: list[tuple[str, str]],
+    query_embeddings: np.ndarray,
+    pages,
+    paragraph_records: list,           # [(page_index, para_index, text, embedding)]
+    paragraph_floor: float = 0.65,
+    scattered_threshold_pages: int = 4,
+    top_k_paragraphs: int = 5,
+) -> list[ParagraphQueryMatch]:
+    """For each query, surface the top paragraphs across the whole site.
+
+    This models how AI answer engines retrieve content: they pick
+    paragraph-sized chunks, not whole pages. Statuses:
+
+    * **gap** — best paragraph similarity below the floor (no chunk is
+      a plausible answer)
+    * **scattered** — paragraphs above the floor are spread across
+      ``scattered_threshold_pages`` or more pages (no clear citation target)
+    * **focused** — the top 3 paragraphs are on the same page
+    * **covered** — between scattered and focused
+    """
+    if not queries_with_source or not paragraph_records:
+        return []
+
+    para_embs = np.stack([r[3] for r in paragraph_records]).astype(np.float32)
+    sims = np.clip(query_embeddings @ para_embs.T, -1.0, 1.0)
+
+    out: list[ParagraphQueryMatch] = []
+    for qi, (query, source) in enumerate(queries_with_source):
+        row = sims[qi]
+        order = np.argsort(-row)
+
+        top: list[dict] = []
+        seen_urls: list[str] = []
+        for pi in order[: top_k_paragraphs * 4]:
+            page_i, para_i, text, _ = paragraph_records[int(pi)]
+            url = pages[page_i].url
+            sim = float(row[int(pi)])
+            if sim < paragraph_floor and len(top) >= 1:
+                break
+            top.append({
+                "url": url,
+                "page_title": pages[page_i].title,
+                "excerpt": text[:240],
+                "similarity": float(round(sim, 4)),
+            })
+            seen_urls.append(url)
+            if len(top) >= top_k_paragraphs:
+                break
+
+        best_sim = top[0]["similarity"] if top else 0.0
+        best_url = top[0]["url"] if top else ""
+        best_para = top[0]["excerpt"] if top else ""
+        # # of distinct pages that have ≥1 paragraph above floor
+        distinct_pages = len({
+            t["url"] for t in top if t["similarity"] >= paragraph_floor
+        })
+
+        if best_sim < paragraph_floor:
+            status = "gap"
+        else:
+            top3_pages = {t["url"] for t in top[:3]}
+            if distinct_pages >= scattered_threshold_pages:
+                status = "scattered"
+            elif len(top3_pages) == 1:
+                status = "focused"
+            else:
+                status = "covered"
+
+        out.append(ParagraphQueryMatch(
+            query=query,
+            source=source,
+            best_similarity=best_sim,
+            best_url=best_url,
+            best_paragraph=best_para,
+            distinct_pages_above_floor=distinct_pages,
+            status=status,
+            top_paragraphs=top,
+        ))
+
+    return out
+
+
+def paragraph_match_payload(matches: list[ParagraphQueryMatch]) -> list[dict]:
+    return [
+        {
+            "query": m.query,
+            "source": m.source,
+            "status": m.status,
+            "best_similarity": m.best_similarity,
+            "best_url": m.best_url,
+            "best_paragraph": m.best_paragraph,
+            "distinct_pages_above_floor": m.distinct_pages_above_floor,
+            "top_paragraphs": m.top_paragraphs,
+        }
+        for m in matches
+    ]
