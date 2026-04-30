@@ -27,6 +27,7 @@ _PLACEHOLDERS = {
     "__COVERAGE_JSON__": "coverage",
     "__ANSWERABILITY_JSON__": "answerability",
     "__LINKGRAPH_JSON__": "linkgraph",
+    "__EXTERNAL_JSON__": "external",
 }
 
 
@@ -73,10 +74,15 @@ def _metrics_payload(result: AuditResult, model_name: str, domain: str) -> dict:
         "model": model_name,
         "page_count": sm["count"],
         "site_focus_score": sm["focus_score"],
+        "site_focus_score_calibrated": result.calibrated_focus_score,
         "site_radius": sm["radius"],
         "mean_distance_to_centroid": sm["mean_distance"],
         "p95_distance_to_centroid": sm["p95_distance"],
         "max_distance_to_centroid": sm["max_distance"],
+        "pairwise": result.pairwise,
+        "section_coherence": result.coherence,
+        "topic_dimension": result.topic_dim,
+        "centroid_histogram": result.centroid_hist,
     }
 
 
@@ -195,6 +201,7 @@ def write_html_report(
     coverage: Optional[list] = None,
     answerability: Optional[list] = None,
     linkgraph: Optional[dict] = None,
+    external_links: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -208,6 +215,7 @@ def write_html_report(
         "coverage": coverage or [],
         "answerability": answerability or [],
         "linkgraph": linkgraph or {},
+        "external": external_links or {},
     }
 
     rendered = template

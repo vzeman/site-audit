@@ -82,7 +82,8 @@ class FetchResult:
     body: str
     content_type: str
     from_cache: bool
-    outlinks: list = field(default_factory=list)  # same-site URLs linked from this page
+    outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
+    external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
 
 
 def normalize_url(url: str) -> str:
@@ -276,19 +277,29 @@ class Crawler:
                     results.append(result)
 
                     if "html" in result.content_type:
-                        page_outlinks: list[str] = []
-                        for link in self._extract_links(result.url, result.body):
-                            if not self._same_site(urlparse(link).netloc):
+                        page_outlinks: list[tuple[str, str]] = []
+                        page_external: list[tuple[str, str]] = []
+                        for link, anchor in self._extract_links(result.url, result.body):
+                            try:
+                                netloc = urlparse(link).netloc
+                            except Exception:
                                 continue
-                            page_outlinks.append(link)
-                            if link in seen:
+                            if not netloc:
                                 continue
-                            if not self._allowed(link):
-                                continue
-                            seen.add(link)
-                            frontier.append(link)
-                        # de-dup, drop self-loops
-                        result.outlinks = sorted({u for u in page_outlinks if u != result.url})
+                            if self._same_site(netloc):
+                                if link == result.url:
+                                    continue
+                                page_outlinks.append((link, anchor))
+                                if link in seen:
+                                    continue
+                                if not self._allowed(link):
+                                    continue
+                                seen.add(link)
+                                frontier.append(link)
+                            else:
+                                page_external.append((link, anchor))
+                        result.outlinks = page_outlinks
+                        result.external_links = page_external
 
                     if len(results) % 25 == 0:
                         LOG.info("crawled %d / queue %d / cache %s",
@@ -298,19 +309,24 @@ class Crawler:
         LOG.info("Crawl finished: %d pages", len(results))
         return results
 
-    def _extract_links(self, base_url: str, body: str) -> list[str]:
+    def _extract_links(self, base_url: str, body: str) -> list[tuple[str, str]]:
+        """Return list of (absolute_url, anchor_text)."""
         try:
             soup = BeautifulSoup(body, "html.parser")
         except Exception:
             return []
-        out: list[str] = []
+        out: list[tuple[str, str]] = []
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
             if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
                 continue
             absolute = urljoin(base_url, href)
             absolute = normalize_url(absolute)
-            out.append(absolute)
+            anchor = " ".join(a.get_text(" ").split())
+            if not anchor:
+                # Fall back to title attribute or aria-label so image links aren't blank
+                anchor = (a.get("title") or a.get("aria-label") or "").strip()
+            out.append((absolute, anchor[:200]))
         return out
 
     # --- single fetch --------------------------------------------------

@@ -51,10 +51,15 @@ def write_site_metrics(path: Path, result: AuditResult, model_name: str, domain:
         "model": model_name,
         "page_count": sm["count"],
         "site_focus_score": sm["focus_score"],
+        "site_focus_score_calibrated": result.calibrated_focus_score,
         "site_radius": sm["radius"],
         "mean_distance_to_centroid": sm["mean_distance"],
         "p95_distance_to_centroid": sm["p95_distance"],
         "max_distance_to_centroid": sm["max_distance"],
+        "pairwise": result.pairwise,
+        "section_coherence": result.coherence,
+        "topic_dimension": result.topic_dim,
+        "centroid_histogram": result.centroid_hist,
         "sections": sorted(
             [
                 {
@@ -70,9 +75,11 @@ def write_site_metrics(path: Path, result: AuditResult, model_name: str, domain:
             reverse=True,
         ),
         "interpretation": {
-            "site_focus_score": "1.0 = all pages share the same meaning; lower = more topical spread.",
+            "site_focus_score": "Raw mean cosine of pages to site centroid. Anchored to the embedding model's anisotropy; for gte-multilingual-base lives in roughly 0.5–0.9.",
+            "site_focus_score_calibrated": "(focus - p10_pairwise) / (1 - p10_pairwise) — strips the model floor. 0 = no more focused than 10% of random pairs, 1 = perfectly aligned.",
             "site_radius": "Std-dev of per-page cosine distance to the site centroid. Lower is tighter.",
-            "section_focus_score": "Same metric restricted to pages inside a section.",
+            "section_coherence_ratio": "Mean intra-section similarity / mean inter-section similarity. >1.5 = URL structure matches content; ~1.0 = sections are arbitrary.",
+            "topic_dimension.effective_dim": "Effective number of independent topics (PCA spectral entropy). 2-4 = laser-focused, 15-30 = broad publisher.",
         },
     }
     _write_json(path, payload)
@@ -258,6 +265,7 @@ def write_all(
     coverage: Optional[list] = None,
     answerability: Optional[list] = None,
     linkgraph: Optional[dict] = None,
+    external_links: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -275,4 +283,6 @@ def write_all(
         _write_json(output_dir / "answerability.json", answerability)
     if linkgraph is not None:
         _write_json(output_dir / "linkgraph.json", linkgraph)
+    if external_links is not None:
+        _write_json(output_dir / "external_links.json", external_links)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

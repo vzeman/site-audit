@@ -6,16 +6,33 @@ recommendations on an interactive D3 scatterplot.
 
 Same vector-space metrics (`siteFocusScore`, `siteRadius`, per-section
 drift, near-duplicate kNN, UMAP scatter) as the Hugo site-audit
-pipeline, *plus* four GEO-focused analyses that are unique to this tool:
+pipeline, *plus* a GEO-focused stack that's unique to this tool:
 
+**Topic structure**
 * **Auto-labelled topic clusters** (BERTopic-style c-TF-IDF)
+* **Calibrated focus score** — strips out the embedding model's
+  anisotropy floor so the number is interpretable as `[0, 1]`
+* **Effective topic dimension** — model-agnostic count of independent
+  themes via PCA spectral entropy
+* **Section coherence ratio** — does your URL structure match content?
+
+**Keyword & query coverage**
 * **Keyword coverage map** — embed target queries in the same vector
   space, find the best page for each, flag gaps and cannibalization
-* **GEO answer-ability score** — 0–10 per page based on FAQ schema,
+
+**GEO citability**
+* **Answer-ability score** — 0–10 per page based on FAQ schema,
   question-form headings, lists/tables, dates, statistics, citations
-* **Internal link graph** — PageRank, orphans, dead-ends, plus
-  link recommendations for pages that are semantically close but
-  currently unlinked
+
+**Link analysis**
+* **Internal link graph** — PageRank + HITS hubs/authorities,
+  click depth from homepage, orphans, dead-ends
+* **Topic-cluster authorities** — canonical entry page per cluster
+* **Anchor-text analysis** — generic-anchor share + anchor↔target
+  topic mismatch detection
+* **Internal link recommendations** — high-similarity unlinked pairs
+* **External link profile** — most-cited domains, citation density,
+  authoritative-domain share, optional broken-link detection
 
 ## What it does
 

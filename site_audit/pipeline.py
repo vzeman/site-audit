@@ -33,6 +33,8 @@ from .cache import EmbeddingCache, HttpCache, domain_slug
 from .cluster_labels import label_clusters
 from .crawler import Crawler, CrawlConfig
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
+from .external_links import analyze as analyze_external
+from .external_links import to_payload as external_payload
 from .extractor import extract
 from .html_report import write_html_report
 from .keyword_coverage import (
@@ -72,6 +74,8 @@ class PipelineConfig:
     enable_keyword_coverage: bool = True
     enable_answerability: bool = True
     enable_linkgraph: bool = True
+    enable_external_links: bool = True
+    check_external_links: bool = False     # opt-in HEAD requests
     queries_file: Optional[Path] = None
     auto_queries_max: int = 200
     coverage_threshold: float = 0.55
@@ -128,7 +132,8 @@ def run(config: PipelineConfig) -> dict:
     pages: list[PageInfo] = []
     extracted_pages = []  # list[ExtractedPage] in same order as `pages`
     embed_inputs: list[EmbedInput] = []
-    outlinks_map: dict[str, list[str]] = {}
+    outlinks_map: dict[str, list[tuple[str, str]]] = {}
+    external_map: dict[str, list[tuple[str, str]]] = {}
 
     for r in fetched:
         ext = extract(r.url, r.body, max_chars=config.max_chars)
@@ -150,6 +155,7 @@ def run(config: PipelineConfig) -> dict:
         extracted_pages.append(ext)
         embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
         outlinks_map[r.url] = r.outlinks or []
+        external_map[r.url] = r.external_links or []
 
     if not pages:
         LOG.warning("No usable pages — aborting before embedding.")
@@ -222,19 +228,49 @@ def run(config: PipelineConfig) -> dict:
     link_payload: dict = {}
     if config.enable_linkgraph:
         pages_with_outlinks = [(p.url, outlinks_map.get(p.url, [])) for p in pages]
+        # crawler.base_url already strips trailing slashes
+        from .crawler import _starting_url  # local import to avoid cycles
+        home_url = _starting_url(config.domain)
         link_result = analyze_linkgraph(
             pages, embeddings, pages_with_outlinks,
+            home_url=home_url,
+            cluster_labels=labels,
+            cluster_summaries=cluster_summaries,
+            embedder=embedder,
             similarity_threshold=config.link_similarity_threshold,
             top_recommendations=config.link_recommendations_top_k,
         )
         link_payload = linkgraph_payload(link_result, pages)
         LOG.info(
-            "  link graph: %d edges, %d orphans, %d dead-ends, %d recommendations",
+            "  link graph: %d edges, %d orphans, %d dead-ends, %d recs, max depth %d",
             link_result.edge_count, len(link_result.orphans),
             len(link_result.dead_ends), len(link_result.recommendations),
+            max(link_result.click_depth.values()) if link_result.click_depth else 0,
         )
 
-    # 10) Reports
+    # 10) External link analysis
+    external_payload_data: dict = {}
+    if config.enable_external_links:
+        word_counts = {p.url: p.word_count for p in pages}
+        pages_with_external = [(p.url, external_map.get(p.url, [])) for p in pages]
+        ext_result = analyze_external(
+            pages,
+            word_counts,
+            pages_with_external,
+            check_links=config.check_external_links,
+            http_cache=http_cache,
+            max_workers=config.max_workers,
+        )
+        external_payload_data = external_payload(ext_result)
+        LOG.info(
+            "  external links: %d distinct domains, top %s ; %d broken (%s)",
+            len(ext_result.top_domains),
+            ext_result.top_domains[0]["domain"] if ext_result.top_domains else "—",
+            len(ext_result.broken_links),
+            "checked" if config.check_external_links else "not checked",
+        )
+
+    # 11) Reports
     summary = write_all(
         report_dir,
         result,
@@ -246,6 +282,7 @@ def run(config: PipelineConfig) -> dict:
         coverage=coverage_payload,
         answerability=ans_payload,
         linkgraph=link_payload,
+        external_links=external_payload_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -263,6 +300,7 @@ def run(config: PipelineConfig) -> dict:
             coverage=coverage_payload,
             answerability=ans_payload,
             linkgraph=link_payload,
+            external_links=external_payload_data,
         )
         LOG.info("  HTML report: %s", html_path)
 
@@ -277,6 +315,9 @@ def run(config: PipelineConfig) -> dict:
         "domain": host,
         "pages": len(pages),
         "site_focus_score": result.site_metrics["focus_score"],
+        "calibrated_focus": result.calibrated_focus_score,
+        "topic_dim": (result.topic_dim or {}).get("effective_dim", 0.0),
+        "section_coherence": (result.coherence or {}).get("ratio", 0.0),
         "site_radius": result.site_metrics["radius"],
         "outliers": summary["outliers"],
         "duplicate_pairs": summary["duplicates"],
@@ -284,7 +325,10 @@ def run(config: PipelineConfig) -> dict:
         "queries_evaluated": len(coverage_payload),
         "linkgraph_edges": link_payload.get("edge_count", 0),
         "linkgraph_orphans": link_payload.get("orphan_count", 0),
+        "max_click_depth": link_payload.get("max_click_depth", 0),
         "link_recommendations": len(link_payload.get("recommendations", [])),
+        "external_domains": len((external_payload_data or {}).get("top_domains", [])),
+        "broken_external": len((external_payload_data or {}).get("broken_links", [])),
         "report_dir": str(report_dir),
         "cache_dir": str(cache_dir),
         "html_report": str(html_path) if html_path else None,

@@ -18,28 +18,61 @@
       <p id="header-domain" class="text-lg text-gray-600">Loading…</p>
     </header>
 
-    <!-- Headline metrics -->
-    <div id="audit-metrics" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <!-- Headline metrics — primary row -->
+    <div id="audit-metrics-primary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5" title="(focus - p10_pairwise) / (1 - p10_pairwise) — strips the embedding model's baseline anisotropy. 0 = no more focused than 10% of random pairs, 1 = perfectly aligned.">
+        <div class="text-sm text-gray-500">Calibrated focus</div>
+        <div id="m-focus-cal" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">model-agnostic, 0–1</div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5" title="Effective number of independent topics via PCA spectral entropy. 2-4 = laser focused, 15-30 = broad publisher.">
+        <div class="text-sm text-gray-500">Topic dimension</div>
+        <div id="m-topic-dim" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">independent themes</div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5" title="Mean intra-section similarity / mean inter-section similarity. >1.5 = URL structure matches content; ~1.0 = sections are arbitrary.">
+        <div class="text-sm text-gray-500">Section coherence</div>
+        <div id="m-coherence" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">URL-vs-content match</div>
+      </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-        <div class="text-sm text-gray-500">siteFocusScore</div>
-        <div id="m-focus" class="text-3xl font-bold text-gray-900">—</div>
-        <div class="text-xs text-gray-500 mt-1">1.0 = laser focused</div>
+        <div class="text-sm text-gray-500">Pages</div>
+        <div id="m-pages" class="text-3xl font-bold text-gray-900">—</div>
+        <div class="text-xs text-gray-500 mt-1">crawled this run</div>
+      </div>
+    </div>
+
+    <!-- Headline metrics — secondary row -->
+    <div id="audit-metrics-secondary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5" title="Raw mean cosine of pages to centroid. For gte-multilingual-base this lives in 0.5–0.9.">
+        <div class="text-sm text-gray-500">Raw siteFocusScore</div>
+        <div id="m-focus" class="text-2xl font-bold text-gray-700">—</div>
+        <div class="text-xs text-gray-500 mt-1">model-anchored</div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <div class="text-sm text-gray-500">siteRadius</div>
-        <div id="m-radius" class="text-3xl font-bold text-gray-900">—</div>
-        <div class="text-xs text-gray-500 mt-1">lower = tighter spread</div>
+        <div id="m-radius" class="text-2xl font-bold text-gray-700">—</div>
+        <div class="text-xs text-gray-500 mt-1">lower = tighter</div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <div class="text-sm text-gray-500">Outlier pages</div>
-        <div id="m-outliers" class="text-3xl font-bold text-orange-600">—</div>
+        <div id="m-outliers" class="text-2xl font-bold text-orange-600">—</div>
         <div class="text-xs text-gray-500 mt-1">refocus or remove</div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <div class="text-sm text-gray-500">Near-duplicates</div>
-        <div id="m-dupes" class="text-3xl font-bold text-red-600">—</div>
+        <div id="m-dupes" class="text-2xl font-bold text-red-600">—</div>
         <div class="text-xs text-gray-500 mt-1">merge candidates</div>
       </div>
+    </div>
+
+    <!-- Distribution histogram -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="hist-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Per-page similarity to site centroid</h3>
+        <span class="text-xs text-gray-500" id="hist-meta"></span>
+      </div>
+      <div id="audit-hist" class="text-sm"></div>
     </div>
 
     <!-- Scatterplot -->
@@ -160,6 +193,77 @@
       </div>
     </div>
 
+    <!-- HITS hubs / authorities + click depth -->
+    <div class="grid md:grid-cols-2 gap-6 mb-8" id="hits-block">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-1">HITS authorities</h3>
+        <p class="text-xs text-gray-500 mb-3">linked from many hub pages — your "topic destinations"</p>
+        <div id="audit-hits-auth" class="text-sm max-h-80 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-1">HITS hubs</h3>
+        <p class="text-xs text-gray-500 mb-3">link out to many authorities — your "topic indexes"</p>
+        <div id="audit-hits-hub" class="text-sm max-h-80 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="depth-block">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Buried pages (click depth ≥ 4 from homepage)</h3>
+        <span class="text-xs text-gray-500" id="depth-summary"></span>
+      </div>
+      <div id="audit-deep" class="text-sm max-h-80 overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Cluster authorities -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cluster-auth-block">
+      <h3 class="text-lg font-semibold mb-3">Topic-cluster authorities</h3>
+      <p class="text-xs text-gray-500 mb-3">canonical entry page per topic, ranked by PageRank</p>
+      <div id="audit-cluster-auth" class="text-sm">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Anchor analysis -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="anchor-block">
+      <h3 class="text-lg font-semibold mb-1">Anchor-text analysis</h3>
+      <p class="text-xs text-gray-500 mb-3">pages with high "click here" / generic-anchor share or anchor↔target topic mismatch</p>
+      <div id="audit-anchors" class="text-sm max-h-[28rem] overflow-y-auto">
+        <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- External links -->
+    <div class="grid md:grid-cols-2 gap-6 mb-8" id="external-block">
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-1">Most-cited external domains</h3>
+        <p class="text-xs text-gray-500 mb-3">where your authors look for sources</p>
+        <div id="audit-ext-domains" class="text-sm max-h-80 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-lg font-semibold mb-1">Citation density</h3>
+        <p class="text-xs text-gray-500 mb-3">external links per 1 000 words — pages with no citations look unsourced</p>
+        <div id="audit-ext-density" class="text-sm max-h-80 overflow-y-auto">
+          <div class="text-gray-500">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="broken-block">
+      <h3 class="text-lg font-semibold mb-3">Broken outbound links</h3>
+      <div id="audit-broken" class="text-sm max-h-80 overflow-y-auto">
+        <div class="text-gray-500">No broken links checked. Re-run with <code>--check-external</code> to verify.</div>
+      </div>
+    </div>
+
     <div class="bg-blue-50 rounded-lg p-5 text-sm text-gray-700">
       <strong>How to read:</strong> the scatterplot shows topical clustering of every crawled page. Tightly-packed dots = similar content. Pages in the <em>Drift</em> view colored orange/red are furthest from their section centroid — refocus or removal candidates. The <em>Outliers + duplicates</em> view highlights pages flagged as off-topic (orange) or near-duplicate (red ring). The <em>GEO answer-ability</em> score is a coarse 0–10 estimate of how cite-able a page is to AI answer engines (FAQ schema, question-form headings, statistics, citations).
     </div>
@@ -175,6 +279,7 @@
 <script type="application/json" id="data-coverage">__COVERAGE_JSON__</script>
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
+<script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -240,8 +345,9 @@
       const inlinedCoverage = readInlined('data-coverage');
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedLinkgraph = readInlined('data-linkgraph');
+      const inlinedExternal = readInlined('data-external');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -252,8 +358,9 @@
         coverage = inlinedCoverage || [];
         answerability = inlinedAnswerability || [];
         linkgraph = inlinedLinkgraph || {};
+        external = inlinedExternal || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -263,6 +370,7 @@
           loadJSON('keyword_coverage.json').catch(() => []),
           loadJSON('answerability.json').catch(() => []),
           loadJSON('linkgraph.json').catch(() => ({})),
+          loadJSON('external_links.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -275,6 +383,7 @@
       state.coverage = coverage;
       state.answerability = answerability;
       state.linkgraph = linkgraph;
+      state.external = external;
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
@@ -291,6 +400,11 @@
       renderCoverage('all');
       renderAnswerability();
       renderLinkgraph();
+      renderHits();
+      renderDeep();
+      renderClusterAuth();
+      renderAnchors();
+      renderExternal();
       wireModeButtons();
       wireCoverageButtons();
     } catch (e) {
@@ -307,9 +421,41 @@
   function renderMetrics() {
     const m = state.metrics;
     document.getElementById('m-focus').textContent = (m.site_focus_score || 0).toFixed(4);
+    document.getElementById('m-focus-cal').textContent = (m.site_focus_score_calibrated || 0).toFixed(3);
     document.getElementById('m-radius').textContent = (m.site_radius || 0).toFixed(4);
+    document.getElementById('m-pages').textContent = (m.page_count || 0).toLocaleString();
+    document.getElementById('m-topic-dim').textContent = (m.topic_dimension && m.topic_dimension.effective_dim != null)
+      ? m.topic_dimension.effective_dim.toFixed(1) : '—';
+    document.getElementById('m-coherence').textContent = (m.section_coherence && m.section_coherence.ratio)
+      ? m.section_coherence.ratio.toFixed(2) : '—';
     document.getElementById('m-outliers').textContent = state.outliers.length.toLocaleString();
     document.getElementById('m-dupes').textContent = state.duplicates.length.toLocaleString();
+    renderHist();
+  }
+
+  function renderHist() {
+    const h = (state.metrics || {}).centroid_histogram;
+    const block = document.getElementById('hist-block');
+    if (!h || !h.counts || !h.counts.length) { block.style.display = 'none'; return; }
+    const meta = document.getElementById('hist-meta');
+    const pw = state.metrics.pairwise || {};
+    meta.textContent = `median ${(h.median || 0).toFixed(3)} · range ${(h.min || 0).toFixed(2)}–${(h.max || 0).toFixed(2)} · model floor (p10 pairwise) ${(pw.p10 || 0).toFixed(3)}`;
+    const max = Math.max(...h.counts);
+    const el = document.getElementById('audit-hist');
+    el.innerHTML = `
+      <div class="flex items-end gap-px h-32 border-b border-gray-200">
+        ${h.counts.map((c, i) => {
+          const pct = max > 0 ? (c / max * 100) : 0;
+          const lo = h.edges[i];
+          const hi = h.edges[i + 1];
+          return `<div class="flex-1 bg-blue-500 hover:bg-blue-600 transition-colors" style="height:${pct.toFixed(1)}%" title="${lo.toFixed(3)}–${hi.toFixed(3)}: ${c} page${c===1?'':'s'}"></div>`;
+        }).join('')}
+      </div>
+      <div class="flex justify-between text-xs text-gray-500 mt-1">
+        <span>${(h.edges[0] || 0).toFixed(2)}</span>
+        <span>cosine similarity to site centroid →</span>
+        <span>${(h.edges[h.edges.length - 1] || 1).toFixed(2)}</span>
+      </div>`;
   }
 
   function renderSections() {
@@ -686,6 +832,136 @@
             </tr>`).join('')}
           </tbody>
         </table>`;
+    }
+  }
+
+  function renderHits() {
+    const lg = state.linkgraph || {};
+    const block = document.getElementById('hits-block');
+    const auth = lg.top_hits_authorities || [];
+    const hub = lg.top_hits_hubs || [];
+    if (!auth.length && !hub.length) { block.style.display = 'none'; return; }
+
+    document.getElementById('audit-hits-auth').innerHTML = auth.length
+      ? auth.slice(0, 15).map(p => `
+          <div class="py-1.5 border-b border-gray-100">
+            <a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a>
+            <div class="text-xs text-gray-500">authority ${(p.authority_score || 0).toFixed(4)} · in:${p.in_degree} · ${escapeHtml(p.section || '')}</div>
+          </div>`).join('')
+      : '<div class="text-gray-500">No data.</div>';
+
+    document.getElementById('audit-hits-hub').innerHTML = hub.length
+      ? hub.slice(0, 15).map(p => `
+          <div class="py-1.5 border-b border-gray-100">
+            <a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a>
+            <div class="text-xs text-gray-500">hub ${(p.hub_score || 0).toFixed(4)} · out:${p.out_degree} · ${escapeHtml(p.section || '')}</div>
+          </div>`).join('')
+      : '<div class="text-gray-500">No data.</div>';
+  }
+
+  function renderDeep() {
+    const lg = state.linkgraph || {};
+    const block = document.getElementById('depth-block');
+    const deep = lg.deep_pages || [];
+    document.getElementById('depth-summary').textContent = `max depth ${lg.max_click_depth || 0} · ${lg.deep_page_count || 0} pages buried`;
+    if (!deep.length) { document.getElementById('audit-deep').innerHTML = '<div class="text-gray-500">All pages are within 3 clicks of the homepage. Nice.</div>'; return; }
+    document.getElementById('audit-deep').innerHTML = deep.map(p => `
+      <div class="py-1.5 border-b border-gray-100">
+        <a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>
+        <span class="text-xs text-gray-400 ml-2">${p.click_depth} clicks deep</span>
+      </div>`).join('');
+  }
+
+  function renderClusterAuth() {
+    const lg = state.linkgraph || {};
+    const block = document.getElementById('cluster-auth-block');
+    const rows = lg.cluster_authorities || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-cluster-auth').innerHTML = `
+      <table class="min-w-full text-sm">
+        <thead class="text-xs text-gray-500"><tr>
+          <th class="text-left py-1">Topic</th><th class="text-left py-1">Pages</th><th class="text-left py-1">Authority</th><th class="text-left py-1">Runners-up</th>
+        </tr></thead>
+        <tbody>${rows.slice(0, 30).map(r => `
+          <tr class="border-b border-gray-100 align-top">
+            <td class="py-1.5 pr-2">${escapeHtml(r.label)}</td>
+            <td class="py-1.5 pr-2 text-gray-500">${r.page_count}</td>
+            <td class="py-1.5 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.authority.url)}" target="_blank" rel="noopener">${escapeHtml(r.authority.title)}</a><div class="text-xs text-gray-500">PR ${(r.authority.pagerank * 100).toFixed(3)}</div></td>
+            <td class="py-1.5">${(r.runners_up || []).slice(0, 3).map(p => `<div class="text-xs"><a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a></div>`).join('') || '<span class="text-gray-400">—</span>'}</td>
+          </tr>`).join('')}</tbody></table>`;
+  }
+
+  function renderAnchors() {
+    const lg = state.linkgraph || {};
+    const block = document.getElementById('anchor-block');
+    const rows = lg.anchor_analysis || [];
+    if (!rows.length) { block.style.display = 'none'; return; }
+    document.getElementById('audit-anchors').innerHTML = rows.map(r => {
+      const top = (r.top_anchors || []).map(a => `<span class="inline-block bg-gray-100 text-gray-700 text-xs px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(a.anchor)} <span class="text-gray-400">×${a.count}</span></span>`).join('');
+      const generic = r.generic_anchor_share > 0 ? `<span class="text-orange-700">${(r.generic_anchor_share * 100).toFixed(0)}% generic</span>` : '';
+      const mismatch = (r.worst_anchor_distance || 0) > 0.45
+        ? `<span class="text-red-700 ml-2">worst-anchor mismatch ${r.worst_anchor_distance.toFixed(3)} ("${escapeHtml(r.worst_anchor_mismatch || '')}")</span>` : '';
+      return `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.target_url)}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a>
+            <span class="text-xs text-gray-500">${r.inbound_link_count} inbound · ${r.unique_anchors} unique anchors</span>
+          </div>
+          <div class="text-xs text-gray-500 mb-1">${generic}${mismatch}</div>
+          <div>${top}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderExternal() {
+    const ext = state.external || {};
+    const block = document.getElementById('external-block');
+    const brokenBlock = document.getElementById('broken-block');
+    const top = ext.top_domains || [];
+    const perPage = ext.per_page || [];
+    if (!top.length && !perPage.length) { block.style.display = 'none'; brokenBlock.style.display = 'none'; return; }
+
+    document.getElementById('audit-ext-domains').innerHTML = top.length
+      ? top.slice(0, 25).map(d => {
+          const auth = d.authority_score >= 0.5 ? `<span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-800 ml-1">authoritative</span>` : '';
+          return `
+            <div class="py-1.5 border-b border-gray-100">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium">${escapeHtml(d.domain)}</span>
+                <span class="text-xs text-gray-500">${d.link_count} links · ${d.pages_citing} pages</span>
+              </div>
+              <div class="text-xs text-gray-500">${(d.top_anchors || []).slice(0, 3).map(a => `"${escapeHtml(a)}"`).join(' · ')} ${auth}</div>
+            </div>`;
+        }).join('')
+      : '<div class="text-gray-500">No outbound links.</div>';
+
+    const ds = ext.citation_density_summary || {};
+    const sortedThin = perPage.filter(p => p.external_count === 0);
+    const sortedRich = [...perPage].sort((a, b) => (b.citation_density || 0) - (a.citation_density || 0)).slice(0, 12);
+    document.getElementById('audit-ext-density').innerHTML = `
+      <div class="text-xs text-gray-500 mb-2">median ${ds.median || 0} · mean ${ds.mean || 0} · p90 ${ds.p90 || 0} · ${ds.pages_with_zero_external || 0} pages have no citations</div>
+      <div class="font-medium text-gray-700 mb-1">Densest citation pages:</div>
+      ${sortedRich.map(p => `<div class="text-xs py-1 border-b border-gray-50"><a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.url)}</a> <span class="text-gray-500">density ${p.citation_density} (${p.external_count} links / ${p.distinct_domains} domains)</span></div>`).join('')}
+      ${sortedThin.length ? `<div class="font-medium text-gray-700 mt-3 mb-1">${sortedThin.length} pages with zero outbound citations</div>` : ''}
+      ${sortedThin.slice(0, 6).map(p => `<div class="text-xs py-1 border-b border-gray-50"><a class="text-blue-600 hover:underline" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.url)}</a></div>`).join('')}
+      ${sortedThin.length > 6 ? `<div class="text-xs text-gray-400 italic">… ${sortedThin.length - 6} more</div>` : ''}`;
+
+    const broken = ext.broken_links || [];
+    if (!broken.length) {
+      // Leave default "not checked" message in place when checks didn't run.
+      // If checks ran and found nothing, show that explicitly.
+      if (ext.broken_links !== undefined) {
+        document.getElementById('audit-broken').innerHTML = '<div class="text-green-700">All checked outbound links resolve OK.</div>';
+      }
+    } else {
+      document.getElementById('audit-broken').innerHTML = `
+        <div class="text-xs text-gray-500 mb-2">${broken.length} broken outbound link${broken.length === 1 ? '' : 's'}</div>` +
+        broken.slice(0, 100).map(b => `
+          <div class="py-1.5 border-b border-gray-100">
+            <a class="text-blue-600 hover:underline" href="${escapeHtml(b.url)}" target="_blank" rel="noopener">${escapeHtml(b.url)}</a>
+            <span class="text-xs text-red-700 ml-2">${b.status || 'error'}</span>
+            ${b.anchor ? `<div class="text-xs text-gray-500">anchor: "${escapeHtml(b.anchor)}"</div>` : ''}
+          </div>`).join('');
     }
   }
 
