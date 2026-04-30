@@ -224,9 +224,14 @@ class Crawler:
     def _same_site(self, netloc: str) -> bool:
         if netloc == self.host:
             return True
+        # treat "x.com" and "www.x.com" as the same site by default
+        host_stripped = self.host[4:] if self.host.startswith("www.") else self.host
+        netloc_stripped = netloc[4:] if netloc.startswith("www.") else netloc
+        if host_stripped == netloc_stripped:
+            return True
         if self.config.follow_subdomains:
-            base_root = ".".join(self.host.split(".")[-2:])
-            netloc_root = ".".join(netloc.split(".")[-2:])
+            base_root = ".".join(host_stripped.split(".")[-2:])
+            netloc_root = ".".join(netloc_stripped.split(".")[-2:])
             return base_root == netloc_root
         return False
 

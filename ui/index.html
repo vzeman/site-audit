@@ -101,9 +101,23 @@
     </div>
   </div>
 
+<!-- Inlined data sentinels: filled by site_audit.html_report when the report is exported as a standalone file. When the file is served by `site-audit serve`, these stay as placeholders and we fall back to /data/ fetches. -->
+<script type="application/json" id="data-scatterplot">__SCATTERPLOT_JSON__</script>
+<script type="application/json" id="data-metrics">__METRICS_JSON__</script>
+<script type="application/json" id="data-sections">__SECTIONS_JSON__</script>
+<script type="application/json" id="data-outliers">__OUTLIERS_JSON__</script>
+<script type="application/json" id="data-duplicates">__DUPLICATES_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
+
+  function readInlined(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const raw = el.textContent.trim();
+    if (!raw || raw.startsWith('__')) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
 
   const palette = [
     '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
@@ -149,13 +163,21 @@
 
   async function boot() {
     try {
-      const [scatter, metrics, sections, outliers, duplicates] = await Promise.all([
-        loadJSON('scatterplot.json').catch(() => null),
-        loadJSON('site_metrics.json'),
-        loadJSON('section_report.json').catch(() => []),
-        loadCSV('outliers.csv'),
-        loadCSV('duplicates.csv'),
-      ]);
+      const inlinedScatter = readInlined('data-scatterplot');
+      const inlinedMetrics = readInlined('data-metrics');
+      const inlinedSections = readInlined('data-sections');
+      const inlinedOutliers = readInlined('data-outliers');
+      const inlinedDuplicates = readInlined('data-duplicates');
+
+      const [scatter, metrics, sections, outliers, duplicates] = inlinedMetrics
+        ? [inlinedScatter, inlinedMetrics, inlinedSections || [], inlinedOutliers || [], inlinedDuplicates || []]
+        : await Promise.all([
+            loadJSON('scatterplot.json').catch(() => null),
+            loadJSON('site_metrics.json'),
+            loadJSON('section_report.json').catch(() => []),
+            loadCSV('outliers.csv'),
+            loadCSV('duplicates.csv'),
+          ]);
       state.scatter = scatter;
       state.pages = scatter ? scatter.pages : [];
       state.metrics = metrics;

@@ -58,7 +58,8 @@ def _run_command(args: argparse.Namespace) -> int:
     print(f"  outliers:     {summary['outliers']}")
     print(f"  dup. pairs:   {summary['duplicate_pairs']}")
     print(f"  report dir:   {summary['output_dir']}")
-    print("\nLaunch the viewer with:")
+    print(f"  HTML report:  {summary['html_report']}  (open this in your browser)")
+    print("\nOr launch the live viewer with:")
     print(f"  site-audit serve {summary['domain']}")
     return 0
 

@@ -18,6 +18,7 @@ from .cache import EmbeddingCache, HttpCache, domain_slug
 from .crawler import Crawler, CrawlConfig
 from .embedder import DEFAULT_MODEL, EmbedInput, embed_pages
 from .extractor import extract
+from .html_report import write_html_report
 from .report import write_all
 from .scatter import project
 
@@ -135,6 +136,19 @@ def run(config: PipelineConfig) -> dict:
         cluster_labels=labels,
     )
 
+    template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
+    if template_path.is_file():
+        html_path = write_html_report(
+            output_dir,
+            template_path,
+            result,
+            model_name=config.model,
+            domain=host,
+            coords=coords,
+            cluster_labels=labels,
+        )
+        LOG.info("  HTML report: %s", html_path)
+
     LOG.info("=== summary ===")
     LOG.info("  pages: %d", len(pages))
     LOG.info("  siteFocusScore: %.4f", result.site_metrics["focus_score"])
@@ -150,4 +164,5 @@ def run(config: PipelineConfig) -> dict:
         "outliers": summary["outliers"],
         "duplicate_pairs": summary["duplicates"],
         "output_dir": str(output_dir),
+        "html_report": str(output_dir / "index.html"),
     }
