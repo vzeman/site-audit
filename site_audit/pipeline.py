@@ -57,6 +57,9 @@ from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
 from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
 from .extractor import extract
+from .header_analysis import analyse as analyse_headers
+from .header_analysis import headers_for_scatter
+from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
 from .keyword_coverage import (
     auto_mine_queries, load_queries_from_file, match_queries,
@@ -87,7 +90,7 @@ class PipelineConfig:
     output_dir: Optional[Path] = None
 
     model: str = DEFAULT_MODEL
-    max_pages: int = 2000
+    max_pages: int = 10000
     max_workers: int = 8
     request_delay: float = 0.0
     duplicate_threshold: float = 0.92
@@ -178,9 +181,18 @@ def run(config: PipelineConfig) -> dict:
     outlinks_map: dict[str, list[tuple[str, str]]] = {}
     external_map: dict[str, list[tuple[str, str]]] = {}
 
+    noindex_dropped = 0
     for r in fetched:
-        ext = extract(r.url, r.body, max_chars=config.max_chars)
+        ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
         if ext is None or not ext.title:
+            continue
+        if ext.noindex:
+            # The page asked search engines not to index it — exclude from
+            # the analysis corpus. We still consumed its outlinks during
+            # the crawl (so internal links from a noindex landing page
+            # contribute to authority), but the page itself does not
+            # count toward focus / clusters / coverage / recommendations.
+            noindex_dropped += 1
             continue
         section = section_for_url(r.url)
         embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
@@ -199,6 +211,8 @@ def run(config: PipelineConfig) -> dict:
         embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
         outlinks_map[r.url] = r.outlinks or []
         external_map[r.url] = r.external_links or []
+    if noindex_dropped:
+        LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
 
     if not pages:
         LOG.warning("No usable pages — aborting before embedding.")
@@ -368,6 +382,28 @@ def run(config: PipelineConfig) -> dict:
                 for k in range(len(triples))
             ]
 
+    # 11.a-pre2) Header (H1-H6) audit. Embeds every header in one batched
+    # call and compares against the host page's paragraph centroid so we
+    # can flag headers that don't describe the content under them. Also
+    # surfaces missing/duplicate H1s, level skips, and keyword frequency
+    # at each header level.
+    header_analysis_data: dict = {}
+    header_scatter_data: dict = {}
+    if paragraph_records:
+        header_analysis_data = analyse_headers(
+            pages, extracted_pages, embeddings, paragraph_records, embedder=embedder,
+        )
+        s = header_analysis_data.get("summary", {}) or {}
+        LOG.info(
+            "  headers: %d total · missing H1 %d · multi-H1 %d · drifty %d · structural issues %d",
+            s.get("total_headers", 0), s.get("pages_missing_h1", 0),
+            s.get("pages_multi_h1", 0), s.get("drifty_headers", 0),
+            s.get("structural_issues", 0),
+        )
+        header_scatter_data = headers_for_scatter(
+            pages, extracted_pages, paragraph_records, embedder=embedder,
+        )
+
     # 11.a-pre) Paragraph link density — counts internal vs external <a href>
     # inside each paragraph at extraction time. Cheap (no embeddings) and
     # used both as a standalone editorial signal and as a saturation filter
@@ -503,6 +539,27 @@ def run(config: PipelineConfig) -> dict:
                 comparisons.append(cmp_result)
             competitive_data = competitive_payload(comparisons)
 
+    # 11.f) Linkbuilding overview — site-level link health, anchor
+    # quality audit, and a UMAP scatter of the most-used anchor texts.
+    linkbuilding_data: dict = {}
+    if pages:
+        linkbuilding_data = analyse_linkbuilding(
+            pages, extracted_pages, link_payload,
+            paragraph_density_payload=paragraph_density_data,
+            embedder=embedder,
+        )
+        s = linkbuilding_data.get("summary", {}) or {}
+        LOG.info(
+            "  linkbuilding: %d total links (%d internal / %d external) · "
+            "%.0f%% with descriptive anchor · %d empty links · %d image-only without alt",
+            s.get("total_links", 0),
+            s.get("internal_links", 0),
+            s.get("external_links", 0),
+            (s.get("descriptive_anchor_share", 0.0) or 0.0) * 100,
+            s.get("empty_links", 0),
+            s.get("image_links_no_alt", 0),
+        )
+
     # 12) Action plan: synthesise prioritised recommendations from the
     # already-built payloads. Cheap (no embeddings), pure aggregation.
     duplicate_rows = build_duplicate_rows(result)
@@ -551,6 +608,9 @@ def run(config: PipelineConfig) -> dict:
         competitive=competitive_data,
         recommendations=recommendations_data,
         paragraph_density=paragraph_density_data,
+        header_analysis=header_analysis_data,
+        header_scatter=header_scatter_data,
+        linkbuilding=linkbuilding_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -580,6 +640,9 @@ def run(config: PipelineConfig) -> dict:
             competitive=competitive_data,
             recommendations=recommendations_data,
             paragraph_density=paragraph_density_data,
+            header_analysis=header_analysis_data,
+            header_scatter=header_scatter_data,
+            linkbuilding=linkbuilding_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

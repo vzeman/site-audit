@@ -288,6 +288,9 @@ def write_all(
     competitive: Optional[list] = None,
     recommendations: Optional[dict] = None,
     paragraph_density: Optional[dict] = None,
+    header_analysis: Optional[dict] = None,
+    header_scatter: Optional[dict] = None,
+    linkbuilding: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -329,4 +332,10 @@ def write_all(
         _write_json(output_dir / "recommendations.json", recommendations)
     if paragraph_density is not None:
         _write_json(output_dir / "paragraph_density.json", paragraph_density)
+    if header_analysis is not None:
+        _write_json(output_dir / "header_analysis.json", header_analysis)
+    if header_scatter is not None:
+        _write_json(output_dir / "header_scatter.json", header_scatter)
+    if linkbuilding is not None:
+        _write_json(output_dir / "linkbuilding.json", linkbuilding)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

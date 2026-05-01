@@ -109,7 +109,7 @@ _NON_HTML_EXTENSIONS = re.compile(
 @dataclass
 class CrawlConfig:
     domain: str
-    max_pages: int = 2000
+    max_pages: int = 10000
     max_workers: int = 8
     request_delay: float = 0.0  # extra delay per worker between requests
     timeout: float = 20.0
@@ -128,6 +128,7 @@ class FetchResult:
     body: str
     content_type: str
     from_cache: bool
+    x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
 
@@ -514,12 +515,21 @@ class Crawler:
         if self.config.use_cache:
             cached = self.cache.get(url)
             if cached and 200 <= cached.status < 400:
+                cached_headers = cached.headers or {}
+                # case-insensitive lookup for X-Robots-Tag (cache may
+                # preserve original casing — be defensive).
+                xrt = ""
+                for k, v in cached_headers.items():
+                    if k.lower() == "x-robots-tag":
+                        xrt = (v or "").lower()
+                        break
                 return FetchResult(
                     url=url,
                     status=cached.status,
                     body=cached.text,
                     content_type=(cached.content_type or "").lower(),
                     from_cache=True,
+                    x_robots_tag=xrt,
                 )
 
         if self.config.request_delay > 0:
@@ -557,4 +567,5 @@ class Crawler:
             body=text,
             content_type=ctype,
             from_cache=False,
+            x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
         )

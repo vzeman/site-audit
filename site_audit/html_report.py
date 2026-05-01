@@ -39,6 +39,9 @@ _PLACEHOLDERS = {
     "__COMPETITIVE_JSON__": "competitive",
     "__RECOMMENDATIONS_JSON__": "recommendations",
     "__PARAGRAPH_DENSITY_JSON__": "paragraph_density",
+    "__HEADER_ANALYSIS_JSON__": "header_analysis",
+    "__HEADER_SCATTER_JSON__": "header_scatter",
+    "__LINKBUILDING_JSON__": "linkbuilding",
 }
 
 
@@ -224,6 +227,9 @@ def write_html_report(
     competitive: Optional[list] = None,
     recommendations: Optional[dict] = None,
     paragraph_density: Optional[dict] = None,
+    header_analysis: Optional[dict] = None,
+    header_scatter: Optional[dict] = None,
+    linkbuilding: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -249,6 +255,9 @@ def write_html_report(
         "competitive": competitive or [],
         "recommendations": recommendations or {},
         "paragraph_density": paragraph_density or {},
+        "header_analysis": header_analysis or {},
+        "header_scatter": header_scatter or {},
+        "linkbuilding": linkbuilding or {},
     }
 
     rendered = template

@@ -68,9 +68,15 @@
 
     <!-- Distribution histogram -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="hist-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Per-page similarity to site centroid</h3>
-        <span class="text-xs text-gray-500" id="hist-meta"></span>
+        <p class="text-xs text-gray-500 mt-1" id="hist-meta"></p>
+        <p class="text-xs text-gray-500 mt-1">
+          How tightly each page sits around the site's average topic. <strong>Unimodal and tall = focused site</strong>
+          (every page roughly on-message). <strong>Bimodal (two peaks)</strong> = two different audiences or two distinct
+          products on one domain — split into separate sites or restructure. A long left tail = many off-topic pages
+          (those are the outliers in the next sections).
+        </p>
       </div>
       <div id="audit-hist" class="text-sm"></div>
     </div>
@@ -103,9 +109,14 @@
 
     <!-- GEO: pages most in need of editing -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="improvement-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">GEO: pages most in need of editing</h3>
-        <span class="text-xs text-gray-500">composite score combines title-content fit, answer-ability, drift, duplicates, wrong-home paragraphs, citations</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Composite editing-priority score per page. We sum penalties for: poor title-content fit, low GEO answer-ability,
+          high drift from the section centroid, near-duplicate of another page, hosting wrong-home paragraphs, and
+          missing citation density. <strong>Sorted weakest pages first</strong> — these are where edits will move the
+          most signals at once. Each row enumerates which specific issues apply so you know what to fix.
+        </p>
       </div>
       <div id="audit-improvement" class="text-sm max-h-[40rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
@@ -114,12 +125,70 @@
 
     <!-- Title ↔ content mismatch -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="title-mismatch-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Title doesn't match content</h3>
-        <span class="text-xs text-gray-500">cosine of page title to its paragraph centroid — lower = bigger mismatch</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Cosine similarity between the &lt;title&gt; tag and the page's
+          paragraph centroid. <strong>Higher = title accurately
+          describes content</strong> (good). <strong>Below 0.6 = the
+          title is misleading</strong> — search engines and users will
+          arrive expecting one thing and find another. Pages flagged
+          here usually need a title rewrite using keywords that already
+          appear in the body (suggested keywords are listed inline).
+        </p>
       </div>
       <div id="audit-title-mismatch" class="text-sm max-h-96 overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Header (H1-H6) audit -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="headers-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Header structure (H1–H6)</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          How well the document outline reflects the page's content. We
+          check three things: (1) <strong>structural rules</strong>
+          — exactly one H1 per page, no skipped levels (H1 → H3 is
+          a skip), every long page should have H2/H3 sub-sections;
+          (2) <strong>title ↔ H1 alignment</strong> — when these
+          disagree, users get a different headline from each;
+          (3) <strong>header ↔ content alignment</strong> — every
+          header is embedded and compared to its host page's paragraph
+          centroid; <em>cosine ≥ 0.65</em> means the header describes
+          what's actually under it, lower is a click-bait header or a
+          stray template fragment.
+        </p>
+      </div>
+      <div id="audit-headers-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+
+      <div class="grid md:grid-cols-2 gap-6 mb-5">
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Structural issues</h4>
+          <p class="text-xs text-gray-500 mb-2">missing/duplicate H1, level skips, long pages with no H2/H3</p>
+          <div id="audit-headers-structural" class="text-xs max-h-80 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Title ↔ H1 mismatch</h4>
+          <p class="text-xs text-gray-500 mb-2">cosine &lt; 0.6 — page promises one thing, the H1 promises another</p>
+          <div id="audit-headers-titleh1" class="text-xs max-h-80 overflow-y-auto"></div>
+        </div>
+      </div>
+
+      <div class="mb-5">
+        <h4 class="text-sm font-semibold mb-1">Headers that don't describe their content</h4>
+        <p class="text-xs text-gray-500 mb-2">cosine of header to host page's paragraph centroid &lt; 0.65 — rewrite or remove</p>
+        <div id="audit-headers-drifty" class="text-xs max-h-80 overflow-y-auto"></div>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-semibold mb-1">Header keyword frequency</h4>
+        <p class="text-xs text-gray-500 mb-2">
+          What the site visually claims to be about. <strong>A few keywords dominating each level = a focused brand voice</strong>;
+          a flat distribution across hundreds of words = boilerplate or every page covers a different topic.
+          Watch out for over-used generic terms ("Read more", "Get started") that crowd out real keywords.
+        </p>
+        <div id="audit-headers-keywords" class="grid sm:grid-cols-3 gap-4 text-xs"></div>
       </div>
     </div>
 
@@ -137,6 +206,7 @@
             <span class="text-sm text-gray-500 mr-2">Show:</span>
             <button data-dataset="pages" class="ds-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Pages</button>
             <button data-dataset="paragraphs" class="ds-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Paragraphs</button>
+            <button data-dataset="headers" class="ds-btn px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">Headers</button>
           </div>
           <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Color mode">
             <span class="text-sm text-gray-500 mr-2">Color by:</span>
@@ -164,13 +234,24 @@
     <!-- Side panels -->
     <div class="grid md:grid-cols-2 gap-6 mb-8">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-        <h3 class="text-lg font-semibold mb-3">Weakest sections (lowest cohesion)</h3>
+        <h3 class="text-lg font-semibold mb-1">Weakest sections (lowest cohesion)</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          Mean cosine of pages within a URL section. <strong>Cohesion ≥ 0.7</strong> = section pages all talk about the same
+          thing (good). <strong>Cohesion &lt; 0.5</strong> = pages in this section are wildly different — your URL structure is
+          fighting your content structure. Either rename URLs to match content, or split the section.
+        </p>
         <div id="audit-sections" class="text-sm">
           <div class="text-gray-500">Loading…</div>
         </div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-        <h3 class="text-lg font-semibold mb-3">Top outliers (highest drift)</h3>
+        <h3 class="text-lg font-semibold mb-1">Top outliers (highest drift)</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          Pages whose embedding is furthest from their section's centroid (above the section's 95th percentile).
+          Each row has a recommendation: <strong>refocus</strong> (rewrite to match its section), <strong>move</strong>
+          (URL belongs in a different section), or <strong>remove</strong> (thin / off-brand). The biggest wins usually come
+          from acting on pages with high PageRank that are also outliers.
+        </p>
         <div id="audit-outliers" class="text-sm max-h-96 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
@@ -178,7 +259,13 @@
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
-      <h3 class="text-lg font-semibold mb-3">Top duplicate pairs (merge candidates)</h3>
+      <h3 class="text-lg font-semibold mb-1">Top duplicate pairs (merge candidates)</h3>
+      <p class="text-xs text-gray-500 mb-3">
+        Page pairs with cosine similarity ≥ 0.92 (default). <strong>Sim ≥ 0.97</strong> = essentially the same page,
+        merge with 301 redirect. <strong>0.94–0.97</strong> = strong overlap, consolidate or canonicalize.
+        <strong>0.92–0.94</strong> = review — strong overlap but not always a duplicate (e.g. product variants).
+        Pick the side with higher PageRank as canonical.
+      </p>
       <div id="audit-duplicates" class="text-sm max-h-96 overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -186,9 +273,14 @@
 
     <!-- Topic clusters -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="clusters-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Topic clusters (auto-labeled)</h3>
-        <span class="text-xs text-gray-500">ranked by size × cohesion</span>
+        <p class="text-xs text-gray-500 mt-1">
+          K-means clusters of page embeddings, labelled with class-discriminative keywords (BERTopic-style c-TF-IDF).
+          Ranked by <em>size × cohesion</em> — the biggest, tightest topics float to the top. <strong>High cohesion (≥ 0.7) and high site-alignment</strong>
+          mean a cluster is a strong, on-brand topic; <strong>low cohesion (&lt; 0.5)</strong> means the cluster is loose
+          (the pages don't really belong together) and probably needs splitting or rewriting.
+        </p>
       </div>
       <div id="audit-clusters" class="grid md:grid-cols-2 gap-4 text-sm">
         <div class="text-gray-500">Loading…</div>
@@ -197,26 +289,42 @@
 
     <!-- Cluster treemap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="treemap-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Topic mass — cluster treemap</h3>
-        <span class="text-xs text-gray-500">size = pages, color = cohesion</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Tile <strong>size = number of pages</strong> in the cluster (where the site invests effort), <strong>color = cohesion</strong> (how tight the cluster is).
+          Big green tiles are your dominant, well-defined topics — the URLs you want LLM answer engines to associate with the brand.
+          Big red tiles are loose, large topics that need restructuring. Tiny tiles are niche or fragmented coverage.
+        </p>
       </div>
       <div id="audit-treemap" class="w-full" style="height: 360px;"></div>
     </div>
 
     <!-- Cluster overlap heatmap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Cluster overlap heatmap</h3>
-        <span class="text-xs text-gray-500">strong diagonal = clean separation; off-diagonal heat = topic overlap → cannibalization</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Cosine similarity between every pair of cluster centroids. <strong>A strong dark diagonal with light off-diagonals = clean topic separation</strong>
+          (each cluster is its own thing). <strong>Heat off the diagonal</strong> = two clusters that are essentially the same topic — those are cannibalising each other in
+          search results and confuse LLM retrieval. The two off-diagonal hotspots are usually the first thing to consolidate.
+        </p>
       </div>
       <div id="audit-heatmap" class="overflow-auto"></div>
     </div>
 
     <!-- Keyword coverage -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="coverage-block">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Keyword coverage</h3>
+      <div class="mb-3 flex items-start justify-between flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Keyword coverage</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            For each target query (auto-mined from titles + question H2s, or supplied via <code>--queries-file</code>), the best-matching page on your site.
+            <strong>Gap</strong> = no page above similarity 0.55 — write a dedicated page for that query.
+            <strong>Cannibalized</strong> = three or more pages above 0.72 — pick one canonical, redirect or rewrite the rest so they target distinct sub-queries.
+            <strong>Covered</strong> = exactly one strong winner.
+          </p>
+        </div>
         <div class="flex gap-2 text-xs" role="group">
           <button data-coverage="all" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
           <button data-coverage="gap" class="cov-btn px-2 py-1 rounded border border-gray-300 bg-white">Gaps</button>
@@ -231,9 +339,15 @@
 
     <!-- Answerability -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">GEO answer-ability score</h3>
-        <span class="text-xs text-gray-500">weakest pages first</span>
+        <p class="text-xs text-gray-500 mt-1">
+          0–10 estimate of how cite-able each page is to AI answer engines (Perplexity, ChatGPT, Google AIO).
+          Sum of weighted signals: <strong>FAQ schema</strong> (3 pts), question-form headings (1–2), tables (1), lists (≤1),
+          statistics with numbers (≤1.5), external citations to authoritative sources (≤1), dates (0.5), question-form title (0.5).
+          <strong>≥ 7 = highly cite-able · 4–6 = workable · &lt; 4 = unlikely to be cited.</strong>
+          Sorted weakest first because that's where the wins are; each row shows exactly which signals are missing.
+        </p>
       </div>
       <div id="audit-answerability" class="text-sm max-h-[28rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
@@ -243,13 +357,24 @@
     <!-- Link graph -->
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="linkgraph-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-        <h3 class="text-lg font-semibold mb-3">Top authority pages (PageRank)</h3>
+        <h3 class="text-lg font-semibold mb-1">Top authority pages (PageRank)</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          Classic damped PageRank over the internal link graph — your "load-bearing" pages.
+          High-PR pages are where the homepage and major sections funnel link equity. <strong>These are the URLs you most
+          want to keep healthy</strong> (high GEO score, fast, no broken links): when they degrade, everything they link to suffers.
+        </p>
         <div id="audit-pagerank" class="text-sm max-h-96 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-        <h3 class="text-lg font-semibold mb-3">Orphan pages (no inbound links)</h3>
+        <h3 class="text-lg font-semibold mb-1">Orphan pages (no inbound links)</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          Pages with zero inbound internal links — only reachable via the sitemap or external links. <strong>Search engines and
+          users won't find them organically.</strong> If a page belongs on the site, link to it from a related authority page or
+          the section landing page; if it doesn't, redirect or remove it. Orphans on the cluster-authority list are the most
+          painful — fix those first.
+        </p>
         <div id="audit-orphans" class="text-sm max-h-96 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
@@ -257,12 +382,60 @@
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Suggested internal links (high similarity, no current link)</h3>
-        <span class="text-xs text-gray-500">try the top 10 first</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Page pairs that <em>should</em> be linking to each other but aren't — cosine similarity ≥ 0.85, no existing internal link.
+          <strong>Ship the top 10 first</strong>: they're the highest-confidence wins, almost certainly contextually relevant. The
+          suggested anchor is drawn from the source page so it reads naturally. (For paragraph-level placement of these links, see
+          "In-paragraph link recommendations" below.)
+        </p>
       </div>
       <div id="audit-link-recs" class="text-sm max-h-96 overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Linkbuilding overview -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="linkbuilding-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Linkbuilding overview</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          How the site distributes internal and external link equity. <strong>Internal:external ratio</strong> shows whether the site
+          mostly talks to itself (high ratio, common for content-heavy sites) or sends traffic away (low ratio).
+          <strong>Descriptive anchor share ≥ 60%</strong> is healthy — anchors that name the destination's topic. <strong>Empty links</strong>
+          (no text, no title, no aria-label, no image alt) are accessibility failures and waste link equity.
+          <strong>Image-only links without alt text</strong> are double-broken: useless to assistive tech and to search engines.
+        </p>
+      </div>
+      <div id="audit-linkbuilding-summary" class="grid sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm mb-5"></div>
+
+      <div class="mb-5" id="audit-linkbuilding-scatter-wrap">
+        <h4 class="text-sm font-semibold mb-1">Anchor-text scatter</h4>
+        <p class="text-xs text-gray-500 mb-2">
+          Top <span id="audit-linkbuilding-scatter-meta">…</span> distinct anchors embedded and projected via UMAP. Tight clusters = anchor phrases that talk about the same topic (good editorial linking);
+          isolated dots far from clusters = generic anchors ("click here", numeric pagination) — clean these up.
+          Generic anchors are highlighted in red. Hover to see the anchor + how often it's used.
+        </p>
+        <div id="audit-linkbuilding-scatter" class="w-full" style="min-height: 460px;"></div>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6 text-xs">
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Top internal anchors</h4>
+          <p class="text-xs text-gray-500 mb-2">phrases pointing to other pages on this site, by frequency</p>
+          <div id="audit-linkbuilding-top-internal" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Top external anchors</h4>
+          <p class="text-xs text-gray-500 mb-2">phrases pointing off-site, by frequency</p>
+          <div id="audit-linkbuilding-top-external" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Most-used generic anchors</h4>
+          <p class="text-xs text-gray-500 mb-2">"click here", numeric, single-word — replace with descriptive phrases</p>
+          <div id="audit-linkbuilding-top-generic" class="max-h-72 overflow-y-auto"></div>
+        </div>
       </div>
     </div>
 
@@ -271,7 +444,14 @@
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div>
           <h3 class="text-lg font-semibold">Internal links per page (in / out)</h3>
-          <p class="text-xs text-gray-500" id="link-counts-meta">distribution of inbound + outbound internal links across every crawled page</p>
+          <p class="text-xs text-gray-500 mt-1" id="link-counts-meta">distribution of inbound + outbound internal links across every crawled page</p>
+          <p class="text-xs text-gray-500 mt-1">
+            <strong>Histogram</strong>: blue = inbound (in_degree), green = outbound (out_degree). A tall spike in the blue 0–1 bin
+            means most pages get almost no inbound links — linkbuilding debt. A green spike at one specific value means the same
+            sidebar/menu provides every link, no contextual linking. Healthy: a body in the 5–40 range and a long right tail of authority hubs.<br>
+            <strong>Scatter (in vs out)</strong>: <span class="text-red-600">red dots</span> = orphans (in = 0),
+            <span class="text-orange-600">orange dots</span> = dead-ends (out = 0). Click any dot to open the page.
+          </p>
         </div>
         <div class="flex gap-2 text-xs" role="group" aria-label="Link count chart">
           <button data-linkmode="hist" class="lc-btn px-2 py-1 rounded border border-gray-300 bg-white">Histogram</button>
@@ -289,7 +469,14 @@
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-density-block">
       <div class="mb-3">
         <h3 class="text-lg font-semibold">Paragraph link density</h3>
-        <p class="text-xs text-gray-500" id="para-density-meta">internal + external <code>&lt;a href&gt;</code> per 100 words, per paragraph</p>
+        <p class="text-xs text-gray-500 mt-1" id="para-density-meta">internal + external <code>&lt;a href&gt;</code> per 100 words, per paragraph</p>
+        <p class="text-xs text-gray-500 mt-1">
+          <strong>Healthy range: roughly 0.5–3 links per 100 words.</strong>
+          A median of 0 with a high "zero-link share" means most paragraphs are unlinked running text — opportunities to add internal links.
+          The <strong>spammy threshold (≥ 5 links/100w, dashed red line on the chart)</strong> flags link-stuffed paragraphs that look low-quality
+          to LLMs and degrade page-level credibility. Saturated paragraphs are automatically excluded from the in-paragraph link
+          recommendations below (we won't suggest more links to a paragraph that already has too many).
+        </p>
       </div>
       <div id="audit-para-density-summary" class="text-sm grid sm:grid-cols-3 gap-3 mb-4"></div>
       <div id="audit-para-density-hist" class="w-full mb-4" style="min-height: 180px;"></div>
@@ -307,9 +494,14 @@
 
     <!-- In-paragraph link recommendations -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-links-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">In-paragraph link recommendations</h3>
-        <span class="text-xs text-gray-500">add a link to <em>this exact paragraph</em>, with this exact anchor</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Closes the gap that page-level link recs leave open: <em>which paragraph on the source page</em> should host the link, and <em>which exact phrase</em> should be the anchor.
+          The <strong>lift</strong> metric is the bar — we require the paragraph to be more relevant to the target than the source page as a whole, so the link reads as natural editorial linking rather than boilerplate.
+          <strong>Lift ≥ 0.15 is high-confidence</strong>; lower values still help but are more arguable.
+          Already-saturated paragraphs (≥ 5 links per 100w) are skipped automatically.
+        </p>
       </div>
       <div id="audit-para-links" class="text-sm max-h-[36rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
@@ -318,9 +510,14 @@
 
     <!-- Wrong-home paragraphs -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="wrong-home-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Paragraphs that belong on a different page</h3>
-        <span class="text-xs text-gray-500">paragraph fits another page meaningfully better than its host</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Each row is a paragraph whose embedding fits a <em>different page on this site</em> meaningfully better than its host
+          (lift ≥ 0.10). Usually means a long page tried to do too many things and a fragment ended up on the wrong URL.
+          Fix: move the paragraph to the suggested page (or, if the topic doesn't really belong on the host, delete it).
+          <strong>Lift ≥ 0.20 is a strong signal</strong>; below that, the move is judgement-call.
+        </p>
       </div>
       <div id="audit-wrong-home" class="text-sm max-h-[40rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
@@ -329,9 +526,14 @@
 
     <!-- Paragraph topic clusters -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-clusters-block">
-      <div class="flex items-center justify-between mb-3">
+      <div class="mb-3">
         <h3 class="text-lg font-semibold">Paragraph topic clusters</h3>
-        <span class="text-xs text-gray-500">sub-topics that exist on the site at the granularity LLMs retrieve at</span>
+        <p class="text-xs text-gray-500 mt-1">
+          Sub-topics at <em>paragraph granularity</em> — the level LLM retrieval engines actually pull from when they cite a source.
+          Clusters that span <strong>many distinct pages</strong> are stable themes the site genuinely talks about; clusters with
+          high paragraph count but few distinct pages are <strong>boilerplate</strong> (footer, repeated CTA, nav patterns) and not
+          really content. Use this view to find content gaps a page-level cluster view would miss.
+        </p>
       </div>
       <div id="audit-para-clusters" class="grid md:grid-cols-2 gap-4 text-sm">
         <div class="text-gray-500">Loading…</div>
@@ -340,8 +542,18 @@
 
     <!-- Paragraph-level query fanout -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="fanout-block">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Query → paragraph fanout</h3>
+      <div class="flex items-start justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Query → paragraph fanout</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            For each query, the top-matching paragraphs anywhere on the site. Status interpretation:
+            <strong class="text-red-700">gap</strong> = no paragraph above the floor — no answer at any granularity;
+            <strong class="text-orange-700">scattered</strong> = the best paragraphs sit on different pages — LLMs can't pick a
+            single citation, so consolidate the answer onto one page;
+            <strong class="text-green-700">focused</strong> = top 3 paragraphs on the same page — the best possible state for AI
+            answer engines, that one page is what they'll cite.
+          </p>
+        </div>
         <div class="flex gap-2 text-xs">
           <button data-fanout="all" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">All</button>
           <button data-fanout="gap" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">Gaps</button>
@@ -349,7 +561,6 @@
           <button data-fanout="focused" class="fan-btn px-2 py-1 rounded border border-gray-300 bg-white">Focused</button>
         </div>
       </div>
-      <p class="text-xs text-gray-500 mb-3">For each query: top paragraphs site-wide. Status — gap = no chunk above floor; scattered = answer fragmented across pages; focused = top 3 paragraphs on the same page (best for AI citation).</p>
       <div id="audit-fanout" class="text-sm max-h-[44rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -370,14 +581,22 @@
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="hits-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <h3 class="text-lg font-semibold mb-1">HITS authorities</h3>
-        <p class="text-xs text-gray-500 mb-3">linked from many hub pages — your "topic destinations"</p>
+        <p class="text-xs text-gray-500 mb-3">
+          Linked from many hub pages — your "topic destinations." Where readers (and crawlers) end up when they're
+          looking for a definitive answer on a sub-topic. <strong>Authorities are often different pages from the PageRank top list</strong>:
+          PageRank is global, HITS is topical. The pages here are the canonical URLs you want LLM answer engines to cite.
+        </p>
         <div id="audit-hits-auth" class="text-sm max-h-80 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <h3 class="text-lg font-semibold mb-1">HITS hubs</h3>
-        <p class="text-xs text-gray-500 mb-3">link out to many authorities — your "topic indexes"</p>
+        <p class="text-xs text-gray-500 mb-3">
+          Pages that link out to many authorities — your "topic indexes." Hubs are usually section landing pages, blog category
+          pages, or hand-curated guides. <strong>If a topic has no hub, an LLM has to discover the authorities on its own</strong>;
+          a strong hub is a shortcut.
+        </p>
         <div id="audit-hits-hub" class="text-sm max-h-80 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
@@ -385,8 +604,16 @@
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="depth-block">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Buried pages (click depth ≥ 4 from homepage)</h3>
+      <div class="flex items-start justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Buried pages (click depth ≥ 4 from homepage)</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            Pages that take 4+ clicks to reach from the homepage via the shortest internal-link path.
+            <strong>Search engines de-prioritise deep pages</strong>, and users almost never reach them. Bring high-PageRank
+            buried pages within 3 clicks by linking them from a section landing page or sidebar; consider redirecting low-value
+            ones.
+          </p>
+        </div>
         <span class="text-xs text-gray-500" id="depth-summary"></span>
       </div>
       <div id="audit-deep" class="text-sm max-h-80 overflow-y-auto">
@@ -396,8 +623,13 @@
 
     <!-- Cluster authorities -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cluster-auth-block">
-      <h3 class="text-lg font-semibold mb-3">Topic-cluster authorities</h3>
-      <p class="text-xs text-gray-500 mb-3">canonical entry page per topic, ranked by PageRank</p>
+      <h3 class="text-lg font-semibold mb-1">Topic-cluster authorities</h3>
+      <p class="text-xs text-gray-500 mb-3">
+        Canonical entry page per topic, picked by PageRank within each cluster.
+        <strong>These are the URLs you most want LLM answer engines to land on</strong> for that topic.
+        If the picked authority looks wrong (a thin landing page, an orphan, or a tag archive), that's a signal the
+        site's link structure isn't pointing readers at the strongest content — promote the better page.
+      </p>
       <div id="audit-cluster-auth" class="text-sm">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -406,7 +638,13 @@
     <!-- Anchor analysis -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="anchor-block">
       <h3 class="text-lg font-semibold mb-1">Anchor-text analysis</h3>
-      <p class="text-xs text-gray-500 mb-3">pages with high "click here" / generic-anchor share or anchor↔target topic mismatch</p>
+      <p class="text-xs text-gray-500 mb-3">
+        Per target page: top inbound anchors and their share of total inbound anchors.
+        <strong>Generic-anchor share</strong> ("click here", "more", numeric, single-word) is wasted SEO juice —
+        replace with descriptive phrases that include the target page's topic. <strong>Watch for ≥ 50% generic
+        share with ≥ 3 inbound links</strong>; that's the bar for action. The "anchor↔target mismatch" column
+        catches anchors that describe a different topic from the page they link to (template bugs or stale links).
+      </p>
       <div id="audit-anchors" class="text-sm max-h-[28rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -416,14 +654,23 @@
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="external-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <h3 class="text-lg font-semibold mb-1">Most-cited external domains</h3>
-        <p class="text-xs text-gray-500 mb-3">where your authors look for sources</p>
+        <p class="text-xs text-gray-500 mb-3">
+          Where your authors look for sources. <strong>Authoritative-TLD domains (.gov, .edu, Wikipedia, NIH, major journals) are flagged</strong> —
+          these are the citations LLM answer engines weight most. If your top citations are mostly social media (twitter/facebook/youtube) or your
+          own subdomains, you're missing the credibility signal that puts a page in the cite-able tier.
+        </p>
         <div id="audit-ext-domains" class="text-sm max-h-80 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
       </div>
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <h3 class="text-lg font-semibold mb-1">Citation density</h3>
-        <p class="text-xs text-gray-500 mb-3">external links per 1 000 words — pages with no citations look unsourced</p>
+        <p class="text-xs text-gray-500 mb-3">
+          External links per 1 000 words. <strong>Healthy: 5–25 / 1 000 words</strong> for content pages.
+          <strong>Pages with zero outbound citations look unsourced to LLM answer engines</strong> — they may be factual but won't be picked
+          as citations. Add 2–3 links to authoritative sources on every long-form page.
+          <strong>Citation density above 100 / 1 000 words</strong> usually means a list-of-links page, not real content.
+        </p>
         <div id="audit-ext-density" class="text-sm max-h-80 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
@@ -431,7 +678,12 @@
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="broken-block">
-      <h3 class="text-lg font-semibold mb-3">Broken outbound links</h3>
+      <h3 class="text-lg font-semibold mb-1">Broken outbound links</h3>
+      <p class="text-xs text-gray-500 mb-3">
+        External URLs your pages link to that returned a 4xx/5xx status when last checked. <strong>Broken outbound links
+        damage perceived credibility</strong> (Google's quality raters explicitly flag them). Replace with a working source or
+        archive.org snapshot. Only populated when the audit was run with <code>--check-external</code>.
+      </p>
       <div id="audit-broken" class="text-sm max-h-80 overflow-y-auto">
         <div class="text-gray-500">No broken links checked. Re-run with <code>--check-external</code> to verify.</div>
       </div>
@@ -464,6 +716,9 @@
 <script type="application/json" id="data-competitive">__COMPETITIVE_JSON__</script>
 <script type="application/json" id="data-recommendations">__RECOMMENDATIONS_JSON__</script>
 <script type="application/json" id="data-paragraph-density">__PARAGRAPH_DENSITY_JSON__</script>
+<script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
+<script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
+<script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -541,8 +796,11 @@
       const inlinedCompetitive = readInlined('data-competitive');
       const inlinedRecommendations = readInlined('data-recommendations');
       const inlinedParaDensity = readInlined('data-paragraph-density');
+      const inlinedHeaderAnalysis = readInlined('data-header-analysis');
+      const inlinedHeaderScatter = readInlined('data-header-scatter');
+      const inlinedLinkbuilding = readInlined('data-linkbuilding');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -565,8 +823,11 @@
         competitive = inlinedCompetitive || [];
         recommendations = inlinedRecommendations || {};
         paraDensity = inlinedParaDensity || {};
+        headerAnalysis = inlinedHeaderAnalysis || {};
+        headerScatter = inlinedHeaderScatter || {};
+        linkbuilding = inlinedLinkbuilding || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -588,6 +849,9 @@
           loadJSON('competitive_analysis.json').catch(() => []),
           loadJSON('recommendations.json').catch(() => ({})),
           loadJSON('paragraph_density.json').catch(() => ({})),
+          loadJSON('header_analysis.json').catch(() => ({})),
+          loadJSON('header_scatter.json').catch(() => ({})),
+          loadJSON('linkbuilding.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -614,6 +878,9 @@
       state.recPriFilter = 'all';
       state.recCatFilter = 'all';
       state.paraDensity = paraDensity || {};
+      state.headerAnalysis = headerAnalysis || {};
+      state.headerScatter = headerScatter || {};
+      state.linkbuilding = linkbuilding || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -635,6 +902,7 @@
       renderCoverage('all');
       renderAnswerability();
       renderLinkgraph();
+      renderLinkbuilding();
       renderLinkCounts();
       renderParaDensity();
       wireLinkCountButtons();
@@ -646,6 +914,7 @@
       renderExternal();
       renderImprovement();
       renderTitleMismatch();
+      renderHeaderAnalysis();
       renderWrongHome();
       renderParaClusters();
       renderFanout('all');
@@ -866,6 +1135,147 @@
       </tr>`).join('') + '</tbody></table>';
   }
 
+  function renderLinkbuilding() {
+    const block = document.getElementById('linkbuilding-block');
+    const lb = state.linkbuilding || {};
+    const s = lb.summary || {};
+    if (!s.total_links) { block.style.display = 'none'; return; }
+
+    const card = (label, value, hint, hintClass='text-gray-400') => `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="text-2xl font-semibold">${value}</div>
+        <div class="text-xs text-gray-500">${label}</div>
+        ${hint ? `<div class="text-xs ${hintClass} mt-0.5">${hint}</div>` : ''}
+      </div>`;
+    const pct = v => `${(v*100).toFixed(0)}%`;
+    const descClass = s.descriptive_anchor_share >= 0.6 ? 'text-green-600' :
+                      s.descriptive_anchor_share >= 0.4 ? 'text-orange-600' : 'text-red-600';
+    const emptyClass = s.empty_share <= 0.02 ? 'text-green-600' :
+                       s.empty_share <= 0.05 ? 'text-orange-600' : 'text-red-600';
+    const noAltClass = s.image_no_alt_share_of_image_links <= 0.1 ? 'text-green-600' :
+                       s.image_no_alt_share_of_image_links <= 0.3 ? 'text-orange-600' : 'text-red-600';
+    document.getElementById('audit-linkbuilding-summary').innerHTML =
+      card('Total links', s.total_links.toLocaleString(),
+        `${s.internal_links.toLocaleString()} internal · ${s.external_links.toLocaleString()} external`) +
+      card('Internal : external', `${s.internal_external_ratio}:1`,
+        s.internal_external_ratio >= 5 ? 'mostly internal — content site' :
+        s.internal_external_ratio >= 2 ? 'balanced' : 'mostly external — directory / aggregator') +
+      card('Avg in / out per page', `${s.mean_in_degree} / ${s.mean_out_degree}`,
+        `median ${s.median_in_degree.toFixed(0)} / ${s.median_out_degree.toFixed(0)} · p90 ${s.p90_in_degree.toFixed(0)} / ${s.p90_out_degree.toFixed(0)}`) +
+      card('Distinct anchors', s.distinct_anchors.toLocaleString(), 'unique anchor phrases site-wide') +
+      card('Descriptive anchors', pct(s.descriptive_anchor_share),
+        s.descriptive_anchor_share >= 0.6 ? 'good' :
+        s.descriptive_anchor_share >= 0.4 ? 'mixed — replace generic ones' :
+        'low — anchors mostly generic',
+        descClass) +
+      card('Generic anchors', pct(s.generic_anchor_share),
+        s.generic_anchor_share >= 0.4 ? '"click here" / numbers / single words dominate' : 'normal level',
+        s.generic_anchor_share >= 0.4 ? 'text-orange-600' : 'text-gray-400') +
+      card('Empty links', `${s.empty_links} (${pct(s.empty_share)})`,
+        s.empty_links === 0 ? 'no broken anchors' : 'no text, no title, no aria — fix or remove',
+        emptyClass) +
+      card('Image-only without alt', `${s.image_links_no_alt} (${pct(s.image_no_alt_share_of_image_links)} of img links)`,
+        s.image_links_no_alt === 0 ? 'every image link has alt text' : 'add alt text — accessibility + SEO',
+        noAltClass);
+
+    // Anchor scatter
+    const scatter = lb.scatter || {};
+    const anchors = scatter.anchors || [];
+    const scWrap = document.getElementById('audit-linkbuilding-scatter-wrap');
+    const meta = document.getElementById('audit-linkbuilding-scatter-meta');
+    if (!anchors.length) {
+      scWrap.style.display = 'none';
+    } else {
+      meta.textContent = `${scatter.shown}/${scatter.total_distinct_anchors}`;
+      const container = document.getElementById('audit-linkbuilding-scatter');
+      container.innerHTML = '';
+      const margin = { top: 14, right: 16, bottom: 30, left: 36 };
+      const width = container.offsetWidth - margin.left - margin.right;
+      const height = 460 - margin.top - margin.bottom;
+      const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 460);
+      const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+      const xExt = d3.extent(anchors, d => d.x);
+      const yExt = d3.extent(anchors, d => d.y);
+      const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
+      const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
+      const x = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
+      const y = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
+
+      // size dot by usage frequency (sqrt for visual fairness)
+      const maxCount = d3.max(anchors, d => d.count) || 1;
+      const r = d3.scaleSqrt().domain([1, maxCount]).range([3, 11]);
+
+      const tooltip = d3.select('body').append('div')
+        .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+        .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+        .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','340px');
+
+      const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+      const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
+
+      const dotsG = svg.append('g');
+      const dots = dotsG.selectAll('circle').data(anchors).join('circle')
+        .attr('cx', d => x(d.x))
+        .attr('cy', d => y(d.y))
+        .attr('r', d => r(d.count))
+        .attr('fill', d => d.is_generic ? '#dc2626' : (d.external > d.internal ? '#10b981' : '#3b82f6'))
+        .attr('fill-opacity', 0.55)
+        .attr('stroke', d => d.is_generic ? '#7f1d1d' : 'white')
+        .attr('stroke-width', 0.5)
+        .on('mouseover', function(e, d) {
+          d3.select(this).attr('stroke', '#000').attr('stroke-width', 1.5);
+          tooltip.style('visibility','visible').html(
+            `<strong>${escapeHtml(d.anchor)}</strong>
+             <br><span style="color:#9ca3af;font-size:11px">${d.count} usage${d.count === 1 ? '' : 's'} · ${d.internal} internal · ${d.external} external</span>
+             ${d.is_generic ? '<br><span style="color:#fca5a5;font-size:11px">flagged as generic</span>' : ''}`);
+        })
+        .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+        .on('mouseout', function(e, d) {
+          d3.select(this).attr('stroke', d.is_generic ? '#7f1d1d' : 'white').attr('stroke-width', 0.5);
+          tooltip.style('visibility','hidden');
+        });
+
+      const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+        .on('zoom', e => {
+          const nx = e.transform.rescaleX(x);
+          const ny = e.transform.rescaleY(y);
+          xAxis.call(d3.axisBottom(nx).ticks(8));
+          yAxis.call(d3.axisLeft(ny).ticks(8));
+          dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+        });
+      svgOuter.call(zoom);
+
+      // legend
+      svg.append('g').attr('transform', `translate(${width - 200}, 4)`).each(function() {
+        const g = d3.select(this);
+        const items = [
+          ['#3b82f6', 'mostly internal'],
+          ['#10b981', 'mostly external'],
+          ['#dc2626', 'generic anchor'],
+        ];
+        items.forEach((it, i) => {
+          g.append('circle').attr('cx', 6).attr('cy', i*16 + 6).attr('r', 5).attr('fill', it[0]).attr('fill-opacity', 0.6);
+          g.append('text').attr('x', 16).attr('y', i*16 + 10).style('font-size','11px').style('fill','#374151').text(it[1]);
+        });
+      });
+    }
+
+    // Top anchor lists
+    const renderAnchorList = (id, rows, showGenericFlag = false) => {
+      const el = document.getElementById(id);
+      if (!rows || !rows.length) { el.innerHTML = '<div class="text-gray-500">none</div>'; return; }
+      el.innerHTML = rows.slice(0, 30).map(r => `
+        <div class="flex items-center justify-between gap-2 py-0.5 border-b border-gray-100">
+          <span class="truncate ${r.is_generic && showGenericFlag ? 'text-red-700' : ''}">${escapeHtml(r.anchor || '(empty)')}</span>
+          <span class="font-mono text-gray-500">${r.count}</span>
+        </div>`).join('');
+    };
+    renderAnchorList('audit-linkbuilding-top-internal', lb.top_internal_anchors, true);
+    renderAnchorList('audit-linkbuilding-top-external', lb.top_external_anchors, true);
+    renderAnchorList('audit-linkbuilding-top-generic', lb.top_generic_anchors);
+  }
+
   function wireLinkCountButtons() {
     document.querySelectorAll('.lc-btn').forEach(b => b.addEventListener('click', () => {
       state.linkCountMode = b.dataset.linkmode;
@@ -1063,6 +1473,9 @@
     if (state.scatterDataset === 'paragraphs') {
       return (state.paraScatter && state.paraScatter.paragraphs) || [];
     }
+    if (state.scatterDataset === 'headers') {
+      return (state.headerScatter && state.headerScatter.headers) || [];
+    }
     return state.pages || [];
   }
 
@@ -1076,9 +1489,13 @@
       if (state.scatterDataset === 'paragraphs') {
         const total = (state.paraScatter && state.paraScatter.total_paragraphs) || data.length;
         const shown = (state.paraScatter && state.paraScatter.shown) || data.length;
-        subtitle.textContent = `Each dot is a paragraph. ${shown}/${total} shown · UMAP cosine projection. Hover for excerpt, click to open the parent page.`;
+        subtitle.textContent = `Each dot is a paragraph (${shown}/${total} shown), UMAP-projected by content embedding. Tightly-packed paragraphs share a topic; distant ones describe unrelated content. Click to open the parent page.`;
+      } else if (state.scatterDataset === 'headers') {
+        const total = (state.headerScatter && state.headerScatter.total_headers) || data.length;
+        const shown = (state.headerScatter && state.headerScatter.shown) || data.length;
+        subtitle.textContent = `Each dot is a header (H1–H6, ${shown}/${total} shown), projected via the same UMAP as the paragraphs. A header far from the paragraph cloud doesn't describe its host page's content. Color = header level.`;
       } else {
-        subtitle.textContent = 'Each dot is a page. 2D UMAP projection of content embeddings. Hover for details, click to open, scroll to zoom.';
+        subtitle.textContent = 'Each dot is a page, 2D UMAP projection of content embeddings. Tight clusters = related pages; isolated dots = topical outliers. Hover for details, click to open the page, scroll to zoom.';
       }
     }
 
@@ -1102,10 +1519,15 @@
     const xScale = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
     const yScale = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
 
+    const isHdr = state.scatterDataset === 'headers';
     const numClusters = state.scatterDataset === 'paragraphs'
       ? ((state.paraScatter && state.paraScatter.num_clusters) || 1)
       : ((state.scatter && state.scatter.num_clusters) || 1);
     state.clusterColor = d3.scaleOrdinal().domain(d3.range(numClusters)).range(palette);
+    // Header level colors: H1 = red (most important), H6 = grey
+    state.headerLevelColor = d3.scaleOrdinal()
+      .domain([1, 2, 3, 4, 5, 6])
+      .range(['#dc2626', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#94a3b8']);
     const maxDrift = (state.scatter && state.scatter.max_drift) || 1;
     state.driftColor = d3.scaleSequential(d3.interpolateRgbBasis(['#16a34a', '#f59e0b', '#dc2626']))
       .domain([0, maxDrift]);
@@ -1115,10 +1537,11 @@
       .append('rect').attr('width', width).attr('height', height);
 
     const isPara = state.scatterDataset === 'paragraphs';
-    const baseR = isPara ? 2.5 : 4;
-    const hoverR = isPara ? 5 : 7;
-    const baseOpacity = isPara ? 0.65 : 0.75;
-    const baseStroke = isPara ? 0.3 : 0.5;
+    const isHeader = state.scatterDataset === 'headers';
+    const baseR = isHeader ? 3 : (isPara ? 2.5 : 4);
+    const hoverR = isHeader ? 6 : (isPara ? 5 : 7);
+    const baseOpacity = isHeader ? 0.8 : (isPara ? 0.65 : 0.75);
+    const baseStroke = isHeader ? 0.5 : (isPara ? 0.3 : 0.5);
 
     const dotsGroup = svg.append('g').attr('clip-path', `url(#${clipId})`);
     const dots = dotsGroup.selectAll('circle')
@@ -1144,7 +1567,14 @@
     dots.on('mouseover', function(event, d) {
       d3.select(this).attr('r', hoverR).attr('stroke', '#000').attr('stroke-width', 1.5);
       let body;
-      if (isPara) {
+      if (isHeader) {
+        body = `
+          <strong style="color:${state.headerLevelColor(d.level)}">H${d.level}</strong>
+          <strong>${escapeHtml(d.text)}</strong>
+          <br><span style="font-size:12px;color:#93c5fd">${escapeHtml(d.url)}</span>
+          <br><span style="font-size:12px;color:#9ca3af">${escapeHtml(d.title || '')}</span>
+          <br><span style="font-size:11px;color:#60a5fa">Click to open the parent page</span>`;
+      } else if (isPara) {
         const sec = state.urlToSection.get(d.url) || '(root)';
         body = `
           <strong>${escapeHtml(d.title || '(untitled)')}</strong>
@@ -1187,18 +1617,22 @@
     svgOuter.call(zoom);
     svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
 
-    applyMode(isPara ? 'cluster' : (state.mode || 'section'));
+    applyMode(isHeader ? 'level' : (isPara ? 'cluster' : (state.mode || 'section')));
   }
 
   function applyMode(mode) {
     if (!state.dots) return;
     const isPara = state.scatterDataset === 'paragraphs';
-    // Paragraphs only support section + cluster; force cluster fallback for drift/flags.
+    const isHdr = state.scatterDataset === 'headers';
+    // Paragraphs support section + cluster only; headers always color by level.
     if (isPara && (mode === 'drift' || mode === 'flags')) mode = 'cluster';
+    if (isHdr) mode = 'level';
     state.mode = mode;
     document.querySelectorAll('.mode-btn').forEach(b => {
       const on = b.dataset.mode === mode;
-      const disabled = isPara && (b.dataset.mode === 'drift' || b.dataset.mode === 'flags');
+      const disabled =
+        (isPara && (b.dataset.mode === 'drift' || b.dataset.mode === 'flags')) ||
+        isHdr;  // every standard color mode is irrelevant for headers
       b.classList.toggle('bg-blue-600', on);
       b.classList.toggle('text-white', on);
       b.classList.toggle('border-blue-600', on);
@@ -1221,6 +1655,7 @@
   }
 
   function colorFor(d, mode) {
+    if (mode === 'level') return state.headerLevelColor(d.level || 1);
     if (mode === 'section') return state.sectionColor(sectionFor(d));
     if (mode === 'cluster') return state.clusterColor(d.cluster);
     if (mode === 'drift') return state.driftColor(d.drift_section);
@@ -1258,7 +1693,12 @@
   function renderLegend(mode) {
     const el = document.getElementById('audit-legend');
     el.innerHTML = '';
-    if (mode === 'section') {
+    if (mode === 'level') {
+      el.innerHTML = [1,2,3,4,5,6].map(lv => `
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200">
+          <span class="w-3 h-3 rounded-full mr-1.5" style="background:${state.headerLevelColor(lv)}"></span>H${lv}
+        </span>`).join('');
+    } else if (mode === 'section') {
       const sections = state.sectionColor.domain();
       el.innerHTML = sections.map(s => `
         <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200">
@@ -1297,7 +1737,12 @@
       b.classList.toggle('text-white', on);
       b.classList.toggle('border-blue-600', on);
       const hasParas = ((state.paraScatter && state.paraScatter.paragraphs) || []).length > 0;
+      const hasHdrs = ((state.headerScatter && state.headerScatter.headers) || []).length > 0;
       if (b.dataset.dataset === 'paragraphs' && !hasParas) {
+        b.classList.add('opacity-40', 'cursor-not-allowed');
+        b.disabled = true;
+      }
+      if (b.dataset.dataset === 'headers' && !hasHdrs) {
         b.classList.add('opacity-40', 'cursor-not-allowed');
         b.disabled = true;
       }
@@ -1718,6 +2163,88 @@
             ${r.reasons.map(x => `<li>${escapeHtml(x)}</li>`).join('')}
           </ul>
         </div>`).join('');
+  }
+
+  function renderHeaderAnalysis() {
+    const block = document.getElementById('headers-block');
+    const ha = state.headerAnalysis || {};
+    const summary = ha.summary || {};
+    if (!summary.total_pages) { block.style.display = 'none'; return; }
+
+    const card = (label, value, hint, hintClass='text-gray-400') => `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="text-2xl font-semibold">${value}</div>
+        <div class="text-xs text-gray-500">${label}</div>
+        ${hint ? `<div class="text-xs ${hintClass} mt-0.5">${hint}</div>` : ''}
+      </div>`;
+    const missingPct = summary.total_pages ? Math.round(summary.pages_missing_h1 / summary.total_pages * 100) : 0;
+    const multiPct = summary.total_pages ? Math.round(summary.pages_multi_h1 / summary.total_pages * 100) : 0;
+    document.getElementById('audit-headers-summary').innerHTML =
+      card('Total headers', summary.total_headers.toLocaleString(),
+        `H1: ${summary.by_level.h1} · H2: ${summary.by_level.h2} · H3: ${summary.by_level.h3} · H4+: ${summary.by_level.h4 + summary.by_level.h5 + summary.by_level.h6}`) +
+      card('Pages missing H1', `${summary.pages_missing_h1} (${missingPct}%)`,
+        missingPct === 0 ? 'all pages have an H1' : 'every page should have exactly one H1',
+        missingPct === 0 ? 'text-green-600' : 'text-red-600') +
+      card('Pages with multiple H1', `${summary.pages_multi_h1} (${multiPct}%)`,
+        multiPct === 0 ? '—' : 'pick one canonical H1 per page',
+        multiPct === 0 ? 'text-green-600' : 'text-orange-600') +
+      card('Drifty headers', summary.drifty_headers.toLocaleString(),
+        'cosine to host page < 0.65 — header doesn\'t describe its content',
+        summary.drifty_headers ? 'text-orange-600' : 'text-green-600') +
+      card('Title↔H1 mismatch', summary.title_h1_misaligned.toLocaleString(),
+        'cosine < 0.6 — title and H1 disagree on the page topic',
+        summary.title_h1_misaligned ? 'text-orange-600' : 'text-green-600');
+
+    const struct = ha.structural_issues || [];
+    document.getElementById('audit-headers-structural').innerHTML = struct.length
+      ? struct.slice(0, 60).map(r => `
+          <div class="py-1.5 border-b border-gray-100">
+            <div class="flex items-center justify-between gap-2">
+              <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+              <span class="text-xs font-mono text-gray-500">${r.header_count} hdrs</span>
+            </div>
+            <div class="text-xs text-red-700">${escapeHtml(r.problems.join(' · '))}</div>
+            ${r.h1 ? `<div class="text-xs text-gray-500 mt-0.5 truncate">current H1: <em>${escapeHtml(r.h1)}</em></div>` : ''}
+          </div>`).join('')
+      : '<div class="text-gray-500">No structural issues found.</div>';
+
+    const titleH1 = ha.title_h1_misaligned || [];
+    document.getElementById('audit-headers-titleh1').innerHTML = titleH1.length
+      ? titleH1.slice(0, 60).map(r => `
+          <div class="py-1.5 border-b border-gray-100">
+            <div class="flex items-center justify-between gap-2">
+              <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+              <span class="font-mono text-orange-700 text-xs">${r.title_to_h1_cosine}</span>
+            </div>
+            <div class="text-xs text-gray-500 mt-0.5">title: <em>${escapeHtml(r.title || '')}</em></div>
+            <div class="text-xs text-gray-500">H1:    <em>${escapeHtml(r.h1)}</em></div>
+          </div>`).join('')
+      : '<div class="text-gray-500">All title/H1 pairs are aligned.</div>';
+
+    const drifty = ha.drifty_headers || [];
+    document.getElementById('audit-headers-drifty').innerHTML = drifty.length
+      ? drifty.slice(0, 80).map(r => `
+          <div class="py-1.5 border-b border-gray-100 flex items-center gap-2">
+            <span class="font-mono text-xs px-1.5 py-0.5 rounded text-white" style="background:${state.headerLevelColor ? state.headerLevelColor(r.level) : '#dc2626'}">H${r.level}</span>
+            <span class="flex-1 truncate"><em>${escapeHtml(r.text)}</em></span>
+            <span class="font-mono text-xs text-orange-700">${r.cosine_to_page}</span>
+            <a class="text-blue-600 hover:underline text-xs truncate max-w-xs" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          </div>`).join('')
+      : '<div class="text-gray-500">All headers describe their host content.</div>';
+
+    const kw = ha.keyword_frequency || {};
+    const cols = ['h1', 'h2', 'h3'].filter(lv => (kw[lv] || []).length).map(lv => {
+      const items = kw[lv].slice(0, 15).map(k =>
+        `<li class="flex items-center justify-between"><span>${escapeHtml(k.keyword)}</span><span class="text-gray-500 font-mono">${k.count} · ${k.documents}p</span></li>`
+      ).join('');
+      return `<div>
+        <div class="font-semibold mb-1">${lv.toUpperCase()} · top keywords</div>
+        <ul class="space-y-0.5">${items}</ul>
+        <div class="text-gray-400 mt-1">count · pages</div>
+      </div>`;
+    }).join('');
+    document.getElementById('audit-headers-keywords').innerHTML = cols ||
+      '<div class="text-gray-500">No header keyword data.</div>';
   }
 
   function renderTitleMismatch() {

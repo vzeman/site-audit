@@ -14,16 +14,23 @@ import numpy as np
 LOG = logging.getLogger(__name__)
 
 
+def _stub_coords(n: int) -> np.ndarray:
+    coords = np.zeros((n, 2), dtype=np.float32)
+    for i in range(n):
+        coords[i, 0] = float(i)
+    return coords
+
+
 def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray, np.ndarray]:
     """Return (cluster_labels, coords[n, 2])."""
     n, d = embeddings.shape
-    if n < 3:
-        # Degenerate sites: stub coordinates so the UI still renders.
+    # UMAP's spectral init uses scipy.sparse.linalg.eigsh which requires
+    # the matrix dimension to exceed the eigenvalue count. With
+    # n_components=2 it asks for 3 eigenvalues, so n=3,4 hit
+    # "k >= N" errors. Stub coords for any site that small.
+    if n < 5:
         labels = np.zeros(n, dtype=int)
-        coords = np.zeros((n, 2), dtype=np.float32)
-        for i in range(n):
-            coords[i, 0] = float(i)
-        return labels, coords
+        return labels, _stub_coords(n)
 
     import faiss  # type: ignore
 
@@ -44,5 +51,9 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
         metric="cosine",
         random_state=42,
     )
-    coords = reducer.fit_transform(emb_f32)
+    try:
+        coords = reducer.fit_transform(emb_f32)
+    except Exception as exc:  # rare scipy/eigensolver corner cases on tiny corpora
+        LOG.warning("UMAP failed on %d-page site (%s); falling back to stub coords", n, exc)
+        coords = _stub_coords(n)
     return cluster_labels, coords.astype(np.float32)

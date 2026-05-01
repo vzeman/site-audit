@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import compare as _compare
 from .embedder import DEFAULT_MODEL
 from .pipeline import PipelineConfig, project_paths, run
 from .server import serve
@@ -29,6 +30,26 @@ def _setup_logging(verbose: bool) -> None:
 
 
 def _run_command(args: argparse.Namespace) -> int:
+    # `--clean` is a single-flag shortcut for "wipe the project's cache and
+    # re-run from scratch". It deletes the cache directory (HTTP + embedding
+    # + paragraph npz) before the pipeline starts; the `--no-*-cache` flags
+    # only *bypass* the caches, they don't reset them. Use --clean when the
+    # crawler / extractor / embedder logic itself has changed and you want
+    # the new logic applied to every page.
+    if args.clean:
+        from .pipeline import PipelineConfig as _PC
+        probe = _PC(
+            domain=args.domain,
+            projects_root=Path(args.projects_root),
+            cache_dir=Path(args.cache_dir) if args.cache_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        cache_dir, _ = project_paths(probe)
+        if cache_dir.exists():
+            import shutil
+            shutil.rmtree(cache_dir)
+            print(f"  cleaned cache: {cache_dir}")
+
     config = PipelineConfig(
         domain=args.domain,
         projects_root=Path(args.projects_root),
@@ -93,6 +114,42 @@ def _run_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare_command(args: argparse.Namespace) -> int:
+    projects_root = Path(args.projects_root)
+    if args.all:
+        domains = sorted(p.name for p in projects_root.iterdir()
+                         if p.is_dir() and not p.name.startswith("_")
+                         and (p / "report" / "site_metrics.json").exists())
+    else:
+        domains = list(args.domains)
+    if len(domains) < 2:
+        print("compare needs at least two domains with completed reports.")
+        return 1
+
+    print(f"Comparing {len(domains)} domains: {', '.join(domains)}")
+    payload = _compare.build_payload(domains, projects_root)
+    if not payload.get("domains"):
+        print("No domains had a usable report — nothing to compare.")
+        return 1
+
+    out_dir = projects_root / "_compare" / args.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "comparison.json").write_text(
+        __import__("json").dumps(payload, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    template = Path(__file__).resolve().parent.parent / "ui" / "compare.html"
+    if template.is_file():
+        out_html = out_dir / "index.html"
+        _compare.write_html(template, payload, out_html)
+        print(f"Wrote {out_html}")
+    else:
+        print(f"compare.html template missing at {template}; only JSON written.")
+
+    return 0
+
+
 def _serve_command(args: argparse.Namespace) -> int:
     here = Path(__file__).resolve().parent.parent
     ui_dir = Path(args.ui_dir) if args.ui_dir else here / "ui"
@@ -124,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--cache-dir", default=None, help="Override cache directory")
     run_p.add_argument("--output-dir", default=None, help="Override report directory")
     run_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
-    run_p.add_argument("--max-pages", type=int, default=2000)
+    run_p.add_argument("--max-pages", type=int, default=10000)
     run_p.add_argument("--workers", type=int, default=8)
     run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)
@@ -135,6 +192,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--ignore-robots", action="store_true", help="Ignore robots.txt (use sparingly)")
     run_p.add_argument("--no-http-cache", action="store_true")
     run_p.add_argument("--no-embedding-cache", action="store_true")
+    run_p.add_argument("--clean", action="store_true",
+                       help="Delete the project's cache directory before running. "
+                       "Use after a crawler/extractor/embedder change so every page is re-processed.")
     run_p.add_argument("--no-scatterplot", action="store_true")
     run_p.add_argument("--no-cluster-labels", action="store_true")
     run_p.add_argument("--no-keyword-coverage", action="store_true")
@@ -153,6 +213,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--link-similarity-threshold", type=float, default=0.85, help="Min similarity for an internal-link recommendation")
     run_p.add_argument("--link-recommendations", type=int, default=75)
     run_p.set_defaults(func=_run_command)
+
+    cmp_p = sub.add_parser("compare", help="Build a side-by-side comparison HTML across multiple already-crawled domains")
+    cmp_p.add_argument("domains", nargs="*", help="Domains to compare (use --all to compare every project)")
+    cmp_p.add_argument("--all", action="store_true", help="Compare every domain with a completed report under projects/")
+    cmp_p.add_argument("--projects-root", default="projects")
+    cmp_p.add_argument("--name", default="latest", help="Subdir under projects/_compare/ to write into (default: latest)")
+    cmp_p.set_defaults(func=_compare_command)
 
     serve_p = sub.add_parser("serve", help="Serve the local viewer for a previously-generated report")
     serve_p.add_argument("domain", help="Domain whose report to serve")

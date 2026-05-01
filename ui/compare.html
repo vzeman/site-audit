@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>site-audit — comparison</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    th, td { white-space: nowrap; }
+    .heat { background-color: var(--bg, #fff); }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-screen-2xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold">site-audit comparison</h1>
+      <p class="text-gray-600 text-sm mt-1" id="hdr-meta">…</p>
+    </header>
+
+    <!-- Leaderboard -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Leaderboard</h2>
+          <p class="text-xs text-gray-500 mt-1" id="lb-meta">
+            Side-by-side metrics across domains. Cells are heat-mapped <em>per column</em>: <span class="text-green-700">green</span> = best for that metric's "good" direction,
+            <span class="text-red-700">red</span> = worst. Click any column header to sort. Switch tabs above to see different metric groups
+            (Topic shape, GEO, Linking, Density, Action plan).
+          </p>
+        </div>
+        <div class="flex gap-2 text-xs flex-wrap" id="lb-group-buttons" role="group">
+          <button data-group="overview"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Overview</button>
+          <button data-group="topic"     class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Topic shape</button>
+          <button data-group="geo"       class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">GEO answer-ability</button>
+          <button data-group="linking"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Internal linking</button>
+          <button data-group="linkbuilding" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Linkbuilding</button>
+          <button data-group="headers"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Headers</button>
+          <button data-group="density"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Paragraph density</button>
+          <button data-group="actions"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Action plan</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="leaderboard">
+          <thead class="bg-gray-100 text-xs uppercase text-gray-600"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="text-xs text-gray-500 mt-2">cell heatmap is per-column: green = best (for that metric's "good" direction), red = worst</div>
+    </section>
+
+    <!-- Combined scatter -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="scatter-section">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Combined Semantic Scatter</h2>
+          <p class="text-xs text-gray-500 mt-1" id="sc-meta">
+            Every domain's pages projected via <em>one shared UMAP</em> (the only fit that makes cross-domain proximity meaningful).
+            <strong>Domains that overlap in the same region cover the same topics</strong> — direct competitors. A domain that sits as
+            an island far from the others is either covering a unique niche or has off-topic content.
+            Use the chips on the right to toggle individual domains in / out.
+          </p>
+        </div>
+        <div class="flex gap-2 text-xs" id="sc-domain-toggles" role="group"></div>
+      </div>
+      <div id="combined-scatter" class="w-full" style="min-height: 600px;"></div>
+    </section>
+
+    <!-- Distribution overlays -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Distribution overlays</h2>
+          <p class="text-xs text-gray-500 mt-1">
+            Each line is one domain's distribution of the chosen metric across its pages, normalised to <em>share of pages</em>
+            so different-sized sites can be compared honestly. The y-axis is "what share of pages had this value".
+          </p>
+        </div>
+        <div class="flex gap-2 text-xs flex-wrap" id="dist-buttons" role="group">
+          <button data-dist="in_degree"     class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Inbound links / page</button>
+          <button data-dist="out_degree"    class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Outbound links / page</button>
+          <button data-dist="answerability" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">GEO score / page</button>
+          <button data-dist="paragraph_density_per_page" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Paragraph link density / page</button>
+        </div>
+      </div>
+      <div id="dist-chart" class="w-full" style="min-height: 360px;"></div>
+      <div id="dist-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      <div id="dist-help" class="text-xs text-gray-600 mt-3 p-3 bg-gray-50 rounded"></div>
+    </section>
+  </div>
+
+<script type="application/json" id="data-compare">__COMPARE_JSON__</script>
+<script>
+(function(){
+  const PALETTE = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf','#3b82f6','#10b981','#f59e0b','#a855f7','#ec4899','#14b8a6'];
+
+  const escapeHtml = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  const data = (function(){
+    const el = document.getElementById('data-compare');
+    const raw = el ? el.textContent.trim() : '';
+    if (!raw || raw.startsWith('__')) return null;
+    try { return JSON.parse(raw); } catch (e) { console.error(e); return null; }
+  })();
+
+  if (!data || !data.domains || !data.domains.length) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="max-w-screen-2xl mx-auto p-6 text-red-700">No comparison data — run <code>site-audit compare D1 D2 …</code> first.</div>');
+    return;
+  }
+
+  const domainColor = d3.scaleOrdinal().domain(data.domains).range(PALETTE);
+
+  document.getElementById('hdr-meta').textContent =
+    `${data.domains.length} domains · ${data.scatter_total || 0} pages projected · ` +
+    data.domains.join(' · ');
+
+  // ============================================================
+  // Leaderboard
+  // ============================================================
+  const COLUMN_GROUPS = {
+    overview: [
+      { key: 'pages',                 label: 'Pages',        better: 'na', fmt: 'int' },
+      { key: 'recommendations_total', label: 'Actions',      better: 'na', fmt: 'int' },
+      { key: 'rec_high',              label: 'High pri',     better: 'low', fmt: 'int' },
+      { key: 'calibrated_focus',      label: 'Calibrated focus', better: 'high', fmt: '0.000' },
+      { key: 'answerability_median',  label: 'GEO median',   better: 'high', fmt: '0.0' },
+      { key: 'orphan_share',          label: 'Orphan share', better: 'low',  fmt: 'pct' },
+      { key: 'descriptive_anchor_share', label: 'Descriptive anchors', better: 'high', fmt: 'pct' },
+      { key: 'pages_missing_h1_share',label: 'Missing H1',   better: 'low',  fmt: 'pct' },
+      { key: 'spammy_paragraph_count',label: 'Spammy paras', better: 'low',  fmt: 'int' },
+    ],
+    topic: [
+      { key: 'pages',              label: 'Pages',           better: 'na',   fmt: 'int' },
+      { key: 'site_focus_score',   label: 'Raw focus',       better: 'high', fmt: '0.000' },
+      { key: 'calibrated_focus',   label: 'Calibrated focus',better: 'high', fmt: '0.000' },
+      { key: 'site_radius',        label: 'Radius',          better: 'low',  fmt: '0.000' },
+      { key: 'topic_dimension',    label: 'Topic dim',       better: 'na',   fmt: '0.0' },
+      { key: 'section_coherence',  label: 'Section coherence', better: 'high', fmt: '0.00' },
+    ],
+    geo: [
+      { key: 'pages',                 label: 'Pages',     better: 'na',   fmt: 'int' },
+      { key: 'answerability_median',  label: 'GEO median',better: 'high', fmt: '0.0' },
+      { key: 'answerability_p90',     label: 'GEO p90',   better: 'high', fmt: '0.0' },
+      { key: 'answerability_below_4_share', label: 'GEO < 4 share', better: 'low', fmt: 'pct' },
+      { key: 'citation_density_median', label: 'Citation density', better: 'high', fmt: '0.0' },
+    ],
+    linking: [
+      { key: 'pages',             label: 'Pages',        better: 'na',   fmt: 'int' },
+      { key: 'median_in_degree',  label: 'In-degree median', better: 'high', fmt: '0' },
+      { key: 'p90_in_degree',     label: 'In-degree p90',    better: 'high', fmt: '0' },
+      { key: 'median_out_degree', label: 'Out-degree median',better: 'high', fmt: '0' },
+      { key: 'orphan_share',      label: 'Orphan share', better: 'low',  fmt: 'pct' },
+    ],
+    density: [
+      { key: 'pages',                       label: 'Pages',          better: 'na',   fmt: 'int' },
+      { key: 'paragraph_density_median',    label: 'Density median',  better: 'na',   fmt: '0.00' },
+      { key: 'paragraph_density_p90',       label: 'Density p90',     better: 'na',   fmt: '0.00' },
+      { key: 'spammy_paragraph_count',      label: 'Spammy paras',    better: 'low',  fmt: 'int' },
+      { key: 'zero_link_paragraph_share',   label: 'Zero-link share', better: 'low',  fmt: 'pct' },
+    ],
+    actions: [
+      { key: 'pages',                 label: 'Pages',     better: 'na', fmt: 'int' },
+      { key: 'recommendations_total', label: 'Total',     better: 'low', fmt: 'int' },
+      { key: 'rec_high',              label: 'High',      better: 'low', fmt: 'int' },
+      { key: 'rec_medium',            label: 'Medium',    better: 'low', fmt: 'int' },
+      { key: 'rec_content_debt',      label: 'Content debt', better: 'low', fmt: 'int' },
+      { key: 'rec_coverage',          label: 'Coverage',     better: 'low', fmt: 'int' },
+      { key: 'rec_geo',               label: 'GEO',          better: 'low', fmt: 'int' },
+      { key: 'rec_linking',           label: 'Linking',      better: 'low', fmt: 'int' },
+      { key: 'rec_onpage',            label: 'On-page',      better: 'low', fmt: 'int' },
+    ],
+    linkbuilding: [
+      { key: 'pages',                    label: 'Pages',          better: 'na',   fmt: 'int' },
+      { key: 'total_links',              label: 'Total links',    better: 'na',   fmt: 'int' },
+      { key: 'internal_links',           label: 'Internal',       better: 'na',   fmt: 'int' },
+      { key: 'external_links',           label: 'External',       better: 'na',   fmt: 'int' },
+      { key: 'internal_external_ratio',  label: 'Int : Ext',      better: 'na',   fmt: '0.0' },
+      { key: 'distinct_anchors',         label: 'Distinct anchors', better: 'high', fmt: 'int' },
+      { key: 'descriptive_anchor_share', label: 'Descriptive %',  better: 'high', fmt: 'pct' },
+      { key: 'generic_anchor_share',     label: 'Generic %',      better: 'low',  fmt: 'pct' },
+      { key: 'empty_links',              label: 'Empty links',    better: 'low',  fmt: 'int' },
+      { key: 'empty_link_share',         label: 'Empty %',        better: 'low',  fmt: 'pct' },
+      { key: 'image_links_no_alt',       label: 'Img w/o alt',    better: 'low',  fmt: 'int' },
+      { key: 'image_no_alt_share',       label: 'Img w/o alt %',  better: 'low',  fmt: 'pct' },
+    ],
+    headers: [
+      { key: 'pages',                  label: 'Pages',          better: 'na',   fmt: 'int' },
+      { key: 'headers_total',          label: 'Total H1–H6',    better: 'na',   fmt: 'int' },
+      { key: 'pages_missing_h1',       label: 'Missing H1',     better: 'low',  fmt: 'int' },
+      { key: 'pages_missing_h1_share', label: 'Missing H1 %',   better: 'low',  fmt: 'pct' },
+      { key: 'pages_multi_h1',         label: 'Multi-H1',       better: 'low',  fmt: 'int' },
+      { key: 'drifty_headers',         label: 'Drifty headers', better: 'low',  fmt: 'int' },
+      { key: 'title_h1_misaligned',    label: 'Title↔H1 off',   better: 'low',  fmt: 'int' },
+    ],
+  };
+
+  let lbGroup = 'overview';
+  let lbSort = { key: null, dir: 1 };
+
+  function fmt(v, code) {
+    if (v == null || isNaN(v)) return '—';
+    if (code === 'int')   return Math.round(v).toLocaleString();
+    if (code === 'pct')   return (v * 100).toFixed(1) + '%';
+    if (code === '0.000') return Number(v).toFixed(3);
+    if (code === '0.00')  return Number(v).toFixed(2);
+    if (code === '0.0')   return Number(v).toFixed(1);
+    return String(v);
+  }
+
+  function heatColor(v, vmin, vmax, better) {
+    if (better === 'na' || vmin === vmax) return '';
+    const t = (v - vmin) / (vmax - vmin);  // 0 = min, 1 = max
+    const score = better === 'high' ? t : (1 - t);
+    // green = high score (good), red = low score (bad)
+    const r = Math.round(255 * (1 - score) + 220 * score);
+    const g = Math.round(220 * score + 240 * (1 - score) * 0.5);
+    const b = Math.round(220 * score * 0.5);
+    return `rgba(${r},${Math.min(255,g+40)},${Math.min(255,b+40)},0.55)`;
+  }
+
+  function renderLeaderboard() {
+    document.querySelectorAll('.lb-group').forEach(b => {
+      const on = b.dataset.group === lbGroup;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const cols = COLUMN_GROUPS[lbGroup];
+    const tbl = document.getElementById('leaderboard');
+
+    // Compute per-column min/max for heat scaling
+    const colStats = cols.map(c => {
+      const vals = data.leaderboard.map(r => Number(r[c.key])).filter(v => !isNaN(v));
+      return { ...c, vmin: vals.length ? Math.min(...vals) : 0, vmax: vals.length ? Math.max(...vals) : 0 };
+    });
+
+    let rows = data.leaderboard.slice();
+    if (lbSort.key) {
+      rows.sort((a, b) => (Number(a[lbSort.key]) - Number(b[lbSort.key])) * lbSort.dir);
+    }
+
+    const head = '<tr>' +
+      `<th class="px-3 py-2 text-left">Domain</th>` +
+      colStats.map(c => `<th class="px-3 py-2 text-right cursor-pointer hover:underline" data-sort-key="${c.key}">${escapeHtml(c.label)}${lbSort.key === c.key ? (lbSort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('') +
+      '</tr>';
+    tbl.querySelector('thead').innerHTML = head;
+
+    const body = rows.map(r => {
+      const dot = `<span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(r.domain)}"></span>`;
+      const cells = colStats.map(c => {
+        const v = Number(r[c.key]);
+        const bg = isNaN(v) ? '' : heatColor(v, c.vmin, c.vmax, c.better);
+        return `<td class="px-3 py-1.5 text-right font-mono heat" style="--bg:${bg}; background:${bg}">${fmt(r[c.key], c.fmt)}</td>`;
+      }).join('');
+      return `<tr class="border-b border-gray-100"><td class="px-3 py-1.5">${dot}<a class="text-blue-600 hover:underline" href="../../${escapeHtml(r.domain)}/report/index.html" target="_blank" rel="noopener">${escapeHtml(r.domain)}</a></td>${cells}</tr>`;
+    }).join('');
+    tbl.querySelector('tbody').innerHTML = body;
+
+    tbl.querySelectorAll('th[data-sort-key]').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.sortKey;
+        if (lbSort.key === key) lbSort.dir *= -1;
+        else { lbSort.key = key; lbSort.dir = -1; }
+        renderLeaderboard();
+      });
+    });
+  }
+
+  document.querySelectorAll('.lb-group').forEach(b => b.addEventListener('click', () => {
+    lbGroup = b.dataset.group;
+    lbSort = { key: null, dir: 1 };
+    renderLeaderboard();
+  }));
+  renderLeaderboard();
+
+  // ============================================================
+  // Combined scatter
+  // ============================================================
+  const sc = data.scatter || [];
+  const visible = new Set(data.domains);
+
+  // Build domain toggle chips
+  const togglesRoot = document.getElementById('sc-domain-toggles');
+  togglesRoot.innerHTML = data.domains.map(d => `
+    <button class="sc-toggle px-2 py-1 rounded border border-gray-300 bg-white text-gray-700" data-domain="${escapeHtml(d)}">
+      <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${domainColor(d)}"></span>${escapeHtml(d)}
+    </button>
+  `).join('');
+  togglesRoot.querySelectorAll('.sc-toggle').forEach(b => {
+    b.classList.add('bg-blue-600','text-white','border-blue-600');
+    b.addEventListener('click', () => {
+      const d = b.dataset.domain;
+      if (visible.has(d)) visible.delete(d); else visible.add(d);
+      const on = visible.has(d);
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+      drawScatter();
+    });
+  });
+
+  function drawScatter() {
+    const container = document.getElementById('combined-scatter');
+    container.innerHTML = '';
+    const points = sc.filter(p => visible.has(p.domain));
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No domains selected.</div>';
+      return;
+    }
+    const margin = { top: 20, right: 20, bottom: 40, left: 40 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 600 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg')
+      .attr('width', container.offsetWidth).attr('height', 600);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
+    const x = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
+
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+
+    const xAxis = svg.append('g').attr('transform',`translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
+
+    const dotsG = svg.append('g');
+    const dots = dotsG.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x))
+      .attr('cy', d => y(d.y))
+      .attr('r', 2.6)
+      .attr('fill', d => domainColor(d.domain))
+      .attr('fill-opacity', 0.7)
+      .attr('stroke', 'white').attr('stroke-width', 0.3)
+      .style('cursor','pointer')
+      .on('click', (e,d) => { e.stopPropagation(); window.open(d.url,'_blank','noopener'); })
+      .on('mouseover', function(e,d){
+        d3.select(this).attr('r',5).attr('stroke','#000').attr('stroke-width',1);
+        tooltip.style('visibility','visible').html(
+          `<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong>
+           <br><strong>${escapeHtml(d.title || '(untitled)')}</strong>
+           <br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url)}</span>
+           <br><span style="color:#9ca3af;font-size:11px">${escapeHtml(d.section || '(root)')}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('r',2.6).attr('stroke','white').attr('stroke-width',0.3); tooltip.style('visibility','hidden'); });
+
+    const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        xAxis.call(d3.axisBottom(nx).ticks(8));
+        yAxis.call(d3.axisLeft(ny).ticks(8));
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+    svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
+  }
+  drawScatter();
+
+  // ============================================================
+  // Distribution overlays
+  // ============================================================
+  let distMetric = 'in_degree';
+  function renderDist() {
+    document.querySelectorAll('.dist-btn').forEach(b => {
+      const on = b.dataset.dist === distMetric;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const container = document.getElementById('dist-chart');
+    container.innerHTML = '';
+    const series = (data.distributions || []).map(d => ({ domain: d.domain, dist: d[distMetric] || { values: [] }})).filter(s => s.dist.values.length);
+    if (!series.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No data.</div>';
+      document.getElementById('dist-legend').innerHTML = '';
+      return;
+    }
+    const margin = { top: 14, right: 20, bottom: 36, left: 50 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 360 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 360);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // shared x axis: cap at p99 across all series so outliers don't squash the chart
+    const allValues = [].concat(...series.map(s => s.dist.values));
+    allValues.sort((a,b) => a-b);
+    const p99 = allValues[Math.floor(allValues.length * 0.99)] || allValues[allValues.length-1] || 1;
+    const xMax = Math.max(p99, 1);
+    const x = d3.scaleLinear().domain([0, xMax]).range([0, width]);
+    const numBins = 30;
+    const binner = d3.bin().domain([0, xMax]).thresholds(numBins);
+
+    // Per-series histograms, normalised to *share of pages* so domains with
+    // wildly different page counts can be overlaid honestly.
+    const seriesBinned = series.map(s => {
+      const clipped = s.dist.values.map(v => Math.min(v, xMax));
+      const bins = binner(clipped);
+      const total = clipped.length || 1;
+      bins.forEach(b => b._share = b.length / total);
+      return { ...s, bins };
+    });
+    const yMax = d3.max(seriesBinned, s => d3.max(s.bins, b => b._share)) || 1;
+    const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
+
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    svg.append('g').call(d3.axisLeft(y).ticks(6).tickFormat(d => (d*100).toFixed(0) + '%'));
+    svg.append('text').attr('x', width/2).attr('y', height + 30).attr('text-anchor','middle')
+      .style('font-size','11px').style('fill','#6b7280').text(METRIC_AXIS_LABEL[distMetric] || '');
+    svg.append('text').attr('transform','rotate(-90)').attr('x', -height/2).attr('y', -38)
+      .attr('text-anchor','middle').style('font-size','11px').style('fill','#6b7280').text('share of pages');
+
+    seriesBinned.forEach(s => {
+      const path = d3.line()
+        .x(b => x((b.x0 + b.x1) / 2))
+        .y(b => y(b._share))
+        .curve(d3.curveMonotoneX);
+      svg.append('path').datum(s.bins).attr('fill', 'none')
+        .attr('stroke', domainColor(s.domain)).attr('stroke-width', 2).attr('stroke-opacity', 0.85)
+        .attr('d', path);
+      svg.append('g').selectAll('rect').data(s.bins).join('rect')
+        .attr('x', b => x(b.x0)).attr('y', b => y(b._share))
+        .attr('width', b => Math.max(0, x(b.x1) - x(b.x0)))
+        .attr('height', b => height - y(b._share))
+        .attr('fill', domainColor(s.domain)).attr('fill-opacity', 0.10);
+    });
+
+    document.getElementById('dist-legend').innerHTML = seriesBinned.map(s =>
+      `<span class="inline-flex items-center"><span class="w-3 h-0.5 mr-1.5" style="background:${domainColor(s.domain)}"></span>${escapeHtml(s.domain)} (median ${s.dist.median.toFixed(2)} · p90 ${s.dist.p90.toFixed(2)})</span>`
+    ).join('');
+
+    const help = document.getElementById('dist-help');
+    if (help) help.innerHTML = METRIC_HELP[distMetric] || '';
+  }
+  const METRIC_AXIS_LABEL = {
+    in_degree: 'inbound internal links per page',
+    out_degree: 'outbound internal links per page',
+    answerability: 'GEO answer-ability score (0–10) per page',
+    paragraph_density_per_page: 'paragraph link density (links / 100 words) per page',
+  };
+  const METRIC_HELP = {
+    in_degree:
+      '<strong>Inbound internal links per page.</strong> ' +
+      'A site where most pages have only 0–1 inbound links shows up as a tall spike near zero — that\'s linkbuilding debt; ' +
+      'almost no page is reachable from the rest of the site. ' +
+      'A healthy distribution has a long right tail (a few authority hubs with many inbound links) and a body that sits in the 3–15 range. ' +
+      'Sites whose curve is left of competitors at every percentile have weaker internal linking.',
+    out_degree:
+      '<strong>Outbound internal links per page.</strong> ' +
+      'How many internal destinations each page links to. A spike at 0 = many dead-end pages (terminal templates, thin product pages); ' +
+      'a spike at one specific number (e.g. 30) = a uniform sidebar/menu providing all the links, no contextual linking. ' +
+      'Healthy = a fat body in the 5–40 range, shape varies by page type rather than being one value.',
+    answerability:
+      '<strong>GEO answer-ability (0–10).</strong> Sum of weighted signals an LLM answer engine looks for — ' +
+      'FAQ schema (3 pts), question-form headings (1–2), tables (1), lists (≤1), statistics with numbers (≤1.5), external citations (≤1), dates (0.5), question-form title (0.5). ' +
+      'A curve sitting in the 0–3 range = your site is mostly invisible to AI answer engines; ' +
+      'a curve centred around 5+ = consistently cite-able. ' +
+      '<strong>Higher and further right = better.</strong>',
+    paragraph_density_per_page:
+      '<strong>Paragraph link density (links per 100 words, page average).</strong> ' +
+      'A spike at 0 = most paragraphs are unlinked running text (could host more contextual links). ' +
+      'A long right tail above 5 = link-stuffed paragraphs that look like SEO spam to LLMs and humans. ' +
+      'Healthy = a body in the 0.5–3 range; competitors with a much fatter tail above 5 are at risk of devaluation.',
+  };
+  document.querySelectorAll('.dist-btn').forEach(b => b.addEventListener('click', () => {
+    distMetric = b.dataset.dist;
+    renderDist();
+  }));
+  renderDist();
+})();
+</script>
+</body>
+</html>
