@@ -337,6 +337,32 @@
       </div>
     </div>
 
+    <!-- Structured data -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="structured-data-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Structured data health</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          JSON-LD coverage and validity across crawled pages. Invalid blocks are ignored by search engines and answer engines;
+          missing recommended properties make schema less useful even when the type is present.
+        </p>
+      </div>
+      <div id="audit-structured-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Top schema types</h4>
+          <div id="audit-structured-types" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Invalid JSON-LD</h4>
+          <div id="audit-structured-invalid" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Missing recommended properties</h4>
+          <div id="audit-structured-missing" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Answerability -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
       <div class="mb-3">
@@ -719,6 +745,7 @@
 <script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
+<script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -799,8 +826,9 @@
       const inlinedHeaderAnalysis = readInlined('data-header-analysis');
       const inlinedHeaderScatter = readInlined('data-header-scatter');
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
+      const inlinedStructuredData = readInlined('data-structured-data');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -826,8 +854,9 @@
         headerAnalysis = inlinedHeaderAnalysis || {};
         headerScatter = inlinedHeaderScatter || {};
         linkbuilding = inlinedLinkbuilding || {};
+        structuredData = inlinedStructuredData || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -852,6 +881,7 @@
           loadJSON('header_analysis.json').catch(() => ({})),
           loadJSON('header_scatter.json').catch(() => ({})),
           loadJSON('linkbuilding.json').catch(() => ({})),
+          loadJSON('structured_data.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -881,6 +911,7 @@
       state.headerAnalysis = headerAnalysis || {};
       state.headerScatter = headerScatter || {};
       state.linkbuilding = linkbuilding || {};
+      state.structuredData = structuredData || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -900,6 +931,7 @@
       renderTreemap();
       renderHeatmap();
       renderCoverage('all');
+      renderStructuredData();
       renderAnswerability();
       renderLinkgraph();
       renderLinkbuilding();
@@ -1851,6 +1883,53 @@
         </div>`;
     }).join('');
     el.innerHTML = summary + rows;
+  }
+
+  function renderStructuredData() {
+    const block = document.getElementById('structured-data-block');
+    const data = state.structuredData || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-structured-summary').innerHTML =
+      card('Coverage', `${((summary.schema_coverage || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_schema || 0} / ${summary.total_pages || 0} pages have schema`,
+        (summary.schema_coverage || 0) >= 0.7 ? 'text-green-600' : 'text-orange-600') +
+      card('Valid JSON-LD', (summary.valid_jsonld_blocks || 0).toLocaleString(),
+        'parseable structured-data blocks') +
+      card('Invalid JSON-LD', (summary.invalid_jsonld_blocks || 0).toLocaleString(),
+        'blocks search engines will ignore',
+        summary.invalid_jsonld_blocks ? 'text-red-600' : 'text-green-600') +
+      card('Schema types', (summary.schema_type_count || 0).toLocaleString(),
+        'distinct @type values') +
+      card('Missing schema', (summary.pages_missing_schema || 0).toLocaleString(),
+        'pages with no valid schema');
+
+    document.getElementById('audit-structured-types').innerHTML =
+      (data.top_types || []).slice(0, 40).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.type)}</span>
+          <span class="font-mono text-gray-600">${Number(r.pages || 0).toLocaleString()}</span>
+        </div>`).join('') || '<div class="text-gray-500">No schema types found.</div>';
+
+    document.getElementById('audit-structured-invalid').innerHTML =
+      (data.invalid_blocks || []).slice(0, 60).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+          <div class="text-red-700 mt-1">${escapeHtml(r.error || 'Invalid JSON-LD')}</div>
+        </div>`).join('') || '<div class="text-gray-500">No invalid JSON-LD blocks.</div>';
+
+    document.getElementById('audit-structured-missing').innerHTML =
+      (data.missing_recommended || []).slice(0, 60).map(r => {
+        const bits = (r.missing || []).map(m => `${escapeHtml(m.type)}: ${(m.missing || []).map(escapeHtml).join(', ')}`).join(' · ');
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+            <div class="text-gray-700 mt-1">${bits}</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No recommended schema properties missing.</div>';
   }
 
   function renderLinkgraph() {

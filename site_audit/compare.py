@@ -44,6 +44,7 @@ class _Project:
     external_links: dict
     linkbuilding: dict
     header_analysis: dict
+    structured_data: dict
     embeddings: Optional[np.ndarray]    # aligned with pages
     embedded_pages: list[dict]          # subset of pages that have an embedding
 
@@ -93,6 +94,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     external_links = _load_json(report / "external_links.json", {})
     linkbuilding = _load_json(report / "linkbuilding.json", {})
     header_analysis = _load_json(report / "header_analysis.json", {})
+    structured_data = _load_json(report / "structured_data.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     model = metrics.get("model", "Alibaba-NLP/gte-multilingual-base")
@@ -120,6 +122,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         external_links=external_links,
         linkbuilding=linkbuilding,
         header_analysis=header_analysis,
+        structured_data=structured_data,
         embeddings=embed_array,
         embedded_pages=embedded_pages,
     )
@@ -224,6 +227,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ext_summary = (proj.external_links or {}).get("citation_density_summary", {}) or {}
     lb = (proj.linkbuilding or {}).get("summary", {}) or {}
     ha = (proj.header_analysis or {}).get("summary", {}) or {}
+    sd = (proj.structured_data or {}).get("summary", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -255,6 +259,10 @@ def _leaderboard_row(proj: _Project) -> dict:
         "zero_link_paragraph_share": float(pd_summary.get("zero_link_share", 0.0)),
         # External citation
         "citation_density_median": float(ext_summary.get("median", 0.0)),
+        "schema_coverage": float(sd.get("schema_coverage", 0.0)),
+        "invalid_jsonld_blocks": int(sd.get("invalid_jsonld_blocks", 0)),
+        "schema_type_count": int(sd.get("schema_type_count", 0)),
+        "pages_missing_schema": int(sd.get("pages_missing_schema", 0)),
         # Action plan
         "recommendations_total": int((proj.recommendations or {}).get("total", 0)),
         "rec_high": int(rec_pri.get("high", 0)),
