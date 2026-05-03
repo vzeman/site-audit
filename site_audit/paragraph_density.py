@@ -109,19 +109,6 @@ def to_payload(
     total_external = sum(r.external for r in rows)
     total_words = sum(r.words for r in rows)
 
-    summary = {
-        "total_paragraphs": n,
-        "total_internal_links": total_internal,
-        "total_external_links": total_external,
-        "total_words": total_words,
-        "median_density_per_100w": _percentile(0.5),
-        "p90_density_per_100w": _percentile(0.9),
-        "p99_density_per_100w": _percentile(0.99),
-        "zero_link_share": sum(1 for r in rows if r.internal + r.external == 0) / n,
-        "spammy_threshold_per_100w": high_density_threshold,
-        "spammy_count": sum(1 for r in rows if r.density_per_100 >= high_density_threshold),
-    }
-
     # Per-page rollup (sorted by avg density desc — link-stuffed pages)
     by_page: dict[int, dict] = {}
     for r in rows:
@@ -151,6 +138,29 @@ def to_payload(
             "links_per_100w": round((agg["internal"] + agg["external"]) / words * 100.0, 2),
         })
     per_page.sort(key=lambda x: x["links_per_100w"], reverse=True)
+    page_densities = sorted(float(p["links_per_100w"]) for p in per_page)
+
+    def _page_percentile(p):
+        if not page_densities:
+            return 0.0
+        idx = max(0, min(len(page_densities) - 1, int(round(p * (len(page_densities) - 1)))))
+        return float(page_densities[idx])
+
+    summary = {
+        "total_paragraphs": n,
+        "total_internal_links": total_internal,
+        "total_external_links": total_external,
+        "total_words": total_words,
+        "median_density_per_100w": _percentile(0.5),
+        "p90_density_per_100w": _percentile(0.9),
+        "p99_density_per_100w": _percentile(0.99),
+        "median_page_density_per_100w": _page_percentile(0.5),
+        "p90_page_density_per_100w": _page_percentile(0.9),
+        "p99_page_density_per_100w": _page_percentile(0.99),
+        "zero_link_share": sum(1 for r in rows if r.internal + r.external == 0) / n,
+        "spammy_threshold_per_100w": high_density_threshold,
+        "spammy_count": sum(1 for r in rows if r.density_per_100 >= high_density_threshold),
+    }
 
     # Flag spammy paragraphs (high density AND have at least a couple of links)
     spammy_rows = [
@@ -191,7 +201,7 @@ def to_payload(
 
     return {
         "summary": summary,
-        "per_page": per_page[:60],
+        "per_page": per_page,
         "spammy": spammy,
         "unlinked_long": unlinked_long,
     }

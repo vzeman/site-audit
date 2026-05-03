@@ -217,6 +217,8 @@ def _leaderboard_row(proj: _Project) -> dict:
     in_degrees = [int(r.get("in_degree", 0)) for r in (proj.page_link_counts or [])]
     out_degrees = [int(r.get("out_degree", 0)) for r in (proj.page_link_counts or [])]
     pd_summary = (proj.paragraph_density or {}).get("summary", {}) or {}
+    pd_pages = (proj.paragraph_density or {}).get("per_page") or []
+    pd_page_distribution = _distribution([float(r.get("links_per_100w", 0.0)) for r in pd_pages])
     rec_pri = (proj.recommendations or {}).get("by_priority", {}) or {}
     rec_cat = (proj.recommendations or {}).get("by_category", {}) or {}
     ext_summary = (proj.external_links or {}).get("citation_density_summary", {}) or {}
@@ -247,8 +249,8 @@ def _leaderboard_row(proj: _Project) -> dict:
         "median_out_degree": _percentile([float(v) for v in out_degrees], 0.5),
         "orphan_share": orphan_share,
         # Paragraph link density
-        "paragraph_density_median": float(pd_summary.get("median_density_per_100w", 0.0)),
-        "paragraph_density_p90": float(pd_summary.get("p90_density_per_100w", 0.0)),
+        "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
+        "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
         "spammy_paragraph_count": int(pd_summary.get("spammy_count", 0)),
         "zero_link_paragraph_share": float(pd_summary.get("zero_link_share", 0.0)),
         # External citation
