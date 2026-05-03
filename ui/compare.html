@@ -34,7 +34,14 @@
           <button data-group="overview"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Overview</button>
           <button data-group="topic"     class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Topic shape</button>
           <button data-group="geo"       class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">GEO answer-ability</button>
+          <button data-group="entities"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Entities</button>
+          <button data-group="pageTypes" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Page types</button>
           <button data-group="metadata"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Metadata</button>
+          <button data-group="media"     class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Media</button>
+          <button data-group="freshness" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Freshness</button>
+          <button data-group="conversion" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Conversion</button>
+          <button data-group="indexability" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Indexability</button>
+          <button data-group="performance" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Performance</button>
           <button data-group="linking"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Internal linking</button>
           <button data-group="linkbuilding" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Linkbuilding</button>
           <button data-group="headers"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Headers</button>
@@ -152,6 +159,24 @@
       { key: 'invalid_jsonld_blocks', label: 'Invalid JSON-LD', better: 'low', fmt: 'int' },
       { key: 'schema_type_count',     label: 'Schema types', better: 'high', fmt: 'int' },
     ],
+    entities: [
+      { key: 'pages',                    label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'topical_authority_score',  label: 'Authority score', better: 'high', fmt: '0.0' },
+      { key: 'entity_coverage',          label: 'Entity coverage', better: 'high', fmt: 'pct' },
+      { key: 'unique_entities',          label: 'Unique entities', better: 'high', fmt: 'int' },
+      { key: 'avg_entities_per_page',    label: 'Avg entities/page', better: 'high', fmt: '0.0' },
+      { key: 'entity_reuse_share',       label: 'Reuse share', better: 'high', fmt: 'pct' },
+      { key: 'organization_coverage',    label: 'Org coverage', better: 'high', fmt: 'pct' },
+      { key: 'topical_depth_share',      label: 'Depth share', better: 'high', fmt: 'pct' },
+    ],
+    pageTypes: [
+      { key: 'pages',                    label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'page_type_count',          label: 'Page types', better: 'na', fmt: 'int' },
+      { key: 'template_family_count',    label: 'Template families', better: 'na', fmt: 'int' },
+      { key: 'template_signature_count', label: 'Template signatures', better: 'na', fmt: 'int' },
+      { key: 'dominant_page_type',       label: 'Dominant type', better: 'na', fmt: 'str' },
+      { key: 'dominant_template_family', label: 'Dominant template', better: 'na', fmt: 'str' },
+    ],
     linking: [
       { key: 'pages',             label: 'Pages',        better: 'na',   fmt: 'int' },
       { key: 'median_in_degree',  label: 'In-degree median', better: 'high', fmt: '0' },
@@ -166,6 +191,45 @@
       { key: 'duplicate_title_pages',   label: 'Duplicate titles', better: 'low', fmt: 'int' },
       { key: 'missing_canonical',       label: 'Missing canonical', better: 'low', fmt: 'int' },
       { key: 'incomplete_open_graph',   label: 'Incomplete OG', better: 'low', fmt: 'int' },
+    ],
+    media: [
+      { key: 'pages',                            label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'media_accessibility_issue_share',  label: 'Pages with issues', better: 'low', fmt: 'pct' },
+      { key: 'images_missing_alt',               label: 'Missing alt', better: 'low', fmt: 'int' },
+      { key: 'linked_images_empty_alt',          label: 'Linked empty alt', better: 'low', fmt: 'int' },
+      { key: 'videos_missing_captions',          label: 'Videos no captions', better: 'low', fmt: 'int' },
+      { key: 'iframes_missing_title',            label: 'Iframes no title', better: 'low', fmt: 'int' },
+    ],
+    freshness: [
+      { key: 'pages',                      label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'freshness_date_coverage',    label: 'Date coverage', better: 'high', fmt: 'pct' },
+      { key: 'freshness_stale_share',      label: 'Stale share', better: 'low', fmt: 'pct' },
+      { key: 'freshness_missing_dates',    label: 'Missing dates', better: 'low', fmt: 'int' },
+      { key: 'freshness_very_stale_pages', label: 'Very stale', better: 'low', fmt: 'int' },
+      { key: 'freshness_median_age_days',  label: 'Median age days', better: 'low', fmt: 'int' },
+    ],
+    conversion: [
+      { key: 'pages',                      label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'cta_coverage',               label: 'CTA coverage', better: 'high', fmt: 'pct' },
+      { key: 'primary_cta_coverage',       label: 'Primary CTA %', better: 'high', fmt: 'pct' },
+      { key: 'form_coverage',              label: 'Form coverage', better: 'high', fmt: 'pct' },
+      { key: 'avg_ctas_per_page',          label: 'Avg CTAs/page', better: 'na', fmt: '0.0' },
+      { key: 'lead_pages_without_capture', label: 'Lead leaks', better: 'low', fmt: 'int' },
+      { key: 'cta_overload_pages',         label: 'CTA overload', better: 'low', fmt: 'int' },
+    ],
+    indexability: [
+      { key: 'pages',            label: 'Analyzed pages', better: 'na', fmt: 'int' },
+      { key: 'indexable_share',  label: 'Analyzed share', better: 'high', fmt: 'pct' },
+      { key: 'noindex_share',    label: 'Noindex share', better: 'low', fmt: 'pct' },
+      { key: 'skipped_pages',    label: 'Skipped pages', better: 'low', fmt: 'int' },
+    ],
+    performance: [
+      { key: 'pages',                       label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'median_html_weight_bytes',    label: 'Median HTML bytes', better: 'low', fmt: 'int' },
+      { key: 'p90_estimated_weight_bytes',  label: 'P90 est. bytes', better: 'low', fmt: 'int' },
+      { key: 'avg_resource_tags_per_page',  label: 'Avg resource tags', better: 'low', fmt: '0.00' },
+      { key: 'render_blocking_share',       label: 'Render-blocking %', better: 'low', fmt: 'pct' },
+      { key: 'heavy_page_share',            label: 'Heavy page %', better: 'low', fmt: 'pct' },
     ],
     density: [
       { key: 'pages',                       label: 'Pages',          better: 'na',   fmt: 'int' },
@@ -214,6 +278,7 @@
   let lbSort = { key: null, dir: 1 };
 
   function fmt(v, code) {
+    if (code === 'str') return v == null || v === '' ? '—' : String(v);
     if (v == null || isNaN(v)) return '—';
     if (code === 'int')   return Math.round(v).toLocaleString();
     if (code === 'pct')   return (v * 100).toFixed(1) + '%';

@@ -128,6 +128,7 @@ class FetchResult:
     body: str
     content_type: str
     from_cache: bool
+    content_length_bytes: int = 0
     x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
@@ -529,6 +530,7 @@ class Crawler:
                     body=cached.text,
                     content_type=(cached.content_type or "").lower(),
                     from_cache=True,
+                    content_length_bytes=len(cached.body or b""),
                     x_robots_tag=xrt,
                 )
 
@@ -567,5 +569,6 @@ class Crawler:
             body=text,
             content_type=ctype,
             from_cache=False,
+            content_length_bytes=len(body_bytes or b""),
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
         )

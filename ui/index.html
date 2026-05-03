@@ -337,6 +337,27 @@
       </div>
     </div>
 
+    <!-- Indexability -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="indexability-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Indexability funnel</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Crawl-to-analysis path: fetched pages, extracted HTML, noindex exclusions, skipped pages, and final analyzed corpus.
+        </p>
+      </div>
+      <div id="audit-indexability-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Noindex pages</h4>
+          <div id="audit-indexability-noindex" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Skipped pages</h4>
+          <div id="audit-indexability-skipped" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Structured data -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="structured-data-block">
       <div class="mb-3">
@@ -373,6 +394,122 @@
       </div>
       <div id="audit-metadata-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
       <div id="audit-metadata-pages" class="text-xs max-h-96 overflow-y-auto"></div>
+    </div>
+
+    <!-- Media accessibility -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="media-accessibility-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Media accessibility</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Images, video, audio, and embeds checked for assistive-text basics: useful alt text, captions, transcripts, and iframe titles.
+        </p>
+      </div>
+      <div id="audit-media-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="audit-media-issues" class="text-xs max-h-96 overflow-y-auto"></div>
+    </div>
+
+    <!-- Page types -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="page-types-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Page types and templates</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Heuristic classification of crawled pages into editorial types and reusable template families.
+        </p>
+      </div>
+      <div id="audit-page-types-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Page type mix</h4>
+          <div id="audit-page-types-counts" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Template families</h4>
+          <div id="audit-page-types-templates" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Low-confidence pages</h4>
+          <div id="audit-page-types-pages" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entities -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="entities-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Entities and topical authority</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Offline entity-like phrase analysis from schema, metadata, headings, and body copy.
+        </p>
+      </div>
+      <div id="audit-entities-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Top entities</h4>
+          <div id="audit-entities-top" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Organizations</h4>
+          <div id="audit-entities-orgs" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Thin entity pages</h4>
+          <div id="audit-entities-pages" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content freshness -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Content freshness</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Publication and modification dates from metadata, JSON-LD, <code>&lt;time&gt;</code>, and visible body dates. Pages older than one year are stale; older than two years are very stale.
+        </p>
+      </div>
+      <div id="audit-freshness-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="audit-freshness-pages" class="text-xs max-h-96 overflow-y-auto"></div>
+    </div>
+
+    <!-- Performance -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Lightweight performance signals</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Offline HTML/resource heuristics from crawled pages: page weight buckets, render-blocking resources, scripts, stylesheets, fonts, and images.
+        </p>
+      </div>
+      <div id="audit-performance-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Heaviest pages</h4>
+          <div id="audit-performance-heavy" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Render-blocking pages</h4>
+          <div id="audit-performance-blocking" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conversion signals -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="conversion-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Conversion and CTA signals</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Calls to action, forms, and direct-contact links. Lead pages without a form, phone, or email capture are likely conversion leaks.
+        </p>
+      </div>
+      <div id="audit-conversion-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Top CTA text</h4>
+          <div id="audit-conversion-ctas" class="max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Pages to review</h4>
+          <div id="audit-conversion-pages" class="max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Answerability -->
@@ -759,6 +896,13 @@
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
+<script type="application/json" id="data-media-accessibility">__MEDIA_ACCESSIBILITY_JSON__</script>
+<script type="application/json" id="data-page-types">__PAGE_TYPES_JSON__</script>
+<script type="application/json" id="data-entities">__ENTITIES_JSON__</script>
+<script type="application/json" id="data-freshness">__FRESHNESS_JSON__</script>
+<script type="application/json" id="data-conversion">__CONVERSION_JSON__</script>
+<script type="application/json" id="data-indexability">__INDEXABILITY_JSON__</script>
+<script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -813,6 +957,15 @@
     return d3.csvParse(text);
   }
 
+  function card(label, value, hint, hintClass='text-gray-400') {
+    return `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="text-2xl font-semibold">${value}</div>
+        <div class="text-xs text-gray-500">${label}</div>
+        ${hint ? `<div class="text-xs ${hintClass} mt-0.5">${hint}</div>` : ''}
+      </div>`;
+  }
+
   async function boot() {
     try {
       const inlinedScatter = readInlined('data-scatterplot');
@@ -841,8 +994,15 @@
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
+      const inlinedMediaAccessibility = readInlined('data-media-accessibility');
+      const inlinedPageTypes = readInlined('data-page-types');
+      const inlinedEntities = readInlined('data-entities');
+      const inlinedFreshness = readInlined('data-freshness');
+      const inlinedConversion = readInlined('data-conversion');
+      const inlinedIndexability = readInlined('data-indexability');
+      const inlinedPerformance = readInlined('data-performance');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -870,8 +1030,15 @@
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
         metadataQuality = inlinedMetadataQuality || {};
+        mediaAccessibility = inlinedMediaAccessibility || {};
+        pageTypes = inlinedPageTypes || {};
+        entities = inlinedEntities || {};
+        freshness = inlinedFreshness || {};
+        conversion = inlinedConversion || {};
+        indexability = inlinedIndexability || {};
+        performance = inlinedPerformance || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -898,6 +1065,13 @@
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
           loadJSON('metadata_quality.json').catch(() => ({})),
+          loadJSON('media_accessibility.json').catch(() => ({})),
+          loadJSON('page_types.json').catch(() => ({})),
+          loadJSON('entities.json').catch(() => ({})),
+          loadJSON('freshness.json').catch(() => ({})),
+          loadJSON('conversion.json').catch(() => ({})),
+          loadJSON('indexability.json').catch(() => ({})),
+          loadJSON('performance.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -929,6 +1103,13 @@
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
       state.metadataQuality = metadataQuality || {};
+      state.mediaAccessibility = mediaAccessibility || {};
+      state.pageTypes = pageTypes || {};
+      state.entities = entities || {};
+      state.freshness = freshness || {};
+      state.conversion = conversion || {};
+      state.indexability = indexability || {};
+      state.performance = performance || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -948,8 +1129,15 @@
       renderTreemap();
       renderHeatmap();
       renderCoverage('all');
+      renderIndexability();
       renderStructuredData();
       renderMetadataQuality();
+      renderMediaAccessibility();
+      renderPageTypes();
+      renderEntities();
+      renderFreshness();
+      renderPerformance();
+      renderConversion();
       renderAnswerability();
       renderLinkgraph();
       renderLinkbuilding();
@@ -1903,6 +2091,46 @@
     el.innerHTML = summary + rows;
   }
 
+  function renderIndexability() {
+    const block = document.getElementById('indexability-block');
+    const data = state.indexability || {};
+    const summary = data.summary || {};
+    if (!summary.fetched_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-indexability-summary').innerHTML =
+      card('Fetched', (summary.fetched_pages || 0).toLocaleString(), 'HTML pages fetched') +
+      card('Analyzed', (summary.analyzed_pages || 0).toLocaleString(),
+        `${((summary.indexable_share || 0) * 100).toFixed(0)}% of fetched pages`,
+        (summary.indexable_share || 0) >= 0.7 ? 'text-green-600' : 'text-orange-600') +
+      card('Noindex', (summary.noindex_pages || 0).toLocaleString(),
+        'excluded by meta robots or X-Robots-Tag',
+        summary.noindex_pages ? 'text-orange-600' : 'text-green-600') +
+      card('Skipped', (summary.skipped_pages || 0).toLocaleString(),
+        'unusable, noindex, or empty text') +
+      card('Unusable', (summary.unusable_pages || 0).toLocaleString(),
+        'failed extraction or missing title');
+
+    const noindex = data.noindex_pages || [];
+    document.getElementById('audit-indexability-noindex').innerHTML = noindex.length
+      ? noindex.slice(0, 100).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+          <div class="text-gray-500 mt-1">source: ${escapeHtml(r.source || 'unknown')}</div>
+        </div>`).join('')
+      : '<div class="text-gray-500">No noindex pages were excluded.</div>';
+
+    const skipped = (data.skipped || []).filter(r => r.reason !== 'noindex');
+    document.getElementById('audit-indexability-skipped').innerHTML = skipped.length
+      ? skipped.slice(0, 100).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+          <div class="text-gray-500 mt-1">${escapeHtml(r.reason || 'skipped')}</div>
+        </div>`).join('')
+      : '<div class="text-gray-500">No non-indexability skips found.</div>';
+  }
+
   function renderStructuredData() {
     const block = document.getElementById('structured-data-block');
     const data = state.structuredData || {};
@@ -1983,6 +2211,243 @@
             <div class="text-gray-500 mt-1">title ${r.title_length || 0} chars · description ${r.description_length || 0} chars · canonical ${escapeHtml(r.canonical_url || 'missing')}</div>
           </div>`;
       }).join('') || '<div class="text-gray-500">No metadata issues found.</div>';
+  }
+
+  function renderMediaAccessibility() {
+    const block = document.getElementById('media-accessibility-block');
+    const data = state.mediaAccessibility || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages || !summary.total_media) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-media-summary').innerHTML =
+      card('Pages with issues', `${((summary.issue_share || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_issues || 0} / ${summary.total_pages || 0} pages flagged`,
+        summary.pages_with_issues ? 'text-orange-600' : 'text-green-600') +
+      card('Missing image alt', (summary.images_missing_alt || 0).toLocaleString(),
+        `${summary.total_images || 0} images total`) +
+      card('Linked empty alt', (summary.linked_images_empty_alt || 0).toLocaleString(),
+        'image links without accessible text') +
+      card('Videos no captions', (summary.videos_missing_captions || 0).toLocaleString(),
+        `${summary.total_videos || 0} videos total`) +
+      card('Iframes no title', (summary.iframes_missing_title || 0).toLocaleString(),
+        `${summary.total_iframes || 0} iframes total`);
+
+    document.getElementById('audit-media-issues').innerHTML =
+      (data.media_with_issues || []).slice(0, 200).map(r => {
+        const issues = (r.issues || []).map(issue =>
+          `<span class="inline-block bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(issue.replaceAll('_', ' '))}</span>`
+        ).join('');
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+            <div class="mt-1">${issues}</div>
+            <div class="text-gray-500 mt-1">${escapeHtml(r.type || 'media')} · ${escapeHtml(r.src || '(inline)')} ${r.alt ? `· alt "${escapeHtml(r.alt)}"` : ''}</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No media accessibility issues found.</div>';
+  }
+
+  function renderPageTypes() {
+    const block = document.getElementById('page-types-block');
+    const data = state.pageTypes || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-page-types-summary').innerHTML =
+      card('Page types', (summary.page_type_count || 0).toLocaleString(), 'distinct page classifications') +
+      card('Template families', (summary.template_family_count || 0).toLocaleString(), 'broad reusable layouts') +
+      card('Template signatures', (summary.template_signature_count || 0).toLocaleString(), 'structural fingerprints') +
+      card('Dominant type', escapeHtml(summary.dominant_page_type || '—'), 'most common page class') +
+      card('Dominant template', escapeHtml(summary.dominant_template_family || '—'), 'most common template family');
+
+    document.getElementById('audit-page-types-counts').innerHTML =
+      (data.type_counts || []).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.page_type || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.pages || 0).toLocaleString()} · ${((r.share || 0) * 100).toFixed(0)}%</span>
+        </div>`).join('') || '<div class="text-gray-500">No page types found.</div>';
+
+    document.getElementById('audit-page-types-templates').innerHTML =
+      (data.template_counts || []).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.template_family || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.pages || 0).toLocaleString()} · ${Number(r.signatures || 0).toLocaleString()} signatures</span>
+        </div>`).join('') || '<div class="text-gray-500">No templates found.</div>';
+
+    document.getElementById('audit-page-types-pages').innerHTML =
+      (data.per_page || []).filter(r => (r.confidence || 0) < 0.6).slice(0, 100).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+          <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || 'other')} · ${escapeHtml(r.template_family || '')} · confidence ${Number(r.confidence || 0).toFixed(2)}</div>
+        </div>`).join('') || '<div class="text-gray-500">No low-confidence page classifications.</div>';
+  }
+
+  function renderEntities() {
+    const block = document.getElementById('entities-block');
+    const data = state.entities || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-entities-summary').innerHTML =
+      card('Authority score', Number(summary.topical_authority_score || 0).toFixed(1),
+        '0–100 heuristic from coverage, depth, reuse, and organizations',
+        (summary.topical_authority_score || 0) >= 60 ? 'text-green-600' : 'text-orange-600') +
+      card('Entity coverage', `${((summary.entity_coverage || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_entities || 0} / ${summary.total_pages || 0} pages`) +
+      card('Unique entities', (summary.unique_entities || 0).toLocaleString(), 'distinct entity-like phrases') +
+      card('Entity reuse', `${((summary.entity_reuse_share || 0) * 100).toFixed(0)}%`,
+        `${summary.entities_reused_across_pages || 0} entities appear on 2+ pages`) +
+      card('Organizations', (summary.organization_count || 0).toLocaleString(),
+        `${((summary.organization_coverage || 0) * 100).toFixed(0)}% page coverage`);
+
+    document.getElementById('audit-entities-top').innerHTML =
+      (data.top_entities || []).slice(0, 80).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.entity || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.mentions || 0).toLocaleString()} · ${Number(r.pages || 0).toLocaleString()}p</span>
+        </div>`).join('') || '<div class="text-gray-500">No entities found.</div>';
+
+    document.getElementById('audit-entities-orgs').innerHTML =
+      (data.organizations || []).slice(0, 80).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.organization || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.mentions || 0).toLocaleString()} · ${Number(r.pages || 0).toLocaleString()}p</span>
+        </div>`).join('') || '<div class="text-gray-500">No organization entities found.</div>';
+
+    document.getElementById('audit-entities-pages').innerHTML =
+      (data.per_page || []).filter(r => (r.entity_count || 0) < 3).slice(0, 100).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+          <div class="text-gray-500 mt-1">${Number(r.entity_count || 0).toLocaleString()} entities · ${Number(r.entity_mentions || 0).toLocaleString()} mentions</div>
+        </div>`).join('') || '<div class="text-gray-500">No thin entity pages found.</div>';
+  }
+
+  function renderFreshness() {
+    const block = document.getElementById('freshness-block');
+    const data = state.freshness || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    const card = (label, value, hint, hintClass='text-gray-400') => `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="text-2xl font-semibold">${value}</div>
+        <div class="text-xs text-gray-500">${label}</div>
+        ${hint ? `<div class="text-xs ${hintClass} mt-0.5">${hint}</div>` : ''}
+      </div>`;
+    document.getElementById('audit-freshness-summary').innerHTML =
+      card('Date coverage', `${((summary.date_coverage || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_date || 0} / ${summary.total_pages || 0} pages expose a date`,
+        (summary.date_coverage || 0) >= 0.7 ? 'text-green-600' : 'text-orange-600') +
+      card('Stale pages', (summary.pages_stale || 0).toLocaleString(),
+        `older than ${summary.stale_days || 365} days`,
+        summary.pages_stale ? 'text-orange-600' : 'text-green-600') +
+      card('Very stale', (summary.pages_very_stale || 0).toLocaleString(),
+        `older than ${summary.very_stale_days || 730} days`,
+        summary.pages_very_stale ? 'text-red-600' : 'text-green-600') +
+      card('Missing dates', (summary.missing_dates || 0).toLocaleString(),
+        'pages with no usable date signal') +
+      card('Median age', summary.median_age_days == null ? '—' : `${Number(summary.median_age_days).toLocaleString()}d`,
+        summary.newest_date ? `newest ${summary.newest_date}` : '');
+
+    document.getElementById('audit-freshness-pages').innerHTML =
+      (data.stale_pages || []).slice(0, 200).map(r => {
+        const bucketClass = r.bucket === 'very_stale' ? 'bg-red-100 text-red-800'
+          : r.bucket === 'stale' ? 'bg-orange-100 text-orange-800'
+          : r.bucket === 'future' ? 'bg-purple-100 text-purple-800'
+          : 'bg-gray-100 text-gray-700';
+        const age = r.age_days == null ? 'unknown age' : `${Number(r.age_days).toLocaleString()} days old`;
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <div class="flex items-start gap-2 flex-wrap">
+              <span class="text-xs px-1.5 py-0.5 rounded ${bucketClass}">${escapeHtml(String(r.bucket || 'unknown').replaceAll('_', ' '))}</span>
+              <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+            </div>
+            <div class="text-gray-500 mt-1">${escapeHtml(r.date || 'missing date')} · ${escapeHtml(age)} · ${escapeHtml(r.date_source || 'no source')}</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No stale or undated pages found.</div>';
+  }
+
+  function renderPerformance() {
+    const block = document.getElementById('performance-block');
+    const data = state.performance || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    const kb = bytes => `${(Number(bytes || 0) / 1024).toFixed(0)} KB`;
+    document.getElementById('audit-performance-summary').innerHTML =
+      card('Median HTML', kb(summary.median_html_weight_bytes), `${kb(summary.p90_html_weight_bytes)} p90`) +
+      card('P90 estimated weight', kb(summary.p90_estimated_weight_bytes), 'HTML + heuristic resource weights') +
+      card('Resource tags/page', Number(summary.avg_resource_tags_per_page || 0).toFixed(1), 'images, scripts, CSS, fonts, preloads') +
+      card('Render-blocking', `${((summary.render_blocking_share || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_render_blocking || 0} pages`,
+        summary.pages_with_render_blocking ? 'text-orange-600' : 'text-green-600') +
+      card('Heavy pages', `${((summary.heavy_page_share || 0) * 100).toFixed(0)}%`,
+        `${summary.heavy_pages || 0} pages in heavy/very heavy buckets`);
+
+    const pageRow = r => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+        <div class="text-gray-500 mt-1">
+          ${escapeHtml(r.weight_bucket || 'unknown')} · est. ${kb(r.estimated_weight_bytes)} · HTML ${kb(r.html_weight_bytes)} ·
+          ${Number(r.resource_tag_count || 0).toLocaleString()} resources · ${Number(r.render_blocking_count || 0).toLocaleString()} blocking
+        </div>
+      </div>`;
+    document.getElementById('audit-performance-heavy').innerHTML =
+      (data.top_heavy_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No heavy pages found.</div>';
+    document.getElementById('audit-performance-blocking').innerHTML =
+      (data.render_blocking_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No render-blocking resources found.</div>';
+  }
+
+  function renderConversion() {
+    const block = document.getElementById('conversion-block');
+    const data = state.conversion || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-conversion-summary').innerHTML =
+      card('CTA coverage', `${((summary.cta_coverage || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_cta || 0} / ${summary.total_pages || 0} pages have a CTA`,
+        (summary.cta_coverage || 0) >= 0.8 ? 'text-green-600' : 'text-orange-600') +
+      card('Primary CTA coverage', `${((summary.primary_cta_coverage || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_primary_cta || 0} pages with transactional CTA`) +
+      card('Forms', (summary.total_forms || 0).toLocaleString(),
+        `${((summary.form_coverage || 0) * 100).toFixed(0)}% page coverage`) +
+      card('Lead leaks', (summary.lead_pages_without_capture || 0).toLocaleString(),
+        'lead pages without form/phone/email',
+        summary.lead_pages_without_capture ? 'text-red-600' : 'text-green-600') +
+      card('Avg CTAs/page', Number(summary.avg_ctas_per_page || 0).toFixed(1),
+        `${summary.cta_overload_pages || 0} overloaded pages`);
+
+    document.getElementById('audit-conversion-ctas').innerHTML =
+      (data.top_ctas || []).slice(0, 40).map(r => `
+        <div class="flex justify-between gap-3 border-b border-gray-100 py-1">
+          <span>${escapeHtml(r.text)}</span>
+          <span class="font-mono text-gray-600">${Number(r.count || 0).toLocaleString()}</span>
+        </div>`).join('') || '<div class="text-gray-500">No CTA text found.</div>';
+
+    document.getElementById('audit-conversion-pages').innerHTML =
+      (data.per_page || []).filter(r => (r.issues || []).length).slice(0, 80).map(r => {
+        const issues = (r.issues || []).map(issue =>
+          `<span class="inline-block bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(issue.replaceAll('_', ' '))}</span>`
+        ).join('');
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+            <div class="mt-1">${issues}</div>
+            <div class="text-gray-500 mt-1">${r.cta_count || 0} CTAs · ${r.primary_cta_count || 0} primary · ${r.form_count || 0} forms · ${r.contact_link_count || 0} contact links</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No conversion issues found.</div>';
   }
 
   function renderLinkgraph() {
