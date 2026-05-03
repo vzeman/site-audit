@@ -363,6 +363,18 @@
       </div>
     </div>
 
+    <!-- SERP metadata -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="metadata-quality-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">SERP metadata quality</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Title, description, canonical, robots, Open Graph, and Twitter card signals that shape search snippets and sharing previews.
+        </p>
+      </div>
+      <div id="audit-metadata-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="audit-metadata-pages" class="text-xs max-h-96 overflow-y-auto"></div>
+    </div>
+
     <!-- Answerability -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
       <div class="mb-3">
@@ -746,6 +758,7 @@
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
+<script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -827,8 +840,9 @@
       const inlinedHeaderScatter = readInlined('data-header-scatter');
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
+      const inlinedMetadataQuality = readInlined('data-metadata-quality');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -855,8 +869,9 @@
         headerScatter = inlinedHeaderScatter || {};
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
+        metadataQuality = inlinedMetadataQuality || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -882,6 +897,7 @@
           loadJSON('header_scatter.json').catch(() => ({})),
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
+          loadJSON('metadata_quality.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -912,6 +928,7 @@
       state.headerScatter = headerScatter || {};
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
+      state.metadataQuality = metadataQuality || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -932,6 +949,7 @@
       renderHeatmap();
       renderCoverage('all');
       renderStructuredData();
+      renderMetadataQuality();
       renderAnswerability();
       renderLinkgraph();
       renderLinkbuilding();
@@ -1930,6 +1948,41 @@
             <div class="text-gray-700 mt-1">${bits}</div>
           </div>`;
       }).join('') || '<div class="text-gray-500">No recommended schema properties missing.</div>';
+  }
+
+  function renderMetadataQuality() {
+    const block = document.getElementById('metadata-quality-block');
+    const data = state.metadataQuality || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('audit-metadata-summary').innerHTML =
+      card('Pages with issues', `${((summary.issue_share || 0) * 100).toFixed(0)}%`,
+        `${summary.pages_with_issues || 0} / ${summary.total_pages || 0} pages flagged`,
+        summary.pages_with_issues ? 'text-orange-600' : 'text-green-600') +
+      card('Missing descriptions', (summary.missing_description || 0).toLocaleString(),
+        'pages without meta descriptions') +
+      card('Duplicate titles', (summary.duplicate_title_pages || 0).toLocaleString(),
+        'pages sharing title text') +
+      card('Missing canonical', (summary.missing_canonical || 0).toLocaleString(),
+        'pages without rel=canonical') +
+      card('Incomplete OG', (summary.incomplete_open_graph || 0).toLocaleString(),
+        'missing og:title or og:description');
+
+    document.getElementById('audit-metadata-pages').innerHTML =
+      (data.per_page || []).filter(r => (r.issues || []).length).slice(0, 200).map(r => {
+        const issues = (r.issues || []).map(issue =>
+          `<span class="inline-block bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(issue.replaceAll('_', ' '))}</span>`
+        ).join('');
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
+            <div class="mt-1">${issues}</div>
+            <div class="text-gray-500 mt-1">title ${r.title_length || 0} chars · description ${r.description_length || 0} chars · canonical ${escapeHtml(r.canonical_url || 'missing')}</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No metadata issues found.</div>';
   }
 
   function renderLinkgraph() {

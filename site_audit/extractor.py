@@ -41,6 +41,14 @@ class ExtractedPage:
     body: str
     word_count: int
     language: Optional[str]
+    canonical_url: str = ""
+    robots_content: str = ""
+    og_title: str = ""
+    og_description: str = ""
+    og_image: str = ""
+    twitter_card: str = ""
+    twitter_title: str = ""
+    twitter_description: str = ""
     headings: list[str] = field(default_factory=list)  # H2 + H3 text, in order (kept for backwards compat)
     h1: str = ""
     h1_count: int = 0                         # number of <h1> elements on the page
@@ -94,6 +102,21 @@ def _title_from_html(soup: BeautifulSoup) -> str:
     if h1:
         return _clean(h1.get_text(" "))
     return ""
+
+
+def _canonical_url(soup: BeautifulSoup) -> str:
+    tag = soup.find("link", rel=lambda value: value and "canonical" in [str(v).lower() for v in (value if isinstance(value, list) else [value])])
+    href = (tag.get("href") or "").strip() if tag else ""
+    return _clean(html.unescape(href))
+
+
+def _robots_content(soup: BeautifulSoup) -> str:
+    values: list[str] = []
+    for tag in soup.find_all("meta"):
+        name = (tag.get("name") or tag.get("http-equiv") or "").strip().lower()
+        if name in _INDEX_BOTS and tag.get("content"):
+            values.append(_clean(html.unescape(tag["content"])))
+    return ", ".join(values)
 
 
 def _strip_to_text(html_body: str) -> str:
@@ -432,6 +455,14 @@ def extract(
     is_noindex, noindex_source = _detect_noindex(soup, x_robots_tag)
     title = _title_from_html(soup)
     description = _meta(soup, "description") or _meta(soup, "og:description")
+    canonical_url = _canonical_url(soup)
+    robots_content = _robots_content(soup)
+    og_title = _meta(soup, "og:title")
+    og_description = _meta(soup, "og:description")
+    og_image = _meta(soup, "og:image")
+    twitter_card = _meta(soup, "twitter:card")
+    twitter_title = _meta(soup, "twitter:title")
+    twitter_description = _meta(soup, "twitter:description")
     lang_attr = soup.find("html")
     language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
 
@@ -478,6 +509,14 @@ def extract(
         body=truncated,
         word_count=word_count,
         language=language,
+        canonical_url=canonical_url,
+        robots_content=robots_content,
+        og_title=og_title,
+        og_description=og_description,
+        og_image=og_image,
+        twitter_card=twitter_card,
+        twitter_title=twitter_title,
+        twitter_description=twitter_description,
         headings=headings,
         h1=h1,
         h1_count=h1_count,

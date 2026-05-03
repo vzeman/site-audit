@@ -34,6 +34,7 @@
           <button data-group="overview"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Overview</button>
           <button data-group="topic"     class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Topic shape</button>
           <button data-group="geo"       class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">GEO answer-ability</button>
+          <button data-group="metadata"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Metadata</button>
           <button data-group="linking"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Internal linking</button>
           <button data-group="linkbuilding" class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Linkbuilding</button>
           <button data-group="headers"   class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Headers</button>
@@ -157,6 +158,14 @@
       { key: 'p90_in_degree',     label: 'In-degree p90',    better: 'high', fmt: '0' },
       { key: 'median_out_degree', label: 'Out-degree median',better: 'high', fmt: '0' },
       { key: 'orphan_share',      label: 'Orphan share', better: 'low',  fmt: 'pct' },
+    ],
+    metadata: [
+      { key: 'pages',                   label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'metadata_issue_share',    label: 'Pages with issues', better: 'low', fmt: 'pct' },
+      { key: 'missing_description',     label: 'Missing desc', better: 'low', fmt: 'int' },
+      { key: 'duplicate_title_pages',   label: 'Duplicate titles', better: 'low', fmt: 'int' },
+      { key: 'missing_canonical',       label: 'Missing canonical', better: 'low', fmt: 'int' },
+      { key: 'incomplete_open_graph',   label: 'Incomplete OG', better: 'low', fmt: 'int' },
     ],
     density: [
       { key: 'pages',                       label: 'Pages',          better: 'na',   fmt: 'int' },
