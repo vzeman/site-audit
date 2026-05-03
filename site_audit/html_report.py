@@ -42,6 +42,7 @@ _PLACEHOLDERS = {
     "__HEADER_ANALYSIS_JSON__": "header_analysis",
     "__HEADER_SCATTER_JSON__": "header_scatter",
     "__LINKBUILDING_JSON__": "linkbuilding",
+    "__STRUCTURED_DATA_JSON__": "structured_data",
 }
 
 
@@ -230,6 +231,7 @@ def write_html_report(
     header_analysis: Optional[dict] = None,
     header_scatter: Optional[dict] = None,
     linkbuilding: Optional[dict] = None,
+    structured_data: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -258,6 +260,7 @@ def write_html_report(
         "header_analysis": header_analysis or {},
         "header_scatter": header_scatter or {},
         "linkbuilding": linkbuilding or {},
+        "structured_data": structured_data or {},
     }
 
     rendered = template

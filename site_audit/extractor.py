@@ -48,6 +48,7 @@ class ExtractedPage:
     list_count: int = 0
     table_count: int = 0
     schema_types: list[str] = field(default_factory=list)  # JSON-LD @type values
+    schema_blocks: list[dict] = field(default_factory=list)  # parsed JSON-LD diagnostics
     external_link_count: int = 0
     has_dates: bool = False
     stat_count: int = 0  # numbers with units / percentages
@@ -172,33 +173,73 @@ def _extract_paragraphs(
     return blocks, counts
 
 
-def _extract_schema_types(soup: BeautifulSoup) -> list[str]:
+def _schema_type_values(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(x) for x in value if x]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _schema_types_from_item(item) -> list[str]:
     types: list[str] = []
+    if isinstance(item, dict):
+        types.extend(_schema_type_values(item.get("@type")))
+        graph = item.get("@graph")
+        if isinstance(graph, list):
+            for graph_item in graph:
+                types.extend(_schema_types_from_item(graph_item))
+    elif isinstance(item, list):
+        for child in item:
+            types.extend(_schema_types_from_item(child))
+    return types
+
+
+def _schema_keys_from_item(item) -> list[str]:
+    keys: set[str] = set()
+    if isinstance(item, dict):
+        keys.update(str(k) for k in item.keys())
+        graph = item.get("@graph")
+        if isinstance(graph, list):
+            for graph_item in graph:
+                keys.update(_schema_keys_from_item(graph_item))
+    elif isinstance(item, list):
+        for child in item:
+            keys.update(_schema_keys_from_item(child))
+    return sorted(keys)
+
+
+def _extract_schema_data(soup: BeautifulSoup) -> tuple[list[str], list[dict]]:
+    types: list[str] = []
+    blocks: list[dict] = []
     for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
         raw = tag.string or tag.get_text() or ""
         if not raw.strip():
             continue
         try:
             data = json.loads(raw)
-        except Exception:
-            # malformed JSON-LD blocks are common; ignore them
+        except Exception as exc:
+            blocks.append({
+                "format": "json-ld",
+                "valid": False,
+                "types": [],
+                "error": str(exc),
+            })
             continue
-        for item in (data if isinstance(data, list) else [data]):
-            if isinstance(item, dict):
-                t = item.get("@type")
-                if isinstance(t, list):
-                    types.extend(str(x) for x in t)
-                elif t:
-                    types.append(str(t))
-                graph = item.get("@graph")
-                if isinstance(graph, list):
-                    for g in graph:
-                        if isinstance(g, dict):
-                            t = g.get("@type")
-                            if isinstance(t, list):
-                                types.extend(str(x) for x in t)
-                            elif t:
-                                types.append(str(t))
+        block_types = _schema_types_from_item(data)
+        types.extend(block_types)
+        blocks.append({
+            "format": "json-ld",
+            "valid": True,
+            "types": sorted(set(block_types)),
+            "keys": _schema_keys_from_item(data),
+            "error": "",
+        })
+    return sorted(set(types)), blocks
+
+
+def _extract_schema_types(soup: BeautifulSoup) -> list[str]:
+    types, _ = _extract_schema_data(soup)
     return types
 
 
@@ -423,7 +464,7 @@ def extract(
     h1, headings, headers_rich, h1_count = _extract_headings(soup)
     list_count = len(soup.find_all(["ul", "ol"]))
     table_count = len(soup.find_all("table"))
-    schema_types = _extract_schema_types(soup)
+    schema_types, schema_blocks = _extract_schema_data(soup)
     external_link_count = _count_external_links(soup, url)
     has_dates = bool(_DATE_RE.search(body_text))
     stat_count = len(_STAT_RE.findall(body_text))
@@ -444,6 +485,7 @@ def extract(
         list_count=list_count,
         table_count=table_count,
         schema_types=schema_types,
+        schema_blocks=schema_blocks,
         external_link_count=external_link_count,
         has_dates=has_dates,
         stat_count=stat_count,

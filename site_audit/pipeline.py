@@ -77,6 +77,8 @@ from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
 from .scatter import project
+from .structured_data import analyze as analyze_structured_data
+from .structured_data import to_payload as structured_data_payload
 
 LOG = logging.getLogger(__name__)
 
@@ -292,6 +294,15 @@ def run(config: PipelineConfig) -> dict:
     if config.enable_answerability:
         ans_payload = answerability_payload(score_answerability(extracted_pages))
         LOG.info("  scored %d pages for answerability", len(ans_payload))
+
+    structured_data_data = structured_data_payload(analyze_structured_data(extracted_pages))
+    sd_summary = structured_data_data.get("summary", {}) or {}
+    LOG.info(
+        "  structured data: %.0f%% coverage · %d invalid JSON-LD blocks · %d schema types",
+        (sd_summary.get("schema_coverage", 0.0) or 0.0) * 100,
+        sd_summary.get("invalid_jsonld_blocks", 0),
+        sd_summary.get("schema_type_count", 0),
+    )
 
     # 9) Link graph + recommendations
     link_payload: dict = {}
@@ -611,6 +622,7 @@ def run(config: PipelineConfig) -> dict:
         header_analysis=header_analysis_data,
         header_scatter=header_scatter_data,
         linkbuilding=linkbuilding_data,
+        structured_data=structured_data_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -643,6 +655,7 @@ def run(config: PipelineConfig) -> dict:
             header_analysis=header_analysis_data,
             header_scatter=header_scatter_data,
             linkbuilding=linkbuilding_data,
+            structured_data=structured_data_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

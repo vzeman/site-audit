@@ -291,6 +291,7 @@ def write_all(
     header_analysis: Optional[dict] = None,
     header_scatter: Optional[dict] = None,
     linkbuilding: Optional[dict] = None,
+    structured_data: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -338,4 +339,6 @@ def write_all(
         _write_json(output_dir / "header_scatter.json", header_scatter)
     if linkbuilding is not None:
         _write_json(output_dir / "linkbuilding.json", linkbuilding)
+    if structured_data is not None:
+        _write_json(output_dir / "structured_data.json", structured_data)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}
