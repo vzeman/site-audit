@@ -46,6 +46,8 @@ from .content_quality import (
     wrong_home_paragraphs,
     wrong_home_payload,
 )
+from .conversion import analyze as analyze_conversion
+from .conversion import to_payload as conversion_payload
 from .paragraph_clustering import (
     cluster_and_label as cluster_paragraphs,
     project_paragraphs,
@@ -54,13 +56,19 @@ from .paragraph_clustering import (
 )
 from .crawler import Crawler, CrawlConfig
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
+from .entities import analyze as analyze_entities
+from .entities import to_payload as entities_payload
 from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
 from .extractor import extract
+from .freshness import analyze as analyze_freshness
+from .freshness import to_payload as freshness_payload
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
+from .indexability import analyze as analyze_indexability
+from .indexability import to_payload as indexability_payload
 from .keyword_coverage import (
     auto_mine_queries, load_queries_from_file, match_queries,
     match_queries_to_paragraphs, paragraph_match_payload,
@@ -68,13 +76,19 @@ from .keyword_coverage import (
 )
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import to_payload as linkgraph_payload
+from .media_accessibility import analyze as analyze_media_accessibility
+from .media_accessibility import to_payload as media_accessibility_payload
 from .metadata_quality import analyze as analyze_metadata_quality
 from .metadata_quality import to_payload as metadata_quality_payload
+from .page_types import analyze as analyze_page_types
+from .page_types import to_payload as page_types_payload
 from .paragraph_density import compute_rows as compute_paragraph_density_rows
 from .paragraph_density import density_lookup as paragraph_density_lookup
 from .paragraph_density import to_payload as paragraph_density_payload
 from .paragraph_links import recommend as recommend_paragraph_links
 from .paragraph_links import to_payload as paragraph_links_payload
+from .performance import analyze as analyze_performance
+from .performance import to_payload as performance_payload
 from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
@@ -184,11 +198,18 @@ def run(config: PipelineConfig) -> dict:
     embed_inputs: list[EmbedInput] = []
     outlinks_map: dict[str, list[tuple[str, str]]] = {}
     external_map: dict[str, list[tuple[str, str]]] = {}
+    extraction_rows: list[dict] = []
 
     noindex_dropped = 0
     for r in fetched:
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
         if ext is None or not ext.title:
+            extraction_rows.append({
+                "url": r.url,
+                "status": "skipped",
+                "reason": "unusable",
+                "http_status": getattr(r, "status", 0),
+            })
             continue
         if ext.noindex:
             # The page asked search engines not to index it — exclude from
@@ -197,10 +218,25 @@ def run(config: PipelineConfig) -> dict:
             # contribute to authority), but the page itself does not
             # count toward focus / clusters / coverage / recommendations.
             noindex_dropped += 1
+            extraction_rows.append({
+                "url": r.url,
+                "title": ext.title,
+                "status": "skipped",
+                "reason": "noindex",
+                "source": ext.noindex_source,
+                "http_status": getattr(r, "status", 0),
+            })
             continue
         section = section_for_url(r.url)
         embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
         if not embed_text.strip():
+            extraction_rows.append({
+                "url": r.url,
+                "title": ext.title,
+                "status": "skipped",
+                "reason": "empty_embedding_text",
+                "http_status": getattr(r, "status", 0),
+            })
             continue
         page = PageInfo(
             url=r.url,
@@ -215,6 +251,13 @@ def run(config: PipelineConfig) -> dict:
         embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
         outlinks_map[r.url] = r.outlinks or []
         external_map[r.url] = r.external_links or []
+        extraction_rows.append({
+            "url": r.url,
+            "title": ext.title,
+            "status": "analyzed",
+            "reason": "",
+            "http_status": getattr(r, "status", 0),
+        })
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
 
@@ -223,6 +266,26 @@ def run(config: PipelineConfig) -> dict:
         return {"pages": 0}
 
     LOG.info("  prepared %d pages for embedding", len(pages))
+
+    indexability_data = indexability_payload(
+        analyze_indexability(fetched, extraction_rows, {p.url for p in pages})
+    )
+    ix_summary = indexability_data.get("summary", {}) or {}
+    LOG.info(
+        "  indexability: %.0f%% analyzed · %d noindex · %d skipped",
+        (ix_summary.get("indexable_share", 0.0) or 0.0) * 100,
+        ix_summary.get("noindex_pages", 0),
+        ix_summary.get("skipped_pages", 0),
+    )
+
+    performance_data = performance_payload(analyze_performance(fetched))
+    pf_summary = performance_data.get("summary", {}) or {}
+    LOG.info(
+        "  performance: median HTML %.0f KB · %.0f%% render-blocking · %d heavy pages",
+        (pf_summary.get("median_html_weight_bytes", 0) or 0) / 1024,
+        (pf_summary.get("render_blocking_share", 0.0) or 0.0) * 100,
+        pf_summary.get("heavy_pages", 0),
+    )
 
     # 3) Embed pages (model loaded here, reused below for queries)
     embedder = Embedder(config.model)
@@ -313,6 +376,53 @@ def run(config: PipelineConfig) -> dict:
         (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
         mq_summary.get("missing_description", 0),
         mq_summary.get("missing_canonical", 0),
+    )
+
+    media_accessibility_data = media_accessibility_payload(analyze_media_accessibility(extracted_pages))
+    ma_summary = media_accessibility_data.get("summary", {}) or {}
+    LOG.info(
+        "  media accessibility: %.0f%% pages with issues · %d missing image alts · %d videos without captions",
+        (ma_summary.get("issue_share", 0.0) or 0.0) * 100,
+        ma_summary.get("images_missing_alt", 0),
+        ma_summary.get("videos_missing_captions", 0),
+    )
+
+    freshness_data = freshness_payload(analyze_freshness(extracted_pages))
+    fr_summary = freshness_data.get("summary", {}) or {}
+    LOG.info(
+        "  freshness: %.0f%% date coverage · %d stale · %d missing dates",
+        (fr_summary.get("date_coverage", 0.0) or 0.0) * 100,
+        fr_summary.get("pages_stale", 0),
+        fr_summary.get("missing_dates", 0),
+    )
+
+    conversion_data = conversion_payload(analyze_conversion(extracted_pages))
+    cv_summary = conversion_data.get("summary", {}) or {}
+    LOG.info(
+        "  conversion: %.0f%% CTA coverage · %.0f%% primary CTA coverage · %d forms · %d lead pages without capture",
+        (cv_summary.get("cta_coverage", 0.0) or 0.0) * 100,
+        (cv_summary.get("primary_cta_coverage", 0.0) or 0.0) * 100,
+        cv_summary.get("total_forms", 0),
+        cv_summary.get("lead_pages_without_capture", 0),
+    )
+
+    page_types_data = page_types_payload(analyze_page_types(extracted_pages))
+    pt_summary = page_types_data.get("summary", {}) or {}
+    LOG.info(
+        "  page types: %d types · %d template families · dominant %s / %s",
+        pt_summary.get("page_type_count", 0),
+        pt_summary.get("template_family_count", 0),
+        pt_summary.get("dominant_page_type", "—"),
+        pt_summary.get("dominant_template_family", "—"),
+    )
+
+    entities_data = entities_payload(analyze_entities(extracted_pages))
+    ent_summary = entities_data.get("summary", {}) or {}
+    LOG.info(
+        "  entities: %d unique · %.0f%% coverage · authority %.1f",
+        ent_summary.get("unique_entities", 0),
+        (ent_summary.get("entity_coverage", 0.0) or 0.0) * 100,
+        ent_summary.get("topical_authority_score", 0.0),
     )
 
     # 9) Link graph + recommendations
@@ -635,6 +745,13 @@ def run(config: PipelineConfig) -> dict:
         linkbuilding=linkbuilding_data,
         structured_data=structured_data_data,
         metadata_quality=metadata_quality_data,
+        media_accessibility=media_accessibility_data,
+        page_types=page_types_data,
+        entities=entities_data,
+        freshness=freshness_data,
+        conversion=conversion_data,
+        indexability=indexability_data,
+        performance=performance_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -669,6 +786,13 @@ def run(config: PipelineConfig) -> dict:
             linkbuilding=linkbuilding_data,
             structured_data=structured_data_data,
             metadata_quality=metadata_quality_data,
+            media_accessibility=media_accessibility_data,
+            page_types=page_types_data,
+            entities=entities_data,
+            freshness=freshness_data,
+            conversion=conversion_data,
+            indexability=indexability_data,
+            performance=performance_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

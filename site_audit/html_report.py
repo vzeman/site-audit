@@ -44,6 +44,13 @@ _PLACEHOLDERS = {
     "__LINKBUILDING_JSON__": "linkbuilding",
     "__STRUCTURED_DATA_JSON__": "structured_data",
     "__METADATA_QUALITY_JSON__": "metadata_quality",
+    "__MEDIA_ACCESSIBILITY_JSON__": "media_accessibility",
+    "__PAGE_TYPES_JSON__": "page_types",
+    "__ENTITIES_JSON__": "entities",
+    "__FRESHNESS_JSON__": "freshness",
+    "__CONVERSION_JSON__": "conversion",
+    "__INDEXABILITY_JSON__": "indexability",
+    "__PERFORMANCE_JSON__": "performance",
 }
 
 
@@ -234,6 +241,13 @@ def write_html_report(
     linkbuilding: Optional[dict] = None,
     structured_data: Optional[dict] = None,
     metadata_quality: Optional[dict] = None,
+    media_accessibility: Optional[dict] = None,
+    page_types: Optional[dict] = None,
+    entities: Optional[dict] = None,
+    freshness: Optional[dict] = None,
+    conversion: Optional[dict] = None,
+    indexability: Optional[dict] = None,
+    performance: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -264,6 +278,13 @@ def write_html_report(
         "linkbuilding": linkbuilding or {},
         "structured_data": structured_data or {},
         "metadata_quality": metadata_quality or {},
+        "media_accessibility": media_accessibility or {},
+        "page_types": page_types or {},
+        "entities": entities or {},
+        "freshness": freshness or {},
+        "conversion": conversion or {},
+        "indexability": indexability or {},
+        "performance": performance or {},
     }
 
     rendered = template

@@ -46,6 +46,13 @@ class _Project:
     header_analysis: dict
     structured_data: dict
     metadata_quality: dict
+    media_accessibility: dict
+    page_types: dict
+    entities: dict
+    freshness: dict
+    conversion: dict
+    indexability: dict
+    performance: dict
     embeddings: Optional[np.ndarray]    # aligned with pages
     embedded_pages: list[dict]          # subset of pages that have an embedding
 
@@ -97,6 +104,13 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     header_analysis = _load_json(report / "header_analysis.json", {})
     structured_data = _load_json(report / "structured_data.json", {})
     metadata_quality = _load_json(report / "metadata_quality.json", {})
+    media_accessibility = _load_json(report / "media_accessibility.json", {})
+    page_types = _load_json(report / "page_types.json", {})
+    entities = _load_json(report / "entities.json", {})
+    freshness = _load_json(report / "freshness.json", {})
+    conversion = _load_json(report / "conversion.json", {})
+    indexability = _load_json(report / "indexability.json", {})
+    performance = _load_json(report / "performance.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     model = metrics.get("model", "Alibaba-NLP/gte-multilingual-base")
@@ -126,6 +140,13 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         header_analysis=header_analysis,
         structured_data=structured_data,
         metadata_quality=metadata_quality,
+        media_accessibility=media_accessibility,
+        page_types=page_types,
+        entities=entities,
+        freshness=freshness,
+        conversion=conversion,
+        indexability=indexability,
+        performance=performance,
         embeddings=embed_array,
         embedded_pages=embedded_pages,
     )
@@ -232,6 +253,13 @@ def _leaderboard_row(proj: _Project) -> dict:
     ha = (proj.header_analysis or {}).get("summary", {}) or {}
     sd = (proj.structured_data or {}).get("summary", {}) or {}
     mq = (proj.metadata_quality or {}).get("summary", {}) or {}
+    ma = (proj.media_accessibility or {}).get("summary", {}) or {}
+    pt = (proj.page_types or {}).get("summary", {}) or {}
+    ent = (proj.entities or {}).get("summary", {}) or {}
+    fr = (proj.freshness or {}).get("summary", {}) or {}
+    cv = (proj.conversion or {}).get("summary", {}) or {}
+    ix = (proj.indexability or {}).get("summary", {}) or {}
+    pf = (proj.performance or {}).get("summary", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -272,6 +300,46 @@ def _leaderboard_row(proj: _Project) -> dict:
         "duplicate_title_pages": int(mq.get("duplicate_title_pages", 0)),
         "missing_canonical": int(mq.get("missing_canonical", 0)),
         "incomplete_open_graph": int(mq.get("incomplete_open_graph", 0)),
+        "media_accessibility_issue_share": float(ma.get("issue_share", 0.0)),
+        "images_missing_alt": int(ma.get("images_missing_alt", 0)),
+        "linked_images_empty_alt": int(ma.get("linked_images_empty_alt", 0)),
+        "videos_missing_captions": int(ma.get("videos_missing_captions", 0)),
+        "iframes_missing_title": int(ma.get("iframes_missing_title", 0)),
+        "page_type_count": int(pt.get("page_type_count", 0)),
+        "template_family_count": int(pt.get("template_family_count", 0)),
+        "template_signature_count": int(pt.get("template_signature_count", 0)),
+        "dominant_page_type": str(pt.get("dominant_page_type", "")),
+        "dominant_template_family": str(pt.get("dominant_template_family", "")),
+        "freshness_date_coverage": float(fr.get("date_coverage", 0.0)),
+        "freshness_stale_share": float(fr.get("stale_share", 0.0)),
+        "freshness_missing_dates": int(fr.get("missing_dates", 0)),
+        "freshness_very_stale_pages": int(fr.get("pages_very_stale", 0)),
+        "freshness_median_age_days": int(fr.get("median_age_days") or 0),
+        "entity_coverage": float(ent.get("entity_coverage", 0.0)),
+        "unique_entities": int(ent.get("unique_entities", 0)),
+        "avg_entities_per_page": float(ent.get("avg_entities_per_page", 0.0)),
+        "entity_reuse_share": float(ent.get("entity_reuse_share", 0.0)),
+        "organization_count": int(ent.get("organization_count", 0)),
+        "organization_coverage": float(ent.get("organization_coverage", 0.0)),
+        "topical_depth_share": float(ent.get("topical_depth_share", 0.0)),
+        "topical_authority_score": float(ent.get("topical_authority_score", 0.0)),
+        "cta_coverage": float(cv.get("cta_coverage", 0.0)),
+        "primary_cta_coverage": float(cv.get("primary_cta_coverage", 0.0)),
+        "form_coverage": float(cv.get("form_coverage", 0.0)),
+        "avg_ctas_per_page": float(cv.get("avg_ctas_per_page", 0.0)),
+        "lead_pages_without_capture": int(cv.get("lead_pages_without_capture", 0)),
+        "cta_overload_pages": int(cv.get("cta_overload_pages", 0)),
+        "indexable_share": float(ix.get("indexable_share", 0.0)),
+        "noindex_share": float(ix.get("noindex_share", 0.0)),
+        "skipped_pages": int(ix.get("skipped_pages", 0)),
+        "median_html_weight_bytes": int(pf.get("median_html_weight_bytes", 0)),
+        "p90_estimated_weight_bytes": int(pf.get("p90_estimated_weight_bytes", 0)),
+        "avg_resource_tags_per_page": float(pf.get("avg_resource_tags_per_page", 0.0)),
+        "render_blocking_share": float(pf.get("render_blocking_share", 0.0)),
+        "heavy_page_share": float(pf.get("heavy_page_share", 0.0)),
+        "total_images": int(pf.get("total_images", 0)),
+        "total_scripts": int(pf.get("total_scripts", 0)),
+        "total_stylesheets": int(pf.get("total_stylesheets", 0)),
         # Action plan
         "recommendations_total": int((proj.recommendations or {}).get("total", 0)),
         "rec_high": int(rec_pri.get("high", 0)),

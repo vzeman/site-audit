@@ -293,6 +293,13 @@ def write_all(
     linkbuilding: Optional[dict] = None,
     structured_data: Optional[dict] = None,
     metadata_quality: Optional[dict] = None,
+    media_accessibility: Optional[dict] = None,
+    page_types: Optional[dict] = None,
+    entities: Optional[dict] = None,
+    freshness: Optional[dict] = None,
+    conversion: Optional[dict] = None,
+    indexability: Optional[dict] = None,
+    performance: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -344,4 +351,18 @@ def write_all(
         _write_json(output_dir / "structured_data.json", structured_data)
     if metadata_quality is not None:
         _write_json(output_dir / "metadata_quality.json", metadata_quality)
+    if media_accessibility is not None:
+        _write_json(output_dir / "media_accessibility.json", media_accessibility)
+    if page_types is not None:
+        _write_json(output_dir / "page_types.json", page_types)
+    if entities is not None:
+        _write_json(output_dir / "entities.json", entities)
+    if freshness is not None:
+        _write_json(output_dir / "freshness.json", freshness)
+    if conversion is not None:
+        _write_json(output_dir / "conversion.json", conversion)
+    if indexability is not None:
+        _write_json(output_dir / "indexability.json", indexability)
+    if performance is not None:
+        _write_json(output_dir / "performance.json", performance)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

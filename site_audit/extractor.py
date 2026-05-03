@@ -59,6 +59,9 @@ class ExtractedPage:
     schema_blocks: list[dict] = field(default_factory=list)  # parsed JSON-LD diagnostics
     external_link_count: int = 0
     has_dates: bool = False
+    date_published: str = ""
+    date_modified: str = ""
+    date_candidates: list[dict] = field(default_factory=list)
     stat_count: int = 0  # numbers with units / percentages
     paragraphs: list[str] = field(default_factory=list)  # body broken into clean paragraph blocks
     paragraph_link_counts: list[tuple[int, int]] = field(default_factory=list)  # (internal, external) per paragraph, aligned with .paragraphs
@@ -66,6 +69,8 @@ class ExtractedPage:
     noindex_source: str = ""  # "meta" | "header" | "" — diagnostic only
     link_quality: dict = field(default_factory=dict)  # per-page link quality counters (total, has_text, has_title, image_only, empty, …)
     link_audit_rows: list[dict] = field(default_factory=list)  # one row per <a href>: anchor + flags, used for site-level aggregation
+    media_items: list[dict] = field(default_factory=list)  # images/video/audio/iframes with accessibility-relevant attributes
+    conversion_signals: dict = field(default_factory=dict)  # CTA/form/contact signals for conversion analysis
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -75,6 +80,7 @@ _DATE_RE = re.compile(
     r"|\b\d{1,2}/\d{1,2}/\d{4}\b",
     re.I,
 )
+_ISO_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 _STAT_RE = re.compile(
     r"\b\d+(?:[,.]\d+)*\s*(?:%|percent|million|billion|thousand|users?|customers?|clients?|"
     r"\$|€|£|kg|kilograms?|grams?|hours?|minutes?|days?|weeks?|months?|years?)\b",
@@ -93,6 +99,115 @@ def _meta(soup: BeautifulSoup, name: str) -> str:
     if tag and tag.get("content"):
         return _clean(html.unescape(tag["content"]))
     return ""
+
+
+def _jsonld_date_values(item, keys: set[str]) -> list[tuple[str, str]]:
+    values: list[tuple[str, str]] = []
+    if isinstance(item, dict):
+        for key, value in item.items():
+            key_str = str(key)
+            if key_str in keys:
+                if isinstance(value, str):
+                    values.append((key_str, value))
+                elif isinstance(value, list):
+                    values.extend((key_str, str(v)) for v in value if v)
+            if key_str == "@graph" and isinstance(value, list):
+                for child in value:
+                    values.extend(_jsonld_date_values(child, keys))
+    elif isinstance(item, list):
+        for child in item:
+            values.extend(_jsonld_date_values(child, keys))
+    return values
+
+
+def _date_candidate(value: str, source: str, kind: str) -> dict | None:
+    clean_value = _clean(html.unescape(value or ""))
+    if not clean_value:
+        return None
+    if _ISO_DATE_PREFIX_RE.match(clean_value):
+        date_value = clean_value[:10]
+    else:
+        match = _DATE_RE.search(clean_value)
+        if not match:
+            return None
+        date_value = match.group(0)
+    return {"date": date_value, "source": source, "kind": kind}
+
+
+def _extract_date_candidates(soup: BeautifulSoup, body_text: str) -> tuple[str, str, list[dict]]:
+    """Collect publication/update date hints from metadata, schema, and body text.
+
+    Values are intentionally kept as short strings; the freshness analyzer owns
+    parsing and ageing so tests can pass a deterministic ``today`` date.
+    """
+    candidates: list[dict] = []
+    published_names = {
+        "article:published_time",
+        "date",
+        "datepublished",
+        "dc.date",
+        "dc.date.issued",
+        "pubdate",
+        "publishdate",
+    }
+    modified_names = {
+        "article:modified_time",
+        "last-modified",
+        "lastmod",
+        "datemodified",
+        "dc.date.modified",
+        "updated_time",
+    }
+
+    for tag in soup.find_all("meta"):
+        name = (tag.get("name") or tag.get("property") or tag.get("itemprop") or "").strip().lower()
+        content = tag.get("content") or ""
+        if name in published_names:
+            candidate = _date_candidate(content, f"meta:{name}", "published")
+            if candidate:
+                candidates.append(candidate)
+        elif name in modified_names:
+            candidate = _date_candidate(content, f"meta:{name}", "modified")
+            if candidate:
+                candidates.append(candidate)
+
+    for time_tag in soup.find_all("time"):
+        raw = time_tag.get("datetime") or time_tag.get_text(" ")
+        candidate = _date_candidate(raw, "time", "visible")
+        if candidate:
+            candidates.append(candidate)
+
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text() or ""
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        for key, value in _jsonld_date_values(data, {"datePublished", "dateModified", "dateCreated", "uploadDate"}):
+            kind = "modified" if key == "dateModified" else "published"
+            candidate = _date_candidate(value, f"jsonld:{key}", kind)
+            if candidate:
+                candidates.append(candidate)
+
+    for match in _DATE_RE.finditer(body_text or ""):
+        candidates.append({"date": match.group(0), "source": "body", "kind": "visible"})
+        if len(candidates) >= 25:
+            break
+
+    deduped: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        key = (candidate["date"], candidate["source"], candidate["kind"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
+    date_published = next((c["date"] for c in deduped if c["kind"] == "published"), "")
+    date_modified = next((c["date"] for c in deduped if c["kind"] == "modified"), "")
+    return date_published, date_modified, deduped
 
 
 def _title_from_html(soup: BeautifulSoup) -> str:
@@ -232,6 +347,27 @@ def _schema_keys_from_item(item) -> list[str]:
     return sorted(keys)
 
 
+def _schema_names_from_item(item) -> list[str]:
+    names: list[str] = []
+    if isinstance(item, dict):
+        item_types = set(_schema_type_values(item.get("@type")))
+        if item_types & {"Organization", "LocalBusiness", "Corporation", "NGO", "EducationalOrganization"}:
+            for key in ("name", "legalName", "alternateName"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    names.append(value.strip())
+                elif isinstance(value, list):
+                    names.extend(str(v).strip() for v in value if str(v).strip())
+        graph = item.get("@graph")
+        if isinstance(graph, list):
+            for graph_item in graph:
+                names.extend(_schema_names_from_item(graph_item))
+    elif isinstance(item, list):
+        for child in item:
+            names.extend(_schema_names_from_item(child))
+    return names
+
+
 def _extract_schema_data(soup: BeautifulSoup) -> tuple[list[str], list[dict]]:
     types: list[str] = []
     blocks: list[dict] = []
@@ -256,6 +392,7 @@ def _extract_schema_data(soup: BeautifulSoup) -> tuple[list[str], list[dict]]:
             "valid": True,
             "types": sorted(set(block_types)),
             "keys": _schema_keys_from_item(data),
+            "names": sorted(set(_schema_names_from_item(data))),
             "error": "",
         })
     return sorted(set(types)), blocks
@@ -414,6 +551,170 @@ def _link_quality(soup: BeautifulSoup, page_url: str) -> tuple[dict, list[dict]]
     return counters, rows
 
 
+def _media_items(soup: BeautifulSoup) -> list[dict]:
+    """Extract lightweight media accessibility signals from HTML."""
+    items: list[dict] = []
+
+    for img in soup.find_all("img"):
+        parent_link = img.find_parent("a")
+        link_text = _clean(parent_link.get_text(" ")) if parent_link else ""
+        items.append({
+            "type": "image",
+            "src": _clean(html.unescape(img.get("src") or img.get("data-src") or "")),
+            "alt": _clean(html.unescape(img.get("alt") or "")),
+            "alt_present": img.has_attr("alt"),
+            "title": _clean(html.unescape(img.get("title") or "")),
+            "aria_label": _clean(html.unescape(img.get("aria-label") or "")),
+            "role": _clean(img.get("role") or "").lower(),
+            "aria_hidden": str(img.get("aria-hidden") or "").lower() == "true",
+            "in_link": parent_link is not None,
+            "link_text": link_text,
+            "link_title": _clean(html.unescape(parent_link.get("title") or "")) if parent_link else "",
+            "link_aria_label": _clean(html.unescape(parent_link.get("aria-label") or "")) if parent_link else "",
+        })
+
+    for video in soup.find_all("video"):
+        tracks = [
+            _clean(track.get("kind") or "").lower()
+            for track in video.find_all("track")
+            if _clean(track.get("kind") or "")
+        ]
+        items.append({
+            "type": "video",
+            "src": _clean(html.unescape(video.get("src") or "")),
+            "title": _clean(html.unescape(video.get("title") or "")),
+            "aria_label": _clean(html.unescape(video.get("aria-label") or "")),
+            "track_kinds": tracks,
+            "has_captions": any(kind in {"captions", "subtitles"} for kind in tracks),
+        })
+
+    for audio in soup.find_all("audio"):
+        parent = audio.parent
+        nearby_text = _clean(parent.get_text(" "))[:500].lower() if parent else ""
+        items.append({
+            "type": "audio",
+            "src": _clean(html.unescape(audio.get("src") or "")),
+            "title": _clean(html.unescape(audio.get("title") or "")),
+            "aria_label": _clean(html.unescape(audio.get("aria-label") or "")),
+            "has_transcript_hint": "transcript" in nearby_text,
+        })
+
+    for iframe in soup.find_all("iframe"):
+        items.append({
+            "type": "iframe",
+            "src": _clean(html.unescape(iframe.get("src") or "")),
+            "title": _clean(html.unescape(iframe.get("title") or "")),
+            "aria_label": _clean(html.unescape(iframe.get("aria-label") or "")),
+        })
+
+    return items
+
+
+_CTA_RE = re.compile(
+    r"\b("
+    r"buy|order|checkout|cart|pricing|price|quote|estimate|demo|book|schedule|"
+    r"contact|call|start|signup|sign\s*up|register|subscribe|download|apply|"
+    r"request|consultation|get\s+started|learn\s+more"
+    r")\b",
+    re.I,
+)
+_PRIMARY_CTA_RE = re.compile(
+    r"\b("
+    r"buy|order|checkout|quote|estimate|demo|book|schedule|contact|call|"
+    r"signup|sign\s*up|subscribe|apply|get\s+started"
+    r")\b",
+    re.I,
+)
+
+
+def _conversion_signals(soup: BeautifulSoup, page_url: str) -> dict:
+    """Extract lightweight CTA, form, and direct-contact signals."""
+    try:
+        host = urlparse(page_url).netloc.lower()
+    except Exception:
+        host = ""
+    host_root = host[4:] if host.startswith("www.") else host
+
+    ctas: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for tag in soup.find_all(["a", "button", "input"]):
+        tag_name = tag.name or ""
+        input_type = (tag.get("type") or "").strip().lower()
+        if tag_name == "input" and input_type not in {"button", "submit", "image"}:
+            continue
+        href = (tag.get("href") or "").strip()
+        if href.startswith(("javascript:", "#")):
+            continue
+        text = _clean(tag.get_text(" ") or tag.get("value") or tag.get("aria-label") or tag.get("title") or "")
+        if not text and href.startswith(("tel:", "mailto:")):
+            text = href.split(":", 1)[0]
+        if not text:
+            continue
+        text = text[:120]
+        is_primary = bool(_PRIMARY_CTA_RE.search(text) or href.startswith(("tel:", "mailto:")))
+        is_cta = is_primary or bool(_CTA_RE.search(text))
+        if not is_cta:
+            continue
+        key = (text.lower(), href)
+        if key in seen:
+            continue
+        seen.add(key)
+        destination = "internal"
+        if href.startswith(("http://", "https://")):
+            other = urlparse(href).netloc.lower()
+            other_root = other[4:] if other.startswith("www.") else other
+            destination = "internal" if host_root and other_root == host_root else "external"
+        elif href.startswith("mailto:"):
+            destination = "email"
+        elif href.startswith("tel:"):
+            destination = "phone"
+        ctas.append({
+            "text": text,
+            "element": tag_name,
+            "href": href,
+            "destination": destination,
+            "primary": is_primary,
+        })
+
+    forms: list[dict] = []
+    for form in soup.find_all("form"):
+        fields = []
+        for field in form.find_all(["input", "select", "textarea"]):
+            field_type = (field.get("type") or field.name or "").strip().lower()
+            if field_type in {"hidden", "submit", "button", "reset", "image"}:
+                continue
+            label = field.get("name") or field.get("id") or field.get("placeholder") or field_type
+            fields.append(_clean(str(label))[:80])
+        submit = form.find(["button", "input"], attrs={"type": re.compile(r"submit|button", re.I)})
+        if submit is None:
+            submit = form.find("button")
+        submit_text = _clean(submit.get_text(" ") or submit.get("value") or submit.get("aria-label") or "") if submit else ""
+        forms.append({
+            "action": (form.get("action") or "").strip(),
+            "method": (form.get("method") or "get").strip().lower(),
+            "field_count": len(fields),
+            "fields": fields[:20],
+            "has_submit": bool(submit),
+            "submit_text": submit_text[:120],
+        })
+
+    contact_links = [
+        (a.get("href") or "").strip()
+        for a in soup.find_all("a", href=True)
+        if (a.get("href") or "").strip().startswith(("tel:", "mailto:"))
+    ]
+    return {
+        "cta_count": len(ctas),
+        "primary_cta_count": sum(1 for cta in ctas if cta["primary"]),
+        "ctas": ctas[:50],
+        "form_count": len(forms),
+        "form_field_count": sum(form["field_count"] for form in forms),
+        "forms": forms[:20],
+        "contact_link_count": len(contact_links),
+        "contact_links": contact_links[:20],
+    }
+
+
 def _count_external_links(soup: BeautifulSoup, page_url: str) -> int:
     try:
         host = urlparse(page_url).netloc.lower()
@@ -497,10 +798,13 @@ def extract(
     table_count = len(soup.find_all("table"))
     schema_types, schema_blocks = _extract_schema_data(soup)
     external_link_count = _count_external_links(soup, url)
-    has_dates = bool(_DATE_RE.search(body_text))
+    date_published, date_modified, date_candidates = _extract_date_candidates(soup, body_text)
+    has_dates = bool(date_candidates)
     stat_count = len(_STAT_RE.findall(body_text))
     paragraphs, paragraph_link_counts = _extract_paragraphs(html_body, url)
     link_quality, link_audit_rows = _link_quality(soup, url)
+    media_items = _media_items(soup)
+    conversion_signals = _conversion_signals(soup, url)
 
     return ExtractedPage(
         url=url,
@@ -527,6 +831,9 @@ def extract(
         schema_blocks=schema_blocks,
         external_link_count=external_link_count,
         has_dates=has_dates,
+        date_published=date_published,
+        date_modified=date_modified,
+        date_candidates=date_candidates,
         stat_count=stat_count,
         paragraphs=paragraphs,
         paragraph_link_counts=paragraph_link_counts,
@@ -534,4 +841,6 @@ def extract(
         noindex_source=noindex_source,
         link_quality=link_quality,
         link_audit_rows=link_audit_rows,
+        media_items=media_items,
+        conversion_signals=conversion_signals,
     )

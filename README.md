@@ -647,8 +647,15 @@ projects/
                                           #   anchor analysis, page_link_counts
       external_links.json                 # outbound profile, broken links
       linkbuilding.json                   # site-level link health, anchor audit, anchor scatter
+      indexability.json                   # crawl-to-analysis funnel + skipped/noindex pages
       structured_data.json                # schema.org JSON-LD coverage, validity, type mix
       metadata_quality.json               # SERP title/description/canonical/social metadata health
+      media_accessibility.json            # image alt/caption/transcript/embed accessibility signals
+      page_types.json                     # page type and template-family classifications
+      entities.json                       # entity coverage, reuse, organizations, topical authority
+      freshness.json                      # date coverage, stale pages, missing/future dates
+      conversion.json                     # CTA, form, contact, and lead-capture signals
+      performance.json                    # offline HTML/resource weight and render-blocking signals
       header_analysis.json                # H1-H6 structure, drifty headers, keyword freq
       header_scatter.json                 # header UMAP coordinates
       paragraph_clusters.json             # paragraph topic clusters
