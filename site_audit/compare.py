@@ -45,6 +45,7 @@ class _Project:
     linkbuilding: dict
     header_analysis: dict
     structured_data: dict
+    metadata_quality: dict
     embeddings: Optional[np.ndarray]    # aligned with pages
     embedded_pages: list[dict]          # subset of pages that have an embedding
 
@@ -95,6 +96,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     linkbuilding = _load_json(report / "linkbuilding.json", {})
     header_analysis = _load_json(report / "header_analysis.json", {})
     structured_data = _load_json(report / "structured_data.json", {})
+    metadata_quality = _load_json(report / "metadata_quality.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     model = metrics.get("model", "Alibaba-NLP/gte-multilingual-base")
@@ -123,6 +125,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         linkbuilding=linkbuilding,
         header_analysis=header_analysis,
         structured_data=structured_data,
+        metadata_quality=metadata_quality,
         embeddings=embed_array,
         embedded_pages=embedded_pages,
     )
@@ -228,6 +231,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     lb = (proj.linkbuilding or {}).get("summary", {}) or {}
     ha = (proj.header_analysis or {}).get("summary", {}) or {}
     sd = (proj.structured_data or {}).get("summary", {}) or {}
+    mq = (proj.metadata_quality or {}).get("summary", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -263,6 +267,11 @@ def _leaderboard_row(proj: _Project) -> dict:
         "invalid_jsonld_blocks": int(sd.get("invalid_jsonld_blocks", 0)),
         "schema_type_count": int(sd.get("schema_type_count", 0)),
         "pages_missing_schema": int(sd.get("pages_missing_schema", 0)),
+        "metadata_issue_share": float(mq.get("issue_share", 0.0)),
+        "missing_description": int(mq.get("missing_description", 0)),
+        "duplicate_title_pages": int(mq.get("duplicate_title_pages", 0)),
+        "missing_canonical": int(mq.get("missing_canonical", 0)),
+        "incomplete_open_graph": int(mq.get("incomplete_open_graph", 0)),
         # Action plan
         "recommendations_total": int((proj.recommendations or {}).get("total", 0)),
         "rec_high": int(rec_pri.get("high", 0)),

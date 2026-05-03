@@ -648,6 +648,7 @@ projects/
       external_links.json                 # outbound profile, broken links
       linkbuilding.json                   # site-level link health, anchor audit, anchor scatter
       structured_data.json                # schema.org JSON-LD coverage, validity, type mix
+      metadata_quality.json               # SERP title/description/canonical/social metadata health
       header_analysis.json                # H1-H6 structure, drifty headers, keyword freq
       header_scatter.json                 # header UMAP coordinates
       paragraph_clusters.json             # paragraph topic clusters

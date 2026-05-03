@@ -68,6 +68,8 @@ from .keyword_coverage import (
 )
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import to_payload as linkgraph_payload
+from .metadata_quality import analyze as analyze_metadata_quality
+from .metadata_quality import to_payload as metadata_quality_payload
 from .paragraph_density import compute_rows as compute_paragraph_density_rows
 from .paragraph_density import density_lookup as paragraph_density_lookup
 from .paragraph_density import to_payload as paragraph_density_payload
@@ -302,6 +304,15 @@ def run(config: PipelineConfig) -> dict:
         (sd_summary.get("schema_coverage", 0.0) or 0.0) * 100,
         sd_summary.get("invalid_jsonld_blocks", 0),
         sd_summary.get("schema_type_count", 0),
+    )
+
+    metadata_quality_data = metadata_quality_payload(analyze_metadata_quality(extracted_pages))
+    mq_summary = metadata_quality_data.get("summary", {}) or {}
+    LOG.info(
+        "  metadata quality: %.0f%% pages with issues · %d missing descriptions · %d missing canonicals",
+        (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
+        mq_summary.get("missing_description", 0),
+        mq_summary.get("missing_canonical", 0),
     )
 
     # 9) Link graph + recommendations
@@ -623,6 +634,7 @@ def run(config: PipelineConfig) -> dict:
         header_scatter=header_scatter_data,
         linkbuilding=linkbuilding_data,
         structured_data=structured_data_data,
+        metadata_quality=metadata_quality_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -656,6 +668,7 @@ def run(config: PipelineConfig) -> dict:
             header_scatter=header_scatter_data,
             linkbuilding=linkbuilding_data,
             structured_data=structured_data_data,
+            metadata_quality=metadata_quality_data,
         )
         LOG.info("  HTML report: %s", html_path)
 
