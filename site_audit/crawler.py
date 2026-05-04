@@ -117,6 +117,10 @@ class CrawlConfig:
     respect_robots: bool = True
     use_cache: bool = True
     exclude_patterns: list = field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATTERNS))
+    include_patterns: list = field(default_factory=list)
+    sitemap_urls: list = field(default_factory=list)
+    sitemap_include_patterns: list = field(default_factory=list)
+    sitemap_exclude_patterns: list = field(default_factory=list)
     seed_paths: list = field(default_factory=lambda: ["/"])
     user_agent: str = USER_AGENT
 
@@ -154,6 +158,9 @@ class Crawler:
         parsed = urlparse(self.base_url)
         self.host = parsed.netloc
         self._exclude_re = [re.compile(p) for p in config.exclude_patterns]
+        self._include_re = [re.compile(p) for p in config.include_patterns]
+        self._sitemap_include_re = [re.compile(p) for p in config.sitemap_include_patterns]
+        self._sitemap_exclude_re = [re.compile(p) for p in config.sitemap_exclude_patterns]
         self._robots: Optional[urllib.robotparser.RobotFileParser] = None
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
@@ -261,13 +268,16 @@ class Crawler:
             return []
 
     def _discover_via_sitemaps(self) -> list[str]:
-        candidates: list[str] = list(self._sitemaps_from_robots())
-        candidates.append(f"{self.base_url}/sitemap.xml")
-        candidates.append(f"{self.base_url}/sitemap_index.xml")
+        if self.config.sitemap_urls:
+            candidates: list[str] = list(self.config.sitemap_urls)
+        else:
+            candidates = list(self._sitemaps_from_robots())
+            candidates.append(f"{self.base_url}/sitemap.xml")
+            candidates.append(f"{self.base_url}/sitemap_index.xml")
 
         seen_sitemaps: Set[str] = set()
         urls: Set[str] = set()
-        queue = collections.deque(dict.fromkeys(candidates))
+        queue = collections.deque(dict.fromkeys(sm for sm in candidates if self._sitemap_allowed(sm)))
 
         while queue:
             sm = queue.popleft()
@@ -296,7 +306,9 @@ class Crawler:
                     # asset URLs, not page URLs.
                     if loc.tag.endswith("}loc") or loc.tag == "loc":
                         if loc.text and not loc.tag.endswith("image}loc") and "image" not in loc.tag and "video" not in loc.tag:
-                            queue.append(loc.text.strip())
+                            child_sitemap = loc.text.strip()
+                            if self._sitemap_allowed(child_sitemap):
+                                queue.append(child_sitemap)
             elif tag == "urlset":
                 for loc in root.iter():
                     if loc.tag.endswith("}loc") or loc.tag == "loc":
@@ -304,10 +316,26 @@ class Crawler:
                         if "image" in loc.tag or "video" in loc.tag:
                             continue
                         if loc.text:
-                            urls.add(normalize_url(loc.text.strip()))
+                            url = normalize_url(loc.text.strip())
+                            if self._url_pattern_allowed(url):
+                                urls.add(url)
 
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
+
+    def _sitemap_allowed(self, sitemap_url: str) -> bool:
+        if self._sitemap_include_re and not any(rx.search(sitemap_url) for rx in self._sitemap_include_re):
+            return False
+        if any(rx.search(sitemap_url) for rx in self._sitemap_exclude_re):
+            return False
+        return True
+
+    def _url_pattern_allowed(self, url: str) -> bool:
+        if self._include_re and not any(rx.search(url) for rx in self._include_re):
+            return False
+        if any(rx.search(url) for rx in self._exclude_re):
+            return False
+        return True
 
     # --- BFS crawl -----------------------------------------------------
 
@@ -324,9 +352,8 @@ class Crawler:
             return False
         if _NON_HTML_EXTENSIONS.search(parsed.path or ""):
             return False
-        for rx in self._exclude_re:
-            if rx.search(url):
-                return False
+        if not self._url_pattern_allowed(url):
+            return False
         rp = self._load_robots()
         if rp is not None:
             try:

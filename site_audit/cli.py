@@ -84,6 +84,11 @@ def _run_command(args: argparse.Namespace) -> int:
         cannibalization_threshold=args.cannibalization_threshold,
         link_similarity_threshold=args.link_similarity_threshold,
         link_recommendations_top_k=args.link_recommendations,
+        url_include_patterns=args.url_include,
+        url_exclude_patterns=args.url_exclude,
+        sitemap_urls=args.sitemap_url,
+        sitemap_include_patterns=args.sitemap_include,
+        sitemap_exclude_patterns=args.sitemap_exclude,
     )
     summary = run(config)
     if summary.get("pages", 0) == 0:
@@ -190,6 +195,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--max-chars", type=int, default=4000)
     run_p.add_argument("--follow-subdomains", action="store_true")
     run_p.add_argument("--ignore-robots", action="store_true", help="Ignore robots.txt (use sparingly)")
+    run_p.add_argument("--sitemap-url", action="append", default=[],
+                       help="Only discover URLs from this sitemap URL; repeat for multiple sitemaps")
+    run_p.add_argument("--sitemap-include", action="append", default=[],
+                       help="Regex whitelist for sitemap URLs when following sitemap indexes")
+    run_p.add_argument("--sitemap-exclude", action="append", default=[],
+                       help="Regex blacklist for sitemap URLs when following sitemap indexes")
+    run_p.add_argument("--url-include", "--include-url", action="append", default=[],
+                       help="Regex whitelist for discovered/crawled page URLs; repeat for OR matching")
+    run_p.add_argument("--url-exclude", "--exclude-url", action="append", default=[],
+                       help="Regex blacklist for discovered/crawled page URLs; repeat to add rules")
     run_p.add_argument("--no-http-cache", action="store_true")
     run_p.add_argument("--no-embedding-cache", action="store_true")
     run_p.add_argument("--clean", action="store_true",

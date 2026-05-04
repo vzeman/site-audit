@@ -59,6 +59,15 @@ The first audit run also downloads the default embedding model
 site-audit run example.com
 ```
 
+Limit discovery to specific sitemaps or URL patterns when a site exposes
+language or section-specific indexes:
+
+```bash
+site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml
+site-audit run example.com --url-include '/en/' --url-exclude '/private/'
+site-audit run example.com --sitemap-include 'blog-sitemap' --sitemap-exclude 'images'
+```
+
 That:
 
 1. Reads `robots.txt` + every `sitemap.xml` it can find

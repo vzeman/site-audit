@@ -54,7 +54,7 @@ from .paragraph_clustering import (
     to_scatter_payload as paragraph_scatter_payload,
     to_summary_payload as paragraph_clusters_payload,
 )
-from .crawler import Crawler, CrawlConfig
+from .crawler import Crawler, CrawlConfig, DEFAULT_EXCLUDE_PATTERNS
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
 from .entities import analyze as analyze_entities
 from .entities import to_payload as entities_payload
@@ -118,6 +118,11 @@ class PipelineConfig:
     respect_robots: bool = True
     use_http_cache: bool = True
     use_embedding_cache: bool = True
+    url_include_patterns: list[str] = field(default_factory=list)
+    url_exclude_patterns: list[str] = field(default_factory=list)
+    sitemap_urls: list[str] = field(default_factory=list)
+    sitemap_include_patterns: list[str] = field(default_factory=list)
+    sitemap_exclude_patterns: list[str] = field(default_factory=list)
     skip_scatterplot: bool = False
     max_chars: int = 4000
 
@@ -187,6 +192,11 @@ def run(config: PipelineConfig) -> dict:
         follow_subdomains=config.follow_subdomains,
         respect_robots=config.respect_robots,
         use_cache=config.use_http_cache,
+        include_patterns=config.url_include_patterns,
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS) + list(config.url_exclude_patterns),
+        sitemap_urls=config.sitemap_urls,
+        sitemap_include_patterns=config.sitemap_include_patterns,
+        sitemap_exclude_patterns=config.sitemap_exclude_patterns,
     )
     crawler = Crawler(crawl_config, http_cache)
     fetched = crawler.discover_and_crawl()
