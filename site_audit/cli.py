@@ -91,6 +91,8 @@ def _run_command(args: argparse.Namespace) -> int:
         sitemap_urls=args.sitemap_url,
         sitemap_include_patterns=args.sitemap_include,
         sitemap_exclude_patterns=args.sitemap_exclude,
+        sitemap_lastmod_after=args.sitemap_lastmod_after,
+        sitemap_lastmod_within_days=args.sitemap_lastmod_within_days,
     )
     summary = run(config)
     if summary.get("pages", 0) == 0:
@@ -205,6 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Regex whitelist for sitemap URLs when following sitemap indexes")
     run_p.add_argument("--sitemap-exclude", action="append", default=[],
                        help="Regex blacklist for sitemap URLs when following sitemap indexes")
+    run_p.add_argument("--sitemap-lastmod-after", default=None,
+                       help="Only keep sitemap URLs whose <lastmod> is on/after YYYY-MM-DD")
+    run_p.add_argument("--sitemap-lastmod-within-days", type=int, default=None,
+                       help="Only keep sitemap URLs whose <lastmod> is within the last N days")
     run_p.add_argument("--url-include", "--include-url", action="append", default=[],
                        help="Regex whitelist for discovered/crawled page URLs; repeat for OR matching")
     run_p.add_argument("--url-exclude", "--exclude-url", action="append", default=[],

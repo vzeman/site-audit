@@ -109,6 +109,36 @@ def test_sitemap_include_and_exclude_patterns_filter_sitemap_index_children() ->
     assert crawler._discover_via_sitemaps() == ["https://example.com/en/page"]
 
 
+def test_sitemap_lastmod_after_filters_urlset_entries() -> None:
+    responses = {
+        "https://example.com/sitemap.xml": """
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url>
+                <loc>https://example.com/recent</loc>
+                <lastmod>2026-05-04T10:00:00+00:00</lastmod>
+              </url>
+              <url>
+                <loc>https://example.com/old</loc>
+                <lastmod>2024-12-31</lastmod>
+              </url>
+              <url>
+                <loc>https://example.com/unknown</loc>
+              </url>
+            </urlset>
+        """,
+    }
+    crawler = _crawler(
+        CrawlConfig(
+            "example.com",
+            respect_robots=False,
+            sitemap_lastmod_after="2025-05-04",
+        ),
+        responses,
+    )
+
+    assert crawler._discover_via_sitemaps() == ["https://example.com/recent"]
+
+
 def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
     crawler = Crawler(
         CrawlConfig(

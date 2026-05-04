@@ -124,6 +124,8 @@ class PipelineConfig:
     sitemap_urls: list[str] = field(default_factory=list)
     sitemap_include_patterns: list[str] = field(default_factory=list)
     sitemap_exclude_patterns: list[str] = field(default_factory=list)
+    sitemap_lastmod_after: Optional[str] = None
+    sitemap_lastmod_within_days: Optional[int] = None
     skip_scatterplot: bool = False
     max_chars: int = 4000
 
@@ -199,6 +201,8 @@ def run(config: PipelineConfig) -> dict:
         sitemap_urls=config.sitemap_urls,
         sitemap_include_patterns=config.sitemap_include_patterns,
         sitemap_exclude_patterns=config.sitemap_exclude_patterns,
+        sitemap_lastmod_after=config.sitemap_lastmod_after,
+        sitemap_lastmod_within_days=config.sitemap_lastmod_within_days,
     )
     crawler = Crawler(crawl_config, http_cache)
     fetched = crawler.discover_and_crawl()

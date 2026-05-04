@@ -27,6 +27,7 @@ import urllib.robotparser
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Iterable, Optional, Set
 from urllib.parse import urljoin, urlparse, urldefrag
 
@@ -122,6 +123,8 @@ class CrawlConfig:
     sitemap_urls: list = field(default_factory=list)
     sitemap_include_patterns: list = field(default_factory=list)
     sitemap_exclude_patterns: list = field(default_factory=list)
+    sitemap_lastmod_after: Optional[str] = None
+    sitemap_lastmod_within_days: Optional[int] = None
     seed_paths: list = field(default_factory=lambda: ["/"])
     user_agent: str = USER_AGENT
 
@@ -162,6 +165,7 @@ class Crawler:
         self._include_re = [re.compile(p) for p in config.include_patterns]
         self._sitemap_include_re = [re.compile(p) for p in config.sitemap_include_patterns]
         self._sitemap_exclude_re = [re.compile(p) for p in config.sitemap_exclude_patterns]
+        self._sitemap_lastmod_cutoff = self._lastmod_cutoff()
         self._robots: Optional[urllib.robotparser.RobotFileParser] = None
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
@@ -311,18 +315,62 @@ class Crawler:
                             if self._sitemap_allowed(child_sitemap):
                                 queue.append(child_sitemap)
             elif tag == "urlset":
-                for loc in root.iter():
-                    if loc.tag.endswith("}loc") or loc.tag == "loc":
-                        # skip <image:loc>, <video:loc> — those are media URLs
-                        if "image" in loc.tag or "video" in loc.tag:
-                            continue
-                        if loc.text:
-                            url = normalize_url(loc.text.strip())
-                            if self._url_pattern_allowed(url):
-                                urls.add(url)
+                for url_node in root:
+                    if self._local_name(url_node.tag) != "url":
+                        continue
+                    loc_text = ""
+                    lastmod_text = ""
+                    for child in url_node:
+                        child_name = self._local_name(child.tag)
+                        if child_name == "loc" and "image" not in child.tag and "video" not in child.tag:
+                            loc_text = (child.text or "").strip()
+                        elif child_name == "lastmod":
+                            lastmod_text = (child.text or "").strip()
+                    if not loc_text:
+                        continue
+                    url = normalize_url(loc_text)
+                    if self._url_pattern_allowed(url) and self._lastmod_allowed(lastmod_text):
+                        urls.add(url)
 
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
+
+    def _lastmod_cutoff(self) -> Optional[date]:
+        if self.config.sitemap_lastmod_after:
+            parsed = self._parse_sitemap_date(self.config.sitemap_lastmod_after)
+            if parsed is None:
+                raise ValueError(
+                    f"invalid sitemap_lastmod_after date: {self.config.sitemap_lastmod_after!r}"
+                )
+            return parsed
+        if self.config.sitemap_lastmod_within_days is not None:
+            return date.today() - timedelta(days=int(self.config.sitemap_lastmod_within_days))
+        return None
+
+    @staticmethod
+    def _local_name(tag: str) -> str:
+        return tag.split("}", 1)[-1]
+
+    @staticmethod
+    def _parse_sitemap_date(raw: str) -> Optional[date]:
+        text = (raw or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(text[:10])
+            except ValueError:
+                return None
+
+    def _lastmod_allowed(self, lastmod_text: str) -> bool:
+        if self._sitemap_lastmod_cutoff is None:
+            return True
+        parsed = self._parse_sitemap_date(lastmod_text)
+        return parsed is not None and parsed >= self._sitemap_lastmod_cutoff
 
     def _sitemap_allowed(self, sitemap_url: str) -> bool:
         if self._sitemap_include_re and not any(rx.search(sitemap_url) for rx in self._sitemap_include_re):
