@@ -58,6 +58,56 @@
       <div class="text-xs text-gray-500 mt-2">cell heatmap is per-column: green = best (for that metric's "good" direction), red = worst</div>
     </section>
 
+    <!-- Side-by-side scorecards -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Side-by-side scorecards</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Normalized category scores from 0–100. Each metric is scored against the other compared domains only, so this answers:
+          where is each domain ahead or behind in this comparison set?
+        </p>
+      </div>
+      <div id="scorecards" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+    </section>
+
+    <!-- Biggest gaps -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Biggest side-by-side gaps</h2>
+          <p class="text-xs text-gray-500 mt-1">
+            Metrics with the largest normalized distance between the leading and trailing domain.
+            Use this as the fastest list of competitive advantages and weaknesses.
+          </p>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="gap-table">
+          <thead class="bg-gray-100 text-xs uppercase text-gray-600"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Metric matrix -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Metric matrix</h2>
+          <p class="text-xs text-gray-500 mt-1">
+            One row per metric and one column per domain. The highlighted cell is the current winner for that metric.
+          </p>
+        </div>
+        <div class="flex gap-2 text-xs flex-wrap" id="matrix-group-buttons" role="group"></div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="metric-matrix">
+          <thead class="bg-gray-100 text-xs uppercase text-gray-600"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Combined scatter -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="scatter-section">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -353,6 +403,129 @@
     renderLeaderboard();
   }));
   renderLeaderboard();
+
+  // ============================================================
+  // Side-by-side scorecards + metric matrix
+  // ============================================================
+  function scoreColor(score) {
+    const s = Math.max(0, Math.min(1, Number(score) || 0));
+    if (s >= 0.75) return 'bg-green-100 text-green-800';
+    if (s >= 0.50) return 'bg-blue-100 text-blue-800';
+    if (s >= 0.25) return 'bg-orange-100 text-orange-800';
+    return 'bg-red-100 text-red-800';
+  }
+
+  function renderScorecards() {
+    const root = document.getElementById('scorecards');
+    const groups = data.metric_groups || [];
+    const cards = data.scorecards || [];
+    if (!root || !cards.length) return;
+    root.innerHTML = cards.map(card => {
+      const bars = groups.map(g => {
+        const score = Number((card.scores || {})[g.key] || 0);
+        return `
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-gray-600">${escapeHtml(g.label)}</span>
+              <span class="font-mono">${Math.round(score * 100)}</span>
+            </div>
+            <div class="h-2 bg-gray-100 rounded overflow-hidden">
+              <div class="h-2 rounded" style="width:${Math.round(score * 100)}%; background:${domainColor(card.domain)}"></div>
+            </div>
+          </div>`;
+      }).join('');
+      return `
+        <article class="border border-gray-200 rounded-lg p-4">
+          <div class="flex items-start justify-between mb-3 gap-3">
+            <div>
+              <h3 class="font-semibold">
+                <span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(card.domain)}"></span>
+                ${escapeHtml(card.domain)}
+              </h3>
+              <p class="text-xs text-gray-500">${card.wins || 0} metric wins</p>
+            </div>
+            <span class="text-sm font-mono px-2 py-1 rounded ${scoreColor(card.overall_score)}">
+              ${Math.round((card.overall_score || 0) * 100)}
+            </span>
+          </div>
+          <div class="space-y-2">${bars}</div>
+        </article>`;
+    }).join('');
+  }
+
+  function renderGaps() {
+    const tbl = document.getElementById('gap-table');
+    const gaps = (data.biggest_gaps || []).slice(0, 15);
+    if (!tbl || !gaps.length) return;
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-3 py-2 text-left">Metric</th>
+        <th class="px-3 py-2 text-left">Group</th>
+        <th class="px-3 py-2 text-left">Leader</th>
+        <th class="px-3 py-2 text-left">Trailing</th>
+        <th class="px-3 py-2 text-right">Gap</th>
+      </tr>`;
+    tbl.querySelector('tbody').innerHTML = gaps.map(g => `
+      <tr class="border-b border-gray-100">
+        <td class="px-3 py-1.5 font-medium">${escapeHtml(g.metric)}</td>
+        <td class="px-3 py-1.5 text-gray-600">${escapeHtml(g.group)}</td>
+        <td class="px-3 py-1.5">
+          <span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(g.winner)}"></span>
+          ${escapeHtml(g.winner)} <span class="font-mono text-green-700">${fmt(g.winner_value, g.fmt)}</span>
+        </td>
+        <td class="px-3 py-1.5">
+          <span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(g.worst)}"></span>
+          ${escapeHtml(g.worst)} <span class="font-mono text-red-700">${fmt(g.worst_value, g.fmt)}</span>
+        </td>
+        <td class="px-3 py-1.5 text-right font-mono">${Math.round((g.relative_gap || 0) * 100)}%</td>
+      </tr>`).join('');
+  }
+
+  let matrixGroup = ((data.metric_groups || [])[0] || {}).key || '';
+
+  function renderMatrixButtons() {
+    const root = document.getElementById('matrix-group-buttons');
+    if (!root) return;
+    root.innerHTML = (data.metric_groups || []).map(g => `
+      <button data-matrix-group="${escapeHtml(g.key)}" class="matrix-group px-2 py-1 rounded border border-gray-300 bg-white">
+        ${escapeHtml(g.label)}
+      </button>`).join('');
+    root.querySelectorAll('.matrix-group').forEach(b => b.addEventListener('click', () => {
+      matrixGroup = b.dataset.matrixGroup;
+      renderMetricMatrix();
+    }));
+  }
+
+  function renderMetricMatrix() {
+    document.querySelectorAll('.matrix-group').forEach(b => {
+      const on = b.dataset.matrixGroup === matrixGroup;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    const tbl = document.getElementById('metric-matrix');
+    const group = (data.metric_groups || []).find(g => g.key === matrixGroup);
+    if (!tbl || !group) return;
+    tbl.querySelector('thead').innerHTML = '<tr>' +
+      '<th class="px-3 py-2 text-left">Metric</th>' +
+      data.domains.map(d => `<th class="px-3 py-2 text-right">${escapeHtml(d)}</th>`).join('') +
+      '<th class="px-3 py-2 text-left">Better</th>' +
+      '</tr>';
+    tbl.querySelector('tbody').innerHTML = (group.metrics || []).map(m => {
+      const cells = data.domains.map(d => {
+        const isWinner = m.winner && d === m.winner;
+        const bg = isWinner ? 'background:#dcfce7' : '';
+        return `<td class="px-3 py-1.5 text-right font-mono" style="${bg}">${fmt((m.values || {})[d], m.fmt)}</td>`;
+      }).join('');
+      const better = m.better === 'high' ? 'higher' : m.better === 'low' ? 'lower' : 'contextual';
+      return `<tr class="border-b border-gray-100"><td class="px-3 py-1.5 font-medium">${escapeHtml(m.label)}</td>${cells}<td class="px-3 py-1.5 text-xs text-gray-500">${better}</td></tr>`;
+    }).join('');
+  }
+
+  renderScorecards();
+  renderGaps();
+  renderMatrixButtons();
+  renderMetricMatrix();
 
   // ============================================================
   // Combined scatter

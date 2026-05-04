@@ -238,6 +238,175 @@ def _percentile(values: list[float], p: float) -> float:
     return float(s[i])
 
 
+COMPARISON_METRIC_GROUPS = [
+    {
+        "key": "topic",
+        "label": "Topic Shape",
+        "metrics": [
+            {"key": "calibrated_focus", "label": "Calibrated focus", "better": "high", "fmt": "0.000"},
+            {"key": "site_radius", "label": "Semantic radius", "better": "low", "fmt": "0.000"},
+            {"key": "section_coherence", "label": "Section coherence", "better": "high", "fmt": "0.00"},
+            {"key": "topic_dimension", "label": "Topic dimension", "better": "na", "fmt": "0.0"},
+        ],
+    },
+    {
+        "key": "geo",
+        "label": "GEO & Schema",
+        "metrics": [
+            {"key": "answerability_median", "label": "GEO median", "better": "high", "fmt": "0.0"},
+            {"key": "answerability_p90", "label": "GEO p90", "better": "high", "fmt": "0.0"},
+            {"key": "answerability_below_4_share", "label": "GEO < 4 share", "better": "low", "fmt": "pct"},
+            {"key": "schema_coverage", "label": "Schema coverage", "better": "high", "fmt": "pct"},
+            {"key": "invalid_jsonld_blocks", "label": "Invalid JSON-LD", "better": "low", "fmt": "int"},
+            {"key": "schema_type_count", "label": "Schema types", "better": "high", "fmt": "int"},
+        ],
+    },
+    {
+        "key": "linking",
+        "label": "Internal Linking",
+        "metrics": [
+            {"key": "median_in_degree", "label": "Median inbound links", "better": "high", "fmt": "0"},
+            {"key": "p90_in_degree", "label": "P90 inbound links", "better": "high", "fmt": "0"},
+            {"key": "median_out_degree", "label": "Median outbound links", "better": "high", "fmt": "0"},
+            {"key": "orphan_share", "label": "Orphan share", "better": "low", "fmt": "pct"},
+            {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
+            {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
+        ],
+    },
+    {
+        "key": "content",
+        "label": "Content Quality",
+        "metrics": [
+            {"key": "metadata_issue_share", "label": "Metadata issue share", "better": "low", "fmt": "pct"},
+            {"key": "freshness_date_coverage", "label": "Date coverage", "better": "high", "fmt": "pct"},
+            {"key": "freshness_stale_share", "label": "Stale share", "better": "low", "fmt": "pct"},
+            {"key": "entity_coverage", "label": "Entity coverage", "better": "high", "fmt": "pct"},
+            {"key": "topical_authority_score", "label": "Authority score", "better": "high", "fmt": "0.0"},
+            {"key": "zero_link_paragraph_share", "label": "Zero-link paragraphs", "better": "low", "fmt": "pct"},
+            {"key": "spammy_paragraph_count", "label": "Spammy paragraphs", "better": "low", "fmt": "int"},
+        ],
+    },
+    {
+        "key": "technical",
+        "label": "Technical & UX",
+        "metrics": [
+            {"key": "indexable_share", "label": "Analyzed/indexable share", "better": "high", "fmt": "pct"},
+            {"key": "media_accessibility_issue_share", "label": "Media issue share", "better": "low", "fmt": "pct"},
+            {"key": "median_html_weight_bytes", "label": "Median HTML bytes", "better": "low", "fmt": "int"},
+            {"key": "heavy_page_share", "label": "Heavy page share", "better": "low", "fmt": "pct"},
+            {"key": "render_blocking_share", "label": "Render-blocking share", "better": "low", "fmt": "pct"},
+            {"key": "pages_missing_h1_share", "label": "Missing H1 share", "better": "low", "fmt": "pct"},
+            {"key": "pages_multi_h1", "label": "Multi-H1 pages", "better": "low", "fmt": "int"},
+        ],
+    },
+    {
+        "key": "conversion",
+        "label": "Conversion",
+        "metrics": [
+            {"key": "cta_coverage", "label": "CTA coverage", "better": "high", "fmt": "pct"},
+            {"key": "primary_cta_coverage", "label": "Primary CTA coverage", "better": "high", "fmt": "pct"},
+            {"key": "form_coverage", "label": "Form coverage", "better": "high", "fmt": "pct"},
+            {"key": "lead_pages_without_capture", "label": "Lead leaks", "better": "low", "fmt": "int"},
+            {"key": "cta_overload_pages", "label": "CTA overload", "better": "low", "fmt": "int"},
+        ],
+    },
+]
+
+
+def _comparison_metric_payload(leaderboard: list[dict]) -> dict:
+    domains = [row.get("domain", "") for row in leaderboard]
+    scorecards = {
+        domain: {"domain": domain, "overall_score": 0.0, "scores": {}, "wins": 0}
+        for domain in domains
+    }
+    biggest_gaps: list[dict] = []
+    groups_payload: list[dict] = []
+
+    for group in COMPARISON_METRIC_GROUPS:
+        metric_payloads: list[dict] = []
+        group_score_values = {domain: [] for domain in domains}
+
+        for metric in group["metrics"]:
+            values: dict[str, float] = {}
+            for row in leaderboard:
+                domain = row.get("domain", "")
+                try:
+                    values[domain] = float(row.get(metric["key"], 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    values[domain] = 0.0
+
+            numeric_values = list(values.values())
+            vmin = min(numeric_values) if numeric_values else 0.0
+            vmax = max(numeric_values) if numeric_values else 0.0
+            better = metric.get("better", "na")
+
+            winner = ""
+            worst = ""
+            if domains and better == "high":
+                winner = max(values, key=values.get)
+                worst = min(values, key=values.get)
+            elif domains and better == "low":
+                winner = min(values, key=values.get)
+                worst = max(values, key=values.get)
+
+            if winner:
+                scorecards[winner]["wins"] += 1
+
+            if better in {"high", "low"} and vmax != vmin:
+                for domain, value in values.items():
+                    normalized = (value - vmin) / (vmax - vmin)
+                    score = normalized if better == "high" else 1.0 - normalized
+                    group_score_values[domain].append(score)
+
+                best_value = values[winner] if winner else 0.0
+                worst_value = values[worst] if worst else 0.0
+                denom = max(abs(best_value), abs(worst_value), 1.0)
+                relative_gap = abs(best_value - worst_value) / denom
+                biggest_gaps.append({
+                    "group": group["label"],
+                    "metric": metric["label"],
+                    "key": metric["key"],
+                    "fmt": metric["fmt"],
+                    "better": better,
+                    "winner": winner,
+                    "winner_value": best_value,
+                    "worst": worst,
+                    "worst_value": worst_value,
+                    "relative_gap": relative_gap,
+                    "values": values,
+                })
+
+            metric_payloads.append({
+                **metric,
+                "values": values,
+                "winner": winner,
+                "worst": worst,
+                "min": vmin,
+                "max": vmax,
+            })
+
+        for domain, scores in group_score_values.items():
+            scorecards[domain]["scores"][group["key"]] = (
+                sum(scores) / len(scores) if scores else 0.0
+            )
+
+        groups_payload.append({
+            "key": group["key"],
+            "label": group["label"],
+            "metrics": metric_payloads,
+        })
+
+    for card in scorecards.values():
+        scores = list(card["scores"].values())
+        card["overall_score"] = sum(scores) / len(scores) if scores else 0.0
+
+    return {
+        "metric_groups": groups_payload,
+        "scorecards": sorted(scorecards.values(), key=lambda c: c["overall_score"], reverse=True),
+        "biggest_gaps": sorted(biggest_gaps, key=lambda g: g["relative_gap"], reverse=True)[:25],
+    }
+
+
 def _leaderboard_row(proj: _Project) -> dict:
     m = proj.metrics or {}
     answer_scores = [float(a.get("score", 0.0)) for a in (proj.answerability or [])]
@@ -418,6 +587,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
 
     leaderboard = [_leaderboard_row(p) for p in projects]
     distributions = [_distributions_for_overlay(p) for p in projects]
+    comparison_metrics = _comparison_metric_payload(leaderboard)
 
     LOG.info("  building combined UMAP across %d domains", len(projects))
     scatter_rows, n_total = _combined_umap(projects)
@@ -429,6 +599,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "scatter": scatter_rows,
         "scatter_total": n_total,
         "distributions": distributions,
+        **comparison_metrics,
     }
 
 
