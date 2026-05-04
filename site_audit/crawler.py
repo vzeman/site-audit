@@ -119,6 +119,8 @@ class CrawlConfig:
     use_cache: bool = True
     crawl_discovered_links: bool = True
     strip_header_footer: bool = False
+    content_include_classes: list = field(default_factory=list)
+    content_exclude_classes: list = field(default_factory=list)
     exclude_patterns: list = field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATTERNS))
     include_patterns: list = field(default_factory=list)
     sitemap_urls: list = field(default_factory=list)
@@ -653,12 +655,47 @@ class Crawler:
         )
 
     def _prepare_html_body(self, body: str) -> str:
-        if not self.config.strip_header_footer or not body:
+        if not (
+            self.config.strip_header_footer
+            or self.config.content_include_classes
+            or self.config.content_exclude_classes
+        ) or not body:
             return body
         try:
             soup = BeautifulSoup(body, "html.parser")
         except Exception:
             return body
-        for tag in soup.find_all(["header", "footer"]):
-            tag.decompose()
+        if self.config.strip_header_footer:
+            for tag in soup.find_all(["header", "footer"]):
+                tag.decompose()
+        if self.config.content_exclude_classes:
+            excluded = set(self.config.content_exclude_classes)
+            for tag in soup.find_all(True):
+                if self._tag_has_any_class(tag, excluded):
+                    tag.decompose()
+        if self.config.content_include_classes:
+            included = set(self.config.content_include_classes)
+            selected = []
+            selected_ids = set()
+            for tag in soup.find_all(True):
+                if not self._tag_has_any_class(tag, included):
+                    continue
+                if any(id(parent) in selected_ids for parent in tag.parents):
+                    continue
+                selected.append(tag)
+                selected_ids.add(id(tag))
+            scoped = BeautifulSoup("<html><body></body></html>", "html.parser")
+            target = scoped.body or scoped
+            for tag in selected:
+                target.append(tag.extract())
+            soup = scoped
         return str(soup)
+
+    @staticmethod
+    def _tag_has_any_class(tag, class_names: set[str]) -> bool:
+        if not getattr(tag, "attrs", None):
+            return False
+        classes = tag.get("class") or []
+        if isinstance(classes, str):
+            classes = classes.split()
+        return any(cls in class_names for cls in classes)

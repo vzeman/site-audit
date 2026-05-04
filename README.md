@@ -69,6 +69,8 @@ site-audit run example.com --sitemap-include 'blog-sitemap' --sitemap-exclude 'i
 site-audit run postoj.sk --sitemap-lastmod-after 2025-05-04 --sitemap-only
 site-audit run example.com --sitemap-lastmod-within-days 365
 site-audit run example.com --strip-header-footer
+site-audit run postoj.sk --content-include-class article-detail-content
+site-audit run example.com --content-exclude-class sidebar --content-exclude-class related-posts
 ```
 
 `--sitemap-lastmod-after` and `--sitemap-lastmod-within-days` keep only
@@ -76,6 +78,10 @@ URLs with a sitemap `<lastmod>` on or after the cutoff. URLs without
 `<lastmod>` are excluded when a date filter is active.
 Use `--strip-header-footer` when navigation/footer links pollute content,
 link density, link graph, or linkbuilding metrics.
+Use `--content-include-class` to analyze only matching content containers,
+and `--content-exclude-class` to remove repeated sidebars, widgets, or
+related-content blocks before extraction. Repeat either flag for multiple
+exact class names.
 
 For large sites, disable paragraph-heavy stages when you only need the
 page-level report:

@@ -180,3 +180,75 @@ def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:
     links = crawler._extract_links("https://example.com/", body)
 
     assert links == [("https://example.com/article", "Article")]
+
+
+def test_content_include_classes_scope_link_extraction() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            respect_robots=False,
+            content_include_classes=["article-detail-content"],
+        ),
+        _Cache(),
+    )
+    body = crawler._prepare_html_body("""
+        <html><body>
+          <aside><a href="/sidebar">Sidebar</a></aside>
+          <article class="article-detail-content"><a href="/article">Article</a></article>
+          <section class="article-detail-content"><a href="/more">More</a></section>
+        </body></html>
+    """)
+
+    links = crawler._extract_links("https://example.com/", body)
+
+    assert links == [
+        ("https://example.com/article", "Article"),
+        ("https://example.com/more", "More"),
+    ]
+
+
+def test_content_exclude_classes_remove_repeated_blocks() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            respect_robots=False,
+            content_exclude_classes=["sidebar", "related-posts"],
+        ),
+        _Cache(),
+    )
+    body = crawler._prepare_html_body("""
+        <html><body>
+          <main><a href="/article">Article</a></main>
+          <aside class="sidebar"><a href="/sidebar">Sidebar</a></aside>
+          <div class="related-posts featured"><a href="/related">Related</a></div>
+        </body></html>
+    """)
+
+    links = crawler._extract_links("https://example.com/", body)
+
+    assert links == [("https://example.com/article", "Article")]
+
+
+def test_content_exclude_classes_apply_inside_included_scope() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            respect_robots=False,
+            content_include_classes=["article-detail-content"],
+            content_exclude_classes=["promo"],
+        ),
+        _Cache(),
+    )
+    body = crawler._prepare_html_body("""
+        <html><body>
+          <article class="article-detail-content">
+            <a href="/article">Article</a>
+            <div class="promo"><a href="/promo">Promo</a></div>
+          </article>
+          <footer><a href="/footer">Footer</a></footer>
+        </body></html>
+    """)
+
+    links = crawler._extract_links("https://example.com/", body)
+
+    assert links == [("https://example.com/article", "Article")]

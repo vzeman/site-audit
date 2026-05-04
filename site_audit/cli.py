@@ -68,6 +68,8 @@ def _run_command(args: argparse.Namespace) -> int:
         use_embedding_cache=not args.no_embedding_cache,
         crawl_discovered_links=not args.sitemap_only,
         strip_header_footer=args.strip_header_footer,
+        content_include_classes=args.content_include_class,
+        content_exclude_classes=args.content_exclude_class,
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
         enable_cluster_labels=not args.no_cluster_labels,
@@ -206,6 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Fetch only sitemap-discovered URLs; do not enqueue internal page links")
     run_p.add_argument("--strip-header-footer", action="store_true",
                        help="Remove <header> and <footer> HTML before text extraction and link analysis")
+    run_p.add_argument("--content-include-class", "--include-class", action="append", default=[],
+                       help="Only analyze HTML elements with this class; repeat for multiple classes")
+    run_p.add_argument("--content-exclude-class", "--exclude-class", action="append", default=[],
+                       help="Remove HTML elements with this class before analysis; repeat for multiple classes")
     run_p.add_argument("--sitemap-include", action="append", default=[],
                        help="Regex whitelist for sitemap URLs when following sitemap indexes")
     run_p.add_argument("--sitemap-exclude", action="append", default=[],

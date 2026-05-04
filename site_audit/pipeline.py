@@ -120,6 +120,8 @@ class PipelineConfig:
     use_embedding_cache: bool = True
     crawl_discovered_links: bool = True
     strip_header_footer: bool = False
+    content_include_classes: list[str] = field(default_factory=list)
+    content_exclude_classes: list[str] = field(default_factory=list)
     url_include_patterns: list[str] = field(default_factory=list)
     url_exclude_patterns: list[str] = field(default_factory=list)
     sitemap_urls: list[str] = field(default_factory=list)
@@ -198,6 +200,8 @@ def run(config: PipelineConfig) -> dict:
         use_cache=config.use_http_cache,
         crawl_discovered_links=config.crawl_discovered_links,
         strip_header_footer=config.strip_header_footer,
+        content_include_classes=config.content_include_classes,
+        content_exclude_classes=config.content_exclude_classes,
         include_patterns=config.url_include_patterns,
         exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS) + list(config.url_exclude_patterns),
         sitemap_urls=config.sitemap_urls,
