@@ -162,3 +162,21 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+
+
+def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, strip_header_footer=True),
+        _Cache(),
+    )
+    body = crawler._prepare_html_body("""
+        <html><body>
+          <header><a href="/nav">Nav</a></header>
+          <main><a href="/article">Article</a></main>
+          <footer><a href="/legal">Legal</a></footer>
+        </body></html>
+    """)
+
+    links = crawler._extract_links("https://example.com/", body)
+
+    assert links == [("https://example.com/article", "Article")]

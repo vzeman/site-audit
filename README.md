@@ -68,11 +68,14 @@ site-audit run example.com --url-include '/en/' --url-exclude '/private/'
 site-audit run example.com --sitemap-include 'blog-sitemap' --sitemap-exclude 'images'
 site-audit run postoj.sk --sitemap-lastmod-after 2025-05-04 --sitemap-only
 site-audit run example.com --sitemap-lastmod-within-days 365
+site-audit run example.com --strip-header-footer
 ```
 
 `--sitemap-lastmod-after` and `--sitemap-lastmod-within-days` keep only
 URLs with a sitemap `<lastmod>` on or after the cutoff. URLs without
 `<lastmod>` are excluded when a date filter is active.
+Use `--strip-header-footer` when navigation/footer links pollute content,
+link density, link graph, or linkbuilding metrics.
 
 For large sites, disable paragraph-heavy stages when you only need the
 page-level report:

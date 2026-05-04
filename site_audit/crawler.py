@@ -118,6 +118,7 @@ class CrawlConfig:
     respect_robots: bool = True
     use_cache: bool = True
     crawl_discovered_links: bool = True
+    strip_header_footer: bool = False
     exclude_patterns: list = field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATTERNS))
     include_patterns: list = field(default_factory=list)
     sitemap_urls: list = field(default_factory=list)
@@ -605,7 +606,7 @@ class Crawler:
                 return FetchResult(
                     url=url,
                     status=cached.status,
-                    body=cached.text,
+                    body=self._prepare_html_body(cached.text),
                     content_type=(cached.content_type or "").lower(),
                     from_cache=True,
                     content_length_bytes=len(cached.body or b""),
@@ -644,9 +645,20 @@ class Crawler:
         return FetchResult(
             url=final_url,
             status=r.status_code,
-            body=text,
+            body=self._prepare_html_body(text),
             content_type=ctype,
             from_cache=False,
             content_length_bytes=len(body_bytes or b""),
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
         )
+
+    def _prepare_html_body(self, body: str) -> str:
+        if not self.config.strip_header_footer or not body:
+            return body
+        try:
+            soup = BeautifulSoup(body, "html.parser")
+        except Exception:
+            return body
+        for tag in soup.find_all(["header", "footer"]):
+            tag.decompose()
+        return str(soup)
