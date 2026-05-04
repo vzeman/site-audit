@@ -118,6 +118,7 @@ class PipelineConfig:
     respect_robots: bool = True
     use_http_cache: bool = True
     use_embedding_cache: bool = True
+    crawl_discovered_links: bool = True
     url_include_patterns: list[str] = field(default_factory=list)
     url_exclude_patterns: list[str] = field(default_factory=list)
     sitemap_urls: list[str] = field(default_factory=list)
@@ -192,6 +193,7 @@ def run(config: PipelineConfig) -> dict:
         follow_subdomains=config.follow_subdomains,
         respect_robots=config.respect_robots,
         use_cache=config.use_http_cache,
+        crawl_discovered_links=config.crawl_discovered_links,
         include_patterns=config.url_include_patterns,
         exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS) + list(config.url_exclude_patterns),
         sitemap_urls=config.sitemap_urls,

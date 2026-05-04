@@ -63,7 +63,7 @@ Limit discovery to specific sitemaps or URL patterns when a site exposes
 language or section-specific indexes:
 
 ```bash
-site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml
+site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml --sitemap-only
 site-audit run example.com --url-include '/en/' --url-exclude '/private/'
 site-audit run example.com --sitemap-include 'blog-sitemap' --sitemap-exclude 'images'
 ```
@@ -73,7 +73,7 @@ page-level report:
 
 ```bash
 site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml \
-  --no-paragraph-links --no-paragraph-clustering --no-paragraph-fanout
+  --sitemap-only --no-paragraph-links --no-paragraph-clustering --no-paragraph-fanout
 ```
 
 That:

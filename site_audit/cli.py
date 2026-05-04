@@ -66,6 +66,7 @@ def _run_command(args: argparse.Namespace) -> int:
         respect_robots=not args.ignore_robots,
         use_http_cache=not args.no_http_cache,
         use_embedding_cache=not args.no_embedding_cache,
+        crawl_discovered_links=not args.sitemap_only,
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
         enable_cluster_labels=not args.no_cluster_labels,
@@ -198,6 +199,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--ignore-robots", action="store_true", help="Ignore robots.txt (use sparingly)")
     run_p.add_argument("--sitemap-url", action="append", default=[],
                        help="Only discover URLs from this sitemap URL; repeat for multiple sitemaps")
+    run_p.add_argument("--sitemap-only", action="store_true",
+                       help="Fetch only sitemap-discovered URLs; do not enqueue internal page links")
     run_p.add_argument("--sitemap-include", action="append", default=[],
                        help="Regex whitelist for sitemap URLs when following sitemap indexes")
     run_p.add_argument("--sitemap-exclude", action="append", default=[],

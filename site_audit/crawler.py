@@ -116,6 +116,7 @@ class CrawlConfig:
     follow_subdomains: bool = False
     respect_robots: bool = True
     use_cache: bool = True
+    crawl_discovered_links: bool = True
     exclude_patterns: list = field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATTERNS))
     include_patterns: list = field(default_factory=list)
     sitemap_urls: list = field(default_factory=list)
@@ -441,6 +442,8 @@ class Crawler:
                                 if link == result.url:
                                     continue
                                 page_outlinks.append((link, anchor))
+                                if not self.config.crawl_discovered_links:
+                                    continue
                                 if link in seen:
                                     continue
                                 if not self._allowed(link):

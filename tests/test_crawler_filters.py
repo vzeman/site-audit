@@ -1,4 +1,4 @@
-from site_audit.crawler import CrawlConfig, Crawler
+from site_audit.crawler import CrawlConfig, Crawler, FetchResult
 
 
 class _Cache:
@@ -107,3 +107,28 @@ def test_sitemap_include_and_exclude_patterns_filter_sitemap_index_children() ->
     )
 
     assert crawler._discover_via_sitemaps() == ["https://example.com/en/page"]
+
+
+def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=1,
+            respect_robots=False,
+            crawl_discovered_links=False,
+        ),
+        _Cache(),
+    )
+    crawler._fetch = lambda url: FetchResult(
+        url=url,
+        status=200,
+        body='<a href="https://example.com/linked">Linked</a>',
+        content_type="text/html",
+        from_cache=True,
+    )
+
+    results = crawler._bfs(["https://example.com/start"])
+
+    assert [result.url for result in results] == ["https://example.com/start"]
+    assert results[0].outlinks == [("https://example.com/linked", "Linked")]
