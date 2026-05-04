@@ -207,6 +207,36 @@ def test_content_include_classes_scope_link_extraction() -> None:
     ]
 
 
+def test_content_include_classes_preserve_head_metadata() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            respect_robots=False,
+            content_include_classes=["article-detail-content"],
+        ),
+        _Cache(),
+    )
+    body = crawler._prepare_html_body("""
+        <html>
+          <head>
+            <title>Article title</title>
+            <script type="application/ld+json">
+              {"@context":"https://schema.org","@type":"NewsArticle","dateModified":"2026-03-01"}
+            </script>
+          </head>
+          <body>
+            <aside><a href="/sidebar">Sidebar</a></aside>
+            <article class="article-detail-content"><p>Article body.</p></article>
+          </body>
+        </html>
+    """)
+
+    assert "<title>Article title</title>" in body
+    assert '"dateModified":"2026-03-01"' in body
+    links = crawler._extract_links("https://example.com/", body)
+    assert links == []
+
+
 def test_content_exclude_classes_remove_repeated_blocks() -> None:
     crawler = Crawler(
         CrawlConfig(

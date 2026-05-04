@@ -101,22 +101,46 @@ def _meta(soup: BeautifulSoup, name: str) -> str:
     return ""
 
 
-def _jsonld_date_values(item, keys: set[str]) -> list[tuple[str, str]]:
-    values: list[tuple[str, str]] = []
+def _schema_type_values(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(x) for x in value if x]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _jsonld_scalar_values(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        for key in ("@value", "value", "date"):
+            nested = value.get(key)
+            if nested:
+                return [str(nested)]
+    if isinstance(value, list):
+        values: list[str] = []
+        for child in value:
+            values.extend(_jsonld_scalar_values(child))
+        return values
+    if value:
+        return [str(value)]
+    return []
+
+
+def _jsonld_date_values(item, keys: set[str], active_types: tuple[str, ...] = ()) -> list[tuple[str, str, str]]:
+    values: list[tuple[str, str, str]] = []
     if isinstance(item, dict):
+        item_types = tuple(_schema_type_values(item.get("@type"))) or active_types
         for key, value in item.items():
             key_str = str(key)
             if key_str in keys:
-                if isinstance(value, str):
-                    values.append((key_str, value))
-                elif isinstance(value, list):
-                    values.extend((key_str, str(v)) for v in value if v)
-            if key_str == "@graph" and isinstance(value, list):
-                for child in value:
-                    values.extend(_jsonld_date_values(child, keys))
+                for scalar in _jsonld_scalar_values(value):
+                    values.append((key_str, scalar, item_types[0] if item_types else ""))
+            elif isinstance(value, (dict, list)):
+                values.extend(_jsonld_date_values(value, keys, item_types))
     elif isinstance(item, list):
         for child in item:
-            values.extend(_jsonld_date_values(child, keys))
+            values.extend(_jsonld_date_values(child, keys, active_types))
     return values
 
 
@@ -185,9 +209,10 @@ def _extract_date_candidates(soup: BeautifulSoup, body_text: str) -> tuple[str, 
             data = json.loads(raw)
         except Exception:
             continue
-        for key, value in _jsonld_date_values(data, {"datePublished", "dateModified", "dateCreated", "uploadDate"}):
+        for key, value, schema_type in _jsonld_date_values(data, {"datePublished", "dateModified", "dateCreated", "uploadDate"}):
             kind = "modified" if key == "dateModified" else "published"
-            candidate = _date_candidate(value, f"jsonld:{key}", kind)
+            source = f"jsonld:{schema_type}.{key}" if schema_type else f"jsonld:{key}"
+            candidate = _date_candidate(value, source, kind)
             if candidate:
                 candidates.append(candidate)
 
@@ -309,14 +334,6 @@ def _extract_paragraphs(
         blocks.append(text)
         counts.append((internal, external))
     return blocks, counts
-
-
-def _schema_type_values(value) -> list[str]:
-    if isinstance(value, list):
-        return [str(x) for x in value if x]
-    if value:
-        return [str(value)]
-    return []
 
 
 def _schema_types_from_item(item) -> list[str]:

@@ -48,7 +48,40 @@ def test_extract_date_candidates_from_meta_time_and_jsonld() -> None:
     assert page.date_published == "2024-03-15"
     assert page.date_modified == "2024-04-20"
     assert {"date": "2024-04-01", "source": "time", "kind": "visible"} in page.date_candidates
-    assert {"date": "2024-04-20", "source": "jsonld:dateModified", "kind": "modified"} in page.date_candidates
+    assert {"date": "2024-04-20", "source": "jsonld:Article.dateModified", "kind": "modified"} in page.date_candidates
+
+
+def test_extract_schema_date_candidates_from_graph_and_value_objects() -> None:
+    html = """
+    <html><head>
+      <title>Graph freshness extraction test</title>
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {"@type": "WebPage", "name": "Container"},
+            {
+              "@type": "NewsArticle",
+              "headline": "Schema date article",
+              "datePublished": {"@value": "2025-09-14T13:33:04+02:00"},
+              "dateModified": {"@value": "2025-09-14T14:01:40+02:00"}
+            }
+          ]
+        }
+      </script>
+    </head><body>
+      <h1>Graph freshness extraction test</h1>
+      <p>This page has enough body copy for the extractor fallback to keep it.
+      It checks schema.org NewsArticle dateModified and datePublished values
+      when they are nested in an @graph and represented as value objects.</p>
+    </body></html>
+    """
+
+    page = extract("https://example.com/graph-freshness", html, max_chars=2000)
+
+    assert page is not None
+    assert {"date": "2025-09-14", "source": "jsonld:NewsArticle.datePublished", "kind": "published"} in page.date_candidates
+    assert {"date": "2025-09-14", "source": "jsonld:NewsArticle.dateModified", "kind": "modified"} in page.date_candidates
 
 
 def test_freshness_payload_buckets_stale_missing_and_future_dates() -> None:

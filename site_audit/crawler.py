@@ -685,6 +685,8 @@ class Crawler:
                 selected.append(tag)
                 selected_ids.add(id(tag))
             scoped = BeautifulSoup("<html><body></body></html>", "html.parser")
+            if soup.head:
+                scoped.html.insert(0, soup.head.extract())
             target = scoped.body or scoped
             for tag in selected:
                 target.append(tag.extract())
