@@ -119,9 +119,11 @@ def test_compare_leaderboard_includes_freshness_metrics(tmp_path: Path) -> None:
             (
                 '{"summary":{"date_coverage":%s,'
                 '"stale_share":%s,'
+                '"total_pages":5,'
                 '"missing_dates":2,'
                 '"pages_very_stale":1,'
-                '"median_age_days":120}}'
+                '"median_age_days":120},'
+                '"buckets":{"fresh":2,"aging":1,"stale":1,"unknown":1}}'
             ) % (date_coverage, stale_share),
             encoding="utf-8",
         )
@@ -134,3 +136,6 @@ def test_compare_leaderboard_includes_freshness_metrics(tmp_path: Path) -> None:
     assert rows["a.example"]["freshness_missing_dates"] == 2
     assert rows["b.example"]["freshness_date_coverage"] == 0.4
     assert rows["b.example"]["freshness_stale_share"] == 0.5
+    dist = {row["domain"]: row for row in payload["distributions"]}
+    assert dist["a.example"]["freshness_buckets"]["fresh"] == 2
+    assert dist["a.example"]["freshness_summary"]["total_pages"] == 5

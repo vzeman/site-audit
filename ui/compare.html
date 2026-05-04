@@ -125,6 +125,20 @@
       <div id="combined-scatter" class="w-full" style="min-height: 600px;"></div>
     </section>
 
+    <!-- Freshness side-by-side -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 class="text-xl font-semibold">Freshness side-by-side</h2>
+          <p class="text-xs text-gray-500 mt-1">
+            Stacked bars show each domain's freshness buckets as a share of analyzed pages. Missing dates are included because pages without dates cannot be trusted as fresh.
+          </p>
+        </div>
+      </div>
+      <div id="freshness-compare-chart" class="w-full" style="min-height: 380px;"></div>
+      <div id="freshness-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+    </section>
+
     <!-- Distribution overlays -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -526,6 +540,81 @@
   renderGaps();
   renderMatrixButtons();
   renderMetricMatrix();
+
+  // ============================================================
+  // Freshness side-by-side
+  // ============================================================
+  const FRESHNESS_BUCKETS = [
+    { key: 'fresh', label: 'Fresh ≤90d', color: '#16a34a' },
+    { key: 'aging', label: 'Aging 91–365d', color: '#84cc16' },
+    { key: 'stale', label: 'Stale 1–2y', color: '#f59e0b' },
+    { key: 'very_stale', label: 'Very stale >2y', color: '#dc2626' },
+    { key: 'unknown', label: 'Missing date', color: '#6b7280' },
+    { key: 'future', label: 'Future date', color: '#8b5cf6' },
+  ];
+
+  function renderFreshnessCompare() {
+    const container = document.getElementById('freshness-compare-chart');
+    const legend = document.getElementById('freshness-compare-legend');
+    if (!container) return;
+    container.innerHTML = '';
+    if (legend) {
+      legend.innerHTML = FRESHNESS_BUCKETS.map(b =>
+        `<span class="inline-flex items-center"><span class="w-3 h-3 rounded mr-1.5" style="background:${b.color}"></span>${escapeHtml(b.label)}</span>`
+      ).join('');
+    }
+    const rows = (data.distributions || []).map(d => {
+      const buckets = d.freshness_buckets || {};
+      const summary = d.freshness_summary || {};
+      const total = Number(summary.total_pages || Object.values(buckets).reduce((sum, v) => sum + Number(v || 0), 0));
+      return { domain: d.domain, buckets, total };
+    }).filter(r => r.total > 0);
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No freshness data.</div>';
+      return;
+    }
+    const margin = { top: 18, right: 28, bottom: 48, left: 56 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 380 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 380)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleBand().domain(rows.map(r => r.domain)).range([0, width]).padding(0.35);
+    const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x));
+    svg.append('g').call(d3.axisLeft(y).ticks(5).tickFormat(d => `${Math.round(d * 100)}%`));
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -40)
+      .attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('share of pages');
+
+    rows.forEach(row => {
+      let yCursor = 0;
+      FRESHNESS_BUCKETS.forEach(bucket => {
+        const value = Number(row.buckets[bucket.key] || 0);
+        if (!value) return;
+        const share = value / row.total;
+        const y0 = y(yCursor + share);
+        const y1 = y(yCursor);
+        svg.append('rect')
+          .attr('x', x(row.domain)).attr('y', y0)
+          .attr('width', x.bandwidth()).attr('height', Math.max(0, y1 - y0))
+          .attr('fill', bucket.color).attr('rx', 2);
+        if (share >= 0.08) {
+          svg.append('text')
+            .attr('x', x(row.domain) + x.bandwidth() / 2)
+            .attr('y', y0 + (y1 - y0) / 2 + 4)
+            .attr('text-anchor', 'middle').style('font-size', '11px').style('fill', 'white')
+            .text(`${Math.round(share * 100)}%`);
+        }
+        yCursor += share;
+      });
+      svg.append('text')
+        .attr('x', x(row.domain) + x.bandwidth() / 2)
+        .attr('y', -4)
+        .attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#374151')
+        .text(`${row.total.toLocaleString()} pages`);
+    });
+  }
+
+  renderFreshnessCompare();
 
   // ============================================================
   // Combined scatter

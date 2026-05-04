@@ -569,6 +569,8 @@ def _distributions_for_overlay(proj: _Project) -> dict:
             [float(r.get("links_per_100w", 0.0))
              for r in ((proj.paragraph_density or {}).get("per_page") or [])]
         ),
+        "freshness_buckets": dict((proj.freshness or {}).get("buckets") or {}),
+        "freshness_summary": dict((proj.freshness or {}).get("summary") or {}),
     }
 
 

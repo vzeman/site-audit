@@ -467,6 +467,11 @@
         </p>
       </div>
       <div id="audit-freshness-summary" class="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="mb-5">
+        <h4 class="font-semibold mb-2">Freshness distribution</h4>
+        <div id="audit-freshness-chart" class="w-full" style="min-height: 260px;"></div>
+        <div id="audit-freshness-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
       <div id="audit-freshness-pages" class="text-xs max-h-96 overflow-y-auto"></div>
     </div>
 
@@ -2356,6 +2361,8 @@
       card('Median age', summary.median_age_days == null ? '—' : `${Number(summary.median_age_days).toLocaleString()}d`,
         summary.newest_date ? `newest ${summary.newest_date}` : '');
 
+    renderFreshnessChart(data);
+
     document.getElementById('audit-freshness-pages').innerHTML =
       (data.stale_pages || []).slice(0, 200).map(r => {
         const bucketClass = r.bucket === 'very_stale' ? 'bg-red-100 text-red-800'
@@ -2372,6 +2379,57 @@
             <div class="text-gray-500 mt-1">${escapeHtml(r.date || 'missing date')} · ${escapeHtml(age)} · ${escapeHtml(r.date_source || 'no source')}</div>
           </div>`;
       }).join('') || '<div class="text-gray-500">No stale or undated pages found.</div>';
+  }
+
+  function renderFreshnessChart(data) {
+    const container = document.getElementById('audit-freshness-chart');
+    const legend = document.getElementById('audit-freshness-legend');
+    if (!container) return;
+    container.innerHTML = '';
+    if (legend) legend.innerHTML = '';
+    const buckets = data.buckets || {};
+    const order = [
+      ['fresh', 'Fresh ≤90d', '#16a34a'],
+      ['aging', 'Aging 91–365d', '#84cc16'],
+      ['stale', 'Stale 1–2y', '#f59e0b'],
+      ['very_stale', 'Very stale >2y', '#dc2626'],
+      ['unknown', 'Missing date', '#6b7280'],
+      ['future', 'Future date', '#8b5cf6'],
+    ];
+    const rows = order.map(([key, label, color]) => ({
+      key, label, color, value: Number(buckets[key] || 0),
+    })).filter(r => r.value > 0);
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-10">No freshness bucket data.</div>';
+      return;
+    }
+    const total = rows.reduce((sum, r) => sum + r.value, 0) || 1;
+    const margin = { top: 12, right: 24, bottom: 52, left: 60 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 260 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg')
+      .attr('width', container.offsetWidth).attr('height', 260)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleBand().domain(rows.map(r => r.key)).range([0, width]).padding(0.25);
+    const y = d3.scaleLinear().domain([0, d3.max(rows, r => r.value) || 1]).nice().range([height, 0]);
+    svg.append('g').attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(x).tickFormat(k => (rows.find(r => r.key === k) || {}).label || k))
+      .selectAll('text').attr('transform', 'rotate(-25)').style('text-anchor', 'end');
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.selectAll('rect').data(rows).join('rect')
+      .attr('x', r => x(r.key)).attr('y', r => y(r.value))
+      .attr('width', x.bandwidth()).attr('height', r => height - y(r.value))
+      .attr('rx', 4).attr('fill', r => r.color);
+    svg.selectAll('.bar-label').data(rows).join('text')
+      .attr('class', 'bar-label').attr('x', r => x(r.key) + x.bandwidth() / 2)
+      .attr('y', r => y(r.value) - 6).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#374151')
+      .text(r => `${r.value.toLocaleString()} (${((r.value / total) * 100).toFixed(0)}%)`);
+    if (legend) {
+      legend.innerHTML = rows.map(r =>
+        `<span class="inline-flex items-center"><span class="w-3 h-3 rounded mr-1.5" style="background:${r.color}"></span>${escapeHtml(r.label)}</span>`
+      ).join('');
+    }
   }
 
   function renderPerformance() {
