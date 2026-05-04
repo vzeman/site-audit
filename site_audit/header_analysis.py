@@ -121,6 +121,32 @@ def _page_paragraph_centroids(
     return centroids, mask
 
 
+def _encode_texts_dedup(
+    texts: list[str],
+    embedder,
+    *,
+    batch_size: int,
+    show_progress: bool,
+) -> np.ndarray:
+    """Embed unique strings once, then expand embeddings back to input order."""
+    unique_texts: list[str] = []
+    unique_index: dict[str, int] = {}
+    positions: list[int] = []
+    for text in texts:
+        index = unique_index.get(text)
+        if index is None:
+            index = len(unique_texts)
+            unique_index[text] = index
+            unique_texts.append(text)
+        positions.append(index)
+    unique_embeddings = embedder.encode(
+        unique_texts,
+        batch_size=batch_size,
+        show_progress=show_progress,
+    ).astype(np.float32)
+    return unique_embeddings[np.array(positions, dtype=np.int64)]
+
+
 # --- main entrypoint -----------------------------------------------------
 
 
@@ -169,8 +195,17 @@ def analyse(
     header_embeddings: Optional[np.ndarray] = None
     if flat and embedder is not None:
         texts = [h["text"] for _, h in flat]
-        LOG.info("  header analysis: embedding %d headers across %d pages", len(texts), n_pages)
-        header_embeddings = embedder.encode(texts, batch_size=256, show_progress=False).astype(np.float32)
+        unique_count = len(set(texts))
+        LOG.info(
+            "  header analysis: embedding %d headers (%d unique) across %d pages",
+            len(texts), unique_count, n_pages,
+        )
+        header_embeddings = _encode_texts_dedup(
+            texts,
+            embedder,
+            batch_size=256,
+            show_progress=False,
+        )
         # normalise so dot == cosine
         norms = np.linalg.norm(header_embeddings, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
@@ -339,7 +374,7 @@ def headers_for_scatter(
         idx = np.sort(rng.choice(n, sample_cap, replace=False))
         flat = [flat[i] for i in idx]
     texts = [h["text"] for _, h in flat]
-    embs = embedder.encode(texts, batch_size=256, show_progress=False).astype(np.float32)
+    embs = _encode_texts_dedup(texts, embedder, batch_size=256, show_progress=False)
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     embs = embs / norms
