@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,8 @@ from typing import Optional
 import numpy as np
 
 LOG = logging.getLogger(__name__)
+
+COMPARISON_PACKAGE_NAME = "comparison-package.zip"
 
 
 # --- per-domain loading ---------------------------------------------------
@@ -610,3 +613,55 @@ def write_html(template_path: Path, payload: dict, out_path: Path) -> None:
     rendered = template.replace("__COMPARE_JSON__", json.dumps(payload, separators=(",", ":")))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(rendered, encoding="utf-8")
+
+
+def package_comparison(
+    out_dir: Path,
+    projects_root: Path,
+    domains: list[str],
+    package_name: str = COMPARISON_PACKAGE_NAME,
+) -> Path:
+    """Create a customer-shareable ZIP for a comparison.
+
+    The package contains the comparison presentation files plus the generated
+    report files for each compared domain. It deliberately excludes caches,
+    embedding files, and other intermediate project data.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = out_dir / package_name
+    if zip_path.exists():
+        zip_path.unlink()
+
+    manifest = {
+        "comparison": out_dir.name,
+        "domains": domains,
+        "open": "index.html",
+        "domain_reports": [f"domains/{domain}/index.html" for domain in domains],
+    }
+    readme = (
+        "Site Audit comparison package\n\n"
+        "Open index.html to view the cross-domain comparison.\n"
+        "Individual domain reports are under domains/<domain>/index.html.\n"
+        "Only generated presentation/report files are included; crawl caches and "
+        "embedding caches are intentionally excluded.\n"
+    )
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", readme)
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+
+        for file_path in sorted(p for p in out_dir.rglob("*") if p.is_file()):
+            if file_path == zip_path:
+                continue
+            zf.write(file_path, file_path.relative_to(out_dir).as_posix())
+
+        for domain in domains:
+            report_dir = projects_root / domain / "report"
+            if not report_dir.is_dir():
+                LOG.warning("  skip %s in comparison package: no report dir", domain)
+                continue
+            for file_path in sorted(p for p in report_dir.rglob("*") if p.is_file()):
+                arcname = Path("domains") / domain / file_path.relative_to(report_dir)
+                zf.write(file_path, arcname.as_posix())
+
+    return zip_path

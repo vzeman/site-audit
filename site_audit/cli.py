@@ -159,6 +159,9 @@ def _compare_command(args: argparse.Namespace) -> int:
     else:
         print(f"compare.html template missing at {template}; only JSON written.")
 
+    package_path = _compare.package_comparison(out_dir, projects_root, payload.get("domains", []))
+    print(f"Wrote {package_path}")
+
     return 0
 
 

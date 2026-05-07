@@ -1,6 +1,7 @@
 from pathlib import Path
+import zipfile
 
-from site_audit.compare import build_payload
+from site_audit.compare import build_payload, package_comparison
 
 
 def _write_report(root: Path, domain: str, metrics: dict, extras: dict[str, str]) -> None:
@@ -83,3 +84,33 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["scorecards"][0]["overall_score"] > payload["scorecards"][1]["overall_score"]
     assert payload["biggest_gaps"]
     assert any(gap["winner"] == "strong.example" for gap in payload["biggest_gaps"])
+
+
+def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:
+    out_dir = tmp_path / "_compare" / "customer"
+    out_dir.mkdir(parents=True)
+    (out_dir / "index.html").write_text("<html>comparison</html>", encoding="utf-8")
+    (out_dir / "comparison.json").write_text("{}", encoding="utf-8")
+
+    report_dir = tmp_path / "example.com" / "report"
+    report_dir.mkdir(parents=True)
+    (report_dir / "index.html").write_text("<html>domain</html>", encoding="utf-8")
+    (report_dir / "pages.json").write_text("[]", encoding="utf-8")
+    cache_dir = tmp_path / "example.com" / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "embeddings_test.npz").write_bytes(b"cache")
+
+    zip_path = package_comparison(out_dir, tmp_path, ["example.com"])
+
+    assert zip_path == out_dir / "comparison-package.zip"
+    with zipfile.ZipFile(zip_path) as zf:
+        names = set(zf.namelist())
+
+    assert "index.html" in names
+    assert "comparison.json" in names
+    assert "README.txt" in names
+    assert "manifest.json" in names
+    assert "domains/example.com/index.html" in names
+    assert "domains/example.com/pages.json" in names
+    assert not any("/cache/" in name or name.startswith("cache/") for name in names)
+    assert "comparison-package.zip" not in names

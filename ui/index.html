@@ -7,7 +7,201 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    :root {
+      --audit-bg: #f5efe6;
+      --audit-panel: #fffdfa;
+      --audit-panel-soft: #fff8ef;
+      --audit-line: #eadfce;
+      --audit-text: #241f19;
+      --audit-muted: #7f776f;
+      --audit-accent: #ff8a1f;
+      --audit-accent-dark: #b85a00;
+      --audit-accent-soft: #fff0df;
+      --audit-green: #1f9d66;
+      --audit-red: #cf5060;
+      --audit-blue: #4766ff;
+      --audit-shadow: 0 18px 48px rgba(61, 43, 18, 0.08);
+      --audit-radius: 26px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: var(--audit-text) !important;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(255, 138, 31, 0.16), transparent 30%),
+        radial-gradient(circle at 88% 10%, rgba(71, 102, 255, 0.10), transparent 26%),
+        linear-gradient(135deg, #fbf6ee 0%, var(--audit-bg) 54%, #efe2d2 100%) !important;
+      min-height: 100vh;
+    }
+
+    body > .max-w-7xl {
+      max-width: 1500px !important;
+      padding: 28px 28px 72px !important;
+    }
+
+    body > .max-w-7xl > header {
+      position: relative;
+      overflow: hidden;
+      text-align: left !important;
+      padding: 30px 32px;
+      margin-bottom: 28px !important;
+      border: 1px solid var(--audit-line);
+      border-radius: 30px;
+      background: linear-gradient(135deg, rgba(255, 253, 250, 0.96), rgba(255, 240, 223, 0.82));
+      box-shadow: var(--audit-shadow);
+    }
+
+    body > .max-w-7xl > header::before {
+      content: "";
+      position: absolute;
+      right: -90px;
+      top: -110px;
+      width: 330px;
+      height: 330px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(255, 138, 31, 0.28), rgba(255, 138, 31, 0));
+      pointer-events: none;
+    }
+
+    body > .max-w-7xl > header h1 {
+      position: relative;
+      margin: 0 0 8px;
+      font-size: clamp(2.35rem, 5vw, 4.75rem) !important;
+      line-height: 0.95;
+      letter-spacing: -0.055em;
+      color: var(--audit-text);
+    }
+
+    body > .max-w-7xl > header p {
+      position: relative;
+      color: var(--audit-muted) !important;
+      font-size: 1rem !important;
+    }
+
+    .bg-white {
+      background-color: var(--audit-panel) !important;
+    }
+
+    .bg-gray-50, .bg-gray-100, .bg-blue-50 {
+      background-color: var(--audit-panel-soft) !important;
+    }
+
+    .border, .border-gray-100, .border-gray-200, .border-gray-300, .border-blue-200 {
+      border-color: var(--audit-line) !important;
+    }
+
+    .shadow-sm, .shadow, .shadow-md, .shadow-lg {
+      box-shadow: var(--audit-shadow) !important;
+    }
+
+    .rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl {
+      border-radius: var(--audit-radius) !important;
+    }
+
+    .p-5.bg-white, .bg-white.border, section.bg-white, div.bg-white.border {
+      border-width: 1px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .p-5.bg-white:hover, section.bg-white:hover, div.bg-white.border:hover {
+      border-color: rgba(255, 138, 31, 0.34) !important;
+      box-shadow: 0 24px 56px rgba(61, 43, 18, 0.11) !important;
+    }
+
+    h2, h3, h4, .text-gray-900, .text-gray-800, .text-gray-700 {
+      color: var(--audit-text) !important;
+    }
+
+    .text-gray-500, .text-gray-600 {
+      color: var(--audit-muted) !important;
+    }
+
+    .text-blue-600, .text-blue-700, a {
+      color: var(--audit-accent-dark) !important;
+    }
+
+    .text-orange-600 {
+      color: var(--audit-accent) !important;
+    }
+
+    .text-green-700, .text-green-800 {
+      color: var(--audit-green) !important;
+    }
+
+    .text-red-600, .text-red-700, .text-red-800 {
+      color: var(--audit-red) !important;
+    }
+
+    .bg-blue-600, button.bg-blue-600 {
+      color: #fffdfa !important;
+      border-color: var(--audit-accent) !important;
+      background: linear-gradient(135deg, var(--audit-accent), #ffb15f) !important;
+      box-shadow: 0 10px 24px rgba(255, 138, 31, 0.22);
+    }
+
+    .bg-blue-100 {
+      background-color: var(--audit-accent-soft) !important;
+      color: var(--audit-accent-dark) !important;
+    }
+
+    .bg-green-100, .bg-green-50 {
+      background-color: rgba(31, 157, 102, 0.10) !important;
+      color: var(--audit-green) !important;
+    }
+
+    .bg-red-100, .bg-red-50 {
+      background-color: rgba(207, 80, 96, 0.10) !important;
+      color: var(--audit-red) !important;
+    }
+
+    button, select, input {
+      border-radius: 999px !important;
+      border-color: var(--audit-line) !important;
+    }
+
+    button {
+      transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    table {
+      border-collapse: separate !important;
+      border-spacing: 0;
+    }
+
+    thead, thead.bg-gray-100 {
+      background: var(--audit-accent-soft) !important;
+    }
+
+    th {
+      color: var(--audit-accent-dark) !important;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+    }
+
+    tbody tr {
+      border-color: var(--audit-line) !important;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 138, 31, 0.055);
+    }
+
+    code {
+      color: var(--audit-accent-dark);
+      background: var(--audit-accent-soft);
+      border-radius: 8px;
+      padding: 0.08rem 0.32rem;
+    }
+
+    svg text {
+      fill: var(--audit-muted);
+    }
   </style>
 </head>
 <body class="bg-white text-gray-900">

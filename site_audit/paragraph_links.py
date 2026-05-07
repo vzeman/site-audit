@@ -214,6 +214,16 @@ def recommend(
             saturated_skipped, saturation_floor_per_100w,
         )
 
+    accepted.sort(key=lambda item: (item[3], item[2]), reverse=True)
+    if top_k_total <= 0:
+        return []
+    if len(accepted) > top_k_total:
+        LOG.info(
+            "  paragraph link recs: trimming %d accepted candidates to top %d before anchor scoring",
+            len(accepted), top_k_total,
+        )
+        accepted = accepted[:top_k_total]
+
     # Pass 2: encode every needed ngram in one batched call.
     para_ngrams: dict[int, list[str]] = {}
     para_ng_offsets: dict[int, tuple[int, int]] = {}
@@ -263,9 +273,8 @@ def recommend(
             anchor_confidence=round(anchor_conf, 4),
         ))
 
-    # sort by lift then fit; keep top_k_total
     raw_recs.sort(key=lambda r: (r.lift, r.fit), reverse=True)
-    return raw_recs[:top_k_total]
+    return raw_recs
 
 
 def to_payload(recs: Iterable[ParagraphLinkRec]) -> list[dict]:
