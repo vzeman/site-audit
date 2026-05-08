@@ -91,6 +91,42 @@ site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml \
   --sitemap-only --no-paragraph-links --no-paragraph-clustering --no-paragraph-fanout
 ```
 
+**Optional search-demand data**
+
+If you have Ahrefs or DataForSEO API credentials, add them to a local
+`.env` file. The file is ignored by git.
+
+```bash
+AHREFS_API_KEY=...
+DATAFORSEO_LOGIN=you@example.com
+DATAFORSEO_PASSWORD=...
+```
+
+By default, `site-audit run` uses cached provider snapshots first,
+tries Ahrefs when `AHREFS_API_KEY` is available, and falls back to
+DataForSEO when Ahrefs is unavailable. Provider data is cached under
+`projects/<domain>/cache/` so repeat reports do not spend API credits
+unless you request a refresh.
+
+Useful flags:
+
+```bash
+site-audit run example.com --search-provider auto
+site-audit run example.com --search-provider ahrefs --ahrefs-country US
+site-audit run example.com --search-provider dataforseo --dataforseo-location-code 2840 --dataforseo-language-code en
+site-audit run example.com --ahrefs-refresh
+site-audit run example.com --dataforseo-refresh
+site-audit run example.com --no-search-data
+```
+
+When provider data is available, the report adds organic traffic and
+keyword overlays, traffic by directory/topic cluster, ranking position
+buckets, SERP features, search intent mix, a keyword/content semantic
+map, and an internal link equity flow chart where page traffic is shown
+alongside internal link paths. The same search-demand payloads are used
+in `site-audit compare` so competing domains can be compared in one
+semantic space.
+
 That:
 
 1. Reads `robots.txt` + every `sitemap.xml` it can find

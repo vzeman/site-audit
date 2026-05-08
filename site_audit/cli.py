@@ -96,6 +96,24 @@ def _run_command(args: argparse.Namespace) -> int:
         sitemap_exclude_patterns=args.sitemap_exclude,
         sitemap_lastmod_after=args.sitemap_lastmod_after,
         sitemap_lastmod_within_days=args.sitemap_lastmod_within_days,
+        search_provider="none" if args.no_search_data else args.search_provider,
+        enable_dataforseo=not args.no_dataforseo,
+        enable_ahrefs=not args.no_ahrefs,
+        ahrefs_date=args.ahrefs_date,
+        ahrefs_country=args.ahrefs_country,
+        ahrefs_mode=args.ahrefs_mode,
+        ahrefs_top_pages_limit=args.ahrefs_top_pages_limit,
+        ahrefs_keywords_limit=args.ahrefs_keywords_limit,
+        ahrefs_refresh=args.ahrefs_refresh,
+        ahrefs_semantic_sample=args.ahrefs_semantic_sample,
+        dataforseo_location_code=args.dataforseo_location_code,
+        dataforseo_location_name=args.dataforseo_location_name,
+        dataforseo_language_code=args.dataforseo_language_code,
+        dataforseo_language_name=args.dataforseo_language_name,
+        dataforseo_top_pages_limit=args.dataforseo_top_pages_limit,
+        dataforseo_keywords_limit=args.dataforseo_keywords_limit,
+        dataforseo_refresh=args.dataforseo_refresh,
+        dataforseo_include_clickstream=args.dataforseo_include_clickstream,
     )
     summary = run(config)
     if summary.get("pages", 0) == 0:
@@ -118,6 +136,9 @@ def _run_command(args: argparse.Namespace) -> int:
     print(f"  link recs:           {summary['link_recommendations']}")
     print(f"  cited domains:       {summary.get('external_domains', 0)}")
     print(f"  broken outbound:     {summary.get('broken_external', 0)}")
+    if summary.get("search_status") == "ok" or summary.get("ahrefs_status") == "ok":
+        provider = summary.get("search_provider") or "search"
+        print(f"  {provider} traffic:  {summary.get('search_top_pages_traffic', summary.get('ahrefs_top_pages_traffic', 0)):,}")
     print(f"  report dir:          {summary['report_dir']}")
     if summary.get("html_report"):
         print(f"  HTML report:         {summary['html_report']}")
@@ -244,6 +265,46 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-content-quality", action="store_true")
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
+    run_p.add_argument("--search-provider", default="auto",
+                       choices=["auto", "ahrefs", "dataforseo", "none"],
+                       help="Search-demand data source. auto uses Ahrefs first, then DataForSEO fallback")
+    run_p.add_argument("--no-search-data", action="store_true",
+                       help="Skip all paid search-data provider enrichment")
+    run_p.add_argument("--no-ahrefs", action="store_true",
+                       help="Skip Ahrefs API enrichment even when AHREFS_API_KEY is set")
+    run_p.add_argument("--no-dataforseo", action="store_true",
+                       help="Skip DataForSEO fallback enrichment even when DATAFORSEO credentials are set")
+    run_p.add_argument("--ahrefs-refresh", action="store_true",
+                       help="Ignore cached Ahrefs snapshots and fetch fresh API data")
+    run_p.add_argument("--ahrefs-date", default=None,
+                       help="Ahrefs report date in YYYY-MM-DD. Default: reuse latest cache, otherwise today")
+    run_p.add_argument("--ahrefs-country", default=None,
+                       help="Optional Ahrefs country code, e.g. US, GB, SK")
+    run_p.add_argument("--ahrefs-mode", default="subdomains",
+                       choices=["exact", "prefix", "domain", "subdomains"],
+                       help="Ahrefs target mode (default: subdomains)")
+    run_p.add_argument("--ahrefs-top-pages-limit", type=int, default=1000,
+                       help="Rows to request from Ahrefs top-pages (default: 1000)")
+    run_p.add_argument("--ahrefs-keywords-limit", type=int, default=1000,
+                       help="Rows to request from Ahrefs organic-keywords (default: 1000)")
+    run_p.add_argument("--ahrefs-semantic-sample", type=int, default=500,
+                       help="Max entities per type in the search-demand semantic map (default: 500)")
+    run_p.add_argument("--dataforseo-refresh", action="store_true",
+                       help="Ignore cached DataForSEO snapshots and fetch fresh API data")
+    run_p.add_argument("--dataforseo-location-code", type=int, default=None,
+                       help="Optional DataForSEO location code, e.g. 2840 for United States")
+    run_p.add_argument("--dataforseo-location-name", default=None,
+                       help="Optional DataForSEO location name, e.g. United States")
+    run_p.add_argument("--dataforseo-language-code", default=None,
+                       help="Optional DataForSEO language code, e.g. en")
+    run_p.add_argument("--dataforseo-language-name", default=None,
+                       help="Optional DataForSEO language name, e.g. English")
+    run_p.add_argument("--dataforseo-top-pages-limit", type=int, default=1000,
+                       help="Rows to request from DataForSEO relevant-pages (default: 1000)")
+    run_p.add_argument("--dataforseo-keywords-limit", type=int, default=1000,
+                       help="Rows to request from DataForSEO ranked-keywords (default: 1000)")
+    run_p.add_argument("--dataforseo-include-clickstream", action="store_true",
+                       help="Request DataForSEO clickstream data where supported")
     run_p.add_argument("--competitive", default=None, help="TSV file with `query<TAB>competitor_url` per line")
     run_p.add_argument("--queries-file", default=None, help="Optional file: one target query per line")
     run_p.add_argument("--auto-queries-max", type=int, default=200)

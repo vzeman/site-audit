@@ -42,6 +42,8 @@ _GENERIC_ANCHORS = {
 
 @dataclass
 class LinkGraphResult:
+    graph: dict[str, list[str]]
+    edge_anchor_count: dict[tuple[str, str], int]
     in_degree: dict[str, int]
     out_degree: dict[str, int]
     pagerank: dict[str, float]
@@ -424,6 +426,8 @@ def analyze(
     )
 
     return LinkGraphResult(
+        graph=graph,
+        edge_anchor_count={edge: len(labels) for edge, labels in anchors.items()},
         in_degree=dict(in_deg),
         out_degree=out_deg,
         pagerank=pr,
@@ -499,4 +503,130 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
         "anchor_analysis": result.anchor_analysis,
         "recommendations": result.recommendations,
         "page_link_counts": page_link_counts,
+    }
+
+
+def link_flow_payload(
+    result: LinkGraphResult,
+    pages,
+    top_pages: list[dict] | None = None,
+    *,
+    max_nodes: int = 360,
+    max_edges: int = 1600,
+) -> dict:
+    """Small edge-bundling payload for the internal link-equity flow view.
+
+    The full graph can be too dense for radial bundling. This samples pages by
+    link authority and organic traffic, then keeps the strongest links among
+    those pages. Traffic is optional; when present, high-demand pages are forced
+    into the node set so the chart can show whether link equity reaches them.
+    """
+    by_url = {p.url: p for p in pages}
+    traffic_by_url: dict[str, dict] = {}
+    for row in top_pages or []:
+        url = row.get("matched_url") or row.get("url") or ""
+        if not url:
+            continue
+        traffic_by_url[url] = row
+
+    nodes = set(result.graph.keys())
+    if not nodes:
+        return {"nodes": [], "edges": [], "total_edges": 0, "shown_edges": 0, "shown_nodes": 0}
+
+    def _norm_lookup(values: dict[str, float]) -> dict[str, float]:
+        vmax = max(values.values()) if values else 0.0
+        if vmax <= 0:
+            return {k: 0.0 for k in values}
+        return {k: float(v) / vmax for k, v in values.items()}
+
+    traffic = {u: float((traffic_by_url.get(u) or {}).get("traffic", 0) or 0) for u in nodes}
+    pr_n = _norm_lookup({u: float(result.pagerank.get(u, 0.0)) for u in nodes})
+    auth_n = _norm_lookup({u: float(result.authority_score.get(u, 0.0)) for u in nodes})
+    hub_n = _norm_lookup({u: float(result.hub_score.get(u, 0.0)) for u in nodes})
+    in_n = _norm_lookup({u: float(result.in_degree.get(u, 0)) for u in nodes})
+    out_n = _norm_lookup({u: float(result.out_degree.get(u, 0)) for u in nodes})
+    traffic_n = _norm_lookup({u: np.log1p(v) for u, v in traffic.items()})
+
+    score = {
+        u: (
+            0.34 * pr_n.get(u, 0.0)
+            + 0.20 * auth_n.get(u, 0.0)
+            + 0.15 * hub_n.get(u, 0.0)
+            + 0.21 * traffic_n.get(u, 0.0)
+            + 0.07 * in_n.get(u, 0.0)
+            + 0.03 * out_n.get(u, 0.0)
+        )
+        for u in nodes
+    }
+
+    selected: set[str] = set()
+
+    def _add_top(values: dict[str, float], n: int) -> None:
+        for url, _ in sorted(values.items(), key=lambda kv: kv[1], reverse=True)[:n]:
+            if url in nodes:
+                selected.add(url)
+
+    _add_top(score, max_nodes)
+    _add_top(traffic, min(120, max_nodes // 3))
+    _add_top({u: float(result.in_degree.get(u, 0)) for u in nodes}, min(80, max_nodes // 4))
+    _add_top({u: float(result.hub_score.get(u, 0.0)) for u in nodes}, min(60, max_nodes // 5))
+    _add_top({u: float(result.pagerank.get(u, 0.0)) for u in nodes}, min(80, max_nodes // 4))
+
+    if len(selected) > max_nodes:
+        selected = set(sorted(selected, key=lambda u: score.get(u, 0.0), reverse=True)[:max_nodes])
+
+    page_rows = []
+    for url in sorted(selected, key=lambda u: score.get(u, 0.0), reverse=True):
+        page = by_url.get(url)
+        traffic_row = traffic_by_url.get(url) or {}
+        page_rows.append({
+            "url": url,
+            "title": page.title if page else url,
+            "section": page.section if page else "",
+            "traffic": int(traffic_row.get("traffic", 0) or 0),
+            "keywords": int(traffic_row.get("keywords", 0) or 0),
+            "top_keyword": traffic_row.get("top_keyword", ""),
+            "pagerank": round(float(result.pagerank.get(url, 0.0)), 8),
+            "hub_score": round(float(result.hub_score.get(url, 0.0)), 8),
+            "authority_score": round(float(result.authority_score.get(url, 0.0)), 8),
+            "in_degree": int(result.in_degree.get(url, 0)),
+            "out_degree": int(result.out_degree.get(url, 0)),
+            "click_depth": int(result.click_depth.get(url, -1)) if url in result.click_depth else None,
+            "flow_score": round(float(score.get(url, 0.0)), 6),
+        })
+
+    edge_rows = []
+    for src in selected:
+        for tgt in result.graph.get(src, []):
+            if tgt not in selected:
+                continue
+            weight = max(1, int(result.edge_anchor_count.get((src, tgt), 0) or 1))
+            source_pr = float(result.pagerank.get(src, 0.0))
+            target_traffic = float(traffic.get(tgt, 0.0))
+            flow_score = (
+                source_pr * 2.5
+                + float(result.hub_score.get(src, 0.0))
+                + float(result.authority_score.get(tgt, 0.0))
+                + traffic_n.get(tgt, 0.0)
+                + np.log1p(weight) * 0.05
+            )
+            edge_rows.append({
+                "source": src,
+                "target": tgt,
+                "weight": weight,
+                "source_pagerank": round(source_pr, 8),
+                "target_traffic": int(target_traffic),
+                "score": round(float(flow_score), 8),
+            })
+    edge_rows.sort(key=lambda r: r["score"], reverse=True)
+    edge_rows = edge_rows[:max_edges]
+
+    return {
+        "nodes": page_rows,
+        "edges": edge_rows,
+        "shown_nodes": len(page_rows),
+        "shown_edges": len(edge_rows),
+        "total_edges": int(result.edge_count),
+        "node_limit": max_nodes,
+        "edge_limit": max_edges,
     }

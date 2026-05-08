@@ -51,6 +51,7 @@ _PLACEHOLDERS = {
     "__CONVERSION_JSON__": "conversion",
     "__INDEXABILITY_JSON__": "indexability",
     "__PERFORMANCE_JSON__": "performance",
+    "__AHREFS_JSON__": "ahrefs",
 }
 
 
@@ -248,6 +249,7 @@ def write_html_report(
     conversion: Optional[dict] = None,
     indexability: Optional[dict] = None,
     performance: Optional[dict] = None,
+    ahrefs: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -285,6 +287,7 @@ def write_html_report(
         "conversion": conversion or {},
         "indexability": indexability or {},
         "performance": performance or {},
+        "ahrefs": ahrefs or {},
     }
 
     rendered = template

@@ -494,6 +494,64 @@
       <div id="audit-treemap" class="w-full" style="height: 360px;"></div>
     </div>
 
+    <!-- Organic search enrichment -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ahrefs-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Organic search demand overlay</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ahrefs-meta">
+          Organic traffic and ranking keywords from cached Ahrefs or DataForSEO snapshots. Bubble size uses estimated traffic, so the biggest dots are the clusters and entities that carry actual search demand.
+        </p>
+      </div>
+      <div id="ahrefs-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Traffic by topic cluster</h4>
+          <p class="text-xs text-gray-500 mb-2">x = pages in the cluster, y = estimated organic traffic, bubble size = traffic.</p>
+          <div id="ahrefs-cluster-bubbles" class="w-full" style="min-height: 380px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Traffic by directory</h4>
+          <p class="text-xs text-gray-500 mb-2">Directories with search demand but weak matched crawl coverage are usually crawl/indexing or IA gaps.</p>
+          <div id="ahrefs-directory-bars" class="w-full" style="min-height: 380px;"></div>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-3 gap-6 mb-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Ranking position buckets</h4>
+          <p class="text-xs text-gray-500 mb-2">Where the domain ranks: page 1 concentration usually explains traffic quality better than raw keyword count.</p>
+          <div id="ahrefs-position-bars" class="w-full" style="min-height: 260px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">SERP features</h4>
+          <p class="text-xs text-gray-500 mb-2">Search result features where the domain appears or competes.</p>
+          <div id="ahrefs-feature-bars" class="w-full" style="min-height: 260px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Search intent mix</h4>
+          <p class="text-xs text-gray-500 mb-2">Intent labels from the ranking keyword set where the provider exposes them.</p>
+          <div id="ahrefs-intent-bars" class="w-full" style="min-height: 260px;"></div>
+        </div>
+      </div>
+      <div class="mb-6">
+        <h4 class="text-sm font-semibold mb-1">Semantic search-demand map</h4>
+        <p class="text-xs text-gray-500 mb-2">
+          Keywords, page titles, pages, headers, paragraphs, and link titles projected together. Good alignment means ranking terms, headings, anchors, and content are using the same vocabulary.
+        </p>
+        <div id="ahrefs-semantic-map" class="w-full" style="min-height: 560px;"></div>
+        <div id="ahrefs-semantic-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Top traffic pages</h4>
+          <div id="ahrefs-top-pages" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Top ranking keywords</h4>
+          <div id="ahrefs-top-keywords" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Cluster overlap heatmap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
       <div class="mb-3">
@@ -753,6 +811,19 @@
           <div class="text-gray-500">Loading…</div>
         </div>
       </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="linkflow-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Internal link equity flow</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Hierarchical edge bundling of the strongest internal links. Edge thickness = number of links between the two pages,
+          edge color and page dot size = estimated organic traffic of the target page. Dense bundles into small, pale targets
+          indicate link equity going to low-demand pages; thick bundles into large, warm targets show authority reaching search-demand pages.
+        </p>
+      </div>
+      <div id="linkflow-bundle" class="w-full" style="min-height: 780px;"></div>
+      <div id="linkflow-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
@@ -1102,6 +1173,7 @@
 <script type="application/json" id="data-conversion">__CONVERSION_JSON__</script>
 <script type="application/json" id="data-indexability">__INDEXABILITY_JSON__</script>
 <script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
+<script type="application/json" id="data-ahrefs">__AHREFS_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -1200,8 +1272,9 @@
       const inlinedConversion = readInlined('data-conversion');
       const inlinedIndexability = readInlined('data-indexability');
       const inlinedPerformance = readInlined('data-performance');
+      const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1236,8 +1309,9 @@
         conversion = inlinedConversion || {};
         indexability = inlinedIndexability || {};
         performance = inlinedPerformance || {};
+        ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1271,6 +1345,7 @@
           loadJSON('conversion.json').catch(() => ({})),
           loadJSON('indexability.json').catch(() => ({})),
           loadJSON('performance.json').catch(() => ({})),
+          loadJSON('ahrefs.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -1309,6 +1384,7 @@
       state.conversion = conversion || {};
       state.indexability = indexability || {};
       state.performance = performance || {};
+      state.ahrefs = ahrefs || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -1326,6 +1402,7 @@
       renderDuplicates();
       renderClusters();
       renderTreemap();
+      renderAhrefs();
       renderHeatmap();
       renderCoverage('all');
       renderIndexability();
@@ -1339,6 +1416,7 @@
       renderConversion();
       renderAnswerability();
       renderLinkgraph();
+      renderLinkFlow();
       renderLinkbuilding();
       renderLinkCounts();
       renderParaDensity();
@@ -1841,6 +1919,277 @@
       </div>`;
   }
 
+  const AHREFS_ENTITY_COLORS = {
+    page: '#2563eb',
+    page_title: '#0f766e',
+    keyword: '#dc2626',
+    header: '#f59e0b',
+    paragraph: '#7c3aed',
+    link_title: '#64748b',
+  };
+  const AHREFS_ENTITY_LABELS = {
+    page: 'Page',
+    page_title: 'Page title',
+    keyword: 'Keyword',
+    header: 'Header',
+    paragraph: 'Paragraph',
+    link_title: 'Link title',
+  };
+
+  function renderAhrefs() {
+    const block = document.getElementById('ahrefs-block');
+    const ah = state.ahrefs || {};
+    const summary = ah.summary || {};
+    const meta = ah.meta || {};
+    if (!summary.top_pages && !summary.organic_keywords && meta.status !== 'ok') {
+      block.style.display = 'none';
+      return;
+    }
+
+    const params = meta.params || {};
+    const metaEl = document.getElementById('ahrefs-meta');
+    const providerLabel = summary.provider_label || meta.provider_label || meta.provider || 'Search provider';
+    metaEl.textContent = `${providerLabel} status: ${meta.status || 'unknown'} · cache ${meta.cache_status || 'unknown'}${params.date ? ' · date ' + params.date : ''}${params.country ? ' · country ' + params.country : ''}${params.location_code ? ' · location ' + params.location_code : ''}${summary.api_cost_usd ? ' · API cost $' + Number(summary.api_cost_usd).toFixed(4) : ''}. Traffic and value are provider estimates.`;
+
+    const metrics = ah.metrics || {};
+    const money = v => '$' + Math.round(Number(v || 0)).toLocaleString();
+    document.getElementById('ahrefs-summary').innerHTML =
+      card('Organic traffic', Number(metrics.org_traffic || summary.top_pages_traffic || 0).toLocaleString(), `${providerLabel} monthly estimate`) +
+      card('Organic keywords', Number(metrics.org_keywords || summary.organic_keywords || 0).toLocaleString(), `${Number(metrics.org_keywords_1_3 || summary.top3_keywords || 0).toLocaleString()} top 3 · ${Number(metrics.org_keywords_1_10 || summary.top10_keywords || 0).toLocaleString()} top 10`) +
+      card('Top pages loaded', Number(summary.top_pages || 0).toLocaleString(), `${Number(summary.matched_top_pages || 0).toLocaleString()} matched to crawl`) +
+      card('Matched traffic', Number(summary.matched_traffic || 0).toLocaleString(), `${Math.round(Number(summary.matched_traffic_share || 0) * 100)}% of top-page traffic`) +
+      card('Traffic value', money(summary.top_pages_value_usd || metrics.org_cost), `USD estimate${summary.paid_traffic ? ' · paid traffic ' + Number(summary.paid_traffic).toLocaleString() : ''}`);
+
+    renderAhrefsClusterBubbles();
+    renderAhrefsDirectoryBars();
+    renderAhrefsPositionBars();
+    renderAhrefsFeatureBars();
+    renderAhrefsIntentBars();
+    renderAhrefsSemanticMap();
+    renderAhrefsTables();
+  }
+
+  function renderAhrefsClusterBubbles() {
+    const container = document.getElementById('ahrefs-cluster-bubbles');
+    const rows = ((state.ahrefs || {}).clusters || []).filter(r => Number(r.traffic || 0) > 0);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No search traffic matched to topic clusters.</div>';
+      return;
+    }
+    const margin = { top: 20, right: 24, bottom: 44, left: 62 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 380 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 380)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.pages || r.page_count || 0)) || 1]).range([0, width]);
+    const y = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.traffic || 0)) || 1]).range([height, 0]);
+    const r = d3.scaleSqrt().domain([0, d3.max(rows, d => Number(d.traffic || 0)) || 1]).range([5, 28]);
+    const color = d3.scaleSequential(d3.interpolateYlGnBu).domain([0, d3.max(rows, d => Number(d.traffic || 0)) || 1]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+    svg.append('g').call(d3.axisLeft(y).ticks(6));
+    svg.append('text').attr('x', width / 2).attr('y', height + 34).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('matched pages in cluster');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -46).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('estimated organic traffic');
+    const tooltip = d3.select('body').append('div').attr('class', 'ahrefs-tt')
+      .style('position', 'absolute').style('visibility', 'hidden').style('background', 'rgba(0,0,0,.92)')
+      .style('color', 'white').style('padding', '7px 10px').style('border-radius', '6px')
+      .style('font-size', '12px').style('pointer-events', 'none').style('z-index', '1000').style('max-width', '360px');
+    svg.selectAll('circle').data(rows).join('circle')
+      .attr('cx', d => x(Number(d.pages || d.page_count || 0)))
+      .attr('cy', d => y(Number(d.traffic || 0)))
+      .attr('r', d => r(Number(d.traffic || 0)))
+      .attr('fill', d => color(Number(d.traffic || 0)))
+      .attr('fill-opacity', 0.72)
+      .attr('stroke', '#0f172a').attr('stroke-opacity', 0.25)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.8).attr('stroke-width', 2);
+        const kws = (d.top_keywords || []).slice(0, 5).map(k => escapeHtml(k.keyword)).join(' · ');
+        tooltip.style('visibility', 'visible').html(`<strong>${escapeHtml(d.label || d.key)}</strong><br>traffic ${Number(d.traffic || 0).toLocaleString()} · pages ${Number(d.pages || 0).toLocaleString()}<br><span style="color:#fbbf24">${kws}</span>`);
+      })
+      .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
+      .on('mouseout', function() { d3.select(this).attr('stroke-opacity', 0.25).attr('stroke-width', 1); tooltip.style('visibility', 'hidden'); });
+    svg.selectAll('text.lbl').data(rows.slice().sort((a,b) => Number(b.traffic || 0) - Number(a.traffic || 0)).slice(0, 8)).join('text')
+      .attr('class', 'lbl')
+      .attr('x', d => x(Number(d.pages || d.page_count || 0)) + r(Number(d.traffic || 0)) + 4)
+      .attr('y', d => y(Number(d.traffic || 0)) + 4)
+      .style('font-size', '10px').style('fill', '#374151')
+      .text(d => String(d.label || d.key).slice(0, 34));
+  }
+
+  function renderAhrefsDirectoryBars() {
+    const container = document.getElementById('ahrefs-directory-bars');
+    const rows = ((state.ahrefs || {}).directories || []).filter(r => Number(r.traffic || 0) > 0).slice(0, 15);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No directory search traffic data.</div>';
+      return;
+    }
+    const margin = { top: 12, right: 24, bottom: 30, left: 118 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = Math.max(340, rows.length * 24) - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', height + margin.top + margin.bottom)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, d3.max(rows, d => Number(d.traffic || 0)) || 1]).range([0, width]);
+    const y = d3.scaleBand().domain(rows.map(d => d.label || d.key)).range([0, height]).padding(0.22);
+    svg.append('g').call(d3.axisLeft(y).tickSize(0)).selectAll('text').style('font-size', '11px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.selectAll('rect').data(rows).join('rect')
+      .attr('x', 0).attr('y', d => y(d.label || d.key))
+      .attr('width', d => x(Number(d.traffic || 0))).attr('height', y.bandwidth())
+      .attr('fill', '#2563eb').attr('fill-opacity', 0.72).attr('rx', 3);
+    svg.selectAll('text.val').data(rows).join('text')
+      .attr('class', 'val').attr('x', d => x(Number(d.traffic || 0)) + 5)
+      .attr('y', d => y(d.label || d.key) + y.bandwidth() / 2 + 4)
+      .style('font-size', '11px').style('fill', '#374151')
+      .text(d => `${Number(d.traffic || 0).toLocaleString()} · ${Number(d.pages || 0)} pages`);
+  }
+
+  function renderAhrefsPositionBars() {
+    const ah = state.ahrefs || {};
+    const buckets = ah.position_buckets || aggregatePositionBuckets(ah.organic_keywords || []);
+    const rows = [
+      ['pos_1', '1'],
+      ['pos_2_3', '2-3'],
+      ['pos_4_10', '4-10'],
+      ['pos_11_20', '11-20'],
+      ['pos_21_50', '21-50'],
+      ['pos_51_plus', '51+']
+    ].map(([key, label]) => ({ label, count: Number(buckets[key] || 0) })).filter(r => r.count > 0);
+    renderMiniBars('ahrefs-position-bars', rows, 'count', '#16a34a', 'No position bucket data.');
+  }
+
+  function aggregatePositionBuckets(rows) {
+    const out = {};
+    (rows || []).forEach(r => {
+      const pos = Number(r.position || 0);
+      const key = pos <= 0 ? 'unknown' : pos === 1 ? 'pos_1' : pos <= 3 ? 'pos_2_3' : pos <= 10 ? 'pos_4_10' : pos <= 20 ? 'pos_11_20' : pos <= 50 ? 'pos_21_50' : 'pos_51_plus';
+      out[key] = (out[key] || 0) + 1;
+    });
+    return out;
+  }
+
+  function renderAhrefsFeatureBars() {
+    const rows = ((state.ahrefs || {}).serp_features || []).map(r => ({
+      label: r.feature || r.type || '',
+      count: Number(r.count || 0)
+    })).filter(r => r.label && r.count > 0).slice(0, 10);
+    renderMiniBars('ahrefs-feature-bars', rows, 'count', '#0ea5e9', 'No SERP feature data.');
+  }
+
+  function renderAhrefsIntentBars() {
+    const rows = ((state.ahrefs || {}).intents || []).map(r => ({
+      label: r.intent || '',
+      count: Number(r.count || 0)
+    })).filter(r => r.label && r.count > 0).slice(0, 10);
+    renderMiniBars('ahrefs-intent-bars', rows, 'count', '#a855f7', 'No intent data.');
+  }
+
+  function renderMiniBars(containerId, rows, valueKey, color, emptyText) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = `<div class="text-gray-500 text-center py-10">${emptyText}</div>`;
+      return;
+    }
+    const margin = { top: 8, right: 18, bottom: 24, left: 86 };
+    const width = Math.max(240, container.offsetWidth) - margin.left - margin.right;
+    const height = Math.max(220, rows.length * 24) - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', width + margin.left + margin.right).attr('height', height + margin.top + margin.bottom)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, d3.max(rows, d => Number(d[valueKey] || 0)) || 1]).range([0, width]);
+    const y = d3.scaleBand().domain(rows.map(d => d.label)).range([0, height]).padding(0.24);
+    svg.append('g').call(d3.axisLeft(y).tickSize(0)).selectAll('text').style('font-size', '10px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(4));
+    svg.selectAll('rect').data(rows).join('rect')
+      .attr('x', 0).attr('y', d => y(d.label))
+      .attr('height', y.bandwidth()).attr('width', d => x(Number(d[valueKey] || 0)))
+      .attr('rx', 3).attr('fill', color).attr('fill-opacity', 0.75);
+    svg.selectAll('text.val').data(rows).join('text')
+      .attr('class', 'val').attr('x', d => x(Number(d[valueKey] || 0)) + 4)
+      .attr('y', d => y(d.label) + y.bandwidth() / 2 + 4)
+      .style('font-size', '10px').style('fill', '#374151')
+      .text(d => Number(d[valueKey] || 0).toLocaleString());
+  }
+
+  function renderAhrefsSemanticMap() {
+    const container = document.getElementById('ahrefs-semantic-map');
+    const legend = document.getElementById('ahrefs-semantic-legend');
+    const points = (((state.ahrefs || {}).semantic_map || {}).points || []);
+    container.innerHTML = '';
+    legend.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No search semantic map. It appears after provider data and entity embeddings are available.</div>';
+      return;
+    }
+    legend.innerHTML = Object.keys(AHREFS_ENTITY_COLORS).map(type =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${AHREFS_ENTITY_COLORS[type]}"></span>${AHREFS_ENTITY_LABELS[type]}</span>`
+    ).join('');
+    const margin = { top: 20, right: 20, bottom: 36, left: 40 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 560 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 560);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxSize = d3.max(points, d => Number(d.size || d.traffic || d.count || 0)) || 1;
+    const r = d3.scaleSqrt().domain([0, maxSize]).range([3, 16]);
+    const tooltip = d3.select('body').append('div').attr('class', 'ahrefs-map-tt')
+      .style('position', 'absolute').style('visibility', 'hidden').style('background', 'rgba(0,0,0,.92)')
+      .style('color', 'white').style('padding', '7px 10px').style('border-radius', '6px')
+      .style('font-size', '12px').style('pointer-events', 'none').style('z-index', '1000').style('max-width', '420px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    svg.append('g').call(d3.axisLeft(y).ticks(8));
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
+      .attr('r', d => r(Number(d.size || d.traffic || d.count || 0)))
+      .attr('fill', d => AHREFS_ENTITY_COLORS[d.type] || '#64748b')
+      .attr('fill-opacity', d => d.type === 'paragraph' ? 0.42 : 0.72)
+      .attr('stroke', 'white').attr('stroke-width', 0.5)
+      .style('cursor', d => d.url ? 'pointer' : 'default')
+      .on('click', (event, d) => { if (d.url) window.open(d.url, '_blank', 'noopener'); })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#111827').attr('stroke-width', 1.5);
+        tooltip.style('visibility', 'visible').html(`<strong style="color:${AHREFS_ENTITY_COLORS[d.type]}">${AHREFS_ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
+      })
+      .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
+      .on('mouseout', function() { d3.select(this).attr('stroke', 'white').attr('stroke-width', 0.5); tooltip.style('visibility', 'hidden'); });
+    const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+  }
+
+  function renderAhrefsTables() {
+    const ah = state.ahrefs || {};
+    const topPages = (ah.top_pages || []).slice(0, 80);
+    const keywords = (ah.organic_keywords || []).slice(0, 80);
+    document.getElementById('ahrefs-top-pages').innerHTML = topPages.length ? `
+      <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Page</th><th class="text-right">Traffic</th><th class="text-right">KW</th><th class="text-right">Top10</th></tr></thead><tbody>
+      ${topPages.map(r => `<tr class="border-b border-gray-100">
+        <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.top_keyword_title || r.url)}</a><div class="text-gray-500">${escapeHtml(r.top_keyword || '')}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}${Number(r.paid_traffic || 0) ? ' · paid ' + Number(r.paid_traffic || 0).toLocaleString() : ''}</div></td>
+        <td class="text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.keywords || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.top10_keywords || 0).toLocaleString()}</td>
+      </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No top pages.</div>';
+    document.getElementById('ahrefs-top-keywords').innerHTML = keywords.length ? `
+      <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Keyword</th><th class="text-right">Traffic</th><th class="text-right">Vol</th><th class="text-right">Pos</th></tr></thead><tbody>
+      ${keywords.map(r => `<tr class="border-b border-gray-100">
+        <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.keyword)}</a><div class="text-gray-500">${escapeHtml(r.section || '')}${r.serp_type ? ' · ' + escapeHtml(r.serp_type) : ''}${(r.intents || []).length ? ' · ' + escapeHtml((r.intents || []).join('/')) : ''}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}</div></td>
+        <td class="text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.volume || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.position || 0) || '—'}</td>
+      </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No keywords.</div>';
+  }
+
   function renderSections() {
     const el = document.getElementById('audit-sections');
     if (!Array.isArray(state.sections) || !state.sections.length) {
@@ -1900,6 +2249,8 @@
   function renderScatter() {
     state.urlToSection = new Map((state.pages || []).map(p => [p.url, p.section || '']));
     state.urlToPage = new Map((state.pages || []).map(p => [p.url, p]));
+    state.ahrefsTrafficByUrl = new Map((((state.ahrefs || {}).top_pages) || []).map(p => [p.matched_url || p.url, Number(p.traffic || 0)]));
+    state.ahrefsKeywordByUrl = new Map((((state.ahrefs || {}).top_pages) || []).map(p => [p.matched_url || p.url, p.top_keyword || '']));
     const sections = Array.from(new Set((state.pages || []).map(p => p.section))).sort();
     state.sectionColor = d3.scaleOrdinal().domain(sections).range(palette);
     state.scatterDataset = 'pages';
@@ -1975,7 +2326,14 @@
 
     const isPara = state.scatterDataset === 'paragraphs';
     const isHeader = state.scatterDataset === 'headers';
+    const maxTraffic = !isHeader && !isPara && state.ahrefsTrafficByUrl
+      ? d3.max(data, d => Number(state.ahrefsTrafficByUrl.get(d.url) || 0)) || 0
+      : 0;
+    const trafficRadius = maxTraffic > 0
+      ? d3.scaleSqrt().domain([0, maxTraffic]).range([3, 13])
+      : null;
     const baseR = isHeader ? 3 : (isPara ? 2.5 : 4);
+    const dotRadius = d => trafficRadius ? trafficRadius(Number(state.ahrefsTrafficByUrl.get(d.url) || 0)) : baseR;
     const hoverR = isHeader ? 6 : (isPara ? 5 : 7);
     const baseOpacity = isHeader ? 0.8 : (isPara ? 0.65 : 0.75);
     const baseStroke = isHeader ? 0.5 : (isPara ? 0.3 : 0.5);
@@ -1986,8 +2344,8 @@
       .join('circle')
       .attr('cx', d => xScale(d.x))
       .attr('cy', d => yScale(d.y))
-      .attr('r', baseR)
-      .attr('fill-opacity', baseOpacity)
+      .attr('r', d => dotRadius(d))
+      .attr('fill-opacity', d => trafficRadius && Number(state.ahrefsTrafficByUrl.get(d.url) || 0) <= 0 ? 0.36 : baseOpacity)
       .attr('stroke', 'white')
       .attr('stroke-width', baseStroke)
       .style('cursor', 'pointer')
@@ -2002,7 +2360,7 @@
       .style('z-index', '1000').style('max-width', '380px');
 
     dots.on('mouseover', function(event, d) {
-      d3.select(this).attr('r', hoverR).attr('stroke', '#000').attr('stroke-width', 1.5);
+        d3.select(this).attr('r', Math.max(hoverR, dotRadius(d) + 3)).attr('stroke', '#000').attr('stroke-width', 1.5);
       let body;
       if (isHeader) {
         body = `
@@ -2020,6 +2378,8 @@
           <br><span style="font-size:12px;color:#fbbf24;font-style:italic">"${escapeHtml(d.excerpt || '')}"</span>
           <br><span style="font-size:11px;color:#60a5fa">Click to open page</span>`;
       } else {
+        const traffic = state.ahrefsTrafficByUrl ? Number(state.ahrefsTrafficByUrl.get(d.url) || 0) : 0;
+        const topKw = state.ahrefsKeywordByUrl ? (state.ahrefsKeywordByUrl.get(d.url) || '') : '';
         const dupLine = (d.duplicate_of && d.duplicate_of.length)
           ? `<br><span style="font-size:12px;color:#fca5a5">↔ duplicate of: ${d.duplicate_of.slice(0,2).map(x => `${escapeHtml(x.title)} (${x.similarity})`).join('; ')}</span>` : '';
         body = `
@@ -2027,6 +2387,7 @@
           <br><span style="font-size:12px;color:#93c5fd">${escapeHtml(d.url)}</span>
           <br><span style="font-size:12px;color:#9ca3af">Section: ${escapeHtml(d.section || '(root)')} · Cluster ${d.cluster}</span>
           <br><span style="font-size:12px;color:#fbbf24">drift to section: ${d.drift_section} · to site: ${d.drift_site}</span>
+          ${traffic ? `<br><span style="font-size:12px;color:#86efac">Ahrefs traffic: ${traffic.toLocaleString()}${topKw ? ' · ' + escapeHtml(topKw) : ''}</span>` : ''}
           <br><span style="font-size:12px;color:#9ca3af">${d.word_count} words</span>
           ${dupLine}
           <br><span style="font-size:11px;color:#60a5fa">Click to open</span>`;
@@ -2035,7 +2396,7 @@
     }).on('mousemove', event => {
       tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px');
     }).on('mouseout', function() {
-      d3.select(this).attr('r', baseR).attr('stroke', 'white').attr('stroke-width', baseStroke);
+      d3.select(this).attr('r', d => dotRadius(d)).attr('stroke', 'white').attr('stroke-width', baseStroke);
       tooltip.style('visibility', 'hidden');
     });
 
@@ -2756,6 +3117,152 @@
           </tbody>
         </table>`;
     }
+  }
+
+  function renderLinkFlow() {
+    const block = document.getElementById('linkflow-block');
+    const container = document.getElementById('linkflow-bundle');
+    const legend = document.getElementById('linkflow-legend');
+    const flow = ((state.linkgraph || {}).link_flow || {});
+    const nodes = flow.nodes || [];
+    const edges = flow.edges || [];
+    if (!nodes.length || !edges.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    container.innerHTML = '';
+    legend.innerHTML = `
+      <span><strong>${Number(flow.shown_nodes || nodes.length).toLocaleString()}</strong> pages shown</span>
+      <span><strong>${Number(flow.shown_edges || edges.length).toLocaleString()}</strong> links shown from ${Number(flow.total_edges || 0).toLocaleString()} total</span>
+      <span>node size = traffic</span>
+      <span>edge width = repeated links</span>
+    `;
+
+    const width = Math.max(760, container.offsetWidth || 900);
+    const height = 780;
+    const radius = Math.min(width, height) / 2 - 150;
+    const trafficMax = d3.max(nodes, d => Number(d.traffic || 0)) || 1;
+    const prMax = d3.max(nodes, d => Number(d.pagerank || 0)) || 1;
+    const edgeWeightMax = d3.max(edges, d => Number(d.weight || 1)) || 1;
+    const trafficColor = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, trafficMax]);
+    const nodeRadius = d3.scaleSqrt().domain([0, trafficMax]).range([2.2, 8.5]);
+    const edgeWidth = d3.scaleSqrt().domain([1, edgeWeightMax]).range([0.45, 3.2]);
+    const edgeOpacity = d3.scaleSqrt().domain([0, trafficMax]).range([0.08, 0.72]);
+
+    const rootData = buildLinkFlowHierarchy(nodes);
+    const root = d3.cluster().size([360, radius])(d3.hierarchy(rootData));
+    const leaves = root.leaves();
+    const leafByUrl = new Map(leaves.map(d => [d.data.url, d]));
+    const bundledEdges = edges
+      .map(e => ({...e, sourceNode: leafByUrl.get(e.source), targetNode: leafByUrl.get(e.target)}))
+      .filter(e => e.sourceNode && e.targetNode);
+    if (!bundledEdges.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No selected links could be bundled.</div>';
+      return;
+    }
+
+    const svg = d3.select(container).append('svg')
+      .attr('width', width).attr('height', height)
+      .attr('viewBox', [-width / 2, -height / 2, width, height])
+      .attr('style', 'max-width:100%;height:auto;font:10px sans-serif;');
+    const line = d3.lineRadial()
+      .curve(d3.curveBundle.beta(0.85))
+      .radius(d => d.y)
+      .angle(d => d.x / 180 * Math.PI);
+    const tooltip = d3.select('body').append('div').attr('class', 'linkflow-tt')
+      .style('position', 'absolute').style('visibility', 'hidden').style('background', 'rgba(0,0,0,.92)')
+      .style('color', 'white').style('padding', '8px 10px').style('border-radius', '6px')
+      .style('font-size', '12px').style('pointer-events', 'none').style('z-index', '1000').style('max-width', '440px');
+
+    const edgeLayer = svg.append('g').attr('fill', 'none');
+    const path = edgeLayer.selectAll('path').data(bundledEdges).join('path')
+      .attr('d', d => line(d.sourceNode.path(d.targetNode)))
+      .attr('stroke', d => trafficColor(Number(d.targetNode.data.traffic || 0)))
+      .attr('stroke-width', d => edgeWidth(Number(d.weight || 1)))
+      .attr('stroke-opacity', d => edgeOpacity(Number(d.targetNode.data.traffic || 0)))
+      .style('mix-blend-mode', 'multiply')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.95).attr('stroke-width', edgeWidth(Number(d.weight || 1)) + 1.5);
+        tooltip.style('visibility', 'visible').html(
+          `<strong>${escapeHtml(d.sourceNode.data.title || d.source)}</strong><br>` +
+          `<span style="color:#bfdbfe">PR ${(Number(d.sourceNode.data.pagerank || 0) * 100).toFixed(3)} · out ${Number(d.sourceNode.data.out_degree || 0).toLocaleString()}</span><br>` +
+          `→ <strong>${escapeHtml(d.targetNode.data.title || d.target)}</strong><br>` +
+          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)}</span>`
+        );
+      })
+      .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
+      .on('mouseout', function(event, d) {
+        d3.select(this).attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0))).attr('stroke-width', edgeWidth(Number(d.weight || 1)));
+        tooltip.style('visibility', 'hidden');
+      });
+
+    const node = svg.append('g').selectAll('g').data(leaves).join('g')
+      .attr('transform', d => `rotate(${d.x - 90}) translate(${d.y},0)`);
+    node.append('circle')
+      .attr('r', d => nodeRadius(Number(d.data.traffic || 0)))
+      .attr('fill', d => trafficColor(Number(d.data.traffic || 0)))
+      .attr('stroke', d => d.data.traffic ? '#7f1d1d' : '#94a3b8')
+      .attr('stroke-width', d => 0.5 + Math.min(2, Number(d.data.pagerank || 0) / prMax * 2))
+      .attr('fill-opacity', d => d.data.traffic ? 0.88 : 0.38);
+    node.append('text')
+      .attr('dy', '0.31em')
+      .attr('x', d => d.x < 180 ? 10 : -10)
+      .attr('text-anchor', d => d.x < 180 ? 'start' : 'end')
+      .attr('transform', d => d.x < 180 ? null : 'rotate(180)')
+      .style('font-size', '10px')
+      .style('fill', d => d.data.traffic ? '#7f1d1d' : '#475569')
+      .text(d => truncateMiddle(d.data.title || d.data.url || '', 34))
+      .on('mouseover', function(event, d) {
+        const related = new Set();
+        path.attr('stroke-opacity', e => {
+          const hit = e.source === d.data.url || e.target === d.data.url;
+          if (hit) {
+            related.add(e.source);
+            related.add(e.target);
+          }
+          return hit ? 0.95 : 0.025;
+        });
+        node.select('text').style('font-weight', n => related.has(n.data.url) || n.data.url === d.data.url ? 700 : 400);
+        tooltip.style('visibility', 'visible').html(
+          `<strong>${escapeHtml(d.data.title || d.data.url)}</strong><br>` +
+          `<span style="color:#93c5fd">${escapeHtml(d.data.section || '')}</span><br>` +
+          `<span style="color:#fbbf24">traffic ${Number(d.data.traffic || 0).toLocaleString()} · keywords ${Number(d.data.keywords || 0).toLocaleString()}${d.data.top_keyword ? ' · ' + escapeHtml(d.data.top_keyword) : ''}</span><br>` +
+          `PR ${(Number(d.data.pagerank || 0) * 100).toFixed(3)} · in ${Number(d.data.in_degree || 0).toLocaleString()} · out ${Number(d.data.out_degree || 0).toLocaleString()} · depth ${d.data.click_depth ?? '—'}`
+        );
+      })
+      .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
+      .on('mouseout', function() {
+        path.attr('stroke-opacity', e => edgeOpacity(Number(e.targetNode.data.traffic || 0)));
+        node.select('text').style('font-weight', 400);
+        tooltip.style('visibility', 'hidden');
+      })
+      .on('click', (event, d) => { if (d.data.url) window.open(d.data.url, '_blank', 'noopener'); });
+  }
+
+  function buildLinkFlowHierarchy(nodes) {
+    const bySection = new Map();
+    nodes.forEach((node, i) => {
+      const section = node.section || 'root';
+      if (!bySection.has(section)) bySection.set(section, []);
+      bySection.get(section).push({...node, name: `${section}-${i}`});
+    });
+    return {
+      name: 'root',
+      children: Array.from(bySection.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([section, children]) => ({
+          name: section,
+          children: children.sort((a, b) => String(a.title || a.url).localeCompare(String(b.title || b.url)))
+        }))
+    };
+  }
+
+  function truncateMiddle(value, maxLen) {
+    const s = String(value || '');
+    if (s.length <= maxLen) return s;
+    const keep = Math.max(6, Math.floor((maxLen - 1) / 2));
+    return s.slice(0, keep) + '…' + s.slice(-keep);
   }
 
   function renderHits() {

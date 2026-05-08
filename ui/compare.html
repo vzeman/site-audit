@@ -222,6 +222,7 @@
         </div>
         <div class="flex gap-2 text-xs flex-wrap" id="lb-group-buttons" role="group">
           <button data-group="overview"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Overview</button>
+          <button data-group="search"    class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Search demand</button>
           <button data-group="topic"     class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Topic shape</button>
           <button data-group="geo"       class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">GEO answer-ability</button>
           <button data-group="entities"  class="lb-group px-2 py-1 rounded border border-gray-300 bg-white">Entities</button>
@@ -298,6 +299,49 @@
       </div>
     </section>
 
+    <!-- Ahrefs search demand -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="search-demand-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Ahrefs search demand</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Cached Ahrefs estimates by domain, directory, and topic cluster. These charts show where each site has actual organic demand, not just content volume.
+        </p>
+      </div>
+      <div id="search-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Directory traffic</h3>
+          <p class="text-xs text-gray-500 mb-2">Top directories across all compared domains, ranked by estimated organic traffic.</p>
+          <div id="search-dir-chart" class="w-full" style="min-height: 420px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster traffic</h3>
+          <p class="text-xs text-gray-500 mb-2">Bubble size and y-axis use Ahrefs traffic; x-axis is matched page count in that cluster.</p>
+          <div id="search-cluster-chart" class="w-full" style="min-height: 420px;"></div>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-sm font-semibold mb-1">Cross-domain keyword/content semantic map</h3>
+        <p class="text-xs text-gray-500 mb-2">
+          Keywords, page titles, pages, headers, paragraphs, and link titles from every domain projected in one vector space. Color = entity type, outline = domain, dot size = traffic or usage.
+        </p>
+        <div id="ahrefs-semantic-compare" class="w-full" style="min-height: 620px;"></div>
+        <div id="ahrefs-semantic-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
+    </section>
+
+    <!-- Internal link flow comparison -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-flow-compare-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Internal link equity flow</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          One hierarchical edge-bundling view per domain. Edge thickness = number of internal links between selected pages,
+          target dot size/color = organic traffic, so you can see whether link authority is flowing into pages with search demand.
+        </p>
+      </div>
+      <div id="link-flow-compare" class="grid xl:grid-cols-2 gap-6"></div>
+    </section>
+
     <!-- Combined scatter -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="scatter-section">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -344,6 +388,8 @@
           <button data-dist="out_degree"    class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Outbound links / page</button>
           <button data-dist="answerability" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">GEO score / page</button>
           <button data-dist="paragraph_density_per_page" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Paragraph link density / page</button>
+          <button data-dist="ahrefs_page_traffic" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Ahrefs traffic / page</button>
+          <button data-dist="ahrefs_keyword_traffic" class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Ahrefs traffic / keyword</button>
         </div>
       </div>
       <div id="dist-chart" class="w-full" style="min-height: 360px;"></div>
@@ -386,6 +432,8 @@
   const COLUMN_GROUPS = {
     overview: [
       { key: 'pages',                 label: 'Pages',        better: 'na', fmt: 'int' },
+      { key: 'ahrefs_org_traffic',    label: 'Organic traffic', better: 'high', fmt: 'int' },
+      { key: 'ahrefs_org_keywords',   label: 'Organic KW', better: 'high', fmt: 'int' },
       { key: 'recommendations_total', label: 'Actions',      better: 'na', fmt: 'int' },
       { key: 'rec_high',              label: 'High pri',     better: 'low', fmt: 'int' },
       { key: 'calibrated_focus',      label: 'Calibrated focus', better: 'high', fmt: '0.000' },
@@ -394,6 +442,16 @@
       { key: 'descriptive_anchor_share', label: 'Descriptive anchors', better: 'high', fmt: 'pct' },
       { key: 'pages_missing_h1_share',label: 'Missing H1',   better: 'low',  fmt: 'pct' },
       { key: 'spammy_paragraph_count',label: 'Spammy paras', better: 'low',  fmt: 'int' },
+    ],
+    search: [
+      { key: 'pages',                       label: 'Pages', better: 'na', fmt: 'int' },
+      { key: 'ahrefs_org_traffic',          label: 'Organic traffic', better: 'high', fmt: 'int' },
+      { key: 'ahrefs_org_keywords',         label: 'Organic keywords', better: 'high', fmt: 'int' },
+      { key: 'ahrefs_top3_keywords',        label: 'Top 3 keywords', better: 'high', fmt: 'int' },
+      { key: 'ahrefs_top_pages',            label: 'Top pages loaded', better: 'na', fmt: 'int' },
+      { key: 'ahrefs_matched_traffic',      label: 'Matched traffic', better: 'high', fmt: 'int' },
+      { key: 'ahrefs_matched_traffic_share', label: 'Matched traffic %', better: 'high', fmt: 'pct' },
+      { key: 'ahrefs_top_pages_value_usd',  label: 'Traffic value $', better: 'high', fmt: 'int' },
     ],
     topic: [
       { key: 'pages',              label: 'Pages',           better: 'na',   fmt: 'int' },
@@ -732,6 +790,287 @@
   renderMetricMatrix();
 
   // ============================================================
+  // Ahrefs search demand
+  // ============================================================
+  const ENTITY_COLORS = {
+    page: '#2563eb',
+    page_title: '#0f766e',
+    keyword: '#dc2626',
+    header: '#f59e0b',
+    paragraph: '#7c3aed',
+    link_title: '#64748b',
+  };
+  const ENTITY_LABELS = {
+    page: 'Page',
+    page_title: 'Page title',
+    keyword: 'Keyword',
+    header: 'Header',
+    paragraph: 'Paragraph',
+    link_title: 'Link title',
+  };
+
+  function renderSearchDemand() {
+    const section = document.getElementById('search-demand-section');
+    const search = data.search || {};
+    const summaries = (search.summaries || []).filter(s => (s.summary || {}).top_pages || (s.metrics || {}).org_traffic);
+    if (!summaries.length && !(data.ahrefs_semantic_scatter || []).length) {
+      section.style.display = 'none';
+      return;
+    }
+    const root = document.getElementById('search-summary');
+    root.innerHTML = summaries.map(s => {
+      const summary = s.summary || {};
+      const metrics = s.metrics || {};
+      const traffic = Number(metrics.org_traffic || summary.top_pages_traffic || 0);
+      const keywords = Number(metrics.org_keywords || summary.organic_keywords || 0);
+      const matched = Number(summary.matched_traffic || 0);
+      const share = Number(summary.matched_traffic_share || 0);
+      return `
+        <article class="border border-gray-200 rounded-lg p-4">
+          <h3 class="font-semibold mb-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(s.domain)}"></span>${escapeHtml(s.domain)}</h3>
+          <div class="grid grid-cols-2 gap-3 text-xs">
+            <div><div class="text-xl font-semibold">${traffic.toLocaleString()}</div><div class="text-gray-500">organic traffic</div></div>
+            <div><div class="text-xl font-semibold">${keywords.toLocaleString()}</div><div class="text-gray-500">keywords</div></div>
+            <div><div class="text-xl font-semibold">${matched.toLocaleString()}</div><div class="text-gray-500">matched traffic</div></div>
+            <div><div class="text-xl font-semibold">${Math.round(share * 100)}%</div><div class="text-gray-500">matched share</div></div>
+          </div>
+          <div class="text-xs text-gray-500 mt-3">cache ${(s.meta || {}).cache_status || 'unknown'}${((s.meta || {}).params || {}).date ? ' · ' + (s.meta.params.date) : ''}</div>
+        </article>`;
+    }).join('');
+    renderSearchDirectoryChart();
+    renderSearchClusterChart();
+    renderAhrefsSemanticCompare();
+  }
+
+  function renderSearchDirectoryChart() {
+    const container = document.getElementById('search-dir-chart');
+    const rows = ((data.search || {}).directories || []).filter(r => Number(r.traffic || 0) > 0)
+      .sort((a,b) => Number(b.traffic || 0) - Number(a.traffic || 0)).slice(0, 24);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No directory traffic data.</div>';
+      return;
+    }
+    const margin = { top: 10, right: 32, bottom: 36, left: 150 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = Math.max(380, rows.length * 22) - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', height + margin.top + margin.bottom)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const y = d3.scaleBand().domain(rows.map((r,i) => `${r.domain}/${r.label || r.key}/${i}`)).range([0, height]).padding(0.18);
+    const x = d3.scaleLinear().domain([0, d3.max(rows, r => Number(r.traffic || 0)) || 1]).range([0, width]);
+    svg.append('g').call(d3.axisLeft(y).tickFormat(v => {
+      const parts = String(v).split('/');
+      return `${parts[0]} / ${parts[1] || 'root'}`;
+    }).tickSize(0)).selectAll('text').style('font-size', '10px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.selectAll('rect').data(rows).join('rect')
+      .attr('x', 0).attr('y', (d,i) => y(`${d.domain}/${d.label || d.key}/${i}`))
+      .attr('width', d => x(Number(d.traffic || 0))).attr('height', y.bandwidth())
+      .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.72).attr('rx', 3);
+    svg.selectAll('text.val').data(rows).join('text')
+      .attr('class', 'val')
+      .attr('x', d => x(Number(d.traffic || 0)) + 5)
+      .attr('y', (d,i) => y(`${d.domain}/${d.label || d.key}/${i}`) + y.bandwidth() / 2 + 4)
+      .style('font-size', '10px').style('fill', '#374151')
+      .text(d => Number(d.traffic || 0).toLocaleString());
+  }
+
+  function renderSearchClusterChart() {
+    const container = document.getElementById('search-cluster-chart');
+    const rows = ((data.search || {}).clusters || []).filter(r => Number(r.traffic || 0) > 0);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No cluster traffic data.</div>';
+      return;
+    }
+    const margin = { top: 18, right: 24, bottom: 44, left: 62 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 420 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 420)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.pages || r.page_count || 0)) || 1]).range([0, width]);
+    const y = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.traffic || 0)) || 1]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.traffic || 0)) || 1]).range([4, 24]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+    svg.append('g').call(d3.axisLeft(y).ticks(6));
+    svg.append('text').attr('x', width/2).attr('y', height + 34).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('matched pages in cluster');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height/2).attr('y', -46).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('Ahrefs traffic');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+    svg.selectAll('circle').data(rows).join('circle')
+      .attr('cx', d => x(Number(d.pages || d.page_count || 0))).attr('cy', d => y(Number(d.traffic || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.68).attr('stroke', '#111827').attr('stroke-opacity', 0.2)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.9).attr('stroke-width', 2);
+        const kws = (d.top_keywords || []).slice(0, 5).map(k => escapeHtml(k.keyword)).join(' · ');
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.label || d.key)}</strong><br>traffic ${Number(d.traffic || 0).toLocaleString()} · pages ${Number(d.pages || 0).toLocaleString()}<br><span style="color:#fbbf24">${kws}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-opacity',0.2).attr('stroke-width',1); tooltip.style('visibility','hidden'); });
+  }
+
+  function renderAhrefsSemanticCompare() {
+    const container = document.getElementById('ahrefs-semantic-compare');
+    const legend = document.getElementById('ahrefs-semantic-compare-legend');
+    const points = data.ahrefs_semantic_scatter || [];
+    container.innerHTML = '';
+    legend.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No Ahrefs semantic entity projection yet.</div>';
+      return;
+    }
+    legend.innerHTML = Object.keys(ENTITY_COLORS).map(t =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${ENTITY_COLORS[t]}"></span>${ENTITY_LABELS[t]}</span>`
+    ).join('') + data.domains.map(d =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5 border-2" style="border-color:${domainColor(d)}"></span>${escapeHtml(d)}</span>`
+    ).join('');
+    const margin = { top: 20, right: 20, bottom: 36, left: 40 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 620 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 620);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxSize = d3.max(points, d => Number(d.size || d.traffic || d.count || 0)) || 1;
+    const radius = d3.scaleSqrt().domain([0, maxSize]).range([2.8, 14]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    svg.append('g').call(d3.axisLeft(y).ticks(8));
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
+      .attr('r', d => radius(Number(d.size || d.traffic || d.count || 0)))
+      .attr('fill', d => ENTITY_COLORS[d.type] || '#64748b')
+      .attr('fill-opacity', d => d.type === 'paragraph' ? 0.38 : 0.7)
+      .attr('stroke', d => domainColor(d.domain)).attr('stroke-width', 1.6)
+      .style('cursor', d => d.url ? 'pointer' : 'default')
+      .on('click', (event, d) => { if (d.url) window.open(d.url, '_blank', 'noopener'); })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-width', 3);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · <strong style="color:${ENTITY_COLORS[d.type]}">${ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-width',1.6); tooltip.style('visibility','hidden'); });
+    const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+  }
+
+  renderSearchDemand();
+
+  // ============================================================
+  // Internal link flow comparison
+  // ============================================================
+  function renderLinkFlowCompare() {
+    const section = document.getElementById('link-flow-compare-section');
+    const root = document.getElementById('link-flow-compare');
+    const flows = data.link_flows || [];
+    if (!flows.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    root.innerHTML = flows.map(flow => `
+      <div class="border border-gray-200 rounded-lg p-3 bg-white">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <div>
+            <h3 class="text-sm font-semibold"><span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(flow.domain)}"></span>${escapeHtml(flow.domain)}</h3>
+            <p class="text-xs text-gray-500">${Number(flow.shown_nodes || 0).toLocaleString()} pages · ${Number(flow.shown_edges || 0).toLocaleString()} selected links</p>
+          </div>
+          <a class="text-xs text-blue-600 hover:underline" href="../../${escapeHtml(flow.domain)}/report/index.html" target="_blank" rel="noopener">open report</a>
+        </div>
+        <div class="link-flow-mini" data-domain="${escapeHtml(flow.domain)}" style="min-height:560px;"></div>
+      </div>
+    `).join('');
+    flows.forEach(flow => drawLinkFlowMini(root.querySelector(`.link-flow-mini[data-domain="${cssEscape(flow.domain)}"]`), flow));
+  }
+
+  function drawLinkFlowMini(container, flow) {
+    if (!container) return;
+    const nodes = flow.nodes || [];
+    const edges = flow.edges || [];
+    if (!nodes.length || !edges.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No bundled links.</div>';
+      return;
+    }
+    const width = Math.max(560, container.offsetWidth || 640);
+    const height = 560;
+    const radius = Math.min(width, height) / 2 - 118;
+    const trafficMax = d3.max(nodes, d => Number(d.traffic || 0)) || 1;
+    const weightMax = d3.max(edges, d => Number(d.weight || 1)) || 1;
+    const trafficColor = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, trafficMax]);
+    const nodeRadius = d3.scaleSqrt().domain([0, trafficMax]).range([1.8, 6.5]);
+    const edgeWidth = d3.scaleSqrt().domain([1, weightMax]).range([0.35, 2.4]);
+    const edgeOpacity = d3.scaleSqrt().domain([0, trafficMax]).range([0.06, 0.62]);
+    const rootData = linkFlowHierarchy(nodes);
+    const root = d3.cluster().size([360, radius])(d3.hierarchy(rootData));
+    const leaves = root.leaves();
+    const byUrl = new Map(leaves.map(d => [d.data.url, d]));
+    const bundled = edges.map(e => ({...e, sourceNode: byUrl.get(e.source), targetNode: byUrl.get(e.target)})).filter(e => e.sourceNode && e.targetNode);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height)
+      .attr('viewBox', [-width / 2, -height / 2, width, height])
+      .attr('style', 'max-width:100%;height:auto;font:9px sans-serif;');
+    const line = d3.lineRadial().curve(d3.curveBundle.beta(0.85)).radius(d => d.y).angle(d => d.x / 180 * Math.PI);
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+    svg.append('g').attr('fill', 'none').selectAll('path').data(bundled).join('path')
+      .attr('d', d => line(d.sourceNode.path(d.targetNode)))
+      .attr('stroke', d => trafficColor(Number(d.targetNode.data.traffic || 0)))
+      .attr('stroke-width', d => edgeWidth(Number(d.weight || 1)))
+      .attr('stroke-opacity', d => edgeOpacity(Number(d.targetNode.data.traffic || 0)))
+      .style('mix-blend-mode', 'multiply')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.95).attr('stroke-width', edgeWidth(Number(d.weight || 1)) + 1);
+        tooltip.style('visibility','visible').html(`<strong>${escapeHtml(flow.domain)}</strong><br>${escapeHtml(d.sourceNode.data.title || d.source)} → ${escapeHtml(d.targetNode.data.title || d.target)}<br><span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(event, d) { d3.select(this).attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0))).attr('stroke-width', edgeWidth(Number(d.weight || 1))); tooltip.style('visibility','hidden'); });
+    const node = svg.append('g').selectAll('g').data(leaves).join('g')
+      .attr('transform', d => `rotate(${d.x - 90}) translate(${d.y},0)`);
+    node.append('circle')
+      .attr('r', d => nodeRadius(Number(d.data.traffic || 0)))
+      .attr('fill', d => trafficColor(Number(d.data.traffic || 0)))
+      .attr('fill-opacity', d => d.data.traffic ? 0.9 : 0.36)
+      .attr('stroke', d => domainColor(flow.domain)).attr('stroke-width', 0.45);
+    node.append('text')
+      .attr('dy','0.31em').attr('x', d => d.x < 180 ? 8 : -8)
+      .attr('text-anchor', d => d.x < 180 ? 'start' : 'end')
+      .attr('transform', d => d.x < 180 ? null : 'rotate(180)')
+      .style('fill', d => d.data.traffic ? '#7f1d1d' : '#475569')
+      .text(d => truncateMiddle(d.data.title || d.data.url || '', 26));
+  }
+
+  function linkFlowHierarchy(nodes) {
+    const bySection = new Map();
+    nodes.forEach((node, i) => {
+      const section = node.section || 'root';
+      if (!bySection.has(section)) bySection.set(section, []);
+      bySection.get(section).push({...node, name: `${section}-${i}`});
+    });
+    return { name: 'root', children: Array.from(bySection.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([name, children]) => ({ name, children })) };
+  }
+
+  function truncateMiddle(value, maxLen) {
+    const s = String(value || '');
+    if (s.length <= maxLen) return s;
+    const keep = Math.max(5, Math.floor((maxLen - 1) / 2));
+    return s.slice(0, keep) + '…' + s.slice(-keep);
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/"/g, '\\"');
+  }
+
+  renderLinkFlowCompare();
+
+  // ============================================================
   // Freshness side-by-side
   // ============================================================
   const FRESHNESS_BUCKETS = [
@@ -852,6 +1191,10 @@
     const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
     const x = d3.scaleLinear().domain([xExt[0]-xPad, xExt[1]+xPad]).range([0, width]);
     const y = d3.scaleLinear().domain([yExt[0]-yPad, yExt[1]+yPad]).range([height, 0]);
+    const maxTraffic = d3.max(points, d => Number(d.traffic || 0)) || 0;
+    const radius = maxTraffic > 0
+      ? d3.scaleSqrt().domain([0, maxTraffic]).range([2.2, 11])
+      : () => 2.6;
 
     const tooltip = d3.select('body').append('div')
       .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
@@ -865,22 +1208,23 @@
     const dots = dotsG.selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(d.x))
       .attr('cy', d => y(d.y))
-      .attr('r', 2.6)
+      .attr('r', d => radius(Number(d.traffic || 0)))
       .attr('fill', d => domainColor(d.domain))
-      .attr('fill-opacity', 0.7)
+      .attr('fill-opacity', d => Number(d.traffic || 0) > 0 ? 0.82 : 0.38)
       .attr('stroke', 'white').attr('stroke-width', 0.3)
       .style('cursor','pointer')
       .on('click', (e,d) => { e.stopPropagation(); window.open(d.url,'_blank','noopener'); })
       .on('mouseover', function(e,d){
-        d3.select(this).attr('r',5).attr('stroke','#000').attr('stroke-width',1);
+        d3.select(this).attr('r', Math.max(5, radius(Number(d.traffic || 0)) + 3)).attr('stroke','#000').attr('stroke-width',1);
         tooltip.style('visibility','visible').html(
           `<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong>
            <br><strong>${escapeHtml(d.title || '(untitled)')}</strong>
            <br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url)}</span>
-           <br><span style="color:#9ca3af;font-size:11px">${escapeHtml(d.section || '(root)')}</span>`);
+           <br><span style="color:#9ca3af;font-size:11px">${escapeHtml(d.section || '(root)')}</span>
+           <br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.top_keyword ? ' · ' + escapeHtml(d.top_keyword) : ''}</span>`);
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
-      .on('mouseout', function(){ d3.select(this).attr('r',2.6).attr('stroke','white').attr('stroke-width',0.3); tooltip.style('visibility','hidden'); });
+      .on('mouseout', function(e,d){ d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke','white').attr('stroke-width',0.3); tooltip.style('visibility','hidden'); });
 
     const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
@@ -975,6 +1319,8 @@
     out_degree: 'outbound internal links per page',
     answerability: 'GEO answer-ability score (0–10) per page',
     paragraph_density_per_page: 'paragraph link density (links / 100 words) per page',
+    ahrefs_page_traffic: 'Ahrefs organic traffic per top page',
+    ahrefs_keyword_traffic: 'Ahrefs organic traffic per keyword',
   };
   const METRIC_HELP = {
     in_degree:
@@ -999,6 +1345,10 @@
       'A spike at 0 = most paragraphs are unlinked running text (could host more contextual links). ' +
       'A long right tail above 5 = link-stuffed paragraphs that look like SEO spam to LLMs and humans. ' +
       'Healthy = a body in the 0.5–3 range; competitors with a much fatter tail above 5 are at risk of devaluation.',
+    ahrefs_page_traffic:
+      '<strong>Ahrefs traffic per top page.</strong> A long right tail means a few URLs carry most organic demand. Compare the tail shape against competitors to see whether traffic is concentrated in one playbook or distributed across many pages.',
+    ahrefs_keyword_traffic:
+      '<strong>Ahrefs traffic per keyword.</strong> Shows how much demand each ranking keyword contributes. A competitor with more mass away from zero has more commercially useful keyword coverage, not just more indexed pages.',
   };
   document.querySelectorAll('.dist-btn').forEach(b => b.addEventListener('click', () => {
     distMetric = b.dataset.dist;

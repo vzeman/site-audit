@@ -29,6 +29,11 @@ from urllib.parse import urlparse
 import numpy as np
 
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
+from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
+from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
+from .ahrefs import write_semantic_cache as write_ahrefs_semantic_cache
+from .dataforseo import DataForSEOConfig, build_analysis as build_dataforseo_analysis
+from .dataforseo import fetch_snapshot as fetch_dataforseo_snapshot
 from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
@@ -75,6 +80,7 @@ from .keyword_coverage import (
     to_payload as queries_payload,
 )
 from .linkgraph import analyze as analyze_linkgraph
+from .linkgraph import link_flow_payload
 from .linkgraph import to_payload as linkgraph_payload
 from .media_accessibility import analyze as analyze_media_accessibility
 from .media_accessibility import to_payload as media_accessibility_payload
@@ -156,6 +162,24 @@ class PipelineConfig:
     cannibalization_threshold: float = 0.72
     link_similarity_threshold: float = 0.85
     link_recommendations_top_k: int = 75
+    search_provider: str = "auto"
+    enable_dataforseo: bool = True
+    enable_ahrefs: bool = True
+    ahrefs_date: Optional[str] = None
+    ahrefs_country: Optional[str] = None
+    ahrefs_mode: str = "subdomains"
+    ahrefs_top_pages_limit: int = 1000
+    ahrefs_keywords_limit: int = 1000
+    ahrefs_refresh: bool = False
+    ahrefs_semantic_sample: int = 500
+    dataforseo_location_code: Optional[int] = None
+    dataforseo_location_name: Optional[str] = None
+    dataforseo_language_code: Optional[str] = None
+    dataforseo_language_name: Optional[str] = None
+    dataforseo_top_pages_limit: int = 1000
+    dataforseo_keywords_limit: int = 1000
+    dataforseo_refresh: bool = False
+    dataforseo_include_clickstream: bool = False
 
 
 def _domain_only(domain: str) -> str:
@@ -174,6 +198,22 @@ def project_paths(config: PipelineConfig) -> tuple[Path, Path]:
     cache_dir = Path(config.cache_dir) if config.cache_dir else project_dir / "cache"
     report_dir = Path(config.output_dir) if config.output_dir else project_dir / "report"
     return cache_dir, report_dir
+
+
+def _search_payload_usable(payload: dict) -> bool:
+    if not payload:
+        return False
+    meta = payload.get("meta", {}) or {}
+    if meta.get("status") != "ok":
+        return False
+    summary = payload.get("summary", {}) or {}
+    metrics = payload.get("metrics", {}) or {}
+    return bool(
+        summary.get("top_pages")
+        or summary.get("organic_keywords")
+        or metrics.get("org_traffic")
+        or metrics.get("org_keywords")
+    )
 
 
 def run(config: PipelineConfig) -> dict:
@@ -449,6 +489,7 @@ def run(config: PipelineConfig) -> dict:
 
     # 9) Link graph + recommendations
     link_payload: dict = {}
+    link_result = None
     if config.enable_linkgraph:
         pages_with_outlinks = [(p.url, outlinks_map.get(p.url, [])) for p in pages]
         # crawler.base_url already strips trailing slashes
@@ -714,6 +755,108 @@ def run(config: PipelineConfig) -> dict:
             s.get("image_links_no_alt", 0),
         )
 
+    # 11.g) Organic search enrichment. Cache-first by default. Ahrefs remains
+    # the primary provider; DataForSEO is fetched only when selected or when
+    # Ahrefs has no usable cache/API payload.
+    ahrefs_data: dict = {}
+    provider_choice = (config.search_provider or "auto").lower()
+    if provider_choice not in {"none", "disabled", "off"}:
+        ahrefs_config = AhrefsConfig(
+            enabled=True,
+            date=config.ahrefs_date,
+            country=config.ahrefs_country,
+            mode=config.ahrefs_mode,
+            top_pages_limit=config.ahrefs_top_pages_limit,
+            keywords_limit=config.ahrefs_keywords_limit,
+            refresh=config.ahrefs_refresh,
+            semantic_sample_cap=config.ahrefs_semantic_sample,
+        )
+        if config.enable_ahrefs and provider_choice in {"auto", "ahrefs"}:
+            snapshot = fetch_ahrefs_snapshot(host, cache_dir, ahrefs_config)
+            ahrefs_analysis = build_ahrefs_analysis(
+                snapshot,
+                pages,
+                embeddings,
+                coords=coords,
+                cluster_labels=labels,
+                cluster_summaries=cluster_summaries,
+                extracted_pages=extracted_pages,
+                paragraph_records=paragraph_records,
+                linkbuilding=linkbuilding_data,
+                embedder=embedder,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            candidate = ahrefs_analysis.payload
+            if _search_payload_usable(candidate) or provider_choice == "ahrefs":
+                ahrefs_data = candidate
+                write_ahrefs_semantic_cache(
+                    cache_dir,
+                    config.model,
+                    ahrefs_analysis.semantic_rows,
+                    ahrefs_analysis.semantic_embeddings,
+                )
+
+        needs_dataforseo = provider_choice == "dataforseo" or (
+            provider_choice == "auto" and not _search_payload_usable(ahrefs_data)
+        )
+        if config.enable_dataforseo and needs_dataforseo:
+            dataforseo_config = DataForSEOConfig(
+                enabled=True,
+                location_code=config.dataforseo_location_code,
+                location_name=config.dataforseo_location_name,
+                language_code=config.dataforseo_language_code,
+                language_name=config.dataforseo_language_name,
+                top_pages_limit=config.dataforseo_top_pages_limit,
+                keywords_limit=config.dataforseo_keywords_limit,
+                refresh=config.dataforseo_refresh,
+                include_clickstream=config.dataforseo_include_clickstream,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            snapshot = fetch_dataforseo_snapshot(host, cache_dir, dataforseo_config)
+            dataforseo_analysis = build_dataforseo_analysis(
+                snapshot,
+                pages,
+                embeddings,
+                coords=coords,
+                cluster_labels=labels,
+                cluster_summaries=cluster_summaries,
+                extracted_pages=extracted_pages,
+                paragraph_records=paragraph_records,
+                linkbuilding=linkbuilding_data,
+                embedder=embedder,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            if _search_payload_usable(dataforseo_analysis.payload) or not ahrefs_data:
+                ahrefs_data = dataforseo_analysis.payload
+                write_ahrefs_semantic_cache(
+                    cache_dir,
+                    config.model,
+                    dataforseo_analysis.semantic_rows,
+                    dataforseo_analysis.semantic_embeddings,
+                )
+
+        search_meta = ahrefs_data.get("meta", {}) or {}
+        search_summary = ahrefs_data.get("summary", {}) or {}
+        provider_label = search_meta.get("provider_label") or search_meta.get("provider") or "search"
+        if search_summary:
+            LOG.info(
+                "  %s search data: %s · %d top pages · %d keywords · %d matched organic visits",
+                provider_label,
+                search_meta.get("cache_status", "unknown"),
+                search_summary.get("top_pages", 0),
+                search_summary.get("organic_keywords", 0),
+                search_summary.get("matched_traffic", 0),
+            )
+        elif search_meta:
+            LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
+
+    if link_result is not None:
+        link_payload["link_flow"] = link_flow_payload(
+            link_result,
+            pages,
+            (ahrefs_data.get("top_pages") or []) if ahrefs_data else [],
+        )
+
     # 12) Action plan: synthesise prioritised recommendations from the
     # already-built payloads. Cheap (no embeddings), pure aggregation.
     duplicate_rows = build_duplicate_rows(result)
@@ -774,6 +917,7 @@ def run(config: PipelineConfig) -> dict:
         conversion=conversion_data,
         indexability=indexability_data,
         performance=performance_data,
+        ahrefs=ahrefs_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -815,6 +959,7 @@ def run(config: PipelineConfig) -> dict:
             conversion=conversion_data,
             indexability=indexability_data,
             performance=performance_data,
+            ahrefs=ahrefs_data,
         )
         LOG.info("  HTML report: %s", html_path)
 
@@ -843,6 +988,11 @@ def run(config: PipelineConfig) -> dict:
         "link_recommendations": len(link_payload.get("recommendations", [])),
         "external_domains": len((external_payload_data or {}).get("top_domains", [])),
         "broken_external": len((external_payload_data or {}).get("broken_links", [])),
+        "search_provider": (ahrefs_data.get("meta", {}) or {}).get("provider", ""),
+        "search_status": (ahrefs_data.get("meta", {}) or {}).get("status", ""),
+        "search_top_pages_traffic": (ahrefs_data.get("summary", {}) or {}).get("top_pages_traffic", 0),
+        "ahrefs_status": (ahrefs_data.get("meta", {}) or {}).get("status", ""),
+        "ahrefs_top_pages_traffic": (ahrefs_data.get("summary", {}) or {}).get("top_pages_traffic", 0),
         "report_dir": str(report_dir),
         "cache_dir": str(cache_dir),
         "html_report": str(html_path) if html_path else None,

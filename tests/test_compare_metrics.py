@@ -47,6 +47,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":1000,"heavy_page_share":0.1,"render_blocking_share":0.2}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":0,"pages_multi_h1":0}}',
             "conversion.json": '{"summary":{"cta_coverage":1,"primary_cta_coverage":0.9,"form_coverage":0.8}}',
+            "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":10,"matched_traffic":1000,"matched_traffic_share":1,"top_pages_value_usd":250},"metrics":{"org_traffic":1200,"org_keywords":20,"org_keywords_1_3":5}}',
         },
     )
     _write_report(
@@ -74,6 +75,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":5000,"heavy_page_share":0.8,"render_blocking_share":1}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":5,"pages_multi_h1":3}}',
             "conversion.json": '{"summary":{"cta_coverage":0.2,"primary_cta_coverage":0.1,"form_coverage":0}}',
+            "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":3,"matched_traffic":100,"matched_traffic_share":0.5,"top_pages_value_usd":20},"metrics":{"org_traffic":150,"org_keywords":4,"org_keywords_1_3":0}}',
         },
     )
 
@@ -84,6 +86,8 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["scorecards"][0]["overall_score"] > payload["scorecards"][1]["overall_score"]
     assert payload["biggest_gaps"]
     assert any(gap["winner"] == "strong.example" for gap in payload["biggest_gaps"])
+    assert any(group["key"] == "search" for group in payload["metric_groups"])
+    assert payload["leaderboard"][0]["ahrefs_org_traffic"] == 1200
 
 
 def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:

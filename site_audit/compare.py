@@ -26,6 +26,8 @@ from typing import Optional
 
 import numpy as np
 
+from .ahrefs import load_semantic_cache
+
 LOG = logging.getLogger(__name__)
 
 COMPARISON_PACKAGE_NAME = "comparison-package.zip"
@@ -42,6 +44,7 @@ class _Project:
     pages: list[dict]
     answerability: list[dict]
     page_link_counts: list[dict]
+    link_flow: dict
     paragraph_density: dict
     recommendations: dict
     external_links: dict
@@ -56,6 +59,9 @@ class _Project:
     conversion: dict
     indexability: dict
     performance: dict
+    ahrefs: dict
+    ahrefs_semantic_rows: list[dict]
+    ahrefs_semantic_embeddings: Optional[np.ndarray]
     embeddings: Optional[np.ndarray]    # aligned with pages
     embedded_pages: list[dict]          # subset of pages that have an embedding
 
@@ -114,8 +120,10 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     conversion = _load_json(report / "conversion.json", {})
     indexability = _load_json(report / "indexability.json", {})
     performance = _load_json(report / "performance.json", {})
+    ahrefs = _load_json(report / "ahrefs.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
+    link_flow = (linkgraph.get("link_flow") or {}) if isinstance(linkgraph, dict) else {}
     model = metrics.get("model", "Alibaba-NLP/gte-multilingual-base")
 
     embed_lookup = _load_embeddings(project_dir, model)
@@ -128,6 +136,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         embedded_pages.append(p)
         embeddings.append(emb)
     embed_array = np.stack(embeddings).astype(np.float32) if embeddings else None
+    ahrefs_semantic_rows, ahrefs_semantic_embeddings = load_semantic_cache(project_dir, model)
 
     return _Project(
         domain=domain,
@@ -136,6 +145,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         pages=pages,
         answerability=answerability,
         page_link_counts=page_link_counts,
+        link_flow=link_flow,
         paragraph_density=paragraph_density,
         recommendations=recommendations,
         external_links=external_links,
@@ -150,6 +160,9 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         conversion=conversion,
         indexability=indexability,
         performance=performance,
+        ahrefs=ahrefs,
+        ahrefs_semantic_rows=ahrefs_semantic_rows,
+        ahrefs_semantic_embeddings=ahrefs_semantic_embeddings,
         embeddings=embed_array,
         embedded_pages=embedded_pages,
     )
@@ -215,9 +228,11 @@ def _combined_umap(
     rows: list[dict] = []
     cursor = 0
     for proj, sub_embs, sub_pages in chunks:
+        traffic_by_url = _ahrefs_page_traffic_lookup(proj)
         n = len(sub_embs)
         for k in range(n):
             p = sub_pages[k]
+            ah = traffic_by_url.get(p.get("url", ""), {})
             rows.append({
                 "domain": proj.domain,
                 "url": p.get("url", ""),
@@ -225,9 +240,87 @@ def _combined_umap(
                 "section": p.get("section", ""),
                 "x": float(coords[cursor + k, 0]),
                 "y": float(coords[cursor + k, 1]),
+                "traffic": int(ah.get("traffic", 0)),
+                "keywords": int(ah.get("keywords", 0)),
+                "top_keyword": ah.get("top_keyword", ""),
             })
         cursor += n
     return rows, n_total
+
+
+def _combined_ahrefs_semantic_umap(
+    projects: list[_Project],
+    sample_per_domain: int = 1800,
+    seed: int = 42,
+) -> tuple[list[dict], int]:
+    rng = np.random.default_rng(seed)
+    chunks: list[tuple[_Project, np.ndarray, list[dict]]] = []
+    dim: Optional[int] = None
+    for proj in projects:
+        rows = proj.ahrefs_semantic_rows or []
+        embs = proj.ahrefs_semantic_embeddings
+        if embs is None or not rows or len(rows) != len(embs):
+            continue
+        n = len(rows)
+        if n > sample_per_domain:
+            idx = np.sort(rng.choice(n, sample_per_domain, replace=False))
+            sub_embs = embs[idx]
+            sub_rows = [rows[i] for i in idx]
+        else:
+            sub_embs = embs
+            sub_rows = rows
+        if dim is None:
+            dim = sub_embs.shape[1]
+        elif sub_embs.shape[1] != dim:
+            LOG.warning("  %s Ahrefs semantic vectors have incompatible dimensions", proj.domain)
+            continue
+        chunks.append((proj, sub_embs, sub_rows))
+
+    if not chunks:
+        return [], 0
+
+    big = np.vstack([chunk[1] for chunk in chunks]).astype(np.float32)
+    if len(big) < 5:
+        coords = np.zeros((len(big), 2), dtype=np.float32)
+        for i in range(len(big)):
+            coords[i, 0] = float(i)
+    else:
+        import umap  # type: ignore
+        reducer = umap.UMAP(
+            n_components=2,
+            n_neighbors=max(2, min(15, len(big) - 1)),
+            min_dist=0.1,
+            metric="cosine",
+            random_state=seed,
+        )
+        coords = reducer.fit_transform(big).astype(np.float32)
+
+    out: list[dict] = []
+    cursor = 0
+    for proj, sub_embs, sub_rows in chunks:
+        for i, row in enumerate(sub_rows):
+            out.append({
+                **row,
+                "domain": proj.domain,
+                "x": float(coords[cursor + i, 0]),
+                "y": float(coords[cursor + i, 1]),
+            })
+        cursor += len(sub_embs)
+    return out, len(big)
+
+
+def _ahrefs_page_traffic_lookup(proj: _Project) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in ((proj.ahrefs or {}).get("top_pages") or []):
+        url = row.get("matched_url") or row.get("url") or ""
+        if not url:
+            continue
+        out[url] = {
+            "traffic": int(row.get("traffic", 0) or 0),
+            "keywords": int(row.get("keywords", 0) or 0),
+            "top_keyword": row.get("top_keyword", ""),
+        }
+    return out
 
 
 # --- leaderboard ----------------------------------------------------------
@@ -242,6 +335,17 @@ def _percentile(values: list[float], p: float) -> float:
 
 
 COMPARISON_METRIC_GROUPS = [
+    {
+        "key": "search",
+        "label": "Search Demand",
+        "metrics": [
+            {"key": "ahrefs_org_traffic", "label": "Organic traffic", "better": "high", "fmt": "int"},
+            {"key": "ahrefs_org_keywords", "label": "Organic keywords", "better": "high", "fmt": "int"},
+            {"key": "ahrefs_matched_traffic", "label": "Matched page traffic", "better": "high", "fmt": "int"},
+            {"key": "ahrefs_top_pages_value_usd", "label": "Traffic value $", "better": "high", "fmt": "int"},
+            {"key": "ahrefs_top3_keywords", "label": "Top 3 keywords", "better": "high", "fmt": "int"},
+        ],
+    },
     {
         "key": "topic",
         "label": "Topic Shape",
@@ -432,6 +536,9 @@ def _leaderboard_row(proj: _Project) -> dict:
     cv = (proj.conversion or {}).get("summary", {}) or {}
     ix = (proj.indexability or {}).get("summary", {}) or {}
     pf = (proj.performance or {}).get("summary", {}) or {}
+    ah = proj.ahrefs or {}
+    ah_summary = ah.get("summary", {}) or {}
+    ah_metrics = ah.get("metrics", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -439,6 +546,14 @@ def _leaderboard_row(proj: _Project) -> dict:
     return {
         "domain": proj.domain,
         "pages": int(n_pages),
+        "ahrefs_status": str((ah.get("meta", {}) or {}).get("status", "")),
+        "ahrefs_org_traffic": int(ah_metrics.get("org_traffic", 0) or ah_summary.get("top_pages_traffic", 0) or 0),
+        "ahrefs_org_keywords": int(ah_metrics.get("org_keywords", 0) or ah_summary.get("organic_keywords", 0) or 0),
+        "ahrefs_top3_keywords": int(ah_metrics.get("org_keywords_1_3", 0) or 0),
+        "ahrefs_top_pages": int(ah_summary.get("top_pages", 0) or 0),
+        "ahrefs_matched_traffic": int(ah_summary.get("matched_traffic", 0) or 0),
+        "ahrefs_matched_traffic_share": float(ah_summary.get("matched_traffic_share", 0.0) or 0.0),
+        "ahrefs_top_pages_value_usd": float(ah_summary.get("top_pages_value_usd", 0.0) or 0.0),
         # Focus / topic shape
         "site_focus_score": float(m.get("site_focus_score", 0.0)),
         "calibrated_focus": float(m.get("site_focus_score_calibrated", 0.0)),
@@ -563,6 +678,8 @@ def _distribution(values: list[float]) -> dict:
 
 
 def _distributions_for_overlay(proj: _Project) -> dict:
+    top_pages = (proj.ahrefs or {}).get("top_pages") or []
+    organic_keywords = (proj.ahrefs or {}).get("organic_keywords") or []
     return {
         "domain": proj.domain,
         "in_degree": _distribution([float(r.get("in_degree", 0)) for r in proj.page_link_counts]),
@@ -572,8 +689,33 @@ def _distributions_for_overlay(proj: _Project) -> dict:
             [float(r.get("links_per_100w", 0.0))
              for r in ((proj.paragraph_density or {}).get("per_page") or [])]
         ),
+        "ahrefs_page_traffic": _distribution([float(r.get("traffic", 0) or 0) for r in top_pages]),
+        "ahrefs_keyword_traffic": _distribution([float(r.get("traffic", 0) or 0) for r in organic_keywords]),
         "freshness_buckets": dict((proj.freshness or {}).get("buckets") or {}),
         "freshness_summary": dict((proj.freshness or {}).get("summary") or {}),
+    }
+
+
+def _search_payload(projects: list[_Project]) -> dict:
+    summaries = []
+    directories = []
+    clusters = []
+    for proj in projects:
+        ah = proj.ahrefs or {}
+        summaries.append({
+            "domain": proj.domain,
+            "summary": ah.get("summary", {}) or {},
+            "metrics": ah.get("metrics", {}) or {},
+            "meta": ah.get("meta", {}) or {},
+        })
+        for row in ah.get("directories", []) or []:
+            directories.append({"domain": proj.domain, **row})
+        for row in ah.get("clusters", []) or []:
+            clusters.append({"domain": proj.domain, **row})
+    return {
+        "summaries": summaries,
+        "directories": directories,
+        "clusters": clusters,
     }
 
 
@@ -597,12 +739,23 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
     LOG.info("  building combined UMAP across %d domains", len(projects))
     scatter_rows, n_total = _combined_umap(projects)
     LOG.info("  combined UMAP: %d points projected", n_total)
+    ahrefs_semantic_rows, ahrefs_semantic_total = _combined_ahrefs_semantic_umap(projects)
+    if ahrefs_semantic_total:
+        LOG.info("  Ahrefs semantic UMAP: %d points projected", ahrefs_semantic_total)
 
     return {
         "domains": [p.domain for p in projects],
         "leaderboard": leaderboard,
         "scatter": scatter_rows,
         "scatter_total": n_total,
+        "ahrefs_semantic_scatter": ahrefs_semantic_rows,
+        "ahrefs_semantic_total": ahrefs_semantic_total,
+        "search": _search_payload(projects),
+        "link_flows": [
+            {"domain": p.domain, **(p.link_flow or {})}
+            for p in projects
+            if (p.link_flow or {}).get("nodes") and (p.link_flow or {}).get("edges")
+        ],
         "distributions": distributions,
         **comparison_metrics,
     }

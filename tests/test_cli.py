@@ -27,6 +27,15 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--sitemap-lastmod-within-days",
             "365",
             "--no-paragraph-links",
+            "--ahrefs-country",
+            "US",
+            "--ahrefs-date",
+            "2026-05-08",
+            "--ahrefs-top-pages-limit",
+            "250",
+            "--ahrefs-keywords-limit",
+            "500",
+            "--ahrefs-refresh",
         ]
     )
 
@@ -42,3 +51,8 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.sitemap_lastmod_after == "2025-05-04"
     assert args.sitemap_lastmod_within_days == 365
     assert args.no_paragraph_links is True
+    assert args.ahrefs_country == "US"
+    assert args.ahrefs_date == "2026-05-08"
+    assert args.ahrefs_top_pages_limit == 250
+    assert args.ahrefs_keywords_limit == 500
+    assert args.ahrefs_refresh is True
