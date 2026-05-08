@@ -127,6 +127,82 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["semantic_entity_maps"]["link_titles"]["total"] == 2
     assert payload["semantic_entity_maps"]["headers"]["total"] == 2
     assert payload["semantic_entity_maps"]["page_titles"]["total"] == 2
+    assert "keyword_gaps" in payload
+    assert "serp_features" in payload
+    assert "content_efficiency" in payload
+    assert "authority_demand" in payload
+    assert "traffic_readiness" in payload
+
+
+def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
+    alpha_url = "https://alpha.example/blog/ai-workflow"
+    beta_url = "https://beta.example/blog/automation-tool"
+    _write_report(
+        tmp_path,
+        "alpha.example",
+        {"page_count": 2},
+        {
+            "answerability.json": json.dumps([{"url": alpha_url, "score": 2.0}]),
+            "structured_data.json": json.dumps({"per_page": [{"url": alpha_url, "types": [], "valid_blocks": 0, "invalid_blocks": 0}]}),
+            "metadata_quality.json": json.dumps({"per_page": [{"url": alpha_url, "title": "AI workflow", "issues": ["missing_description"]}]}),
+            "freshness.json": json.dumps({"per_page": [{"url": alpha_url, "bucket": "very_stale", "age_days": 800, "issues": ["very_stale"]}]}),
+            "conversion.json": json.dumps({"per_page": [{"url": alpha_url, "cta_count": 0, "primary_cta_count": 0, "form_count": 0, "lead_page": True}]}),
+            "linkgraph.json": json.dumps({
+                "page_link_counts": [{"url": alpha_url, "title": "AI workflow", "in_degree": 0, "out_degree": 3, "click_depth": 4}],
+                "top_authority_pages": [{"url": "https://alpha.example/", "title": "Alpha", "pagerank": 0.9, "authority_score": 0.8, "in_degree": 8, "out_degree": 10}],
+            }),
+            "ahrefs.json": json.dumps({
+                "top_pages": [
+                    {"url": alpha_url, "matched_url": alpha_url, "title": "AI workflow", "traffic": 100, "keywords": 8, "top_keyword": "ai workflow", "section": "blog"}
+                ],
+                "organic_keywords": [
+                    {"keyword": "ai workflow", "url": alpha_url, "matched_url": alpha_url, "page_title": "AI workflow", "position": 2, "traffic": 70, "volume": 1000, "intents": ["informational"], "serp_features": ["ai_overview", "question"]},
+                    {"keyword": "alpha only", "url": alpha_url, "matched_url": alpha_url, "page_title": "AI workflow", "position": 4, "traffic": 20, "volume": 300, "intents": ["commercial"], "serp_features": ["video_th"]},
+                ],
+                "clusters": [{"key": "c1", "label": "ai workflow", "traffic": 100, "pages": 1, "matched_pages": 1, "keywords_total": 8, "keyword_rows": 2, "top3_keywords": 1, "top_keywords": [{"keyword": "ai workflow", "traffic": 70}]}],
+                "directories": [{"key": "blog", "label": "blog", "traffic": 100, "pages": 1, "matched_pages": 1, "keywords_total": 8, "keyword_rows": 2, "top3_keywords": 1}],
+            }),
+        },
+        pages=[{"url": alpha_url, "title": "AI workflow", "section": "blog"}],
+    )
+    _write_report(
+        tmp_path,
+        "beta.example",
+        {"page_count": 1},
+        {
+            "answerability.json": json.dumps([{"url": beta_url, "score": 8.0}]),
+            "structured_data.json": json.dumps({"per_page": [{"url": beta_url, "types": ["Article"], "valid_blocks": 1, "invalid_blocks": 0}]}),
+            "metadata_quality.json": json.dumps({"per_page": [{"url": beta_url, "title": "Automation tool", "issues": []}]}),
+            "freshness.json": json.dumps({"per_page": [{"url": beta_url, "bucket": "fresh", "age_days": 20, "issues": []}]}),
+            "conversion.json": json.dumps({"per_page": [{"url": beta_url, "cta_count": 2, "primary_cta_count": 1, "form_count": 0, "lead_page": True}]}),
+            "linkgraph.json": json.dumps({
+                "page_link_counts": [{"url": beta_url, "title": "Automation tool", "in_degree": 5, "out_degree": 2, "click_depth": 2}],
+                "top_authority_pages": [{"url": beta_url, "title": "Automation tool", "pagerank": 0.5, "authority_score": 0.6, "in_degree": 5, "out_degree": 2}],
+            }),
+            "ahrefs.json": json.dumps({
+                "top_pages": [
+                    {"url": beta_url, "matched_url": beta_url, "title": "Automation tool", "traffic": 15, "keywords": 2, "top_keyword": "automation tool", "section": "blog"}
+                ],
+                "organic_keywords": [
+                    {"keyword": "automation tool", "url": beta_url, "matched_url": beta_url, "page_title": "Automation tool", "position": 6, "traffic": 15, "volume": 500, "intents": ["commercial"], "serp_features": ["question"]}
+                ],
+                "clusters": [{"key": "c2", "label": "automation", "traffic": 15, "pages": 1, "matched_pages": 1, "keywords_total": 2, "keyword_rows": 1, "top3_keywords": 0}],
+                "directories": [{"key": "blog", "label": "blog", "traffic": 15, "pages": 1, "matched_pages": 1, "keywords_total": 2, "keyword_rows": 1, "top3_keywords": 0}],
+            }),
+        },
+        pages=[{"url": beta_url, "title": "Automation tool", "section": "blog"}],
+    )
+
+    payload = build_payload(["alpha.example", "beta.example"], tmp_path)
+
+    assert any(
+        row["domain"] == "beta.example" and row["keyword"] == "ai workflow" and row["gap_type"] == "missing"
+        for row in payload["keyword_gaps"]["opportunities"]
+    )
+    assert payload["serp_features"]["matrix"][0]["feature"] in {"ai_overview", "question"}
+    assert payload["content_efficiency"]["clusters"]
+    assert payload["authority_demand"]["ranked_orphans"][0]["url"] == alpha_url
+    assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url
 
 
 def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:

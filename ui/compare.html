@@ -337,6 +337,83 @@
       </div>
     </section>
 
+    <!-- Competitive opportunities -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="opportunity-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Competitive opportunity comparisons</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Search-demand, SERP, internal-link, and page-readiness gaps derived from cached provider data plus the crawled audit signals.
+        </p>
+      </div>
+      <div id="opportunity-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Keyword gaps</h3>
+          <p class="text-xs text-gray-500 mb-2">Keywords where one domain owns traffic and another domain is missing or materially behind.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="keyword-gap-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">SERP feature ownership</h3>
+          <p class="text-xs text-gray-500 mb-2">Stacked by estimated keyword traffic, so AI Overviews, questions, videos, and other SERP features are comparable by domain.</p>
+          <div id="serp-feature-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster efficiency</h3>
+          <p class="text-xs text-gray-500 mb-2">Traffic per page by topic cluster. Dot size is total traffic.</p>
+          <div id="cluster-efficiency-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Directory efficiency</h3>
+          <p class="text-xs text-gray-500 mb-2">Traffic per page by directory. Dot size is total traffic.</p>
+          <div id="directory-efficiency-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Authority vs search demand</h3>
+          <p class="text-xs text-gray-500 mb-2">High-traffic pages plotted against internal inlinks. Orphans, deep pages, and unmatched search pages are highlighted in the table.</p>
+          <div id="authority-demand-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Link support gaps</h3>
+          <p class="text-xs text-gray-500 mb-2">Organic pages that need stronger internal linking or crawl matching.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="authority-gap-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">Authority without search demand</h3>
+        <p class="text-xs text-gray-500 mb-2">Pages with high internal authority but low or missing organic traffic in the cached top-page data.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="authority-unused-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-sm font-semibold mb-1">High-traffic readiness gaps</h3>
+        <p class="text-xs text-gray-500 mb-2">Traffic-weighted pages where GEO, schema, metadata, freshness, conversion, or internal-link readiness is weak.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="readiness-gap-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Internal link flow comparison -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-flow-compare-section">
       <div class="mb-4">
@@ -1091,6 +1168,326 @@
   }
 
   renderSearchDemand();
+
+  // ============================================================
+  // Competitive opportunity comparisons
+  // ============================================================
+  function renderOpportunityComparisons() {
+    const section = document.getElementById('opportunity-section');
+    if (!section) return;
+    const hasData =
+      ((data.keyword_gaps || {}).opportunities || []).length ||
+      ((data.serp_features || {}).matrix || []).length ||
+      ((data.content_efficiency || {}).clusters || []).length ||
+      ((data.authority_demand || {}).pages || []).length ||
+      ((data.traffic_readiness || {}).weak_high_traffic || []).length;
+    if (!hasData) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    renderOpportunitySummary();
+    renderKeywordGapTable();
+    renderSerpFeatureChart();
+    drawEfficiencyScatter(document.getElementById('cluster-efficiency-chart'), ((data.content_efficiency || {}).clusters || []), 'cluster');
+    drawEfficiencyScatter(document.getElementById('directory-efficiency-chart'), ((data.content_efficiency || {}).directories || []), 'directory');
+    drawAuthorityDemandScatter();
+    renderAuthorityGapTable();
+    renderUnusedAuthorityTable();
+    renderReadinessGapTable();
+  }
+
+  function renderOpportunitySummary() {
+    const root = document.getElementById('opportunity-summary');
+    if (!root) return;
+    const keywordGaps = data.keyword_gaps || {};
+    const serp = data.serp_features || {};
+    const authority = data.authority_demand || {};
+    const readiness = data.traffic_readiness || {};
+    const cards = [
+      ['Keyword opportunities', (keywordGaps.opportunities || []).length, 'missing or underperforming keyword gaps'],
+      ['Exclusive keywords', (keywordGaps.exclusive || []).length, 'keywords currently owned by one compared domain'],
+      ['SERP features', (serp.matrix || []).length, 'feature types found in cached keyword rows'],
+      ['Weak traffic pages', (readiness.weak_high_traffic || []).length, 'organic pages below readiness score 70'],
+    ];
+    if ((authority.ranked_orphans || []).length || (authority.buried_demand || []).length) {
+      cards[3] = ['Link support gaps', ((authority.ranked_orphans || []).length + (authority.buried_demand || []).length + (authority.thin_internal_support || []).length), 'traffic pages needing internal-link support'];
+    }
+    root.innerHTML = cards.map(card => `
+      <article class="border border-gray-200 rounded-lg p-4">
+        <div class="text-2xl font-semibold">${Number(card[1] || 0).toLocaleString()}</div>
+        <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(card[2])}</div>
+      </article>
+    `).join('');
+  }
+
+  function renderKeywordGapTable() {
+    const tbl = document.getElementById('keyword-gap-table');
+    if (!tbl) return;
+    const rows = ((data.keyword_gaps || {}).opportunities || []).slice(0, 50);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Gap</th>
+        <th class="px-2 py-2 text-left">Keyword</th>
+        <th class="px-2 py-2 text-left">Leader</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-right">Pos.</th>
+        <th class="px-2 py-2 text-right">Volume</th>
+        <th class="px-2 py-2 text-left">Intent</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="8">No keyword gap rows.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><span class="px-1.5 py-0.5 rounded ${r.gap_type === 'missing' ? 'bg-red-50 text-red-700' : 'bg-orange-50 text-orange-700'}">${escapeHtml(r.gap_type || '')}</span></td>
+        <td class="px-2 py-1.5 font-medium">${escapeHtml(r.keyword)}</td>
+        <td class="px-2 py-1.5">
+          <span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.competitor)}"></span>
+          <a class="text-blue-600 hover:underline" href="${escapeHtml(r.competitor_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.competitor)}</a>
+        </td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.competitor_traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${r.competitor_position == null ? '—' : Number(r.competitor_position).toFixed(0)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.volume || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-gray-600">${escapeHtml(r.intent || '')}</td>
+      </tr>`).join('');
+  }
+
+  function renderSerpFeatureChart() {
+    const container = document.getElementById('serp-feature-chart');
+    if (!container) return;
+    const rows = ((data.serp_features || {}).matrix || [])
+      .filter(r => Number(r.total_traffic || r.total_count || 0) > 0)
+      .slice(0, 16);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No SERP feature data.</div>';
+      return;
+    }
+    const margin = { top: 12, right: 28, bottom: 34, left: 120 };
+    const outerWidth = Math.max(420, container.offsetWidth || 520);
+    const outerHeight = Math.max(360, rows.length * 24 + margin.top + margin.bottom);
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const value = d => Number(d.total_traffic || d.total_count || 0);
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const y = d3.scaleBand().domain(rows.map(r => r.feature)).range([0, height]).padding(0.22);
+    const x = d3.scaleLinear().domain([0, d3.max(rows, value) || 1]).nice().range([0, width]);
+    svg.append('g').call(d3.axisLeft(y).tickSize(0)).selectAll('text').style('font-size', '10px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','360px');
+    rows.forEach(row => {
+      let cursor = 0;
+      (row.domains || []).forEach(domainRow => {
+        const traffic = Number(domainRow.traffic || domainRow.count || 0);
+        if (!traffic) return;
+        svg.append('rect')
+          .attr('x', x(cursor)).attr('y', y(row.feature))
+          .attr('width', Math.max(1, x(cursor + traffic) - x(cursor))).attr('height', y.bandwidth())
+          .attr('fill', domainColor(domainRow.domain)).attr('fill-opacity', 0.76).attr('rx', 3)
+          .on('mouseover', function(event) {
+            d3.select(this).attr('fill-opacity', 1);
+            const sample = (domainRow.sample_keywords || []).slice(0, 5).map(escapeHtml).join(' · ');
+            tooltip.style('visibility','visible').html(`<strong>${escapeHtml(row.feature)}</strong><br><span style="color:${domainColor(domainRow.domain)}">${escapeHtml(domainRow.domain)}</span><br>traffic ${Number(domainRow.traffic || 0).toLocaleString()} · keywords ${Number(domainRow.count || 0).toLocaleString()}<br><span style="color:#fbbf24">${sample}</span>`);
+          })
+          .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+          .on('mouseout', function(){ d3.select(this).attr('fill-opacity',0.76); tooltip.style('visibility','hidden'); });
+        cursor += traffic;
+      });
+    });
+  }
+
+  function drawEfficiencyScatter(container, rows, label) {
+    if (!container) return;
+    const points = (rows || []).filter(r => Number(r.traffic || 0) > 0);
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = `<div class="text-gray-500 text-center py-12">No ${escapeHtml(label)} efficiency data.</div>`;
+      return;
+    }
+    const margin = { top: 18, right: 24, bottom: 44, left: 58 };
+    const outerWidth = Math.max(420, container.offsetWidth || 520);
+    const outerHeight = 390;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.pages || 0)) || 1]).range([0, width]);
+    const y = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic_per_page || 0)) || 1]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([4, 20]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+    svg.append('g').call(d3.axisLeft(y).ticks(6));
+    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('pages');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -42).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('traffic per page');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','390px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.pages || 0))).attr('cy', d => y(Number(d.traffic_per_page || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.68)
+      .attr('stroke', '#111827').attr('stroke-opacity', 0.22)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.9).attr('stroke-width', 2);
+        const kws = (d.top_keywords || []).slice(0, 5).map(k => escapeHtml(k.keyword || '')).filter(Boolean).join(' · ');
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.label || d.key || '')}</strong><br>traffic ${Number(d.traffic || 0).toLocaleString()} · pages ${Number(d.pages || 0).toLocaleString()} · traffic/page ${Number(d.traffic_per_page || 0).toFixed(1)}<br><span style="color:#fbbf24">${kws}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-opacity',0.22).attr('stroke-width',1); tooltip.style('visibility','hidden'); });
+  }
+
+  function drawAuthorityDemandScatter() {
+    const container = document.getElementById('authority-demand-chart');
+    if (!container) return;
+    const points = ((data.authority_demand || {}).pages || []).filter(r => Number(r.traffic || 0) > 0).slice(0, 600);
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No authority-demand rows.</div>';
+      return;
+    }
+    const margin = { top: 18, right: 24, bottom: 44, left: 62 };
+    const outerWidth = Math.max(420, container.offsetWidth || 520);
+    const outerHeight = 390;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.in_degree || 0)) || 1]).range([0, width]);
+    const y = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([3.5, 18]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+    svg.append('g').call(d3.axisLeft(y).ticks(6));
+    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('internal inlinks');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -46).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('organic traffic');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','410px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.in_degree || 0))).attr('cy', d => y(Number(d.traffic || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.64)
+      .attr('stroke', d => !d.linkgraph_found ? '#64748b' : Number(d.in_degree || 0) <= 0 ? '#dc2626' : Number(d.click_depth || 0) >= 4 ? '#f59e0b' : '#111827')
+      .attr('stroke-width', d => (!d.linkgraph_found || Number(d.in_degree || 0) <= 0 || Number(d.click_depth || 0) >= 4) ? 2 : 0.5)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('fill-opacity', 0.9);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>traffic ${Number(d.traffic || 0).toLocaleString()} · inlinks ${Number(d.in_degree || 0).toLocaleString()} · depth ${d.click_depth == null ? '—' : d.click_depth}<br><span style="color:#fbbf24">${escapeHtml(d.top_keyword || '')}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('fill-opacity',0.64); tooltip.style('visibility','hidden'); });
+  }
+
+  function renderAuthorityGapTable() {
+    const tbl = document.getElementById('authority-gap-table');
+    if (!tbl) return;
+    const authority = data.authority_demand || {};
+    const byKey = new Map();
+    function add(rows, label) {
+      (rows || []).forEach(r => {
+        const key = `${r.domain}|${r.url}`;
+        const existing = byKey.get(key) || {...r, issue_labels: []};
+        if (!existing.issue_labels.includes(label)) existing.issue_labels.push(label);
+        byKey.set(key, existing);
+      });
+    }
+    add(authority.ranked_orphans, 'orphan');
+    add(authority.buried_demand, 'deep');
+    add(authority.thin_internal_support, 'thin links');
+    add(authority.unmatched_pages, 'unmatched');
+    const rows = Array.from(byKey.values()).sort((a,b) => Number(b.traffic || 0) - Number(a.traffic || 0)).slice(0, 45);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Issue</th>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-right">Inlinks</th>
+        <th class="px-2 py-2 text-right">Depth</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No link support gaps.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5">${(r.issue_labels || []).map(x => `<span class="inline-block px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 mr-1 mb-1">${escapeHtml(x)}</span>`).join('')}</td>
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.title || r.url || '', 56))}</a><div class="text-[11px] text-gray-500">${escapeHtml(r.top_keyword || '')}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.in_degree || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${r.click_depth == null ? '—' : r.click_depth}</td>
+      </tr>`).join('');
+  }
+
+  function readinessBadge(score) {
+    const s = Number(score || 0);
+    if (s >= 85) return 'bg-green-100 text-green-800';
+    if (s >= 70) return 'bg-blue-100 text-blue-800';
+    if (s >= 50) return 'bg-orange-100 text-orange-800';
+    return 'bg-red-100 text-red-800';
+  }
+
+  function renderUnusedAuthorityTable() {
+    const tbl = document.getElementById('authority-unused-table');
+    if (!tbl) return;
+    const rows = ((data.authority_demand || {}).authority_without_demand || []).slice(0, 45);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">PageRank</th>
+        <th class="px-2 py-2 text-right">Inlinks</th>
+        <th class="px-2 py-2 text-right">Depth</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No unused authority rows.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.title || r.url || '', 84))}</a><div class="text-[11px] text-gray-500">${escapeHtml(r.section || '')}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.pagerank || 0).toFixed(4)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.in_degree || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${r.click_depth == null ? '—' : r.click_depth}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+      </tr>`).join('');
+  }
+
+  function renderReadinessGapTable() {
+    const tbl = document.getElementById('readiness-gap-table');
+    if (!tbl) return;
+    const rows = ((data.traffic_readiness || {}).weak_high_traffic || []).slice(0, 70);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-right">Score</th>
+        <th class="px-2 py-2 text-right">GEO</th>
+        <th class="px-2 py-2 text-left">Freshness</th>
+        <th class="px-2 py-2 text-right">CTAs</th>
+        <th class="px-2 py-2 text-left">Issues</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="8">No high-traffic readiness gaps.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.title || r.url || '', 72))}</a><div class="text-[11px] text-gray-500">${escapeHtml(r.top_keyword || '')}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right"><span class="px-2 py-0.5 rounded font-mono ${readinessBadge(r.readiness_score)}">${Number(r.readiness_score || 0).toFixed(0)}</span></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.geo_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${FRESHNESS_COLORS[r.freshness_bucket] || FRESHNESS_COLORS.unknown}"></span>${escapeHtml(FRESHNESS_LABELS[r.freshness_bucket] || r.freshness_bucket || 'unknown')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.primary_cta_count || r.cta_count || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-gray-600">${(r.issues || []).slice(0, 4).map(escapeHtml).join(' · ')}</td>
+      </tr>`).join('');
+  }
+
+  renderOpportunityComparisons();
 
   // ============================================================
   // Internal link flow comparison
