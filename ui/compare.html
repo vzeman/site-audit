@@ -366,6 +366,19 @@
       <div id="combined-scatter" class="w-full" style="min-height: 600px;"></div>
     </section>
 
+    <!-- Freshness semantic scatter -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-scatter-section">
+      <div class="mb-3">
+        <h2 class="text-xl font-semibold">Freshness Semantic Scatter</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Same shared page UMAP as the combined semantic scatter. Fill color = freshness bucket, dot size = organic traffic,
+          stroke color = domain. This shows whether high-traffic content clusters are fresh, aging, stale, or missing date signals.
+        </p>
+      </div>
+      <div id="freshness-scatter" class="w-full" style="min-height: 620px;"></div>
+      <div id="freshness-scatter-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+    </section>
+
     <!-- Freshness side-by-side -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -428,6 +441,22 @@
   }
 
   const domainColor = d3.scaleOrdinal().domain(data.domains).range(PALETTE);
+  const FRESHNESS_COLORS = {
+    fresh: '#16a34a',
+    aging: '#84cc16',
+    stale: '#f59e0b',
+    very_stale: '#dc2626',
+    unknown: '#6b7280',
+    future: '#8b5cf6',
+  };
+  const FRESHNESS_LABELS = {
+    fresh: 'Fresh <=90d',
+    aging: 'Aging',
+    stale: 'Stale',
+    very_stale: 'Very stale',
+    unknown: 'Missing date',
+    future: 'Future date',
+  };
 
   document.getElementById('hdr-meta').textContent =
     `${data.domains.length} domains · ${data.scatter_total || 0} pages projected · ` +
@@ -1172,12 +1201,12 @@
   // Freshness side-by-side
   // ============================================================
   const FRESHNESS_BUCKETS = [
-    { key: 'fresh', label: 'Fresh ≤90d', color: '#16a34a' },
-    { key: 'aging', label: 'Aging 91–365d', color: '#84cc16' },
-    { key: 'stale', label: 'Stale 1–2y', color: '#f59e0b' },
-    { key: 'very_stale', label: 'Very stale >2y', color: '#dc2626' },
-    { key: 'unknown', label: 'Missing date', color: '#6b7280' },
-    { key: 'future', label: 'Future date', color: '#8b5cf6' },
+    { key: 'fresh', label: 'Fresh ≤90d', color: FRESHNESS_COLORS.fresh },
+    { key: 'aging', label: 'Aging 91–365d', color: FRESHNESS_COLORS.aging },
+    { key: 'stale', label: 'Stale 1–2y', color: FRESHNESS_COLORS.stale },
+    { key: 'very_stale', label: 'Very stale >2y', color: FRESHNESS_COLORS.very_stale },
+    { key: 'unknown', label: 'Missing date', color: FRESHNESS_COLORS.unknown },
+    { key: 'future', label: 'Future date', color: FRESHNESS_COLORS.future },
   ];
 
   function renderFreshnessCompare() {
@@ -1266,6 +1295,7 @@
       b.classList.toggle('text-white', on);
       b.classList.toggle('border-blue-600', on);
       drawScatter();
+      drawFreshnessScatter();
     });
   });
 
@@ -1336,6 +1366,83 @@
     svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
   }
   drawScatter();
+
+  function drawFreshnessScatter() {
+    const section = document.getElementById('freshness-scatter-section');
+    const container = document.getElementById('freshness-scatter');
+    const legend = document.getElementById('freshness-scatter-legend');
+    const points = sc.filter(p => visible.has(p.domain));
+    if (!points.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    container.innerHTML = '';
+    legend.innerHTML = Object.keys(FRESHNESS_COLORS).map(key =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${FRESHNESS_COLORS[key]}"></span>${escapeHtml(FRESHNESS_LABELS[key] || key)}</span>`
+    ).join('') + data.domains.map(d =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5 border-2" style="border-color:${domainColor(d)}"></span>${escapeHtml(d)}</span>`
+    ).join('');
+
+    const margin = { top: 20, right: 20, bottom: 40, left: 40 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 620 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 620);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxTraffic = d3.max(points, d => Number(d.traffic || 0)) || 0;
+    const radius = maxTraffic > 0
+      ? d3.scaleSqrt().domain([0, maxTraffic]).range([2.2, 13])
+      : () => 2.8;
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
+    const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => FRESHNESS_COLORS[d.freshness_bucket || 'unknown'] || FRESHNESS_COLORS.unknown)
+      .attr('fill-opacity', d => Number(d.traffic || 0) > 0 ? 0.82 : 0.48)
+      .attr('stroke', d => domainColor(d.domain))
+      .attr('stroke-width', 1.1)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => { event.stopPropagation(); window.open(d.url, '_blank', 'noopener'); })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('r', Math.max(5, radius(Number(d.traffic || 0)) + 3)).attr('stroke-width', 2.4);
+        const bucket = d.freshness_bucket || 'unknown';
+        const age = d.freshness_age_days == null ? 'unknown age' : `${Number(d.freshness_age_days).toLocaleString()} days old`;
+        tooltip.style('visibility','visible').html(
+          `<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · <strong style="color:${FRESHNESS_COLORS[bucket] || FRESHNESS_COLORS.unknown}">${escapeHtml(FRESHNESS_LABELS[bucket] || bucket)}</strong><br>` +
+          `<strong>${escapeHtml(d.title || '(untitled)')}</strong><br>` +
+          `<span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url)}</span><br>` +
+          `<span style="color:#e5e7eb;font-size:11px">${escapeHtml(d.freshness_date || 'no date')} · ${escapeHtml(age)}</span><br>` +
+          `<span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.top_keyword ? ' · ' + escapeHtml(d.top_keyword) : ''}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(event, d) {
+        d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke-width', 1.1);
+        tooltip.style('visibility','hidden');
+      });
+    const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        xAxis.call(d3.axisBottom(nx).ticks(8));
+        yAxis.call(d3.axisLeft(ny).ticks(8));
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+    svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
+  }
+  drawFreshnessScatter();
 
   // ============================================================
   // Distribution overlays

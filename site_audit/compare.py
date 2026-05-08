@@ -229,10 +229,12 @@ def _combined_umap(
     cursor = 0
     for proj, sub_embs, sub_pages in chunks:
         traffic_by_url = _ahrefs_page_traffic_lookup(proj)
+        freshness_by_url = _freshness_lookup(proj)
         n = len(sub_embs)
         for k in range(n):
             p = sub_pages[k]
             ah = traffic_by_url.get(p.get("url", ""), {})
+            freshness = freshness_by_url.get(p.get("url", ""), {})
             rows.append({
                 "domain": proj.domain,
                 "url": p.get("url", ""),
@@ -243,6 +245,10 @@ def _combined_umap(
                 "traffic": int(ah.get("traffic", 0)),
                 "keywords": int(ah.get("keywords", 0)),
                 "top_keyword": ah.get("top_keyword", ""),
+                "freshness_bucket": freshness.get("bucket", "unknown"),
+                "freshness_age_days": freshness.get("age_days"),
+                "freshness_date": freshness.get("date", ""),
+                "freshness_issues": freshness.get("issues", []),
             })
         cursor += n
     return rows, n_total
@@ -363,6 +369,15 @@ def _ahrefs_page_traffic_lookup(proj: _Project) -> dict[str, dict]:
             "keywords": int(row.get("keywords", 0) or 0),
             "top_keyword": row.get("top_keyword", ""),
         }
+    return out
+
+
+def _freshness_lookup(proj: _Project) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in ((proj.freshness or {}).get("per_page") or []):
+        url = row.get("url") or ""
+        if url:
+            out[url] = row
     return out
 
 

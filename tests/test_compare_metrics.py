@@ -7,7 +7,13 @@ import numpy as np
 from site_audit.compare import build_payload, package_comparison
 
 
-def _write_report(root: Path, domain: str, metrics: dict, extras: dict[str, str]) -> None:
+def _write_report(
+    root: Path,
+    domain: str,
+    metrics: dict,
+    extras: dict[str, str],
+    pages: list[dict] | None = None,
+) -> None:
     report_dir = root / domain / "report"
     report_dir.mkdir(parents=True)
     (report_dir / "site_metrics.json").write_text(
@@ -19,7 +25,7 @@ def _write_report(root: Path, domain: str, metrics: dict, extras: dict[str, str]
         }),
         encoding="utf-8",
     )
-    (report_dir / "pages.json").write_text("[]", encoding="utf-8")
+    (report_dir / "pages.json").write_text(json.dumps(pages or []), encoding="utf-8")
     for name, payload in extras.items():
         (report_dir / name).write_text(payload, encoding="utf-8")
 
@@ -40,6 +46,13 @@ def _write_semantic_cache(root: Path, domain: str) -> None:
         cache_dir / "semantic_entities_test_model.npz",
         embeddings=np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]], dtype=np.float32),
     )
+
+
+def _write_embedding_cache(root: Path, domain: str, urls: list[str]) -> None:
+    cache_dir = root / domain / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    embs = np.eye(len(urls), 4, dtype=np.float32)
+    np.savez_compressed(cache_dir / "embeddings_test_model.npz", urls=np.array(urls), embeddings=embs)
 
 
 def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Path) -> None:
@@ -114,6 +127,52 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["semantic_entity_maps"]["link_titles"]["total"] == 2
     assert payload["semantic_entity_maps"]["headers"]["total"] == 2
     assert payload["semantic_entity_maps"]["page_titles"]["total"] == 2
+
+
+def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:
+    page_url = "https://fresh.example/blog/a"
+    _write_report(
+        tmp_path,
+        "fresh.example",
+        {"page_count": 1},
+        {
+            "freshness.json": json.dumps({
+                "summary": {"total_pages": 1},
+                "buckets": {"stale": 1},
+                "per_page": [
+                    {
+                        "url": page_url,
+                        "title": "Old page",
+                        "date": "2024-01-01",
+                        "age_days": 858,
+                        "bucket": "stale",
+                        "issues": ["stale"],
+                    }
+                ],
+            }),
+            "ahrefs.json": json.dumps({
+                "top_pages": [
+                    {
+                        "matched_url": page_url,
+                        "traffic": 321,
+                        "keywords": 8,
+                        "top_keyword": "old topic",
+                    }
+                ]
+            }),
+        },
+        pages=[{"url": page_url, "title": "Old page", "section": "blog"}],
+    )
+    _write_embedding_cache(tmp_path, "fresh.example", [page_url])
+
+    payload = build_payload(["fresh.example"], tmp_path)
+
+    assert payload["scatter"]
+    row = payload["scatter"][0]
+    assert row["freshness_bucket"] == "stale"
+    assert row["freshness_age_days"] == 858
+    assert row["freshness_date"] == "2024-01-01"
+    assert row["traffic"] == 321
 
 
 def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:
