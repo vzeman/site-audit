@@ -328,6 +328,13 @@
         <div id="ahrefs-semantic-compare" class="w-full" style="min-height: 620px;"></div>
         <div id="ahrefs-semantic-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
       </div>
+      <div class="mt-6">
+        <h3 class="text-sm font-semibold mb-1">Entity-specific semantic comparisons</h3>
+        <p class="text-xs text-gray-500 mb-3">
+          Separate projections for link titles, header names, and page titles. Color = domain, dot size = traffic or usage, so vocabulary overlap and naming gaps are visible without mixing entity types.
+        </p>
+        <div id="semantic-entity-comparisons" class="grid xl:grid-cols-3 gap-6"></div>
+      </div>
     </section>
 
     <!-- Internal link flow comparison -->
@@ -840,6 +847,7 @@
     renderSearchDirectoryChart();
     renderSearchClusterChart();
     renderAhrefsSemanticCompare();
+    renderSemanticEntityComparisons();
   }
 
   function renderSearchDirectoryChart() {
@@ -961,6 +969,96 @@
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
       });
     svgOuter.call(zoom);
+  }
+
+  function renderSemanticEntityComparisons() {
+    const root = document.getElementById('semantic-entity-comparisons');
+    const maps = data.semantic_entity_maps || {};
+    const specs = [
+      ['link_titles', 'Semantic comparison of link titles'],
+      ['headers', 'Semantic comparison of header names'],
+      ['page_titles', 'Semantic comparison of titles'],
+    ];
+    const available = specs.filter(([key]) => ((maps[key] || {}).points || []).length);
+    if (!available.length) {
+      root.innerHTML = '<div class="text-gray-500 text-center py-10 xl:col-span-3">No entity-specific semantic maps available.</div>';
+      return;
+    }
+    root.innerHTML = available.map(([key, title]) => {
+      const map = maps[key] || {};
+      return `
+        <div class="border border-gray-200 rounded-lg p-3 bg-white">
+          <div class="mb-2">
+            <h4 class="text-sm font-semibold">${escapeHtml(title)}</h4>
+            <p class="text-xs text-gray-500">${escapeHtml(map.description || '')}</p>
+            <p class="text-[11px] text-gray-400">${Number(map.total || 0).toLocaleString()} entities projected</p>
+          </div>
+          <div class="semantic-entity-chart" data-key="${escapeHtml(key)}" style="min-height:420px;"></div>
+        </div>`;
+    }).join('');
+    available.forEach(([key]) => drawSemanticEntityChart(root.querySelector(`.semantic-entity-chart[data-key="${cssEscape(key)}"]`), maps[key]));
+  }
+
+  function drawSemanticEntityChart(container, map) {
+    if (!container) return;
+    const points = (map.points || []).filter(p => Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-10">No points.</div>';
+      return;
+    }
+    const margin = { top: 16, right: 16, bottom: 30, left: 34 };
+    const outerWidth = Math.max(320, container.offsetWidth || 420);
+    const outerHeight = 420;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => Number(d.x));
+    const yExt = d3.extent(points, d => Number(d.y));
+    const xPad = (xExt[1] - xExt[0]) * 0.06 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.06 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxSize = d3.max(points, d => Number(d.size || d.traffic || d.count || 0)) || 1;
+    const radius = d3.scaleSqrt().domain([0, maxSize]).range([2.4, 10]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.x))).attr('cy', d => y(Number(d.y)))
+      .attr('r', d => radius(Number(d.size || d.traffic || d.count || 0)))
+      .attr('fill', d => domainColor(d.domain))
+      .attr('fill-opacity', 0.7)
+      .attr('stroke', d => ENTITY_COLORS[d.type] || '#111827')
+      .attr('stroke-width', 0.8)
+      .style('cursor', d => d.url ? 'pointer' : 'default')
+      .on('click', (event, d) => { if (d.url) window.open(d.url, '_blank', 'noopener'); })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-width', 2.4);
+        tooltip.style('visibility','visible').html(
+          `<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · ${escapeHtml(ENTITY_LABELS[d.type] || d.type || '')}<br>` +
+          `<strong>${escapeHtml(d.label || '')}</strong><br>` +
+          `<span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br>` +
+          `<span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.count ? ' · used ' + Number(d.count).toLocaleString() + 'x' : ''}${d.level ? ' · H' + d.level : ''}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-width',0.8); tooltip.style('visibility','hidden'); });
+    const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        dots.attr('cx', d => nx(Number(d.x))).attr('cy', d => ny(Number(d.y)));
+      });
+    svgOuter.call(zoom);
+    const legend = d3.select(container).append('div').attr('class', 'text-xs text-gray-600 mt-2 flex flex-wrap gap-2');
+    legend.html(data.domains.map(d =>
+      `<span class="inline-flex items-center"><span class="w-2.5 h-2.5 rounded-full mr-1" style="background:${domainColor(d)}"></span>${escapeHtml(d)}</span>`
+    ).join(''));
   }
 
   renderSearchDemand();

@@ -1,5 +1,8 @@
 from pathlib import Path
+import json
 import zipfile
+
+import numpy as np
 
 from site_audit.compare import build_payload, package_comparison
 
@@ -19,6 +22,24 @@ def _write_report(root: Path, domain: str, metrics: dict, extras: dict[str, str]
     (report_dir / "pages.json").write_text("[]", encoding="utf-8")
     for name, payload in extras.items():
         (report_dir / name).write_text(payload, encoding="utf-8")
+
+
+def _write_semantic_cache(root: Path, domain: str) -> None:
+    cache_dir = root / domain / "cache" / "ahrefs"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"type": "link_title", "label": f"{domain} anchor", "count": 4, "size": 4},
+        {"type": "header", "label": f"{domain} H1", "level": 1, "size": 10},
+        {"type": "page_title", "label": f"{domain} title", "traffic": 20, "size": 20},
+    ]
+    (cache_dir / "semantic_entities_test_model.meta.json").write_text(
+        json.dumps(rows),
+        encoding="utf-8",
+    )
+    np.savez_compressed(
+        cache_dir / "semantic_entities_test_model.npz",
+        embeddings=np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]], dtype=np.float32),
+    )
 
 
 def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Path) -> None:
@@ -50,6 +71,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":10,"matched_traffic":1000,"matched_traffic_share":1,"top_pages_value_usd":250},"metrics":{"org_traffic":1200,"org_keywords":20,"org_keywords_1_3":5}}',
         },
     )
+    _write_semantic_cache(tmp_path, "strong.example")
     _write_report(
         tmp_path,
         "weak.example",
@@ -78,6 +100,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":3,"matched_traffic":100,"matched_traffic_share":0.5,"top_pages_value_usd":20},"metrics":{"org_traffic":150,"org_keywords":4,"org_keywords_1_3":0}}',
         },
     )
+    _write_semantic_cache(tmp_path, "weak.example")
 
     payload = build_payload(["strong.example", "weak.example"], tmp_path)
 
@@ -88,6 +111,9 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert any(gap["winner"] == "strong.example" for gap in payload["biggest_gaps"])
     assert any(group["key"] == "search" for group in payload["metric_groups"])
     assert payload["leaderboard"][0]["ahrefs_org_traffic"] == 1200
+    assert payload["semantic_entity_maps"]["link_titles"]["total"] == 2
+    assert payload["semantic_entity_maps"]["headers"]["total"] == 2
+    assert payload["semantic_entity_maps"]["page_titles"]["total"] == 2
 
 
 def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:

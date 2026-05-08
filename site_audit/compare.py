@@ -252,6 +252,7 @@ def _combined_ahrefs_semantic_umap(
     projects: list[_Project],
     sample_per_domain: int = 1800,
     seed: int = 42,
+    include_types: Optional[set[str]] = None,
 ) -> tuple[list[dict], int]:
     rng = np.random.default_rng(seed)
     chunks: list[tuple[_Project, np.ndarray, list[dict]]] = []
@@ -261,6 +262,12 @@ def _combined_ahrefs_semantic_umap(
         embs = proj.ahrefs_semantic_embeddings
         if embs is None or not rows or len(rows) != len(embs):
             continue
+        if include_types is not None:
+            idx_keep = [i for i, row in enumerate(rows) if row.get("type") in include_types]
+            if not idx_keep:
+                continue
+            rows = [rows[i] for i in idx_keep]
+            embs = embs[np.array(idx_keep, dtype=np.int64)]
         n = len(rows)
         if n > sample_per_domain:
             idx = np.sort(rng.choice(n, sample_per_domain, replace=False))
@@ -307,6 +314,42 @@ def _combined_ahrefs_semantic_umap(
             })
         cursor += len(sub_embs)
     return out, len(big)
+
+
+def _semantic_entity_maps(projects: list[_Project]) -> dict:
+    specs = {
+        "link_titles": {
+            "types": {"link_title"},
+            "label": "Link titles",
+            "description": "Anchor/link-title text projected across domains.",
+        },
+        "headers": {
+            "types": {"header"},
+            "label": "Header names",
+            "description": "H1-H6 headings projected across domains.",
+        },
+        "page_titles": {
+            "types": {"page_title"},
+            "label": "Page titles",
+            "description": "HTML page titles projected across domains.",
+        },
+    }
+    maps: dict[str, dict] = {}
+    for i, (key, spec) in enumerate(specs.items()):
+        rows, total = _combined_ahrefs_semantic_umap(
+            projects,
+            sample_per_domain=1000,
+            seed=73 + i,
+            include_types=set(spec["types"]),
+        )
+        maps[key] = {
+            "label": spec["label"],
+            "description": spec["description"],
+            "entity_types": sorted(spec["types"]),
+            "points": rows,
+            "total": total,
+        }
+    return maps
 
 
 def _ahrefs_page_traffic_lookup(proj: _Project) -> dict[str, dict]:
@@ -742,6 +785,10 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
     ahrefs_semantic_rows, ahrefs_semantic_total = _combined_ahrefs_semantic_umap(projects)
     if ahrefs_semantic_total:
         LOG.info("  Ahrefs semantic UMAP: %d points projected", ahrefs_semantic_total)
+    semantic_entity_maps = _semantic_entity_maps(projects)
+    for key, entity_map in semantic_entity_maps.items():
+        if entity_map.get("total"):
+            LOG.info("  semantic %s UMAP: %d points projected", key, entity_map["total"])
 
     return {
         "domains": [p.domain for p in projects],
@@ -750,6 +797,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "scatter_total": n_total,
         "ahrefs_semantic_scatter": ahrefs_semantic_rows,
         "ahrefs_semantic_total": ahrefs_semantic_total,
+        "semantic_entity_maps": semantic_entity_maps,
         "search": _search_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}
