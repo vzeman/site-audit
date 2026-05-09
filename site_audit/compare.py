@@ -46,6 +46,7 @@ class _Project:
     metrics: dict
     pages: list[dict]
     answerability: list[dict]
+    answer_blocks: dict
     page_link_counts: list[dict]
     linkgraph: dict
     link_flow: dict
@@ -111,6 +112,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     metrics = _load_json(report / "site_metrics.json", {})
     pages = _load_json(report / "pages.json", [])
     answerability = _load_json(report / "answerability.json", [])
+    answer_blocks = _load_json(report / "answer_blocks.json", {})
     linkgraph = _load_json(report / "linkgraph.json", {})
     paragraph_density = _load_json(report / "paragraph_density.json", {})
     recommendations = _load_json(report / "recommendations.json", {})
@@ -152,6 +154,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         metrics=metrics,
         pages=pages,
         answerability=answerability,
+        answer_blocks=answer_blocks,
         page_link_counts=page_link_counts,
         linkgraph=linkgraph if isinstance(linkgraph, dict) else {},
         link_flow=link_flow,
@@ -433,6 +436,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "answerability_median", "label": "GEO median", "better": "high", "fmt": "0.0"},
             {"key": "answerability_p90", "label": "GEO p90", "better": "high", "fmt": "0.0"},
             {"key": "answerability_below_4_share", "label": "GEO < 4 share", "better": "low", "fmt": "pct"},
+            {"key": "answer_block_strong_cluster_share", "label": "Strong answer clusters", "better": "high", "fmt": "pct"},
+            {"key": "answer_block_opportunities", "label": "Answer gaps", "better": "low", "fmt": "int"},
             {"key": "schema_coverage", "label": "Schema coverage", "better": "high", "fmt": "pct"},
             {"key": "invalid_jsonld_blocks", "label": "Invalid JSON-LD", "better": "low", "fmt": "int"},
             {"key": "schema_type_count", "label": "Schema types", "better": "high", "fmt": "int"},
@@ -609,6 +614,8 @@ def _leaderboard_row(proj: _Project) -> dict:
     ah = proj.ahrefs or {}
     ah_summary = ah.get("summary", {}) or {}
     ah_metrics = ah.get("metrics", {}) or {}
+    ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
+    ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -636,6 +643,11 @@ def _leaderboard_row(proj: _Project) -> dict:
         "answerability_below_4_share": (
             sum(1 for v in answer_scores if v < 4.0) / len(answer_scores) if answer_scores else 0.0
         ),
+        "answer_block_strong_cluster_share": (
+            int(ablocks.get("strong_query_clusters", 0) or 0) / ablock_clusters if ablock_clusters else 0.0
+        ),
+        "answer_block_opportunities": int(ablocks.get("opportunity_queries", 0) or 0),
+        "answer_block_strong_blocks": int(ablocks.get("strong_blocks", 0) or 0),
         # Internal linking
         "median_in_degree": _percentile([float(v) for v in in_degrees], 0.5),
         "p90_in_degree": _percentile([float(v) for v in in_degrees], 0.9),
@@ -896,6 +908,59 @@ def _information_gain_comparison(projects: list[_Project]) -> dict:
     matrix.sort(key=lambda r: sum(_safe_float(d.get("avg_score")) for d in r["domains"]) / max(len(r["domains"]), 1))
     low_pages.sort(key=lambda r: _safe_float(r.get("information_gain_score")))
     return {"domains": domains, "clusters": matrix[:80], "low_pages": low_pages[:200]}
+
+
+def _answer_blocks_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    opportunities: list[dict] = []
+    for proj in projects:
+        payload = proj.answer_blocks or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for cluster in payload.get("clusters") or []:
+            key = str(cluster.get("label") or cluster.get("cluster") or "cluster")
+            clusters[key][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": key,
+                "strong_query_share": _safe_float(cluster.get("strong_query_share")),
+                "avg_best_score": _safe_float(cluster.get("avg_best_score")),
+                "queries": _safe_int(cluster.get("queries")),
+                "traffic": _safe_int(cluster.get("traffic")),
+                "opportunity_queries": _safe_int(cluster.get("opportunity_queries")),
+                "recommended_format": cluster.get("recommended_format") or "",
+                "status": cluster.get("status") or "",
+            }
+        for row in (payload.get("opportunities") or [])[:80]:
+            opportunities.append({"domain": proj.domain, **row})
+    matrix = []
+    project_domains = [p.domain for p in projects]
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "cluster": cluster,
+                    "strong_query_share": 0.0,
+                    "avg_best_score": 0.0,
+                    "queries": 0,
+                    "traffic": 0,
+                    "opportunity_queries": 0,
+                    "recommended_format": "",
+                })
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(
+        key=lambda r: (
+            sum(_safe_float(d.get("strong_query_share")) for d in r["domains"]) / max(len(r["domains"]), 1),
+            -sum(_safe_int(d.get("traffic")) for d in r["domains"]),
+        )
+    )
+    opportunities.sort(key=lambda r: (_safe_int(r.get("keyword_traffic")), -_safe_float(r.get("best_score"))), reverse=True)
+    return {"domains": domains, "clusters": matrix[:80], "opportunities": opportunities[:200]}
 
 
 # --- competitive search/content opportunities ----------------------------
@@ -1547,6 +1612,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "entity_alignment": _entity_alignment_comparison(projects),
         "entity_coverage": _entity_coverage_comparison(projects),
         "information_gain": _information_gain_comparison(projects),
+        "answer_blocks": _answer_blocks_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

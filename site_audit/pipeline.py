@@ -32,6 +32,7 @@ from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_u
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
 from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
 from .ahrefs import write_semantic_cache as write_ahrefs_semantic_cache
+from .answer_blocks import build_answer_blocks
 from .dataforseo import DataForSEOConfig, build_analysis as build_dataforseo_analysis
 from .dataforseo import fetch_snapshot as fetch_dataforseo_snapshot
 from .answerability import score_all as score_answerability
@@ -150,6 +151,7 @@ class PipelineConfig:
     enable_cluster_labels: bool = True
     enable_keyword_coverage: bool = True
     enable_answerability: bool = True
+    enable_answer_blocks: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -562,6 +564,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_keyword_attribution
         or config.enable_weak_paragraphs
         or config.enable_heading_impact
+        or config.enable_answer_blocks
         or config.enable_information_gain
         or config.enable_content_quality
         or config.enable_paragraph_fanout
@@ -915,6 +918,28 @@ def run(config: PipelineConfig) -> dict:
                 ig_summary.get("high_score_pages", 0),
             )
 
+    answer_blocks_data: dict = {}
+    if config.enable_answer_blocks:
+        answer_blocks_data = build_answer_blocks(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            coverage=coverage_payload,
+            paragraph_fanout=paragraph_fanout_payload,
+            search_payload=ahrefs_data,
+            cluster_labels=labels,
+            cluster_summaries=cluster_summaries,
+        )
+        ablocks_summary = answer_blocks_data.get("summary", {}) or {}
+        if ablocks_summary.get("status") == "ok":
+            LOG.info(
+                "  answer blocks: %d blocks · %d query opportunities · %d/%d strong clusters",
+                ablocks_summary.get("blocks", 0),
+                ablocks_summary.get("opportunity_queries", 0),
+                ablocks_summary.get("strong_query_clusters", 0),
+                ablocks_summary.get("top_query_clusters", 0),
+            )
+
     paragraph_impact_data: dict = {}
     if config.enable_paragraph_impact and paragraph_records and ahrefs_data:
         paragraph_impact_data = build_paragraph_impact(
@@ -1089,6 +1114,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_impact=paragraph_impact_data,
         semantic_ablation=semantic_ablation_data,
         keyword_attribution=keyword_attribution_data,
+        answer_blocks=answer_blocks_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
@@ -1139,6 +1165,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_impact=paragraph_impact_data,
             semantic_ablation=semantic_ablation_data,
             keyword_attribution=keyword_attribution_data,
+            answer_blocks=answer_blocks_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,

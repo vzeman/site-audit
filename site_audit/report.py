@@ -285,6 +285,7 @@ def write_all(
     paragraph_impact: Optional[dict] = None,
     semantic_ablation: Optional[dict] = None,
     keyword_attribution: Optional[dict] = None,
+    answer_blocks: Optional[dict] = None,
     winning_paragraphs: Optional[dict] = None,
     weak_paragraphs: Optional[dict] = None,
     heading_impact: Optional[dict] = None,
@@ -344,6 +345,8 @@ def write_all(
         _write_json(output_dir / "semantic_ablation.json", semantic_ablation)
     if keyword_attribution is not None:
         _write_json(output_dir / "keyword_attribution.json", keyword_attribution)
+    if answer_blocks is not None:
+        _write_json(output_dir / "answer_blocks.json", answer_blocks)
     if winning_paragraphs is not None:
         _write_json(output_dir / "winning_paragraphs.json", winning_paragraphs)
     if weak_paragraphs is not None:

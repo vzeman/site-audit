@@ -1005,6 +1005,31 @@
       </div>
     </div>
 
+    <!-- Answer blocks -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answer-blocks-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Answer blocks and snippet candidates</h3>
+        <p class="text-xs text-gray-500 mt-1" id="answer-blocks-meta">
+          Query-level inventory of concise answer blocks, recommended SERP answer formats, and schema opportunities.
+        </p>
+      </div>
+      <div id="answer-blocks-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Query clusters</h4>
+          <div id="answer-blocks-clusters" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Missing answer formats</h4>
+          <div id="answer-blocks-opportunities" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Candidate snippets</h4>
+          <div id="answer-blocks-inventory" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Link graph -->
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="linkgraph-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
@@ -1367,6 +1392,7 @@
 <script type="application/json" id="data-clusters">__CLUSTERS_JSON__</script>
 <script type="application/json" id="data-coverage">__COVERAGE_JSON__</script>
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
+<script type="application/json" id="data-answer-blocks">__ANSWER_BLOCKS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
 <script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
 <script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
@@ -1474,6 +1500,7 @@
       const inlinedClusters = readInlined('data-clusters');
       const inlinedCoverage = readInlined('data-coverage');
       const inlinedAnswerability = readInlined('data-answerability');
+      const inlinedAnswerBlocks = readInlined('data-answer-blocks');
       const inlinedLinkgraph = readInlined('data-linkgraph');
       const inlinedExternal = readInlined('data-external');
       const inlinedParaLinks = readInlined('data-paragraph-links');
@@ -1509,7 +1536,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1519,6 +1546,7 @@
         clusters = inlinedClusters || [];
         coverage = inlinedCoverage || [];
         answerability = inlinedAnswerability || [];
+        answerBlocks = inlinedAnswerBlocks || {};
         linkgraph = inlinedLinkgraph || {};
         external = inlinedExternal || {};
         paraLinks = inlinedParaLinks || [];
@@ -1554,7 +1582,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1563,6 +1591,7 @@
           loadJSON('clusters.json').catch(() => []),
           loadJSON('keyword_coverage.json').catch(() => []),
           loadJSON('answerability.json').catch(() => []),
+          loadJSON('answer_blocks.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
           loadJSON('external_links.json').catch(() => ({})),
           loadJSON('paragraph_link_recommendations.json').catch(() => []),
@@ -1608,6 +1637,7 @@
       state.clusters = clusters;
       state.coverage = coverage;
       state.answerability = answerability;
+      state.answerBlocks = answerBlocks || {};
       state.linkgraph = linkgraph;
       state.external = external;
       state.paraLinks = paraLinks;
@@ -1680,6 +1710,7 @@
       renderPerformance();
       renderConversion();
       renderAnswerability();
+      renderAnswerBlocks();
       renderLinkgraph();
       renderLinkFlow();
       renderLinkbuilding();
@@ -3474,6 +3505,76 @@
         </div>`;
     }).join('');
     el.innerHTML = summary + rows;
+  }
+
+  function renderAnswerBlocks() {
+    const block = document.getElementById('answer-blocks-block');
+    const data = state.answerBlocks || {};
+    const summary = data.summary || {};
+    const clusters = data.clusters || [];
+    const opportunities = data.opportunities || [];
+    const blocks = data.blocks || [];
+    if (!blocks.length && !clusters.length && !opportunities.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('answer-blocks-meta').textContent =
+      `${Number(summary.queries || 0).toLocaleString()} target queries · ${Number(summary.top_query_clusters || clusters.length).toLocaleString()} query clusters · provider ${summary.provider || 'site queries'}.`;
+    document.getElementById('answer-blocks-summary').innerHTML =
+      card('strong clusters', `${Number(summary.strong_query_clusters || 0).toLocaleString()} / ${Number(summary.top_query_clusters || clusters.length).toLocaleString()}`, 'cluster has strong answer blocks for most queries') +
+      card('opportunity queries', Number(summary.opportunity_queries || opportunities.length).toLocaleString(), 'no strong answer block yet') +
+      card('candidate blocks', Number(summary.blocks || blocks.length).toLocaleString(), `${Number(summary.strong_blocks || 0).toLocaleString()} score 70+`) +
+      card('avg block score', Number(summary.avg_best_score || 0).toFixed(1), '0-100 snippet-readiness heuristic');
+
+    const statusBadge = status => status === 'strong' ? 'bg-green-100 text-green-800'
+      : status === 'partial' ? 'bg-amber-100 text-amber-800'
+      : 'bg-red-100 text-red-800';
+    document.getElementById('answer-blocks-clusters').innerHTML = clusters.slice(0, 120).map(c => {
+      const top = (c.top_queries || []).slice(0, 3).map(q =>
+        `<div class="truncate">${escapeHtml(q.query || '')} <span class="text-gray-400">score ${Number(q.best_score || 0).toFixed(0)}</span></div>`
+      ).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(c.label || `cluster ${c.cluster}`)}</div>
+          <span class="px-1.5 py-0.5 rounded ${statusBadge(c.status)}">${escapeHtml(c.status || 'gap')}</span>
+        </div>
+        <div class="text-gray-500">${Number(c.queries || 0)} queries · ${Number(c.traffic || 0).toLocaleString()} traffic · ${Math.round((c.strong_query_share || 0) * 100)}% strong</div>
+        ${c.recommended_format ? `<div class="text-red-700 mt-0.5">Add ${escapeHtml(c.recommended_format)} blocks</div>` : ''}
+        <div class="mt-1 text-gray-600">${top}</div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No query clusters.</div>';
+
+    document.getElementById('answer-blocks-opportunities').innerHTML = opportunities.slice(0, 140).map(o => {
+      const schema = o.schema_recommendation ? ` · add ${escapeHtml(o.schema_recommendation)} schema` : '';
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(o.query || '')}</div>
+          <span class="font-mono text-red-700">${Number(o.best_score || 0).toFixed(0)}</span>
+        </div>
+        <div class="text-gray-500">${escapeHtml(o.cluster_label || '')} · ${escapeHtml(o.recommended_format || '')}${schema}</div>
+        <a class="text-blue-600 hover:underline block truncate" href="${escapeHtml(o.url || '')}" target="_blank" rel="noopener">${escapeHtml(o.title || o.url || '')}</a>
+        <div class="text-gray-700 mt-1">${escapeHtml(o.reason || '')}</div>
+        <div class="italic text-gray-500 mt-1">"${escapeHtml(o.candidate_excerpt || '')}"</div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No answer-format gaps.</div>';
+
+    const chip = (text, cls) => `<span class="inline-block ${cls} rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(text)}</span>`;
+    document.getElementById('answer-blocks-inventory').innerHTML = blocks.slice(0, 140).map(r => {
+      const color = Number(r.score || 0) >= 70 ? 'text-green-700' : (Number(r.score || 0) >= 55 ? 'text-amber-700' : 'text-red-700');
+      const evidence = (r.evidence || []).slice(0, 3).map(x => chip(x, 'bg-green-50 text-green-800')).join('');
+      const risks = (r.risks || []).slice(0, 3).map(x => chip(x, 'bg-red-50 text-red-800')).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(r.query || r.heading || '')}</div>
+          <span class="font-mono ${color}">${Number(r.score || 0).toFixed(0)}</span>
+        </div>
+        <div class="text-gray-500">${escapeHtml(r.answer_type || '')} · ${escapeHtml(r.heading || '')} · traffic ${Number(r.keyword_traffic || 0).toLocaleString()}</div>
+        <a class="text-blue-600 hover:underline block truncate" href="${escapeHtml(r.url || '')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url || '')}</a>
+        <div class="italic text-gray-700 mt-1">"${escapeHtml(r.excerpt || '')}"</div>
+        <div class="mt-1">${evidence}${risks}</div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No candidate snippets.</div>';
   }
 
   function renderIndexability() {

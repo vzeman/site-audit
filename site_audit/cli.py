@@ -75,6 +75,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_cluster_labels=not args.no_cluster_labels,
         enable_keyword_coverage=not args.no_keyword_coverage,
         enable_answerability=not args.no_answerability,
+        enable_answer_blocks=not args.no_answer_blocks,
         enable_linkgraph=not args.no_linkgraph,
         enable_external_links=not args.no_external_links,
         enable_paragraph_links=not args.no_paragraph_links,
@@ -261,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-cluster-labels", action="store_true")
     run_p.add_argument("--no-keyword-coverage", action="store_true")
     run_p.add_argument("--no-answerability", action="store_true")
+    run_p.add_argument("--no-answer-blocks", action="store_true")
     run_p.add_argument("--no-linkgraph", action="store_true")
     run_p.add_argument("--no-external-links", action="store_true")
     run_p.add_argument("--no-paragraph-links", action="store_true",

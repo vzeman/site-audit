@@ -81,6 +81,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":1000,"heavy_page_share":0.1,"render_blocking_share":0.2}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":0,"pages_multi_h1":0}}',
             "conversion.json": '{"summary":{"cta_coverage":1,"primary_cta_coverage":0.9,"form_coverage":0.8}}',
+            "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":2,"opportunity_queries":0,"strong_blocks":6},"clusters":[{"label":"support","queries":4,"traffic":100,"strong_query_share":1,"avg_best_score":82,"opportunity_queries":0,"recommended_format":"","status":"strong"}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":10,"matched_traffic":1000,"matched_traffic_share":1,"top_pages_value_usd":250},"metrics":{"org_traffic":1200,"org_keywords":20,"org_keywords_1_3":5}}',
         },
     )
@@ -110,6 +111,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":5000,"heavy_page_share":0.8,"render_blocking_share":1}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":5,"pages_multi_h1":3}}',
             "conversion.json": '{"summary":{"cta_coverage":0.2,"primary_cta_coverage":0.1,"form_coverage":0}}',
+            "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":0,"opportunity_queries":5,"strong_blocks":1},"clusters":[{"label":"support","queries":3,"traffic":80,"strong_query_share":0,"avg_best_score":42,"opportunity_queries":3,"recommended_format":"faq","status":"gap"}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":3,"matched_traffic":100,"matched_traffic_share":0.5,"top_pages_value_usd":20},"metrics":{"org_traffic":150,"org_keywords":4,"org_keywords_1_3":0}}',
         },
     )
@@ -132,6 +134,8 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert "content_efficiency" in payload
     assert "authority_demand" in payload
     assert "traffic_readiness" in payload
+    assert payload["answer_blocks"]["clusters"][0]["cluster"] == "support"
+    assert payload["answer_blocks"]["clusters"][0]["domains"][0]["strong_query_share"] == 1
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
