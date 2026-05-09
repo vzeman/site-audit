@@ -69,7 +69,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
         },
         {
             "answerability.json": '[{"score":7},{"score":8}]',
-            "structured_data.json": '{"summary":{"schema_coverage":1,"invalid_jsonld_blocks":0,"schema_type_count":5}}',
+            "structured_data.json": '{"summary":{"schema_coverage":1,"invalid_jsonld_blocks":0,"schema_type_count":5,"schema_opportunities":1,"high_priority_schema_opportunities":0},"top_types":[{"type":"Article","pages":5}],"opportunities":[{"url":"https://strong.example/a","title":"A","schema_type":"FAQPage","priority":"medium","reason":"FAQ content","missing_evidence":["visible answers"],"missing_recommended_properties":["mainEntity"],"guideline_url":"https://developers.google.com/search/docs/appearance/structured-data/faqpage"}],"clusters":[{"cluster":"support","pages":3,"traffic":100,"schema_coverage":1,"opportunities":1,"invalid_blocks":0,"top_schema_types":[{"type":"Article","pages":3}]}]}',
             "linkgraph.json": '{"page_link_counts":[{"in_degree":4,"out_degree":6},{"in_degree":6,"out_degree":8}]}',
             "linkbuilding.json": '{"summary":{"descriptive_anchor_share":0.8,"generic_anchor_share":0.1}}',
             "metadata_quality.json": '{"summary":{"issue_share":0.1}}',
@@ -102,7 +102,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
         },
         {
             "answerability.json": '[{"score":2},{"score":3}]',
-            "structured_data.json": '{"summary":{"schema_coverage":0.2,"invalid_jsonld_blocks":3,"schema_type_count":1}}',
+            "structured_data.json": '{"summary":{"schema_coverage":0.2,"invalid_jsonld_blocks":3,"schema_type_count":1,"schema_opportunities":4,"high_priority_schema_opportunities":2},"top_types":[{"type":"Article","pages":1}],"opportunities":[{"url":"https://weak.example/a","title":"A","schema_type":"Article","priority":"high","reason":"Article page missing primary schema","missing_evidence":["published or modified date"],"missing_recommended_properties":["author"],"guideline_url":"https://developers.google.com/search/docs/appearance/structured-data/article"}],"clusters":[{"cluster":"support","pages":3,"traffic":8,"schema_coverage":0.2,"opportunities":4,"invalid_blocks":3,"top_schema_types":[{"type":"Article","pages":1}]}],"invalid_blocks":[{"url":"https://weak.example/bad","title":"Bad","error":"Expecting property name"}]}',
             "linkgraph.json": '{"page_link_counts":[{"in_degree":0,"out_degree":1},{"in_degree":1,"out_degree":1}]}',
             "linkbuilding.json": '{"summary":{"descriptive_anchor_share":0.2,"generic_anchor_share":0.6}}',
             "metadata_quality.json": '{"summary":{"issue_share":0.8}}',
@@ -149,6 +149,9 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["template_patterns"]["features"]
     assert payload["leaderboard"][0]["template_success_patterns"] == 2
     assert payload["leaderboard"][1]["template_pattern_recommendations"] == 4
+    assert payload["structured_data_opportunities"]["types"]
+    assert payload["structured_data_opportunities"]["clusters"]
+    assert payload["leaderboard"][1]["schema_opportunities"] == 4
     assert payload["keyword_cluster_gaps"]["clusters"]
     assert payload["keyword_cluster_gaps"]["clusters"][0]["leader_domain"] == "strong.example"
     assert payload["keyword_cluster_gaps"]["recommendations"]

@@ -450,15 +450,6 @@ def run(config: PipelineConfig) -> dict:
         ans_payload = answerability_payload(score_answerability(extracted_pages))
         LOG.info("  scored %d pages for answerability", len(ans_payload))
 
-    structured_data_data = structured_data_payload(analyze_structured_data(extracted_pages))
-    sd_summary = structured_data_data.get("summary", {}) or {}
-    LOG.info(
-        "  structured data: %.0f%% coverage · %d invalid JSON-LD blocks · %d schema types",
-        (sd_summary.get("schema_coverage", 0.0) or 0.0) * 100,
-        sd_summary.get("invalid_jsonld_blocks", 0),
-        sd_summary.get("schema_type_count", 0),
-    )
-
     metadata_quality_data = metadata_quality_payload(analyze_metadata_quality(extracted_pages))
     mq_summary = metadata_quality_data.get("summary", {}) or {}
     LOG.info(
@@ -892,6 +883,18 @@ def run(config: PipelineConfig) -> dict:
             )
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
+
+    structured_data_data = structured_data_payload(
+        analyze_structured_data(extracted_pages, search_payload=ahrefs_data)
+    )
+    sd_summary = structured_data_data.get("summary", {}) or {}
+    LOG.info(
+        "  structured data: %.0f%% coverage · %d invalid JSON-LD blocks · %d schema types · %d opportunities",
+        (sd_summary.get("schema_coverage", 0.0) or 0.0) * 100,
+        sd_summary.get("invalid_jsonld_blocks", 0),
+        sd_summary.get("schema_type_count", 0),
+        sd_summary.get("schema_opportunities", 0),
+    )
 
     entity_coverage_data: dict = {}
     if config.enable_entity_coverage:

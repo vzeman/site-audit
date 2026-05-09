@@ -811,6 +811,16 @@
           <div id="audit-structured-missing" class="max-h-72 overflow-y-auto"></div>
         </div>
       </div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs mt-5">
+        <div>
+          <h4 class="font-semibold mb-2">Schema opportunities</h4>
+          <div id="audit-structured-opportunities" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Cluster schema coverage</h4>
+          <div id="audit-structured-clusters" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+      </div>
     </div>
 
     <!-- SERP metadata -->
@@ -3881,8 +3891,8 @@
         summary.invalid_jsonld_blocks ? 'text-red-600' : 'text-green-600') +
       card('Schema types', (summary.schema_type_count || 0).toLocaleString(),
         'distinct @type values') +
-      card('Missing schema', (summary.pages_missing_schema || 0).toLocaleString(),
-        'pages with no valid schema');
+      card('Opportunities', (summary.schema_opportunities || 0).toLocaleString(),
+        `${summary.high_priority_schema_opportunities || 0} high priority`);
 
     document.getElementById('audit-structured-types').innerHTML =
       (data.top_types || []).slice(0, 40).map(r => `
@@ -3907,6 +3917,45 @@
             <div class="text-gray-700 mt-1">${bits}</div>
           </div>`;
       }).join('') || '<div class="text-gray-500">No recommended schema properties missing.</div>';
+
+    document.getElementById('audit-structured-opportunities').innerHTML =
+      (data.opportunities || []).slice(0, 160).map(r => {
+        const missing = [
+          ...(r.missing_evidence || []),
+          ...(r.missing_recommended_properties || []).map(p => `${p} property`),
+        ].slice(0, 5).map(v => `<span class="inline-block bg-orange-50 text-orange-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(v)}</span>`).join('');
+        const present = (r.present_evidence || []).slice(0, 4).map(v =>
+          `<span class="inline-block bg-green-50 text-green-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(v)}</span>`
+        ).join('');
+        return `
+          <div class="border-b border-gray-100 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+              <span class="text-[11px] px-1.5 py-0.5 rounded ${r.priority === 'high' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}">${escapeHtml(r.priority || '')}</span>
+            </div>
+            <div class="font-medium mt-1">${escapeHtml(r.schema_type || '')} · ${escapeHtml(String(r.recommendation_type || '').replaceAll('_', ' '))}</div>
+            <div class="text-gray-700 mt-1">${escapeHtml(r.reason || '')}</div>
+            ${missing ? `<div class="mt-2">${missing}</div>` : ''}
+            ${present ? `<div class="mt-1">${present}</div>` : ''}
+            <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || '')}${(r.keyword_intents || []).length ? ' · ' + escapeHtml((r.keyword_intents || []).join('/')) : ''}${r.guideline_url ? ` · <a class="text-blue-600 hover:underline" href="${escapeHtml(r.guideline_url)}" target="_blank" rel="noopener">Google reference</a>` : ''}</div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No structured-data opportunities found.</div>';
+
+    document.getElementById('audit-structured-clusters').innerHTML =
+      (data.clusters || []).slice(0, 80).map(r => {
+        const pct = ((r.schema_coverage || 0) * 100).toFixed(0);
+        const types = (r.top_schema_types || []).slice(0, 4).map(t => `${escapeHtml(t.type)} ${Number(t.pages || 0).toLocaleString()}`).join(' · ');
+        return `
+          <div class="border-b border-gray-100 py-2">
+            <div class="flex justify-between gap-3">
+              <span class="font-medium">${escapeHtml(r.cluster || '')}</span>
+              <span class="font-mono text-gray-600">${pct}%</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded mt-1 overflow-hidden"><div class="h-full bg-blue-500" style="width:${Math.max(0, Math.min(100, Number(pct)))}%"></div></div>
+            <div class="text-gray-500 mt-1">${Number(r.pages || 0).toLocaleString()} pages · ${Number(r.opportunities || 0).toLocaleString()} opportunities · ${Number(r.invalid_blocks || 0).toLocaleString()} invalid</div>
+            ${types ? `<div class="text-gray-500 mt-1">${types}</div>` : ''}
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No cluster schema coverage available.</div>';
   }
 
   function renderMetadataQuality() {

@@ -454,6 +454,7 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "schema_coverage", "label": "Schema coverage", "better": "high", "fmt": "pct"},
             {"key": "invalid_jsonld_blocks", "label": "Invalid JSON-LD", "better": "low", "fmt": "int"},
             {"key": "schema_type_count", "label": "Schema types", "better": "high", "fmt": "int"},
+            {"key": "schema_opportunities", "label": "Schema opportunities", "better": "low", "fmt": "int"},
         ],
     },
     {
@@ -689,6 +690,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "invalid_jsonld_blocks": int(sd.get("invalid_jsonld_blocks", 0)),
         "schema_type_count": int(sd.get("schema_type_count", 0)),
         "pages_missing_schema": int(sd.get("pages_missing_schema", 0)),
+        "schema_opportunities": int(sd.get("schema_opportunities", 0)),
+        "high_priority_schema_opportunities": int(sd.get("high_priority_schema_opportunities", 0)),
+        "schema_opportunity_clusters": int(sd.get("schema_opportunity_clusters", 0)),
         "metadata_issue_share": float(mq.get("issue_share", 0.0)),
         "missing_description": int(mq.get("missing_description", 0)),
         "duplicate_title_pages": int(mq.get("duplicate_title_pages", 0)),
@@ -946,6 +950,89 @@ def _information_gain_comparison(projects: list[_Project]) -> dict:
     matrix.sort(key=lambda r: sum(_safe_float(d.get("avg_score")) for d in r["domains"]) / max(len(r["domains"]), 1))
     low_pages.sort(key=lambda r: _safe_float(r.get("information_gain_score")))
     return {"domains": domains, "clusters": matrix[:80], "low_pages": low_pages[:200]}
+
+
+def _structured_data_opportunity_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    type_domains: dict[str, dict[str, dict]] = defaultdict(dict)
+    cluster_domains: dict[str, dict[str, dict]] = defaultdict(dict)
+    recommendations: list[dict] = []
+    invalid: list[dict] = []
+    for proj in projects:
+        payload = proj.structured_data or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("top_types") or []:
+            schema_type = row.get("type") or ""
+            if not schema_type:
+                continue
+            type_domains[schema_type][proj.domain] = {
+                "domain": proj.domain,
+                "schema_type": schema_type,
+                "pages": _safe_int(row.get("pages")),
+                "opportunities": 0,
+                "high_priority": 0,
+            }
+        for row in payload.get("opportunities") or []:
+            schema_type = row.get("schema_type") or "unknown"
+            stats = type_domains[schema_type].setdefault(proj.domain, {
+                "domain": proj.domain,
+                "schema_type": schema_type,
+                "pages": 0,
+                "opportunities": 0,
+                "high_priority": 0,
+            })
+            stats["opportunities"] += 1
+            if row.get("priority") == "high":
+                stats["high_priority"] += 1
+            recommendations.append({"domain": proj.domain, **row})
+        for row in payload.get("clusters") or []:
+            cluster = str(row.get("cluster") or "unclustered")
+            cluster_domains[cluster][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": cluster,
+                "schema_coverage": _safe_float(row.get("schema_coverage")),
+                "pages": _safe_int(row.get("pages")),
+                "traffic": _safe_int(row.get("traffic")),
+                "opportunities": _safe_int(row.get("opportunities")),
+                "invalid_blocks": _safe_int(row.get("invalid_blocks")),
+                "top_schema_types": row.get("top_schema_types") or [],
+            }
+        for row in payload.get("invalid_blocks") or []:
+            invalid.append({"domain": proj.domain, **row})
+
+    project_domains = [p.domain for p in projects]
+    type_matrix = []
+    for schema_type, values in type_domains.items():
+        type_matrix.append({
+            "schema_type": schema_type,
+            "domains": [
+                values.get(domain, {"domain": domain, "schema_type": schema_type, "pages": 0, "opportunities": 0, "high_priority": 0})
+                for domain in project_domains
+            ],
+        })
+    type_matrix.sort(key=lambda r: sum(_safe_int(d.get("pages")) + _safe_int(d.get("opportunities")) for d in r["domains"]), reverse=True)
+
+    cluster_matrix = []
+    for cluster, values in cluster_domains.items():
+        cluster_matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {"domain": domain, "cluster": cluster, "schema_coverage": 0.0, "pages": 0, "traffic": 0, "opportunities": 0, "invalid_blocks": 0})
+                for domain in project_domains
+            ],
+        })
+    cluster_matrix.sort(key=lambda r: sum(_safe_int(d.get("traffic")) + _safe_int(d.get("opportunities")) * 10 for d in r["domains"]), reverse=True)
+    recommendations.sort(key=lambda r: (1 if r.get("priority") == "high" else 0, _safe_int(r.get("traffic"))), reverse=True)
+    invalid.sort(key=lambda r: (r.get("domain", ""), r.get("url", "")))
+    return {
+        "domains": domains,
+        "types": type_matrix[:80],
+        "clusters": cluster_matrix[:100],
+        "recommendations": recommendations[:300],
+        "invalid": invalid[:200],
+    }
 
 
 def _answer_blocks_comparison(projects: list[_Project]) -> dict:
@@ -2272,6 +2359,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "entity_alignment": _entity_alignment_comparison(projects),
         "entity_coverage": _entity_coverage_comparison(projects),
         "information_gain": _information_gain_comparison(projects),
+        "structured_data_opportunities": _structured_data_opportunity_comparison(projects),
         "answer_blocks": _answer_blocks_comparison(projects),
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),

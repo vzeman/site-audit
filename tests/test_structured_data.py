@@ -18,6 +18,26 @@ def _page(url: str, schema_types=None, schema_blocks=None) -> ExtractedPage:
     )
 
 
+def _rich_page(url: str, title: str, headings: list[str], body: str, **kwargs) -> ExtractedPage:
+    return ExtractedPage(
+        url=url,
+        title=title,
+        description="Helpful page description.",
+        body=body,
+        word_count=len(body.split()),
+        language="en",
+        h1=title,
+        h1_count=1,
+        headings=headings,
+        headers_rich=[
+            {"level": 1, "text": title, "order": 0},
+            *[{"level": 2, "text": heading, "order": i + 1} for i, heading in enumerate(headings)],
+        ],
+        paragraphs=["Answer paragraph one.", "Answer paragraph two.", "Answer paragraph three."],
+        **kwargs,
+    )
+
+
 def test_extract_jsonld_blocks_with_graph_and_invalid_json() -> None:
     html = """
     <html><head>
@@ -86,6 +106,31 @@ def test_structured_data_payload_summarizes_coverage_and_missing_properties() ->
     assert report["missing_recommended"][0]["missing"] == [
         {"type": "Article", "missing": ["author"]}
     ]
+    assert report["summary"]["schema_opportunities"] >= 1
+
+
+def test_structured_data_opportunities_include_schema_evidence_and_google_reference() -> None:
+    url = "https://example.com/support/faq"
+    report = to_payload(analyze([
+        _rich_page(
+            url,
+            "Support FAQ",
+            ["What is live chat?", "How does routing work?", "Can I add automation?"],
+            "This FAQ answers common support automation questions with visible answers for every question.",
+        )
+    ], search_payload={
+        "organic_keywords": [
+            {"matched_url": url, "keyword": "support faq", "traffic": 25, "position": 2, "intents": ["informational"], "cluster_label": "support"}
+        ]
+    }))
+
+    faq = next(row for row in report["opportunities"] if row["schema_type"] == "FAQPage")
+    assert faq["target_url"] == url
+    assert faq["required_evidence"] == ["visible questions", "visible answers for each question"]
+    assert "visible questions" in faq["present_evidence"]
+    assert faq["guideline_url"].startswith("https://developers.google.com/search/docs/appearance/structured-data/")
+    assert faq["keyword_intents"] == ["informational"]
+    assert report["clusters"][0]["cluster"] == "support"
 
 
 def test_compare_leaderboard_includes_structured_data_metrics(tmp_path: Path) -> None:
