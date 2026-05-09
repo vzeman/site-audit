@@ -23,7 +23,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -555,16 +555,24 @@ def _link_quality(soup: BeautifulSoup, page_url: str) -> tuple[dict, list[dict]]
             internal += 1
         # Effective anchor (used by linkbuilding analysis)
         eff = text or title_attr or aria_label or img_alt or ""
-        if eff:
-            rows.append({
-                "anchor": eff[:200],
-                "has_text": bool(text),
-                "has_title": bool(title_attr),
-                "is_image_only": is_img and not text,
-                "is_internal": (href.startswith(("/", "#", "?")) or
-                                (href.startswith(("http://", "https://")) and host_root and
-                                 (urlparse(href).netloc[4:] if urlparse(href).netloc.startswith("www.") else urlparse(href).netloc) == host_root)),
-            })
+        target_url = urldefrag(urljoin(page_url, href))[0]
+        context_parent = a.find_parent(["p", "li", "h1", "h2", "h3", "h4", "td", "th", "section", "article"])
+        context_text = _clean(context_parent.get_text(" "))[:320] if context_parent else ""
+        rows.append({
+            "anchor": eff[:200],
+            "href": href[:500],
+            "target_url": target_url[:1000],
+            "context": context_text,
+            "has_text": bool(text),
+            "has_title": bool(title_attr),
+            "has_aria": bool(aria_label),
+            "is_empty": not bool(eff),
+            "is_image_only": is_img and not text,
+            "image_alt": img_alt[:200],
+            "is_internal": (href.startswith(("/", "#", "?")) or
+                            (href.startswith(("http://", "https://")) and host_root and
+                             (urlparse(href).netloc[4:] if urlparse(href).netloc.startswith("www.") else urlparse(href).netloc) == host_root)),
+        })
 
     counters = {
         "total": total,

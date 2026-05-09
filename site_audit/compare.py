@@ -480,6 +480,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "weak_internal_links", "label": "Weak/harmful links", "better": "low", "fmt": "int"},
             {"key": "high_priority_link_additions", "label": "High-priority additions", "better": "na", "fmt": "int"},
             {"key": "avg_link_addition_benefit", "label": "Addition benefit", "better": "high", "fmt": "0.0"},
+            {"key": "anchor_relevance_descriptive_rate", "label": "Anchor relevance", "better": "high", "fmt": "pct"},
+            {"key": "anchor_relevance_weak_links", "label": "Weak anchors", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -659,6 +661,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     twpr = ((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("summary", {}) or {}
     removal = ((proj.linkgraph or {}).get("link_removal_simulation") or {}).get("summary", {}) or {}
     addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {}).get("summary", {}) or {}
+    anchor_rel = ((proj.linkgraph or {}).get("anchor_relevance") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -710,6 +713,8 @@ def _leaderboard_row(proj: _Project) -> dict:
         "template_navigation_links": int(removal.get("template_navigation_links", 0)),
         "high_priority_link_additions": int(addition.get("high_priority", 0)),
         "avg_link_addition_benefit": float(addition.get("avg_expected_benefit", 0.0)),
+        "anchor_relevance_descriptive_rate": float(anchor_rel.get("descriptive_rate", 0.0)),
+        "anchor_relevance_weak_links": int(anchor_rel.get("weak_links", 0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2435,6 +2440,32 @@ def _link_addition_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _anchor_relevance_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    weak_links: list[dict] = []
+    directories: dict[str, dict[str, dict]] = defaultdict(dict)
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("anchor_relevance") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("weak_links") or []:
+            weak_links.append({"domain": proj.domain, **row})
+        for row in payload.get("by_target_directory") or []:
+            directory = row.get("target_directory") or row.get("label") or "unknown"
+            directories[directory][proj.domain] = {"domain": proj.domain, **row}
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for directory, values in directories.items():
+        matrix.append({
+            "directory": directory,
+            "domains": [values.get(domain, {"domain": domain, "target_directory": directory, "links": 0, "avg_score": 0.0, "descriptive_rate": 0.0, "weak_links": 0}) for domain in project_domains],
+        })
+    weak_links.sort(key=lambda r: _safe_float(r.get("score")))
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("weak_links")) for d in r["domains"]), reverse=True)
+    return {"domains": domains, "weak_links": weak_links[:400], "directories": matrix[:120]}
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2624,6 +2655,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "traffic_weighted_pagerank": _traffic_weighted_pagerank_comparison(projects),
         "link_removal_simulation": _link_removal_comparison(projects),
         "link_addition_simulation": _link_addition_comparison(projects),
+        "anchor_relevance": _anchor_relevance_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

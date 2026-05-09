@@ -32,6 +32,7 @@ from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_u
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
 from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
 from .ahrefs import write_semantic_cache as write_ahrefs_semantic_cache
+from .anchor_relevance import build_anchor_relevance
 from .answer_blocks import build_answer_blocks
 from .dataforseo import DataForSEOConfig, build_analysis as build_dataforseo_analysis
 from .dataforseo import fetch_snapshot as fetch_dataforseo_snapshot
@@ -1244,6 +1245,21 @@ def run(config: PipelineConfig) -> dict:
                 "  link addition simulation: %d high-priority · %.1f avg expected benefit",
                 addition_summary.get("high_priority", 0),
                 addition_summary.get("avg_expected_benefit", 0.0),
+            )
+        link_payload["anchor_relevance"] = build_anchor_relevance(
+            extracted_pages,
+            embeddings,
+            search_payload=ahrefs_data,
+            entities_payload=entities_data,
+            embedder=embedder,
+        )
+        anchor_summary = (link_payload.get("anchor_relevance") or {}).get("summary", {}) or {}
+        if anchor_summary.get("status") == "ok":
+            LOG.info(
+                "  anchor relevance: %.0f%% descriptive · %d weak · %d empty/image-only",
+                (anchor_summary.get("descriptive_rate", 0.0) or 0.0) * 100,
+                anchor_summary.get("weak_links", 0),
+                anchor_summary.get("empty_links", 0) + anchor_summary.get("image_only_links", 0),
             )
         link_payload["link_flow"] = link_flow_payload(
             link_result,

@@ -1563,6 +1563,9 @@
       <div id="audit-anchors" class="text-sm max-h-[28rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
+      <div id="anchor-relevance-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm my-4"></div>
+      <h4 class="text-sm font-semibold mb-2">Weak contextual anchors</h4>
+      <div id="anchor-relevance-weak" class="text-xs max-h-[34rem] overflow-y-auto"></div>
     </div>
 
     <!-- External links -->
@@ -5301,7 +5304,9 @@
     const lg = state.linkgraph || {};
     const block = document.getElementById('anchor-block');
     const rows = lg.anchor_analysis || [];
-    if (!rows.length) { block.style.display = 'none'; return; }
+    const relevance = lg.anchor_relevance || {};
+    if (!rows.length && !((relevance.weak_links || []).length)) { block.style.display = 'none'; return; }
+    block.style.display = '';
     document.getElementById('audit-anchors').innerHTML = rows.map(r => {
       const top = (r.top_anchors || []).map(a => `<span class="inline-block bg-gray-100 text-gray-700 text-xs px-1.5 py-0.5 rounded mr-1 mb-1">${escapeHtml(a.anchor)} <span class="text-gray-400">×${a.count}</span></span>`).join('');
       const generic = r.generic_anchor_share > 0 ? `<span class="text-orange-700">${(r.generic_anchor_share * 100).toFixed(0)}% generic</span>` : '';
@@ -5316,7 +5321,36 @@
           <div class="text-xs text-gray-500 mb-1">${generic}${mismatch}</div>
           <div>${top}</div>
         </div>`;
-    }).join('');
+    }).join('') || '<div class="text-gray-500">No target-level anchor analysis.</div>';
+    const s = relevance.summary || {};
+    const summaryEl = document.getElementById('anchor-relevance-summary');
+    if (summaryEl && s.total_internal_links) {
+      summaryEl.innerHTML =
+        card('Internal anchors', Number(s.total_internal_links || 0).toLocaleString(), 'scored links') +
+        card('Avg relevance', Number(s.avg_score || 0).toFixed(1), '0-100') +
+        card('Descriptive rate', `${((s.descriptive_rate || 0) * 100).toFixed(0)}%`, 'descriptive + acceptable') +
+        card('Weak anchors', Number(s.weak_links || 0).toLocaleString(), 'vague/mismatched/empty') +
+        card('Empty/image', Number((s.empty_links || 0) + (s.image_only_links || 0)).toLocaleString(), 'flagged separately');
+    }
+    const weakEl = document.getElementById('anchor-relevance-weak');
+    if (weakEl) {
+      weakEl.innerHTML = (relevance.weak_links || []).slice(0, 200).map(r => `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <span class="px-1.5 py-0.5 rounded ${r.label === 'empty' || r.label === 'image_only' ? 'bg-red-50 text-red-700' : r.label === 'mismatched' ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-700'}">${escapeHtml(r.label || '')}</span>
+            <span class="font-mono text-gray-600">${Number(r.score || 0).toFixed(1)}</span>
+          </div>
+          <div class="mt-1">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+            <span class="text-gray-400"> -> </span>
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a>
+          </div>
+          <div class="mt-1"><span class="text-gray-500">anchor:</span> <span class="font-mono bg-yellow-50 px-1 rounded">${escapeHtml(r.anchor || '(empty)')}</span> <span class="text-gray-500">suggest:</span> <span class="font-mono bg-green-50 px-1 rounded">${escapeHtml(r.suggested_anchor || '')}</span></div>
+          <div class="text-gray-500 mt-1">semantic ${Number(r.semantic_score || 0).toFixed(0)} · lexical ${(Number(r.lexical_overlap || 0) * 100).toFixed(0)}% · keyword ${(Number(r.keyword_overlap || 0) * 100).toFixed(0)}% · context ${(Number(r.context_overlap || 0) * 100).toFixed(0)}%</div>
+          ${r.context ? `<div class="text-gray-600 mt-1">${escapeHtml(r.context)}</div>` : ''}
+        </div>
+      `).join('') || '<div class="text-gray-500">No weak anchors found.</div>';
+    }
   }
 
   function renderExternal() {
