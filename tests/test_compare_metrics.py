@@ -86,7 +86,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":2,"opportunity_queries":0,"strong_blocks":6},"clusters":[{"label":"support","queries":4,"traffic":100,"strong_query_share":1,"avg_best_score":82,"opportunity_queries":0,"recommended_format":"","status":"strong"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":1,"paragraph_conflicts":2,"traffic_at_risk":15},"page_conflicts":[{"classification":"duplicate_competing_page","traffic_at_risk":15,"traffic":100,"label":"support","preferred_winner_url":"https://strong.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":2,"strong_patterns":1,"harmful_boilerplate":1},"groups":[{"classification":"strong_reusable_pattern","count":1,"attributed_traffic":50,"page_traffic_sum":100}]}',
-            "template_patterns.json": '{"summary":{"patterns":2,"recommendations":1,"segments_compared":1,"median_confidence":0.7},"patterns":[{"feature_key":"primary_cta","label":"Primary CTA","category":"conversion","observed_lift":1.2,"confidence":0.7,"sample_size":8,"affected_weak_pages":[{"url":"https://strong.example/weak","title":"Weak"}]}],"recommendations":[{"url":"https://strong.example/weak","missing_pattern":"Primary CTA","confidence":0.7,"observed_lift":1.2}]}',
+            "template_patterns.json": '{"summary":{"patterns":2,"recommendations":1,"segments_compared":1,"median_confidence":0.7},"patterns":[{"feature_key":"primary_cta","label":"Primary CTA","category":"conversion","page_type":"article","observed_lift":1.2,"confidence":0.7,"sample_size":8,"recommendation":"Add a primary CTA block after the main answer.","sample_urls":[{"url":"https://strong.example/a","title":"A"}],"affected_weak_pages":[{"url":"https://strong.example/weak","title":"Weak"}]}],"recommendations":[{"url":"https://strong.example/weak","title":"Weak","feature_key":"primary_cta","page_type":"article","missing_pattern":"Primary CTA","confidence":0.7,"observed_lift":1.2}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":10,"matched_traffic":1000,"matched_traffic_share":1,"top_pages_value_usd":250},"metrics":{"org_traffic":1200,"org_keywords":20,"org_keywords_1_3":5},"organic_keywords":[{"keyword":"support automation","cluster_label":"support","matched_url":"https://strong.example/a","page_title":"Support automation","position":1,"traffic":80,"volume":1000,"serp_features":["question"]}],"clusters":[{"key":"support","label":"support","traffic":100,"keyword_rows":1,"keywords_total":1,"top3_keywords":1,"top_pages":[{"matched_url":"https://strong.example/a","title":"Support automation"}],"top_keywords":[{"keyword":"support automation","traffic":80}]}]}',
         },
     )
@@ -121,7 +121,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":0,"opportunity_queries":5,"strong_blocks":1},"clusters":[{"label":"support","queries":3,"traffic":80,"strong_query_share":0,"avg_best_score":42,"opportunity_queries":3,"recommended_format":"faq","status":"gap"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":3,"paragraph_conflicts":4,"traffic_at_risk":90},"page_conflicts":[{"classification":"consolidation_candidate","traffic_at_risk":90,"traffic":120,"label":"support","preferred_winner_url":"https://weak.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":5,"strong_patterns":0,"harmful_boilerplate":4},"groups":[{"classification":"harmful_boilerplate","count":4,"attributed_traffic":0,"page_traffic_sum":0}]}',
-            "template_patterns.json": '{"summary":{"patterns":0,"recommendations":4,"segments_compared":1,"median_confidence":0},"patterns":[],"recommendations":[{"url":"https://weak.example/a","missing_pattern":"Primary CTA","confidence":0.6,"observed_lift":1.0}]}',
+            "template_patterns.json": '{"summary":{"patterns":0,"recommendations":4,"segments_compared":1,"median_confidence":0},"patterns":[],"recommendations":[{"url":"https://weak.example/a","title":"A","feature_key":"primary_cta","page_type":"article","missing_pattern":"Primary CTA","recommendation":"Add a primary CTA block after the main answer.","traffic":80,"keywords":3,"confidence":0.6,"observed_lift":1.0}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":3,"matched_traffic":100,"matched_traffic_share":0.5,"top_pages_value_usd":20},"metrics":{"org_traffic":150,"org_keywords":4,"org_keywords_1_3":0},"organic_keywords":[{"keyword":"support automation","cluster_label":"support","matched_url":"https://weak.example/a","page_title":"Support automation","position":8,"traffic":8,"volume":1000,"serp_features":["question"]}],"clusters":[{"key":"support","label":"support","traffic":8,"keyword_rows":1,"keywords_total":1,"top3_keywords":0,"top_pages":[{"matched_url":"https://weak.example/a","title":"Support automation"}],"top_keywords":[{"keyword":"support automation","traffic":8}]}]}',
         },
     )
@@ -153,6 +153,12 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["template_patterns"]["features"]
     assert payload["leaderboard"][0]["template_success_patterns"] == 2
     assert payload["leaderboard"][1]["template_pattern_recommendations"] == 4
+    assert payload["pattern_transplants"]["recommendations"]
+    assert payload["pattern_transplants"]["recommendations"][0]["source_domain"] == "strong.example"
+    assert payload["pattern_transplants"]["recommendations"][0]["target_domain"] == "weak.example"
+    assert payload["pattern_transplants"]["recommendations"][0]["pattern_type"] == "template"
+    assert payload["pattern_transplants"]["coverage"]
+    assert payload["pattern_transplants"]["domains"][1]["recommendations"] >= 1
     assert payload["structured_data_opportunities"]["types"]
     assert payload["structured_data_opportunities"]["clusters"]
     assert payload["leaderboard"][1]["schema_opportunities"] == 4
@@ -282,9 +288,9 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "source_pages": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "avg_contextual_impact": 40, "main_content_links": 1, "template_links": 1}],
                 },
                 "internal_link_patterns": {
-                    "summary": {"patterns": 0, "recommendations": 0, "avg_confidence": 0.0, "total_links": 2, "page_types_with_patterns": 0},
+                    "summary": {"patterns": 0, "recommendations": 1, "avg_confidence": 0.0, "total_links": 2, "page_types_with_patterns": 0},
                     "patterns": [],
-                    "recommendations": [],
+                    "recommendations": [{"pattern_id": "missing", "rule_key": "blog_post|product|keyword_phrase|main_content|cross_cluster|cross_directory|deeper|close", "source_url": beta_url, "source_title": "Automation tool", "source_page_type": "blog_post", "missing_pattern": "blog posts link to product pages", "recommended_action": "Add a contextual link from this blog post to the product page.", "suggested_anchor": "Automation tool", "suggested_targets": [{"url": "https://beta.example/product", "title": "Product", "traffic": 10, "keywords": 1}], "confidence": 0.5, "lift_score_difference": 12, "traffic": 15, "keywords": 2}],
                 },
                 "high_demand_low_link": {
                     "summary": {"demand_support_alignment": 0.88, "classified_top_pages": 1, "high_demand_low_support_pages": 0, "opportunity_pages": 0, "high_demand_low_support_traffic": 0, "opportunity_traffic": 0, "source_candidates": 0},
@@ -334,6 +340,7 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["leaderboard"][0]["internal_link_patterns"] == 1
     assert payload["internal_link_patterns"]["rules"][0]["domains"][0]["support_count"] == 3
     assert payload["internal_link_patterns"]["recommendations"][0]["domain"] == "alpha.example"
+    assert any(r["pattern_type"] == "internal_link" for r in payload["pattern_transplants"]["recommendations"])
     assert payload["leaderboard"][0]["demand_support_alignment"] == 0.42
     assert payload["leaderboard"][0]["high_demand_low_support_pages"] == 1
     assert payload["high_demand_low_link"]["opportunities"][0]["url"] == alpha_url

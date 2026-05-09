@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import hashlib
+import math
 import re
 import zipfile
 from collections import Counter, defaultdict
@@ -2671,6 +2672,265 @@ def _internal_link_patterns_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _pattern_transplant_payload(projects: list[_Project]) -> dict:
+    domains = [p.domain for p in projects]
+    pattern_domains: dict[str, dict[str, dict]] = defaultdict(dict)
+    pattern_meta: dict[str, dict] = {}
+    recommendations: list[dict] = []
+
+    template_recs: dict[str, dict[tuple[str, str], list[dict]]] = defaultdict(lambda: defaultdict(list))
+    template_coverage: dict[str, dict[str, dict]] = defaultdict(dict)
+    internal_recs: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    internal_coverage: dict[str, dict[str, dict]] = defaultdict(dict)
+
+    def pattern_token(value: object) -> str:
+        return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+    def template_key(feature: object, label: object, page_type: object) -> str:
+        token = pattern_token(feature) or pattern_token(label)
+        if not token:
+            return ""
+        return f"template::{token}::{page_type or ''}"
+
+    def template_tokens(*values: object) -> list[str]:
+        tokens: list[str] = []
+        for value in values:
+            token = pattern_token(value)
+            if token and token not in tokens:
+                tokens.append(token)
+        return tokens
+
+    for proj in projects:
+        for rec in (proj.template_patterns or {}).get("recommendations") or []:
+            page_type = rec.get("page_type") or ""
+            for token in template_tokens(rec.get("feature_key"), rec.get("missing_pattern"), rec.get("label")):
+                template_recs[proj.domain][(token, page_type)].append(rec)
+        for pattern in (proj.template_patterns or {}).get("patterns") or []:
+            key = template_key(pattern.get("feature_key"), pattern.get("label"), pattern.get("page_type"))
+            if not key:
+                continue
+            template_coverage[key][proj.domain] = pattern
+            pattern_meta.setdefault(key, {
+                "pattern_type": "template",
+                "label": pattern.get("label") or pattern.get("feature_key") or "Template pattern",
+                "page_type": pattern.get("page_type") or "",
+            })
+        for rec in (((proj.linkgraph or {}).get("internal_link_patterns") or {}).get("recommendations") or []):
+            key = rec.get("rule_key") or rec.get("pattern_rule_key") or ""
+            if not key:
+                # Older generated reports may not repeat the rule key on recs;
+                # keep pattern_id recommendations available for same-domain UI,
+                # but avoid cross-domain matching without the full rule.
+                continue
+            internal_recs[proj.domain][key].append(rec)
+        for pattern in (((proj.linkgraph or {}).get("internal_link_patterns") or {}).get("patterns") or []):
+            key = f"internal::{pattern.get('rule_key') or pattern.get('inferred_rule') or ''}"
+            if not key.strip(":"):
+                continue
+            internal_coverage[key][proj.domain] = pattern
+            pattern_meta.setdefault(key, {
+                "pattern_type": "internal_link",
+                "label": pattern.get("inferred_rule") or "Internal link pattern",
+                "source_page_type": pattern.get("source_page_type") or "",
+                "target_page_type": pattern.get("target_page_type") or "",
+            })
+
+    def add_coverage(pattern_key: str, domain: str, row: dict, pattern_type: str, label: str) -> None:
+        pattern_domains[pattern_key][domain] = {
+            "domain": domain,
+            "pattern_key": pattern_key,
+            "pattern_type": pattern_type,
+            "label": label,
+            "covered": True,
+            "confidence": _safe_float(row.get("confidence")),
+            "support_count": _safe_int(row.get("support_count") or row.get("sample_size")),
+            "recommendations": 0,
+        }
+
+    for key, by_domain in template_coverage.items():
+        meta = pattern_meta.get(key, {})
+        for domain, row in by_domain.items():
+            add_coverage(key, domain, row, "template", meta.get("label") or key)
+    for key, by_domain in internal_coverage.items():
+        meta = pattern_meta.get(key, {})
+        for domain, row in by_domain.items():
+            add_coverage(key, domain, row, "internal_link", meta.get("label") or key)
+
+    for source in projects:
+        source_template_patterns = (source.template_patterns or {}).get("patterns") or []
+        for pattern in source_template_patterns:
+            feature = pattern.get("feature_key") or pattern.get("label") or ""
+            label = pattern.get("label") or feature
+            tokens = template_tokens(pattern.get("feature_key"), label)
+            if not tokens:
+                continue
+            page_type = pattern.get("page_type") or ""
+            confidence = _safe_float(pattern.get("confidence"))
+            sample_size = _safe_int(pattern.get("sample_size"))
+            if confidence < 0.55 or sample_size < 2:
+                continue
+            pattern_key = f"template::{tokens[0]}::{page_type}"
+            for target in projects:
+                if target.domain == source.domain:
+                    continue
+                target_rows = []
+                seen_rows: set[tuple[str, str]] = set()
+                for token in tokens:
+                    candidate_rows = list(template_recs[target.domain].get((token, page_type), []))
+                    if page_type:
+                        candidate_rows.extend(template_recs[target.domain].get((token, ""), []))
+                    for candidate in candidate_rows:
+                        row_key = (str(candidate.get("url") or ""), str(candidate.get("missing_pattern") or candidate.get("feature_key") or ""))
+                        if row_key in seen_rows:
+                            continue
+                        seen_rows.add(row_key)
+                        target_rows.append(candidate)
+                for rec in target_rows[:8]:
+                    rec_page_type = rec.get("page_type") or page_type
+                    if page_type and rec_page_type and rec_page_type != page_type:
+                        continue
+                    target_traffic = _safe_int(rec.get("traffic"))
+                    lift = _safe_float(pattern.get("observed_lift"))
+                    domain_gap = 0 if target.domain in template_coverage.get(pattern_key, {}) else 1
+                    priority = min(100.0, confidence * 38.0 + min(24.0, math.log1p(target_traffic) * 4.0) + min(24.0, max(0.0, lift) * 12.0) + domain_gap * 14.0)
+                    recommendations.append({
+                        "pattern_type": "template",
+                        "pattern_key": pattern_key,
+                        "source_domain": source.domain,
+                        "target_domain": target.domain,
+                        "source_pattern": label,
+                        "source_evidence": {
+                            "confidence": confidence,
+                            "observed_lift": lift,
+                            "sample_size": sample_size,
+                            "sample_urls": (pattern.get("sample_urls") or [])[:5],
+                        },
+                        "target_url": rec.get("url") or "",
+                        "target_title": rec.get("title") or rec.get("url") or "",
+                        "target_page_type": rec_page_type,
+                        "target_traffic": target_traffic,
+                        "target_keywords": _safe_int(rec.get("keywords")),
+                        "concrete_change": rec.get("recommendation") or pattern.get("recommendation") or f"Add the {label} pattern to this page.",
+                        "suggested_heading": rec.get("missing_pattern") or label,
+                        "suggested_anchor": "",
+                        "expected_benefit_components": {
+                            "source_confidence": round(confidence, 3),
+                            "source_lift": round(lift, 3),
+                            "target_traffic": target_traffic,
+                            "domain_pattern_gap": domain_gap,
+                        },
+                        "priority_score": round(priority, 2),
+                        "confidence": round(confidence, 3),
+                    })
+
+        source_internal_patterns = (((source.linkgraph or {}).get("internal_link_patterns") or {}).get("patterns") or [])
+        for pattern in source_internal_patterns:
+            rule_key = pattern.get("rule_key") or ""
+            if not rule_key:
+                continue
+            confidence = _safe_float(pattern.get("confidence"))
+            support = _safe_int(pattern.get("support_count"))
+            if confidence < 0.55 or support < 2:
+                continue
+            pattern_key = f"internal::{rule_key}"
+            for target in projects:
+                if target.domain == source.domain:
+                    continue
+                for rec in internal_recs[target.domain].get(rule_key, [])[:8]:
+                    if pattern.get("source_page_type") and rec.get("source_page_type") and pattern.get("source_page_type") != rec.get("source_page_type"):
+                        continue
+                    target_traffic = _safe_int(rec.get("traffic"))
+                    domain_gap = 0 if target.domain in internal_coverage.get(pattern_key, {}) else 1
+                    lift = _safe_float(pattern.get("lift_score_difference"))
+                    priority = min(100.0, confidence * 40.0 + min(22.0, support * 3.0) + min(20.0, math.log1p(target_traffic) * 4.0) + min(10.0, max(0.0, lift) / 4.0) + domain_gap * 8.0)
+                    first_target = (rec.get("suggested_targets") or [{}])[0]
+                    recommendations.append({
+                        "pattern_type": "internal_link",
+                        "pattern_key": pattern_key,
+                        "source_domain": source.domain,
+                        "target_domain": target.domain,
+                        "source_pattern": pattern.get("inferred_rule") or rule_key,
+                        "source_evidence": {
+                            "confidence": confidence,
+                            "support_count": support,
+                            "top_rate": _safe_float(pattern.get("top_rate")),
+                            "weak_rate": _safe_float(pattern.get("weak_rate")),
+                            "sample_links": (pattern.get("sample_links") or [])[:5],
+                        },
+                        "target_url": rec.get("source_url") or "",
+                        "target_title": rec.get("source_title") or rec.get("source_url") or "",
+                        "target_page_type": rec.get("source_page_type") or pattern.get("source_page_type") or "",
+                        "target_traffic": target_traffic,
+                        "target_keywords": _safe_int(rec.get("keywords")),
+                        "concrete_change": rec.get("recommended_action") or "Add a contextual internal link that follows the source pattern.",
+                        "suggested_heading": "",
+                        "suggested_anchor": rec.get("suggested_anchor") or "",
+                        "suggested_target_url": first_target.get("url") or "",
+                        "suggested_target_title": first_target.get("title") or "",
+                        "expected_benefit_components": {
+                            "source_confidence": round(confidence, 3),
+                            "support_count": support,
+                            "target_traffic": target_traffic,
+                            "domain_pattern_gap": domain_gap,
+                        },
+                        "priority_score": round(priority, 2),
+                        "confidence": round(confidence, 3),
+                    })
+
+    rec_counts = Counter(r["pattern_key"] for r in recommendations)
+    rec_counts_by_domain = Counter((r["pattern_key"], r.get("target_domain") or "") for r in recommendations)
+    coverage_rows = []
+    for pattern_key, meta in pattern_meta.items():
+        label = meta.get("label") or pattern_key
+        ptype = meta.get("pattern_type") or ("internal_link" if pattern_key.startswith("internal::") else "template")
+        coverage_rows.append({
+            "pattern_key": pattern_key,
+            "label": label,
+            "pattern_type": ptype,
+            "recommendations": rec_counts.get(pattern_key, 0),
+            "domains": [
+                {
+                    **pattern_domains.get(pattern_key, {}).get(domain, {
+                        "domain": domain,
+                        "pattern_key": pattern_key,
+                        "pattern_type": ptype,
+                        "label": label,
+                        "covered": False,
+                        "confidence": 0.0,
+                        "support_count": 0,
+                    }),
+                    "recommendations": rec_counts_by_domain.get((pattern_key, domain), 0),
+                }
+                for domain in domains
+            ],
+        })
+    coverage_rows.sort(key=lambda r: (sum(1 for d in r["domains"] if d.get("covered")), rec_counts.get(r["pattern_key"], 0)), reverse=True)
+    recommendations.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("confidence"))), reverse=True)
+    covered_by_domain = {
+        domain: sum(1 for row in coverage_rows if any(d.get("domain") == domain and d.get("covered") for d in row["domains"]))
+        for domain in domains
+    }
+    total_patterns = len(coverage_rows)
+    return {
+        "summary": {
+            "patterns": total_patterns,
+            "recommendations": len(recommendations),
+            "domains": len(domains),
+        },
+        "domains": [
+            {
+                "domain": domain,
+                "covered_patterns": covered_by_domain.get(domain, 0),
+                "coverage_rate": round(covered_by_domain.get(domain, 0) / max(1, total_patterns), 4),
+                "recommendations": sum(1 for r in recommendations if r.get("target_domain") == domain),
+            }
+            for domain in domains
+        ],
+        "coverage": coverage_rows[:180],
+        "recommendations": recommendations[:400],
+    }
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2864,6 +3124,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "contextual_link_impact": _contextual_link_comparison(projects),
         "high_demand_low_link": _high_demand_low_link_comparison(projects),
         "internal_link_patterns": _internal_link_patterns_comparison(projects),
+        "pattern_transplants": _pattern_transplant_payload(projects),
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [

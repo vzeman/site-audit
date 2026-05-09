@@ -731,6 +731,18 @@
       <div id="internal-link-patterns-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="pattern-transplants-section">
+      <div class="mb-3">
+        <h2 class="text-xl font-semibold">Pattern transplant recommendations</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Proven template and internal-link patterns matched to similar pages on domains where the same pattern is missing.
+        </p>
+      </div>
+      <div id="pattern-transplant-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
+      <div id="pattern-transplant-board" class="grid xl:grid-cols-2 gap-4"></div>
+      <div id="pattern-transplant-coverage" class="w-full overflow-x-auto mt-5"></div>
+    </section>
+
     <!-- Distribution overlays -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -3057,6 +3069,155 @@
     container.appendChild(detail);
   }
   renderInternalLinkPatternsCompare();
+
+  function renderPatternTransplants() {
+    const section = document.getElementById('pattern-transplants-section');
+    const summaryEl = document.getElementById('pattern-transplant-summary');
+    const boardEl = document.getElementById('pattern-transplant-board');
+    const coverageEl = document.getElementById('pattern-transplant-coverage');
+    const payload = data.pattern_transplants || {};
+    const recommendations = payload.recommendations || [];
+    const coverage = payload.coverage || [];
+    if (!recommendations.length && !coverage.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const summary = payload.summary || {};
+    const domains = data.domains || [];
+    const domainStats = (payload.domains || []).slice().sort((a, b) => Number(b.coverage_rate || 0) - Number(a.coverage_rate || 0));
+    const bestDomain = domainStats[0] || {};
+    const summaryCards = [
+      { label: 'Source patterns', value: Number(summary.patterns || 0).toLocaleString(), hint: 'usable evidence' },
+      { label: 'Recommendations', value: Number(summary.recommendations || 0).toLocaleString(), hint: 'target changes' },
+      { label: 'Domains', value: Number(summary.domains || domains.length || 0).toLocaleString(), hint: 'compared' },
+      { label: 'Best coverage', value: bestDomain.domain || '-', hint: `${Math.round(Number(bestDomain.coverage_rate || 0) * 100)}%` },
+    ];
+    const domainCards = domainStats.map(row => `
+      <div class="border border-gray-200 rounded-md p-3 bg-white">
+        <div class="font-medium text-gray-900 truncate">${escapeHtml(row.domain || '')}</div>
+        <div class="text-lg font-semibold mt-1">${Math.round(Number(row.coverage_rate || 0) * 100)}%</div>
+        <div class="h-1.5 bg-gray-100 rounded mt-2 overflow-hidden">
+          <div class="h-full bg-blue-600" style="width:${Math.min(100, Math.max(0, Number(row.coverage_rate || 0) * 100))}%"></div>
+        </div>
+        <div class="text-gray-500 mt-2">${Number(row.covered_patterns || 0).toLocaleString()} covered · ${Number(row.recommendations || 0).toLocaleString()} fixes</div>
+      </div>
+    `).join('');
+    summaryEl.innerHTML = summaryCards.map(card => `
+      <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
+        <div class="uppercase tracking-wide text-[10px] text-gray-500">${escapeHtml(card.label)}</div>
+        <div class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(card.value)}</div>
+        <div class="text-gray-500 mt-1">${escapeHtml(card.hint)}</div>
+      </div>
+    `).join('') + domainCards;
+
+    const byPattern = d3.group(recommendations.slice(0, 160), d => d.pattern_key || d.source_pattern || d.pattern_type || 'pattern');
+    const groups = Array.from(byPattern, ([key, rows]) => ({
+      key,
+      rows: rows.slice().sort((a, b) => Number(b.priority_score || 0) - Number(a.priority_score || 0)),
+      maxPriority: d3.max(rows, r => Number(r.priority_score || 0)) || 0,
+    })).sort((a, b) => b.maxPriority - a.maxPriority);
+
+    const sourceExample = r => {
+      const evidence = r.source_evidence || {};
+      const sampleUrl = (evidence.sample_urls || [])[0] || {};
+      const sampleLink = (evidence.sample_links || [])[0] || {};
+      if (sampleUrl.url) {
+        return `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(sampleUrl.url)}" target="_blank" rel="noopener">${escapeHtml(sampleUrl.title || sampleUrl.url)}</a>`;
+      }
+      if (sampleLink.source_url || sampleLink.target_url) {
+        return `<span>${escapeHtml(sampleLink.source_title || sampleLink.source_url || 'source')} → ${escapeHtml(sampleLink.target_title || sampleLink.target_url || 'target')}</span>`;
+      }
+      return '<span class="text-gray-500">No sample stored.</span>';
+    };
+
+    const componentsHtml = components => Object.entries(components || {}).map(([key, value]) => `
+      <span class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700">${escapeHtml(key.replaceAll('_', ' '))}: ${escapeHtml(value)}</span>
+    `).join('');
+
+    boardEl.innerHTML = groups.slice(0, 18).map(group => {
+      const first = group.rows[0] || {};
+      const typeLabel = first.pattern_type === 'internal_link' ? 'Internal link' : 'Template';
+      const rowsHtml = group.rows.slice(0, 6).map(r => `
+        <div class="border-t border-gray-100 py-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-[11px] uppercase tracking-wide text-gray-500">${escapeHtml(r.source_domain || '')} → ${escapeHtml(r.target_domain || '')}</div>
+              <a class="font-medium text-blue-700 hover:underline break-all" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url || 'Target page')}</a>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-sm font-semibold">${Number(r.priority_score || 0).toFixed(0)}</div>
+              <div class="text-[10px] text-gray-500">priority</div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-3 mt-3 text-xs">
+            <div class="bg-gray-50 rounded-md p-3">
+              <div class="font-semibold text-gray-700 mb-1">Source evidence</div>
+              <div>${sourceExample(r)}</div>
+              <div class="text-gray-500 mt-1">confidence ${Number(r.confidence || 0).toFixed(2)} · traffic ${Number(r.target_traffic || 0).toLocaleString()} · keywords ${Number(r.target_keywords || 0).toLocaleString()}</div>
+            </div>
+            <div class="bg-blue-50 rounded-md p-3">
+              <div class="font-semibold text-gray-700 mb-1">Concrete change</div>
+              <div>${escapeHtml(r.concrete_change || '')}</div>
+              ${(r.suggested_heading || r.suggested_anchor || r.suggested_target_url) ? `
+                <div class="text-gray-600 mt-2">
+                  ${r.suggested_heading ? `Heading: ${escapeHtml(r.suggested_heading)}` : ''}
+                  ${r.suggested_anchor ? `Anchor: ${escapeHtml(r.suggested_anchor)}` : ''}
+                  ${r.suggested_target_url ? `Target: ${escapeHtml(r.suggested_target_title || r.suggested_target_url)}` : ''}
+                </div>` : ''}
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-1.5 mt-2">${componentsHtml(r.expected_benefit_components)}</div>
+        </div>
+      `).join('');
+      return `
+        <div class="border border-gray-200 rounded-md bg-white p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-[11px] uppercase tracking-wide text-gray-500">${escapeHtml(typeLabel)} pattern</div>
+              <h3 class="font-semibold text-gray-900">${escapeHtml(first.source_pattern || group.key)}</h3>
+            </div>
+            <div class="text-xs rounded bg-gray-100 px-2 py-1 text-gray-700">${Number(group.rows.length || 0).toLocaleString()} targets</div>
+          </div>
+          ${rowsHtml}
+        </div>
+      `;
+    }).join('') || '<div class="text-sm text-gray-500">No transplant recommendations.</div>';
+
+    const visibleCoverage = coverage.slice(0, 60);
+    coverageEl.innerHTML = visibleCoverage.length ? `
+      <h3 class="font-semibold text-sm mb-2">Pattern coverage per domain</h3>
+      <table class="min-w-full text-xs border border-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="text-left p-2 border-b border-gray-200">Pattern</th>
+            <th class="text-left p-2 border-b border-gray-200">Type</th>
+            ${domains.map(domain => `<th class="text-left p-2 border-b border-gray-200">${escapeHtml(domain)}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${visibleCoverage.map(row => `
+            <tr class="border-t border-gray-100">
+              <td class="p-2 max-w-xs">
+                <div class="font-medium truncate">${escapeHtml(row.label || row.pattern_key || '')}</div>
+                <div class="text-gray-500">${Number(row.recommendations || 0).toLocaleString()} recommendations</div>
+              </td>
+              <td class="p-2 text-gray-600">${escapeHtml(row.pattern_type === 'internal_link' ? 'Internal link' : 'Template')}</td>
+              ${domains.map(domain => {
+                const cell = (row.domains || []).find(d => d.domain === domain) || {};
+                const recs = Number(cell.recommendations || 0);
+                const covered = Boolean(cell.covered);
+                const cls = covered ? 'bg-green-50 text-green-800' : recs ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500';
+                const label = covered ? 'Covered' : recs ? `Gap · ${recs}` : 'No evidence';
+                return `<td class="p-2"><span class="inline-flex rounded px-2 py-1 ${cls}">${escapeHtml(label)}</span></td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '';
+  }
+  renderPatternTransplants();
 
   // ============================================================
   // Combined scatter
