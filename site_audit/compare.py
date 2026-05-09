@@ -476,6 +476,9 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "authority_traffic_alignment", "label": "Authority-demand alignment", "better": "high", "fmt": "pct"},
             {"key": "high_traffic_low_authority_pages", "label": "Underserved search pages", "better": "low", "fmt": "int"},
             {"key": "authority_without_demand_pages", "label": "Authority without demand", "better": "low", "fmt": "int"},
+            {"key": "demand_support_alignment", "label": "Demand/support alignment", "better": "high", "fmt": "pct"},
+            {"key": "high_demand_low_support_pages", "label": "High-demand low-support", "better": "low", "fmt": "int"},
+            {"key": "high_demand_low_support_traffic", "label": "Low-support traffic", "better": "low", "fmt": "int"},
             {"key": "critical_internal_links", "label": "Critical links", "better": "na", "fmt": "int"},
             {"key": "weak_internal_links", "label": "Weak/harmful links", "better": "low", "fmt": "int"},
             {"key": "high_priority_link_additions", "label": "High-priority additions", "better": "na", "fmt": "int"},
@@ -668,6 +671,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     anchor_rel = ((proj.linkgraph or {}).get("anchor_relevance") or {}).get("summary", {}) or {}
     context_links = ((proj.linkgraph or {}).get("contextual_link_impact") or {}).get("summary", {}) or {}
     hubs = ((proj.linkgraph or {}).get("hub_bottlenecks") or {}).get("summary", {}) or {}
+    hdl = ((proj.linkgraph or {}).get("high_demand_low_link") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -714,6 +718,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "high_traffic_low_authority_pages": int(twpr.get("high_traffic_low_authority_pages", 0)),
         "authority_without_demand_pages": int(twpr.get("high_authority_low_value_pages", 0)),
         "orphan_traffic_share": float(twpr.get("orphan_traffic_share", 0.0)),
+        "demand_support_alignment": float(hdl.get("demand_support_alignment", 0.0)),
+        "high_demand_low_support_pages": int(hdl.get("high_demand_low_support_pages", 0)),
+        "high_demand_low_support_traffic": int(hdl.get("high_demand_low_support_traffic", 0)),
         "critical_internal_links": int(removal.get("critical_links", 0)),
         "weak_internal_links": int(removal.get("irrelevant_links", 0)) + int(removal.get("potentially_harmful_links", 0)),
         "template_navigation_links": int(removal.get("template_navigation_links", 0)),
@@ -2514,6 +2521,68 @@ def _hub_bottleneck_comparison(projects: list[_Project]) -> dict:
     return {"domains": domains, "risks": pages[:400], "cluster_edges": cluster_edges[:300]}
 
 
+def _high_demand_low_link_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    pages: list[dict] = []
+    opportunities: list[dict] = []
+    directories: dict[str, dict[str, dict]] = defaultdict(dict)
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("high_demand_low_link") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("pages") or []:
+            item = {"domain": proj.domain, **row}
+            pages.append(item)
+            if row.get("classification") in {"high_demand_low_support", "demand_support_gap"}:
+                opportunities.append(item)
+        for row in payload.get("directories") or []:
+            directory = row.get("directory") or row.get("label") or "unknown"
+            directories[directory][proj.domain] = {"domain": proj.domain, **row}
+        for row in payload.get("clusters") or []:
+            cluster = row.get("cluster") or row.get("label") or "unknown"
+            clusters[cluster][proj.domain] = {"domain": proj.domain, **row}
+
+    project_domains = [p.domain for p in projects]
+
+    def matrix_rows(groups: dict[str, dict[str, dict]], key: str) -> list[dict]:
+        rows = []
+        for name, values in groups.items():
+            rows.append({
+                key: name,
+                "label": name,
+                "domains": [
+                    values.get(domain, {
+                        "domain": domain,
+                        key: name,
+                        "label": name,
+                        "pages": 0,
+                        "classified_top_pages": 0,
+                        "traffic": 0,
+                        "opportunities": 0,
+                        "opportunity_traffic": 0,
+                        "avg_demand_score": 0.0,
+                        "avg_support_score": 0.0,
+                        "avg_demand_support_gap": 0.0,
+                    })
+                    for domain in project_domains
+                ],
+            })
+        rows.sort(key=lambda r: sum(_safe_int(d.get("opportunity_traffic")) for d in r["domains"]), reverse=True)
+        return rows
+
+    pages.sort(key=lambda r: (_safe_float(r.get("opportunity_score")), _safe_int(r.get("traffic"))), reverse=True)
+    opportunities.sort(key=lambda r: (_safe_float(r.get("opportunity_score")), _safe_int(r.get("traffic"))), reverse=True)
+    return {
+        "domains": domains,
+        "pages": pages[:900],
+        "opportunities": opportunities[:400],
+        "directories": matrix_rows(directories, "directory")[:120],
+        "clusters": matrix_rows(clusters, "cluster")[:120],
+    }
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2705,6 +2774,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "link_addition_simulation": _link_addition_comparison(projects),
         "anchor_relevance": _anchor_relevance_comparison(projects),
         "contextual_link_impact": _contextual_link_comparison(projects),
+        "high_demand_low_link": _high_demand_low_link_comparison(projects),
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [

@@ -1164,6 +1164,386 @@ def hub_bottleneck_payload(
     }
 
 
+def _ranking_opportunity(position: int, volume: int) -> float:
+    if position <= 0:
+        return 0.0
+    weight = math.log1p(max(0, volume))
+    if position <= 3:
+        return weight * 0.25
+    if position <= 10:
+        return weight * 1.0
+    if position <= 20:
+        return weight * 0.65
+    if position <= 50:
+        return weight * 0.25
+    return weight * 0.08
+
+
+def _high_demand_search_lookup(pages, search_payload: dict | None) -> dict[str, dict]:
+    by_url = {_canonical_url(p.url): p.url for p in pages}
+    out: dict[str, dict] = defaultdict(lambda: {
+        "traffic": 0,
+        "keyword_traffic": 0,
+        "keywords": 0,
+        "volume": 0,
+        "ranking_opportunity": 0.0,
+        "position_weight": 0.0,
+        "weighted_position_sum": 0.0,
+        "top_keyword": "",
+        "top_keyword_position": None,
+        "top_keyword_volume": 0,
+        "cluster": "",
+        "top_keywords": [],
+    })
+
+    def match(row: dict) -> str | None:
+        for key in ("matched_url", "url"):
+            canonical = _canonical_url(row.get(key) or "")
+            if canonical in by_url:
+                return by_url[canonical]
+        return None
+
+    def add_keyword(ctx: dict, keyword: str, traffic: int, volume: int, position: int) -> None:
+        if keyword and len(ctx["top_keywords"]) < 18:
+            ctx["top_keywords"].append({
+                "keyword": keyword,
+                "traffic": traffic,
+                "volume": volume,
+                "position": position or None,
+            })
+        ctx["volume"] += volume
+        ctx["ranking_opportunity"] += _ranking_opportunity(position, volume)
+        weight = max(1.0, float(traffic), math.sqrt(max(0, volume)))
+        if position > 0:
+            ctx["position_weight"] += weight
+            ctx["weighted_position_sum"] += position * weight
+        if traffic > _safe_int(ctx.get("_top_keyword_traffic", -1)):
+            ctx["top_keyword"] = keyword or ctx.get("top_keyword") or ""
+            ctx["top_keyword_position"] = position or ctx.get("top_keyword_position")
+            ctx["top_keyword_volume"] = volume or _safe_int(ctx.get("top_keyword_volume"))
+            ctx["_top_keyword_traffic"] = traffic
+
+    for row in (search_payload or {}).get("top_pages") or []:
+        url = match(row)
+        if not url:
+            continue
+        ctx = out[url]
+        traffic = _safe_int(row.get("traffic"))
+        keywords = _safe_int(row.get("keywords"))
+        volume = _safe_int(row.get("top_keyword_volume") or row.get("volume"))
+        position = _safe_int(row.get("top_keyword_position") or row.get("position"))
+        ctx["traffic"] = max(_safe_int(ctx.get("traffic")), traffic)
+        ctx["keywords"] = max(_safe_int(ctx.get("keywords")), keywords)
+        if row.get("cluster_label") or row.get("cluster"):
+            ctx["cluster"] = row.get("cluster_label") or row.get("cluster")
+        if row.get("top_keyword"):
+            add_keyword(ctx, str(row.get("top_keyword") or ""), traffic, volume, position)
+
+    for row in (search_payload or {}).get("organic_keywords") or []:
+        url = match(row)
+        if not url:
+            continue
+        ctx = out[url]
+        traffic = _safe_int(row.get("traffic"))
+        volume = _safe_int(row.get("volume") or row.get("search_volume"))
+        position = _safe_int(row.get("position"))
+        ctx["keyword_traffic"] += traffic
+        ctx["keywords"] = _safe_int(ctx.get("keywords")) + 1
+        if row.get("cluster_label") or row.get("cluster"):
+            ctx["cluster"] = row.get("cluster_label") or row.get("cluster")
+        add_keyword(ctx, str(row.get("keyword") or ""), traffic, volume, position)
+
+    for ctx in out.values():
+        if not _safe_int(ctx.get("traffic")):
+            ctx["traffic"] = _safe_int(ctx.get("keyword_traffic"))
+        weight = _safe_float(ctx.get("position_weight"))
+        ctx["avg_position"] = round(_safe_float(ctx.get("weighted_position_sum")) / weight, 2) if weight else None
+        ctx["top_keywords"] = sorted(
+            ctx.get("top_keywords") or [],
+            key=lambda r: (_safe_int(r.get("traffic")), _safe_int(r.get("volume"))),
+            reverse=True,
+        )[:12]
+        ctx.pop("_top_keyword_traffic", None)
+        ctx.pop("keyword_traffic", None)
+        ctx.pop("position_weight", None)
+        ctx.pop("weighted_position_sum", None)
+    return out
+
+
+def _score_scale(values: dict[str, float]) -> dict[str, float]:
+    vmax = max((float(v) for v in values.values()), default=0.0)
+    if vmax <= 0:
+        return {k: 0.0 for k in values}
+    return {k: max(0.0, float(v)) / vmax for k, v in values.items()}
+
+
+def _demand_support_label(demand_score: float, support_score: float) -> str:
+    if demand_score >= 65 and support_score < 45:
+        return "high_demand_low_support"
+    if demand_score >= 55 and support_score < 60:
+        return "demand_support_gap"
+    if demand_score >= 55:
+        return "supported_demand"
+    if support_score >= 70 and demand_score < 35:
+        return "over_supported_low_demand"
+    if demand_score < 35 and support_score < 35:
+        return "low_demand_low_support"
+    return "balanced"
+
+
+def high_demand_low_link_payload(
+    result: LinkGraphResult,
+    pages,
+    *,
+    search_payload: dict | None = None,
+    traffic_authority: dict | None = None,
+    link_addition: dict | None = None,
+    page_types: dict | None = None,
+) -> dict:
+    if not result.graph:
+        return {"summary": {"status": "no_graph", "total_pages": 0}, "pages": [], "opportunities": []}
+
+    page_by_url = {p.url: p for p in pages}
+    type_by_url = _page_type_lookup(page_types)
+    search = _high_demand_search_lookup(pages, search_payload)
+    authority_by_url = {
+        row.get("url"): row
+        for row in (traffic_authority or {}).get("pages", [])
+        if row.get("url")
+    }
+    reverse: dict[str, list[str]] = defaultdict(list)
+    for src, targets in result.graph.items():
+        for tgt in targets:
+            reverse[tgt].append(src)
+
+    def cluster_for(url: str) -> str:
+        page = page_by_url.get(url)
+        auth = authority_by_url.get(url) or {}
+        ctx = search.get(url) or {}
+        return str(auth.get("cluster") or ctx.get("cluster") or (page.section if page else "") or _directory(url))
+
+    inbound_anchor_quality: dict[str, list[float]] = defaultdict(list)
+    inbound_context_quality: dict[str, list[float]] = defaultdict(list)
+    contextual_counts: Counter[str] = Counter()
+    for (src, tgt), anchor_quality in result.edge_anchor_quality.items():
+        inbound_anchor_quality[tgt].append(_safe_float(anchor_quality))
+        relevance = _safe_float(result.edge_contextual_relevance.get((src, tgt), 0.5))
+        inbound_context_quality[tgt].append(relevance)
+        if anchor_quality >= 0.58 and relevance >= 0.62:
+            contextual_counts[tgt] += 1
+
+    urls = list(result.graph.keys())
+    traffic_n = _score_scale({url: math.log1p(_safe_int((search.get(url) or {}).get("traffic"))) for url in urls})
+    keyword_n = _score_scale({url: math.sqrt(_safe_int((search.get(url) or {}).get("keywords"))) for url in urls})
+    volume_n = _score_scale({url: math.log1p(_safe_int((search.get(url) or {}).get("volume"))) for url in urls})
+    ranking_n = _score_scale({url: _safe_float((search.get(url) or {}).get("ranking_opportunity")) for url in urls})
+
+    base_rows: list[dict] = []
+    for url in urls:
+        page = page_by_url.get(url)
+        ctx = search.get(url) or {}
+        auth = authority_by_url.get(url) or {}
+        in_degree = _safe_int(result.in_degree.get(url))
+        avg_anchor = sum(inbound_anchor_quality.get(url, [])) / max(1, len(inbound_anchor_quality.get(url, [])))
+        avg_context = sum(inbound_context_quality.get(url, [])) / max(1, len(inbound_context_quality.get(url, [])))
+        contextual_support = avg_context * min(1.0, contextual_counts.get(url, 0) / 4.0)
+        inlink_support = min(1.0, math.log1p(in_degree) / math.log1p(12))
+        demand_score = (
+            traffic_n.get(url, 0.0) * 42.0
+            + keyword_n.get(url, 0.0) * 18.0
+            + volume_n.get(url, 0.0) * 22.0
+            + ranking_n.get(url, 0.0) * 18.0
+        )
+        support_score = (
+            inlink_support * 26.0
+            + _safe_float(auth.get("weighted_pagerank_percentile")) * 28.0
+            + _safe_float(auth.get("link_flow_percentile")) * 16.0
+            + avg_anchor * min(1.0, in_degree / 4.0) * 15.0
+            + contextual_support * 15.0
+        )
+        gap = max(0.0, demand_score - support_score)
+        label = _demand_support_label(demand_score, support_score)
+        row = {
+            "url": url,
+            "title": page.title if page else url,
+            "section": page.section if page else "",
+            "directory": _directory(url),
+            "cluster": cluster_for(url),
+            "page_type": type_by_url.get(_canonical_url(url), auth.get("page_type", "")),
+            "traffic": _safe_int(ctx.get("traffic") if ctx else auth.get("traffic")),
+            "keywords": _safe_int(ctx.get("keywords") if ctx else auth.get("keywords")),
+            "volume": _safe_int(ctx.get("volume")),
+            "top_keyword": ctx.get("top_keyword") or auth.get("top_keyword") or "",
+            "top_keyword_position": ctx.get("top_keyword_position") or auth.get("top_keyword_position"),
+            "top_keyword_volume": _safe_int(ctx.get("top_keyword_volume")),
+            "avg_position": ctx.get("avg_position"),
+            "ranking_opportunity": round(_safe_float(ctx.get("ranking_opportunity")), 4),
+            "top_keywords": ctx.get("top_keywords") or [],
+            "demand_score": round(demand_score, 2),
+            "support_score": round(max(0.0, min(100.0, support_score)), 2),
+            "demand_support_gap": round(gap, 2),
+            "classification": label,
+            "priority": "high" if label == "high_demand_low_support" else "medium" if label == "demand_support_gap" else "low",
+            "in_degree": in_degree,
+            "out_degree": _safe_int(result.out_degree.get(url)),
+            "click_depth": int(result.click_depth.get(url, -1)) if url in result.click_depth else None,
+            "pagerank": round(float(result.pagerank.get(url, 0.0)), 8),
+            "weighted_pagerank_percentile": _safe_float(auth.get("weighted_pagerank_percentile")),
+            "traffic_percentile": _safe_float(auth.get("traffic_percentile")),
+            "link_flow_percentile": _safe_float(auth.get("link_flow_percentile")),
+            "avg_inbound_anchor_quality": round(avg_anchor, 4),
+            "avg_inbound_contextual_relevance": round(avg_context, 4),
+            "contextual_inlinks": contextual_counts.get(url, 0),
+            "incoming_clusters": sorted({cluster_for(src) for src in reverse.get(url, []) if cluster_for(src)}),
+        }
+        row["opportunity_score"] = round(gap * (1.0 + math.log1p(row["traffic"]) / 6.0), 2)
+        base_rows.append(row)
+
+    row_by_url = {row["url"]: row for row in base_rows}
+    source_candidates_by_target: dict[str, list[dict]] = defaultdict(list)
+    for rec in (link_addition or {}).get("recommendations") or []:
+        src = rec.get("source_url") or ""
+        tgt = rec.get("target_url") or ""
+        if src not in row_by_url or tgt not in row_by_url:
+            continue
+        src_row = row_by_url[src]
+        source_candidates_by_target[tgt].append({
+            "source_url": src,
+            "source_title": rec.get("source_title") or src_row.get("title") or src,
+            "source_cluster": src_row.get("cluster") or cluster_for(src),
+            "source_directory": src_row.get("directory") or _directory(src),
+            "source_page_type": src_row.get("page_type") or "",
+            "source_support_score": src_row.get("support_score", 0.0),
+            "paragraph_index": rec.get("paragraph_index"),
+            "paragraph_excerpt": rec.get("paragraph_excerpt") or "",
+            "suggested_anchor": rec.get("suggested_anchor") or row_by_url[tgt].get("top_keyword") or row_by_url[tgt].get("title") or "",
+            "expected_benefit_score": _safe_float(rec.get("expected_benefit_score")),
+            "priority": rec.get("priority") or "",
+        })
+
+    support_sources = sorted(base_rows, key=lambda r: (_safe_float(r.get("support_score")), _safe_float(r.get("pagerank"))), reverse=True)
+    for row in base_rows:
+        incoming_clusters = set(row.get("incoming_clusters") or [])
+        candidates = sorted(
+            source_candidates_by_target.get(row["url"], []),
+            key=lambda r: _safe_float(r.get("expected_benefit_score")),
+            reverse=True,
+        )
+        if not candidates and row["classification"] in {"high_demand_low_support", "demand_support_gap"}:
+            existing_sources = set(reverse.get(row["url"], []))
+            for source in support_sources:
+                src = source["url"]
+                if src == row["url"] or src in existing_sources or row["url"] in result.graph.get(src, []):
+                    continue
+                if source.get("cluster") != row.get("cluster") and len(candidates) >= 2:
+                    continue
+                candidates.append({
+                    "source_url": src,
+                    "source_title": source.get("title") or src,
+                    "source_cluster": source.get("cluster") or cluster_for(src),
+                    "source_directory": source.get("directory") or _directory(src),
+                    "source_page_type": source.get("page_type") or "",
+                    "source_support_score": source.get("support_score", 0.0),
+                    "paragraph_index": None,
+                    "paragraph_excerpt": "",
+                    "suggested_anchor": row.get("top_keyword") or row.get("title") or "",
+                    "expected_benefit_score": round((row.get("demand_support_gap", 0.0) or 0.0) * 0.75 + _safe_float(source.get("support_score")) * 0.25, 2),
+                    "priority": row.get("priority") or "",
+                })
+                if len(candidates) >= 5:
+                    break
+        candidates = candidates[:6]
+        missing_clusters = []
+        seen_clusters = set()
+        for candidate in candidates:
+            cluster = candidate.get("source_cluster") or ""
+            if not cluster or cluster in incoming_clusters or cluster in seen_clusters:
+                continue
+            seen_clusters.add(cluster)
+            missing_clusters.append({
+                "cluster": cluster,
+                "candidate_sources": sum(1 for c in candidates if c.get("source_cluster") == cluster),
+            })
+        anchors = []
+        for candidate in candidates:
+            anchor = candidate.get("suggested_anchor") or ""
+            if anchor and anchor not in anchors:
+                anchors.append(anchor)
+        if row.get("top_keyword") and row["top_keyword"] not in anchors:
+            anchors.append(row["top_keyword"])
+        row["source_candidates"] = candidates
+        row["missing_source_clusters"] = missing_clusters[:8]
+        row["suggested_anchors"] = anchors[:8]
+        row["recommended_action"] = (
+            "Add contextual links from the suggested source pages and cover the missing source clusters first."
+            if row["classification"] == "high_demand_low_support"
+            else "Add one or two relevant contextual links before expanding more content for this intent."
+            if row["classification"] == "demand_support_gap"
+            else "Maintain the current support pattern while monitoring ranking movement."
+            if row["classification"] == "supported_demand"
+            else "Reuse this page as a source hub or consolidate if it has no strategic demand."
+            if row["classification"] == "over_supported_low_demand"
+            else "No urgent internal-link action."
+        )
+
+    base_rows.sort(key=lambda r: (_safe_float(r.get("opportunity_score")), _safe_int(r.get("traffic"))), reverse=True)
+
+    def aggregate(key: str) -> list[dict]:
+        buckets: dict[str, list[dict]] = defaultdict(list)
+        for row in base_rows:
+            buckets[str(row.get(key) or "unknown")].append(row)
+        out = []
+        for name, bucket in buckets.items():
+            demand_rows = [r for r in bucket if _safe_int(r.get("traffic")) > 0 or _safe_int(r.get("keywords")) > 0]
+            traffic = sum(_safe_int(r.get("traffic")) for r in bucket)
+            opp = [r for r in bucket if r.get("classification") in {"high_demand_low_support", "demand_support_gap"}]
+            out.append({
+                key: name,
+                "label": name,
+                "pages": len(bucket),
+                "classified_top_pages": len(demand_rows),
+                "traffic": traffic,
+                "opportunities": len(opp),
+                "opportunity_traffic": sum(_safe_int(r.get("traffic")) for r in opp),
+                "avg_demand_score": round(sum(_safe_float(r.get("demand_score")) for r in demand_rows) / max(1, len(demand_rows)), 2),
+                "avg_support_score": round(sum(_safe_float(r.get("support_score")) for r in demand_rows) / max(1, len(demand_rows)), 2),
+                "avg_demand_support_gap": round(sum(_safe_float(r.get("demand_support_gap")) for r in demand_rows) / max(1, len(demand_rows)), 2),
+            })
+        out.sort(key=lambda r: (_safe_int(r.get("opportunity_traffic")), _safe_int(r.get("opportunities")), _safe_float(r.get("avg_demand_support_gap"))), reverse=True)
+        return out
+
+    top_rows = [r for r in base_rows if _safe_int(r.get("traffic")) > 0 or _safe_int(r.get("keywords")) > 0 or _safe_int(r.get("volume")) > 0]
+    opportunities = [r for r in base_rows if r.get("classification") in {"high_demand_low_support", "demand_support_gap"}]
+    high_opps = [r for r in base_rows if r.get("classification") == "high_demand_low_support"]
+    traffic_weight = sum(max(1, _safe_int(r.get("traffic"))) for r in top_rows) or 1
+    weighted_gap = sum(_safe_float(r.get("demand_support_gap")) * max(1, _safe_int(r.get("traffic"))) for r in top_rows)
+    alignment = max(0.0, min(1.0, 1.0 - weighted_gap / (100.0 * traffic_weight)))
+    return {
+        "summary": {
+            "status": "ok",
+            "model": "high_demand_low_link_v1",
+            "total_pages": len(base_rows),
+            "classified_top_pages": len(top_rows),
+            "demand_support_alignment": round(alignment, 4),
+            "high_demand_low_support_pages": len(high_opps),
+            "opportunity_pages": len(opportunities),
+            "high_demand_low_support_traffic": sum(_safe_int(r.get("traffic")) for r in high_opps),
+            "opportunity_traffic": sum(_safe_int(r.get("traffic")) for r in opportunities),
+            "source_candidates": sum(len(r.get("source_candidates") or []) for r in opportunities),
+        },
+        "pages": base_rows,
+        "opportunities": opportunities[:250],
+        "high_priority": high_opps[:200],
+        "directories": aggregate("directory")[:120],
+        "clusters": aggregate("cluster")[:120],
+        "page_types": aggregate("page_type")[:120],
+        "interpretation": {
+            "demand_score": "Search demand score from organic traffic, keyword count, keyword volume, and near-top ranking opportunity.",
+            "support_score": "Internal support score from inbound links, weighted PageRank percentile, inbound link flow, anchor quality, and contextual relevance.",
+        },
+    }
+
+
 def _edge_placement(src: str, tgt: str, anchors: list[str], anchor_quality: float, relevance: float, target_in_degree: int) -> str:
     try:
         target_path = urlparse(tgt).path or "/"

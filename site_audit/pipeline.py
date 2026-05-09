@@ -91,6 +91,7 @@ from .keyword_coverage import (
 )
 from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
+from .linkgraph import high_demand_low_link_payload
 from .linkgraph import hub_bottleneck_payload
 from .linkgraph import link_removal_simulation_payload
 from .linkgraph import link_flow_payload
@@ -1261,6 +1262,22 @@ def run(config: PipelineConfig) -> dict:
                 "  link addition simulation: %d high-priority · %.1f avg expected benefit",
                 addition_summary.get("high_priority", 0),
                 addition_summary.get("avg_expected_benefit", 0.0),
+            )
+        link_payload["high_demand_low_link"] = high_demand_low_link_payload(
+            link_result,
+            pages,
+            search_payload=ahrefs_data,
+            traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
+            link_addition=link_payload.get("link_addition_simulation") or {},
+            page_types=page_types_data,
+        )
+        hdl_summary = (link_payload.get("high_demand_low_link") or {}).get("summary", {}) or {}
+        if hdl_summary.get("status") == "ok":
+            LOG.info(
+                "  high-demand low-link pages: %d high-priority · %d opportunity traffic · %.0f%% demand/support alignment",
+                hdl_summary.get("high_demand_low_support_pages", 0),
+                hdl_summary.get("opportunity_traffic", 0),
+                (hdl_summary.get("demand_support_alignment", 0.0) or 0.0) * 100,
             )
         link_payload["anchor_relevance"] = build_anchor_relevance(
             extracted_pages,

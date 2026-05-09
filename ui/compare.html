@@ -524,6 +524,33 @@
           </table>
         </div>
       </div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Demand/support quadrant</h3>
+          <p class="text-xs text-gray-500 mb-2">Demand score vs internal support score. Dot size is traffic; red/orange dots need new contextual links.</p>
+          <div id="demand-support-compare-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Demand/link gaps by directory</h3>
+          <p class="text-xs text-gray-500 mb-2">Directories ranked by traffic sitting on high-demand low-support pages.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="demand-support-directory-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">High-demand low-link opportunities</h3>
+        <p class="text-xs text-gray-500 mb-2">Pages whose search demand is stronger than their internal-link support, with suggested source pages and anchors.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="high-demand-link-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <div class="mb-6">
         <h3 class="text-sm font-semibold mb-1">Critical internal links</h3>
         <p class="text-xs text-gray-500 mb-2">Links whose removal has the highest estimated authority and demand loss.</p>
@@ -912,6 +939,8 @@
       { key: 'authority_traffic_alignment', label: 'Authority-demand', better: 'high', fmt: 'pct' },
       { key: 'high_traffic_low_authority_pages', label: 'Underserved search', better: 'low', fmt: 'int' },
       { key: 'authority_without_demand_pages', label: 'Unused authority', better: 'low', fmt: 'int' },
+      { key: 'demand_support_alignment', label: 'Demand support', better: 'high', fmt: 'pct' },
+      { key: 'high_demand_low_support_pages', label: 'Demand/link gaps', better: 'low', fmt: 'int' },
       { key: 'critical_internal_links', label: 'Critical links', better: 'na', fmt: 'int' },
       { key: 'weak_internal_links', label: 'Weak/harmful links', better: 'low', fmt: 'int' },
       { key: 'high_priority_link_additions', label: 'High-pri additions', better: 'na', fmt: 'int' },
@@ -1860,6 +1889,7 @@
       ((data.serp_features || {}).matrix || []).length ||
       ((data.content_efficiency || {}).clusters || []).length ||
       ((data.authority_demand || {}).pages || []).length ||
+      ((data.high_demand_low_link || {}).pages || []).length ||
       ((data.traffic_readiness || {}).weak_high_traffic || []).length;
     if (!hasData) {
       section.style.display = 'none';
@@ -1877,6 +1907,9 @@
     drawAuthorityDemandScatter();
     renderAuthorityGapTable();
     renderUnusedAuthorityTable();
+    drawDemandSupportCompare();
+    renderDemandSupportDirectoryTable();
+    renderHighDemandLinkTable();
     renderLinkRemovalCriticalTable();
     renderLinkAdditionTable();
     renderAnchorRelevanceTable();
@@ -1892,6 +1925,7 @@
     const clusterGaps = data.keyword_cluster_gaps || {};
     const serp = data.serp_features || {};
     const authority = data.authority_demand || {};
+    const highDemand = data.high_demand_low_link || {};
     const readiness = data.traffic_readiness || {};
     const cards = [
       ['Keyword opportunities', (keywordGaps.opportunities || []).length, 'missing or underperforming keyword gaps'],
@@ -1902,6 +1936,9 @@
     ];
     if ((authority.ranked_orphans || []).length || (authority.buried_demand || []).length) {
       cards[3] = ['Link support gaps', ((authority.ranked_orphans || []).length + (authority.buried_demand || []).length + (authority.thin_internal_support || []).length), 'traffic pages needing internal-link support'];
+    }
+    if ((highDemand.opportunities || []).length) {
+      cards[3] = ['Demand/link gaps', (highDemand.opportunities || []).length, 'high-demand pages needing stronger internal links'];
     }
     root.innerHTML = cards.map(card => `
       <article class="border border-gray-200 rounded-lg p-4">
@@ -2254,6 +2291,133 @@
         <td class="px-2 py-1.5 text-right font-mono">${r.click_depth == null ? '—' : r.click_depth}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
       </tr>`).join('');
+  }
+
+  const DEMAND_SUPPORT_LABELS = {
+    high_demand_low_support: 'High demand, low support',
+    demand_support_gap: 'Demand support gap',
+    supported_demand: 'Supported demand',
+    over_supported_low_demand: 'Over-supported low demand',
+    low_demand_low_support: 'Low demand, low support',
+    balanced: 'Balanced',
+  };
+
+  function demandSupportColor(label) {
+    return label === 'high_demand_low_support' ? '#dc2626'
+      : label === 'demand_support_gap' ? '#f59e0b'
+      : label === 'supported_demand' ? '#16a34a'
+      : label === 'over_supported_low_demand' ? '#2563eb'
+      : label === 'low_demand_low_support' ? '#9ca3af'
+      : '#6b7280';
+  }
+
+  function drawDemandSupportCompare() {
+    const container = document.getElementById('demand-support-compare-chart');
+    if (!container) return;
+    container.innerHTML = '';
+    const points = ((data.high_demand_low_link || {}).pages || []).filter(r => Number(r.demand_score || 0) > 0).slice(0, 700);
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No demand/support comparison data.</div>';
+      return;
+    }
+    const margin = {top: 18, right: 24, bottom: 42, left: 56};
+    const outerWidth = Math.max(560, container.offsetWidth || 760);
+    const outerHeight = 390;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([3.5, 17]);
+    svg.append('rect').attr('x', 0).attr('y', 0).attr('width', x(45)).attr('height', y(65)).attr('fill', '#fee2e2').attr('opacity', 0.4);
+    svg.append('line').attr('x1', x(45)).attr('x2', x(45)).attr('y1', 0).attr('y2', height).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(65)).attr('y2', y(65)).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('text').attr('x', width / 2).attr('y', height + 34).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('internal support score');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -42).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('organic demand score');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','410px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.support_score || 0)))
+      .attr('cy', d => y(Number(d.demand_score || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => domainColor(d.domain))
+      .attr('fill-opacity', 0.66)
+      .attr('stroke', d => demandSupportColor(d.classification))
+      .attr('stroke-width', d => d.classification === 'high_demand_low_support' ? 2.4 : d.classification === 'demand_support_gap' ? 1.8 : 0.8)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('fill-opacity', 0.9);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>${escapeHtml(DEMAND_SUPPORT_LABELS[d.classification] || d.classification || '')}<br>demand ${Number(d.demand_score || 0).toFixed(1)} · support ${Number(d.support_score || 0).toFixed(1)} · traffic ${Number(d.traffic || 0).toLocaleString()}<br><span style="color:#fbbf24">${escapeHtml(d.top_keyword || '')}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('fill-opacity',0.66); tooltip.style('visibility','hidden'); });
+  }
+
+  function renderDemandSupportDirectoryTable() {
+    const tbl = document.getElementById('demand-support-directory-table');
+    if (!tbl) return;
+    const rows = ((data.high_demand_low_link || {}).directories || []).slice(0, 40);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Directory</th>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-right">Opp traffic</th>
+        <th class="px-2 py-2 text-right">Opps</th>
+        <th class="px-2 py-2 text-right">Demand</th>
+        <th class="px-2 py-2 text-right">Support</th>
+      </tr>`;
+    const flat = [];
+    rows.forEach(row => (row.domains || []).forEach(d => {
+      if (Number(d.opportunities || 0) > 0 || Number(d.opportunity_traffic || 0) > 0) {
+        flat.push({directory: row.directory || row.label, ...d});
+      }
+    }));
+    flat.sort((a, b) => Number(b.opportunity_traffic || 0) - Number(a.opportunity_traffic || 0));
+    if (!flat.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No directory-level demand/link gaps.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = flat.slice(0, 80).map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 font-medium">${escapeHtml(r.directory || r.label || '')}</td>
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.opportunity_traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.opportunities || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.avg_demand_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.avg_support_score || 0).toFixed(1)}</td>
+      </tr>`).join('');
+  }
+
+  function renderHighDemandLinkTable() {
+    const tbl = document.getElementById('high-demand-link-table');
+    if (!tbl) return;
+    const rows = ((data.high_demand_low_link || {}).opportunities || []).slice(0, 90);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">Demand</th>
+        <th class="px-2 py-2 text-right">Support</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-left">Source / anchor</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No high-demand low-link rows.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => {
+      const candidate = (r.source_candidates || [])[0] || {};
+      const anchor = candidate.suggested_anchor || (r.suggested_anchors || [])[0] || r.top_keyword || '';
+      return `<tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.title || r.url || '', 66))}</a><div class="text-[11px]" style="color:${demandSupportColor(r.classification)}">${escapeHtml(DEMAND_SUPPORT_LABELS[r.classification] || r.classification || '')}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.demand_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.support_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(candidate.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(candidate.source_title || candidate.source_url || '', 52))}</a><div class="text-[11px] text-gray-500">${escapeHtml(anchor)}</div></td>
+      </tr>`;
+    }).join('');
   }
 
   function renderLinkRemovalCriticalTable() {

@@ -1,7 +1,7 @@
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, hub_bottleneck_payload, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import analyze, high_demand_low_link_payload, hub_bottleneck_payload, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -141,3 +141,62 @@ def test_hub_bottleneck_payload_detects_cluster_bridges() -> None:
     assert bridge["role"] in {"bottleneck", "cluster_bridge"}
     assert bridge["cluster_bridge_count"] >= 2
     assert payload["cluster_edges"]
+
+
+def test_high_demand_low_link_payload_classifies_and_recommends_sources() -> None:
+    pages = [
+        PageInfo(url="https://example.com/", title="Home", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/blog/demand", title="Demand guide", description="", section="blog", word_count=100, language="en"),
+        PageInfo(url="https://example.com/blog/source", title="Source guide", description="", section="blog", word_count=100, language="en"),
+        PageInfo(url="https://example.com/docs/hub", title="Docs hub", description="", section="docs", word_count=100, language="en"),
+    ]
+    outlinks = [
+        (pages[0].url, [(pages[2].url, "source guide"), (pages[3].url, "docs hub")]),
+        (pages[1].url, []),
+        (pages[2].url, [(pages[0].url, "home")]),
+        (pages[3].url, [(pages[0].url, "home")]),
+    ]
+    result = analyze(pages, np.eye(4, dtype=np.float32), outlinks, home_url=pages[0].url)
+    search_payload = {
+        "top_pages": [
+            {"matched_url": pages[1].url, "traffic": 900, "keywords": 20, "top_keyword": "demand guide", "top_keyword_position": 6, "top_keyword_volume": 2000, "cluster_label": "demand"},
+            {"matched_url": pages[2].url, "traffic": 10, "keywords": 2, "top_keyword": "source guide", "cluster_label": "support"},
+        ],
+        "organic_keywords": [
+            {"matched_url": pages[1].url, "keyword": "demand guide", "traffic": 500, "volume": 2000, "position": 6, "cluster_label": "demand"},
+            {"matched_url": pages[1].url, "keyword": "demand software", "traffic": 250, "volume": 1200, "position": 9, "cluster_label": "demand"},
+        ],
+    }
+    authority = traffic_weighted_pagerank_payload(result, pages, np.eye(4, dtype=np.float32), search_payload=search_payload)
+    payload = high_demand_low_link_payload(
+        result,
+        pages,
+        search_payload=search_payload,
+        traffic_authority=authority,
+        link_addition={
+            "recommendations": [
+                {
+                    "source_url": pages[2].url,
+                    "source_title": "Source guide",
+                    "target_url": pages[1].url,
+                    "target_title": "Demand guide",
+                    "suggested_anchor": "demand guide",
+                    "expected_benefit_score": 88,
+                    "priority": "high",
+                    "paragraph_index": 1,
+                    "paragraph_excerpt": "A paragraph about demand guide.",
+                }
+            ]
+        },
+        page_types={"per_page": [{"url": pages[1].url, "page_type": "article"}]},
+    )
+
+    demand = next(row for row in payload["pages"] if row["url"] == pages[1].url)
+    assert demand["classification"] == "high_demand_low_support"
+    assert demand["page_type"] == "article"
+    assert demand["demand_score"] > demand["support_score"]
+    assert demand["source_candidates"][0]["source_url"] == pages[2].url
+    assert demand["source_candidates"][0]["suggested_anchor"] == "demand guide"
+    assert demand["missing_source_clusters"]
+    assert payload["summary"]["classified_top_pages"] >= 2
+    assert payload["opportunities"][0]["url"] == pages[1].url

@@ -210,6 +210,13 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "top_contextual_links": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "target_url": alpha_url, "target_title": "AI workflow", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "contextual_link_impact": 88, "contextual_similarity": 0.8, "structural_authority_score": 70}],
                     "source_pages": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "avg_contextual_impact": 78, "main_content_links": 2, "template_links": 0}],
                 },
+                "high_demand_low_link": {
+                    "summary": {"demand_support_alignment": 0.42, "classified_top_pages": 1, "high_demand_low_support_pages": 1, "opportunity_pages": 1, "high_demand_low_support_traffic": 100, "opportunity_traffic": 100, "source_candidates": 1},
+                    "pages": [{"url": alpha_url, "title": "AI workflow", "section": "blog", "cluster": "workflow", "directory": "/blog/", "page_type": "article", "traffic": 100, "keywords": 8, "volume": 1300, "top_keyword": "ai workflow", "demand_score": 92, "support_score": 18, "demand_support_gap": 74, "opportunity_score": 130, "classification": "high_demand_low_support", "source_candidates": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "source_cluster": "guide", "suggested_anchor": "AI workflow", "expected_benefit_score": 82}], "suggested_anchors": ["AI workflow"], "missing_source_clusters": [{"cluster": "guide", "candidate_sources": 1}]}],
+                    "opportunities": [{"url": alpha_url, "title": "AI workflow", "section": "blog", "cluster": "workflow", "directory": "/blog/", "page_type": "article", "traffic": 100, "keywords": 8, "volume": 1300, "top_keyword": "ai workflow", "demand_score": 92, "support_score": 18, "demand_support_gap": 74, "opportunity_score": 130, "classification": "high_demand_low_support", "source_candidates": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "source_cluster": "guide", "suggested_anchor": "AI workflow", "expected_benefit_score": 82}], "suggested_anchors": ["AI workflow"], "missing_source_clusters": [{"cluster": "guide", "candidate_sources": 1}]}],
+                    "directories": [{"directory": "/blog/", "label": "/blog/", "pages": 1, "classified_top_pages": 1, "traffic": 100, "opportunities": 1, "opportunity_traffic": 100, "avg_demand_score": 92, "avg_support_score": 18, "avg_demand_support_gap": 74}],
+                    "clusters": [{"cluster": "workflow", "label": "workflow", "pages": 1, "classified_top_pages": 1, "traffic": 100, "opportunities": 1, "opportunity_traffic": 100, "avg_demand_score": 92, "avg_support_score": 18, "avg_demand_support_gap": 74}],
+                },
                 "hub_bottlenecks": {
                     "summary": {"architecture_resilience": 0.9, "bottleneck_pages": 0, "bridge_pages": 1, "authority_hubs": 1, "dead_end_risks": 0, "orphan_risks": 0},
                     "risks": [{"url": "https://alpha.example/hub", "title": "Hub", "role": "cluster_bridge", "resilience_risk": 55, "cluster_bridge_count": 2, "affected_clusters": ["guide", "blog"], "in_degree": 3, "out_degree": 4}],
@@ -269,6 +276,13 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "top_contextual_links": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "target_url": beta_url, "target_title": "Automation tool", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "contextual_link_impact": 45, "contextual_similarity": 0.5, "structural_authority_score": 35}],
                     "source_pages": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "avg_contextual_impact": 40, "main_content_links": 1, "template_links": 1}],
                 },
+                "high_demand_low_link": {
+                    "summary": {"demand_support_alignment": 0.88, "classified_top_pages": 1, "high_demand_low_support_pages": 0, "opportunity_pages": 0, "high_demand_low_support_traffic": 0, "opportunity_traffic": 0, "source_candidates": 0},
+                    "pages": [{"url": beta_url, "title": "Automation tool", "section": "blog", "cluster": "automation", "directory": "/blog/", "page_type": "article", "traffic": 15, "keywords": 2, "volume": 500, "top_keyword": "automation tool", "demand_score": 58, "support_score": 72, "demand_support_gap": 0, "opportunity_score": 0, "classification": "supported_demand", "source_candidates": [], "suggested_anchors": ["Automation tool"], "missing_source_clusters": []}],
+                    "opportunities": [],
+                    "directories": [{"directory": "/blog/", "label": "/blog/", "pages": 1, "classified_top_pages": 1, "traffic": 15, "opportunities": 0, "opportunity_traffic": 0, "avg_demand_score": 58, "avg_support_score": 72, "avg_demand_support_gap": 0}],
+                    "clusters": [{"cluster": "automation", "label": "automation", "pages": 1, "classified_top_pages": 1, "traffic": 15, "opportunities": 0, "opportunity_traffic": 0, "avg_demand_score": 58, "avg_support_score": 72, "avg_demand_support_gap": 0}],
+                },
                 "hub_bottlenecks": {
                     "summary": {"architecture_resilience": 0.4, "bottleneck_pages": 2, "bridge_pages": 0, "authority_hubs": 0, "dead_end_risks": 1, "orphan_risks": 1},
                     "risks": [{"url": "https://beta.example/hub", "title": "Hub", "role": "bottleneck", "resilience_risk": 88, "cluster_bridge_count": 1, "affected_clusters": ["guide", "blog"], "in_degree": 1, "out_degree": 1}],
@@ -307,6 +321,10 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["anchor_relevance"]["weak_links"][0]["domain"] == "beta.example"
     assert payload["leaderboard"][0]["contextual_link_avg_impact"] == 78
     assert payload["contextual_link_impact"]["top_contextual_links"][0]["domain"] == "alpha.example"
+    assert payload["leaderboard"][0]["demand_support_alignment"] == 0.42
+    assert payload["leaderboard"][0]["high_demand_low_support_pages"] == 1
+    assert payload["high_demand_low_link"]["opportunities"][0]["url"] == alpha_url
+    assert payload["high_demand_low_link"]["directories"][0]["domains"][0]["opportunity_traffic"] == 100
     assert payload["leaderboard"][0]["architecture_resilience"] == 0.9
     assert payload["hub_bottlenecks"]["risks"][0]["domain"] == "beta.example"
     assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35

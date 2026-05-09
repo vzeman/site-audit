@@ -1271,6 +1271,32 @@
       </div>
     </div>
 
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="high-demand-link-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">High-demand low-link pages</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Classifies search-demand pages by organic demand versus internal support. Dot size is traffic; upper-left pages have ranking demand but weak internal links.
+        </p>
+      </div>
+      <div id="high-demand-link-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-4"></div>
+      <div class="flex flex-wrap gap-2 mb-3 text-xs">
+        <select id="demand-link-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="demand-link-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="demand-link-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+      </div>
+      <div id="high-demand-link-quadrant" class="w-full mb-5" style="min-height: 440px;"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div class="lg:col-span-2">
+          <h4 class="font-semibold mb-2">Priority link opportunities</h4>
+          <div id="high-demand-link-opportunities" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Directories and clusters</h4>
+          <div id="high-demand-link-segments" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="hub-bottleneck-block">
       <div class="mb-3">
         <h3 class="text-lg font-semibold">Hub and bottleneck pages</h3>
@@ -2020,6 +2046,7 @@
       renderDuplicateFragments();
       renderLinkgraph();
       renderTrafficPagerank();
+      renderHighDemandLowLink();
       renderHubBottlenecks();
       renderLinkRemovalSimulation();
       renderLinkFlow();
@@ -5062,6 +5089,152 @@
         <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
       </div>
     `).join('') || '<div class="text-gray-500">No non-indexable search-demand pages.</div>';
+  }
+
+  const DEMAND_SUPPORT_LABELS = {
+    high_demand_low_support: 'High demand, low support',
+    demand_support_gap: 'Demand support gap',
+    supported_demand: 'Supported demand',
+    over_supported_low_demand: 'Over-supported low demand',
+    low_demand_low_support: 'Low demand, low support',
+    balanced: 'Balanced',
+  };
+
+  function demandSupportColor(label) {
+    return label === 'high_demand_low_support' ? '#dc2626'
+      : label === 'demand_support_gap' ? '#f59e0b'
+      : label === 'supported_demand' ? '#16a34a'
+      : label === 'over_supported_low_demand' ? '#2563eb'
+      : label === 'low_demand_low_support' ? '#9ca3af'
+      : '#6b7280';
+  }
+
+  function renderHighDemandLowLink() {
+    const block = document.getElementById('high-demand-link-block');
+    const payload = ((state.linkgraph || {}).high_demand_low_link || {});
+    const rowsAll = payload.pages || [];
+    if (!rowsAll.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const rerender = () => renderHighDemandLowLink();
+    setSelectOptions('demand-link-directory-filter', 'directories', rowsAll.map(r => r.directory), rerender);
+    setSelectOptions('demand-link-cluster-filter', 'clusters', rowsAll.map(r => r.cluster), rerender);
+    setSelectOptions('demand-link-type-filter', 'page types', rowsAll.map(r => r.page_type), rerender);
+    const rows = filterByAuthorityControls(rowsAll, 'demand-link');
+    const summary = payload.summary || {};
+    document.getElementById('high-demand-link-summary').innerHTML =
+      card('Alignment', `${((summary.demand_support_alignment || 0) * 100).toFixed(0)}%`, 'demand vs support') +
+      card('High-priority', Number(summary.high_demand_low_support_pages || 0).toLocaleString(), 'pages under-supported') +
+      card('Opportunity traffic', Number(summary.opportunity_traffic || 0).toLocaleString(), 'traffic on support gaps') +
+      card('Top pages classified', Number(summary.classified_top_pages || 0).toLocaleString(), 'search-demand pages') +
+      card('Source candidates', Number(summary.source_candidates || 0).toLocaleString(), 'suggested link sources');
+
+    drawDemandSupportQuadrant(document.getElementById('high-demand-link-quadrant'), rows);
+    const keep = r =>
+      (!document.getElementById('demand-link-directory-filter')?.value || r.directory === document.getElementById('demand-link-directory-filter').value) &&
+      (!document.getElementById('demand-link-cluster-filter')?.value || r.cluster === document.getElementById('demand-link-cluster-filter').value) &&
+      (!document.getElementById('demand-link-type-filter')?.value || r.page_type === document.getElementById('demand-link-type-filter').value);
+    renderDemandSupportOpportunities((payload.opportunities || []).filter(keep));
+    renderDemandSupportSegments(payload, keep);
+  }
+
+  function drawDemandSupportQuadrant(container, rows) {
+    if (!container) return;
+    container.innerHTML = '';
+    const points = (rows || []).filter(r => Number(r.traffic || 0) > 0 || Number(r.keywords || 0) > 0 || Number(r.demand_score || 0) > 0);
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No demand/support rows for this filter.</div>';
+      return;
+    }
+    const margin = {top: 18, right: 24, bottom: 46, left: 58};
+    const outerWidth = Math.max(560, container.offsetWidth || 780);
+    const outerHeight = 440;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([3.5, 18]);
+    svg.append('rect').attr('x', 0).attr('y', 0).attr('width', x(45)).attr('height', y(65)).attr('fill', '#fee2e2').attr('opacity', 0.45);
+    svg.append('line').attr('x1', x(45)).attr('x2', x(45)).attr('y1', 0).attr('y2', height).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(65)).attr('y2', y(65)).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('text').attr('x', width / 2).attr('y', height + 38).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('internal support score');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -42).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('organic demand score');
+    svg.append('text').attr('x', x(4)).attr('y', y(96)).style('font-size', '11px').style('font-weight', 600).style('fill', '#991b1b').text('priority links');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','430px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.support_score || 0)))
+      .attr('cy', d => y(Number(d.demand_score || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => demandSupportColor(d.classification))
+      .attr('fill-opacity', 0.72)
+      .attr('stroke', '#111827')
+      .attr('stroke-opacity', 0.22)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.9).attr('stroke-width', 2);
+        const anchors = (d.suggested_anchors || []).slice(0, 3).join(' · ');
+        tooltip.style('visibility','visible').html(`<strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>${escapeHtml(DEMAND_SUPPORT_LABELS[d.classification] || d.classification || '')}<br>demand ${Number(d.demand_score || 0).toFixed(1)} · support ${Number(d.support_score || 0).toFixed(1)} · gap ${Number(d.demand_support_gap || 0).toFixed(1)}<br>traffic ${Number(d.traffic || 0).toLocaleString()} · keywords ${Number(d.keywords || 0).toLocaleString()} · inlinks ${Number(d.in_degree || 0).toLocaleString()}<br><span style="color:#fbbf24">${escapeHtml(anchors || d.top_keyword || '')}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-opacity',0.22).attr('stroke-width',1); tooltip.style('visibility','hidden'); });
+    const labels = ['high_demand_low_support', 'demand_support_gap', 'supported_demand', 'over_supported_low_demand'];
+    d3.select(container).append('div').attr('class', 'text-xs text-gray-600 mt-2 flex flex-wrap gap-3').html(labels.map(label =>
+      `<span class="inline-flex items-center"><span class="w-2.5 h-2.5 rounded-full mr-1.5" style="background:${demandSupportColor(label)}"></span>${escapeHtml(DEMAND_SUPPORT_LABELS[label])}</span>`
+    ).join(''));
+  }
+
+  function renderDemandSupportOpportunities(rows) {
+    const el = document.getElementById('high-demand-link-opportunities');
+    if (!el) return;
+    const dataRows = (rows || []).slice(0, 140);
+    if (!dataRows.length) {
+      el.innerHTML = '<div class="text-gray-500">No high-demand low-link opportunities in this view.</div>';
+      return;
+    }
+    el.innerHTML = dataRows.map(r => {
+      const candidates = (r.source_candidates || []).slice(0, 4).map(c => {
+        const anchor = c.suggested_anchor ? ` · "${escapeHtml(c.suggested_anchor)}"` : '';
+        return `<li><a class="text-blue-600 hover:underline" href="${escapeHtml(c.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(c.source_title || c.source_url || '', 58))}</a><span class="text-gray-500"> · ${escapeHtml(c.source_cluster || '')}${anchor} · benefit ${Number(c.expected_benefit_score || 0).toFixed(1)}</span></li>`;
+      }).join('');
+      const missing = (r.missing_source_clusters || []).slice(0, 4).map(c => escapeHtml(c.cluster)).join(' · ');
+      return `<div class="border-b border-gray-100 py-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="px-1.5 py-0.5 rounded" style="background:${demandSupportColor(r.classification)}22;color:${demandSupportColor(r.classification)}">${escapeHtml(DEMAND_SUPPORT_LABELS[r.classification] || r.classification || '')}</span>
+          <span class="font-mono text-gray-600">gap ${Number(r.demand_support_gap || 0).toFixed(1)} · score ${Number(r.opportunity_score || 0).toFixed(1)}</span>
+        </div>
+        <a class="text-blue-600 hover:underline break-all mt-1 inline-block" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+        <div class="text-gray-500 mt-1">traffic ${Number(r.traffic || 0).toLocaleString()} · keywords ${Number(r.keywords || 0).toLocaleString()} · volume ${Number(r.volume || 0).toLocaleString()} · inlinks ${Number(r.in_degree || 0).toLocaleString()} · ${escapeHtml(r.directory || '')}</div>
+        ${missing ? `<div class="text-gray-600 mt-1">Missing source clusters: ${missing}</div>` : ''}
+        ${candidates ? `<ul class="list-disc list-inside text-gray-700 mt-1 space-y-0.5">${candidates}</ul>` : '<div class="text-gray-500 mt-1">No source candidates found yet.</div>'}
+        <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderDemandSupportSegments(payload, keep) {
+    const el = document.getElementById('high-demand-link-segments');
+    if (!el) return;
+    const rows = []
+      .concat((payload.directories || []).map(r => ({kind: 'directory', name: r.directory || r.label, ...r})))
+      .concat((payload.clusters || []).map(r => ({kind: 'cluster', name: r.cluster || r.label, ...r})));
+    const filtered = rows.filter(r => {
+      if (!keep) return true;
+      return (payload.pages || []).some(p => keep(p) && (p.directory === r.directory || p.cluster === r.cluster));
+    }).slice(0, 80);
+    el.innerHTML = filtered.map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <div><span class="text-gray-500">${escapeHtml(r.kind)}</span> <span class="font-medium">${escapeHtml(r.name || '')}</span></div>
+          <span class="font-mono text-gray-700">${Number(r.opportunity_traffic || 0).toLocaleString()}</span>
+        </div>
+        <div class="text-gray-500">opps ${Number(r.opportunities || 0).toLocaleString()} · pages ${Number(r.classified_top_pages || r.pages || 0).toLocaleString()} · demand ${Number(r.avg_demand_score || 0).toFixed(1)} · support ${Number(r.avg_support_score || 0).toFixed(1)}</div>
+      </div>
+    `).join('') || '<div class="text-gray-500">No segment opportunity data.</div>';
   }
 
   function renderHubBottlenecks() {
