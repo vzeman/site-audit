@@ -204,6 +204,10 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["paragraph_archetypes"]["matrix"]
     assert payload["paragraph_archetypes"]["timelines"]
     assert payload["paragraph_archetypes"]["recommendations"][0]["source_examples"]
+    assert payload["seo_playbooks"]["playbooks"]
+    assert payload["seo_playbooks"]["playbooks"][0]["implementation_steps"]
+    assert payload["seo_playbooks"]["playbooks"][0]["acceptance_criteria"]
+    assert payload["seo_playbooks"]["playbooks"][0]["validation_metric"]
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
@@ -515,6 +519,16 @@ def test_compare_payload_includes_unified_action_board(tmp_path: Path) -> None:
     assert payload["action_board"]["items"][0]["domain"] == "alpha.example"
     assert payload["action_board"]["items"][0]["priority_score"] == 71.5
     assert payload["action_board"]["filters"]["owners"] == ["SEO"]
+    playbooks = payload["seo_playbooks"]["playbooks"]
+    assert payload["seo_playbooks"]["summary"]["playbooks"] == 1
+    assert playbooks[0]["source_type"] == "fix_priority_score"
+    assert playbooks[0]["target_count"] == 2
+    assert {target["url"] for target in playbooks[0]["targets"]} == {
+        "https://alpha.example/a",
+        "https://alpha.example/b",
+    }
+    assert playbooks[0]["evidence"][0]["priority_model"] == "fix_priority_score_v1"
+    assert playbooks[0]["checklist"][0]["target_url"] == "https://alpha.example/a"
 
 
 def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:

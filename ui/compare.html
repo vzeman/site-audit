@@ -339,6 +339,35 @@
       </div>
     </section>
 
+    <!-- Cross-domain SEO playbooks -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="seo-playbooks-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Cross-domain SEO playbooks</h2>
+        <p class="text-xs text-gray-500 mt-1" id="seo-playbooks-meta">
+          Reusable execution patterns grouped from winning pages, template patterns, link rules, schema gaps, paragraph archetypes, and prioritized fixes.
+        </p>
+      </div>
+      <div id="seo-playbooks-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
+      <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
+        <input id="seo-playbooks-search" type="search" autocomplete="off" placeholder="Search playbooks, targets, steps..."
+          class="border border-gray-300 rounded px-3 py-1 bg-white min-w-[260px]">
+        <select id="seo-playbooks-domain" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="seo-playbooks-category" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="seo-playbooks-source" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="seo-playbooks-cluster" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="seo-playbooks-sort" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="expected_benefit_score">Sort by expected benefit</option>
+          <option value="priority_score">Sort by priority</option>
+          <option value="traffic_opportunity">Sort by traffic opportunity</option>
+          <option value="target_count">Sort by target count</option>
+        </select>
+        <button id="seo-playbooks-export-md" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export Markdown</button>
+        <button id="seo-playbooks-export-csv" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export CSV</button>
+        <button id="seo-playbooks-export-checklist" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export checklist</button>
+      </div>
+      <div id="seo-playbooks-list" class="grid xl:grid-cols-2 gap-4"></div>
+    </section>
+
     <!-- Structured data opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="structured-data-compare-section">
       <div class="mb-4">
@@ -1739,11 +1768,278 @@
     URL.revokeObjectURL(url);
   }
 
+  function playbookColor(category) {
+    return {
+      content: '#2563eb',
+      schema: '#7c3aed',
+      link: '#16a34a',
+      linking: '#16a34a',
+      freshness: '#f59e0b',
+      conversion: '#dc2626',
+      onpage: '#0f766e',
+      content_debt: '#dc2626',
+      coverage: '#2563eb',
+      geo: '#7c3aed',
+    }[category] || ACTION_COLORS[category] || '#64748b';
+  }
+
+  function preparePlaybookFilters(payload) {
+    data._playbookFilters = data._playbookFilters || { domain: '', category: '', source: '', cluster: '', sort: 'expected_benefit_score', q: '' };
+    const filters = payload.filters || {};
+    data._playbookFilters.domain = setCompareSelectOptions('seo-playbooks-domain', 'domains', filters.domains || data.domains || [], renderSeoPlaybooks);
+    data._playbookFilters.category = setCompareSelectOptions('seo-playbooks-category', 'categories', filters.categories || [], renderSeoPlaybooks);
+    data._playbookFilters.source = setCompareSelectOptions('seo-playbooks-source', 'sources', filters.source_types || [], renderSeoPlaybooks);
+    data._playbookFilters.cluster = setCompareSelectOptions('seo-playbooks-cluster', 'clusters', filters.clusters || [], renderSeoPlaybooks);
+    const search = document.getElementById('seo-playbooks-search');
+    if (search && !search.dataset.ready) {
+      search.dataset.ready = '1';
+      search.addEventListener('input', () => {
+        data._playbookFilters.q = search.value || '';
+        renderSeoPlaybooks();
+      });
+    }
+    if (search && search.value !== (data._playbookFilters.q || '')) search.value = data._playbookFilters.q || '';
+    const sort = document.getElementById('seo-playbooks-sort');
+    if (sort && !sort.dataset.ready) {
+      sort.dataset.ready = '1';
+      sort.onchange = () => {
+        data._playbookFilters.sort = sort.value || 'expected_benefit_score';
+        renderSeoPlaybooks();
+      };
+    }
+    if (sort) sort.value = data._playbookFilters.sort || 'expected_benefit_score';
+    const exportMd = document.getElementById('seo-playbooks-export-md');
+    const exportCsv = document.getElementById('seo-playbooks-export-csv');
+    const exportChecklist = document.getElementById('seo-playbooks-export-checklist');
+    if (exportMd && !exportMd.dataset.ready) { exportMd.dataset.ready = '1'; exportMd.onclick = () => exportSeoPlaybooks('markdown'); }
+    if (exportCsv && !exportCsv.dataset.ready) { exportCsv.dataset.ready = '1'; exportCsv.onclick = () => exportSeoPlaybooks('csv'); }
+    if (exportChecklist && !exportChecklist.dataset.ready) { exportChecklist.dataset.ready = '1'; exportChecklist.onclick = () => exportSeoPlaybooks('checklist'); }
+  }
+
+  function playbookMatchesDomain(pb, domain) {
+    if (!domain) return true;
+    if ((pb.source_domains || []).includes(domain)) return true;
+    return (pb.targets || []).some(t => t.domain === domain) || (pb.affected_domains || []).some(d => d.domain === domain);
+  }
+
+  function filteredSeoPlaybooks() {
+    const payload = data.seo_playbooks || {};
+    const filters = data._playbookFilters || {};
+    let rows = (payload.playbooks || []).slice();
+    if (filters.domain) rows = rows.filter(pb => playbookMatchesDomain(pb, filters.domain));
+    if (filters.category) rows = rows.filter(pb => pb.category === filters.category);
+    if (filters.source) rows = rows.filter(pb => (pb.source_types || []).includes(filters.source) || pb.source_type === filters.source);
+    if (filters.cluster) rows = rows.filter(pb => (pb.cluster_label || pb.cluster || '') === filters.cluster);
+    const q = (filters.q || '').trim().toLowerCase();
+    if (q) rows = rows.filter(pb => semanticSearchText(pb).includes(q));
+    const sortKey = filters.sort || 'expected_benefit_score';
+    rows.sort((a, b) => Number(b[sortKey] || 0) - Number(a[sortKey] || 0));
+    return rows;
+  }
+
+  function shortEvidenceValue(value) {
+    if (Array.isArray(value)) return value.slice(0, 4).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' | ');
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return String(value == null ? '' : value);
+  }
+
+  function renderSeoPlaybooks() {
+    const section = document.getElementById('seo-playbooks-section');
+    if (!section) return;
+    const payload = data.seo_playbooks || {};
+    const playbooks = payload.playbooks || [];
+    if (!playbooks.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    preparePlaybookFilters(payload);
+    const rows = filteredSeoPlaybooks();
+    const summary = payload.summary || {};
+    document.getElementById('seo-playbooks-meta').textContent =
+      `${Number(summary.playbooks || playbooks.length).toLocaleString()} playbooks · ${Number(summary.targets || 0).toLocaleString()} targets · ${Number(summary.cross_domain || 0).toLocaleString()} cross-domain · showing ${rows.length.toLocaleString()}/${playbooks.length.toLocaleString()}`;
+    document.getElementById('seo-playbooks-summary').innerHTML = [
+      ['Playbooks', Number(summary.playbooks || playbooks.length).toLocaleString(), 'reusable patterns'],
+      ['Targets', Number(summary.targets || 0).toLocaleString(), 'page-level tasks'],
+      ['Cross-domain', Number(summary.cross_domain || 0).toLocaleString(), 'portable patterns'],
+      ['Traffic opp.', Number(summary.traffic_opportunity || 0).toLocaleString(), 'mapped opportunity'],
+    ].map(card => `
+      <article class="border border-gray-200 rounded-lg p-4 bg-white">
+        <div class="text-xl font-semibold">${escapeHtml(card[1])}</div>
+        <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(card[2])}</div>
+      </article>`).join('');
+    renderSeoPlaybookCards(rows);
+  }
+
+  function renderSeoPlaybookCards(rows) {
+    const root = document.getElementById('seo-playbooks-list');
+    if (!root) return;
+    if (!rows.length) {
+      root.innerHTML = '<div class="text-gray-500 text-center py-12 xl:col-span-2">No playbooks match these filters.</div>';
+      return;
+    }
+    root.innerHTML = rows.slice(0, 60).map(pb => {
+      const color = playbookColor(pb.category);
+      const targets = pb.targets || [];
+      const evidence = (pb.evidence || []).slice(0, 4);
+      const examples = (pb.source_examples || []).slice(0, 4);
+      const targetRows = targets.slice(0, 6).map(t => `
+        <div class="border-t border-gray-100 py-2">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-medium">${escapeHtml(t.domain || '')} · <a class="text-blue-600 hover:underline" href="${escapeHtml(t.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(t.title || t.url || '', 72))}</a></div>
+              <div class="text-gray-600">${escapeHtml(truncateMiddle(t.action || '', 120))}</div>
+              ${t.suggested_anchor ? `<div class="text-gray-500">anchor: ${escapeHtml(t.suggested_anchor)}</div>` : ''}
+              ${t.suggested_target_url ? `<div class="text-gray-500">to: ${escapeHtml(truncateMiddle(t.suggested_target_url, 64))}</div>` : ''}
+            </div>
+            <div class="text-right font-mono whitespace-nowrap">
+              <div>${Number(t.priority_score || 0).toFixed(1)}</div>
+              <div class="text-gray-500">${Number(t.traffic_opportunity || 0).toLocaleString()}</div>
+            </div>
+          </div>
+        </div>`).join('');
+      const evidenceRows = evidence.length ? evidence.map(e => {
+        const entries = Object.entries(e).filter(([key]) => key !== 'sample_urls' && key !== 'sample_links').slice(0, 5);
+        return `<li>${entries.map(([key, value]) => `<span class="font-medium">${escapeHtml(key.replaceAll('_', ' '))}</span>: ${escapeHtml(truncateMiddle(shortEvidenceValue(value), 82))}`).join(' · ')}</li>`;
+      }).join('') : '<li>No evidence rows attached.</li>';
+      const exampleRows = examples.length ? examples.map(ex => {
+        const label = ex.title || ex.label || ex.anchor || ex.excerpt || ex.url || ex.detail || '';
+        return `<li>${ex.domain ? `<span class="font-medium">${escapeHtml(ex.domain)}</span> · ` : ''}${ex.url ? `<a class="text-blue-600 hover:underline" href="${escapeHtml(ex.url)}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(label || ex.url, 74))}</a>` : escapeHtml(truncateMiddle(label, 92))}</li>`;
+      }).join('') : '<li>No source examples attached.</li>';
+      return `
+        <article class="border border-gray-200 rounded-lg p-4 bg-white">
+          <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="min-w-0">
+              <div class="text-[11px] uppercase tracking-wide font-semibold" style="color:${color}">${escapeHtml((pb.category || '').replaceAll('_', ' '))} · ${escapeHtml((pb.source_type || '').replaceAll('_', ' '))}</div>
+              <h3 class="font-semibold text-base leading-snug">${escapeHtml(pb.pattern || '')}</h3>
+              <div class="text-xs text-gray-500 mt-1">${escapeHtml(pb.reusable_scope || '')}${pb.cluster_label ? ' · ' + escapeHtml(pb.cluster_label) : ''}</div>
+            </div>
+            <div class="text-right whitespace-nowrap">
+              <div class="text-lg font-semibold font-mono">${Number(pb.expected_benefit_score || 0).toFixed(1)}</div>
+              <div class="text-[11px] text-gray-500">benefit</div>
+            </div>
+          </div>
+          <div class="grid sm:grid-cols-3 gap-2 text-xs mb-3">
+            <div class="bg-gray-50 rounded p-2"><div class="font-semibold">${Number(pb.priority_score || 0).toFixed(1)}</div><div class="text-gray-500">priority</div></div>
+            <div class="bg-gray-50 rounded p-2"><div class="font-semibold">${Number(pb.target_count || targets.length || 0).toLocaleString()}</div><div class="text-gray-500">targets</div></div>
+            <div class="bg-gray-50 rounded p-2"><div class="font-semibold">${Number(pb.traffic_opportunity || 0).toLocaleString()}</div><div class="text-gray-500">traffic opp.</div></div>
+          </div>
+          <div class="text-xs mb-3">
+            <div class="font-semibold mb-1">Trigger</div>
+            <ul class="list-disc pl-5 text-gray-600 space-y-0.5">${(pb.trigger_conditions || []).slice(0, 3).map(v => `<li>${escapeHtml(v)}</li>`).join('')}</ul>
+          </div>
+          <div class="grid md:grid-cols-2 gap-3 text-xs mb-3">
+            <div>
+              <div class="font-semibold mb-1">Evidence</div>
+              <ul class="list-disc pl-5 text-gray-600 space-y-0.5">${evidenceRows}</ul>
+            </div>
+            <div>
+              <div class="font-semibold mb-1">Source examples</div>
+              <ul class="list-disc pl-5 text-gray-600 space-y-0.5">${exampleRows}</ul>
+            </div>
+          </div>
+          <div class="text-xs mb-3">
+            <div class="font-semibold mb-1">Steps</div>
+            <ol class="list-decimal pl-5 text-gray-600 space-y-0.5">${(pb.implementation_steps || []).map(v => `<li>${escapeHtml(v)}</li>`).join('')}</ol>
+          </div>
+          <div class="text-xs mb-3">
+            <div class="font-semibold mb-1">Acceptance</div>
+            <ul class="list-disc pl-5 text-gray-600 space-y-0.5">${(pb.acceptance_criteria || []).map(v => `<li>${escapeHtml(v)}</li>`).join('')}</ul>
+            <div class="text-gray-500 mt-1">Validation: ${escapeHtml(pb.validation_metric || '')}</div>
+          </div>
+          <div class="text-xs">
+            <div class="font-semibold mb-1">Targets</div>
+            ${targetRows || '<div class="text-gray-500">No targets attached.</div>'}
+            ${targets.length > 6 ? `<div class="text-gray-500 pt-2">+ ${Number(targets.length - 6).toLocaleString()} more targets in export</div>` : ''}
+          </div>
+        </article>`;
+    }).join('');
+  }
+
+  function downloadTextFile(filename, body, mime) {
+    const blob = new Blob([body], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function markdownList(items) {
+    return (items || []).map(item => `- ${String(item || '').replace(/\n/g, ' ')}`).join('\n');
+  }
+
+  function exportSeoPlaybooks(kind) {
+    const rows = filteredSeoPlaybooks();
+    if (kind === 'csv') {
+      const cols = ['playbook_id','pattern','category','source_type','reusable_scope','priority_score','expected_benefit_score','confidence','target_count','traffic_opportunity','affected_domains','validation_metric','trigger_conditions','implementation_steps','acceptance_criteria','targets'];
+      const csv = [cols.join(',')].concat(rows.map(pb => cols.map(col => {
+        let value = pb[col];
+        if (col === 'affected_domains') value = (pb.affected_domains || []).map(d => `${d.domain}:${d.target_count}`).join(' | ');
+        if (col === 'trigger_conditions') value = (pb.trigger_conditions || []).join(' | ');
+        if (col === 'implementation_steps') value = (pb.implementation_steps || []).join(' | ');
+        if (col === 'acceptance_criteria') value = (pb.acceptance_criteria || []).join(' | ');
+        if (col === 'targets') value = (pb.targets || []).map(t => `${t.domain} ${t.url} ${t.action || ''}`.trim()).join(' | ');
+        return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+      }).join(','))).join('\n');
+      downloadTextFile('comparison-seo-playbooks.csv', csv, 'text/csv;charset=utf-8');
+      return;
+    }
+    if (kind === 'checklist') {
+      const body = ['# Cross-domain SEO Playbook Checklist', '']
+        .concat(rows.flatMap(pb => [
+          `## ${pb.pattern || pb.playbook_id}`,
+          `Owner: ${pb.owner || ''} | Category: ${pb.category || ''} | Priority: ${Number(pb.priority_score || 0).toFixed(1)}`,
+          '',
+          ...(pb.checklist || []).map(item => `- [ ] ${item.task || pb.pattern}${item.target_url ? ` (${item.target_url})` : ''}`),
+          '',
+        ])).join('\n');
+      downloadTextFile('comparison-seo-playbook-checklist.md', body, 'text/markdown;charset=utf-8');
+      return;
+    }
+    const body = ['# Cross-domain SEO Playbooks', '']
+      .concat(rows.map(pb => [
+        `## ${pb.pattern || pb.playbook_id}`,
+        '',
+        `- Category: ${pb.category || ''}`,
+        `- Source: ${(pb.source_types || [pb.source_type || '']).join(', ')}`,
+        `- Scope: ${pb.reusable_scope || ''}`,
+        `- Priority: ${Number(pb.priority_score || 0).toFixed(1)}`,
+        `- Expected benefit: ${pb.expected_benefit || ''} (${Number(pb.expected_benefit_score || 0).toFixed(1)})`,
+        `- Validation metric: ${pb.validation_metric || ''}`,
+        '',
+        '### Trigger conditions',
+        markdownList(pb.trigger_conditions),
+        '',
+        '### Implementation steps',
+        (pb.implementation_steps || []).map((step, i) => `${i + 1}. ${step}`).join('\n'),
+        '',
+        '### Evidence',
+        markdownList((pb.evidence || []).map(e => Object.entries(e).slice(0, 6).map(([key, value]) => `${key}: ${shortEvidenceValue(value)}`).join(' | '))),
+        '',
+        '### Source examples',
+        markdownList((pb.source_examples || []).map(ex => [ex.domain, ex.title || ex.label || ex.url || ex.excerpt, ex.url].filter(Boolean).join(' | '))),
+        '',
+        '### Targets',
+        markdownList((pb.targets || []).map(t => `${t.domain} | ${t.title || t.url} | ${t.url || ''} | ${t.action || ''}`)),
+        '',
+        '### Acceptance criteria',
+        markdownList(pb.acceptance_criteria),
+        '',
+      ].join('\n'))).join('\n');
+    downloadTextFile('comparison-seo-playbooks.md', body, 'text/markdown;charset=utf-8');
+  }
+
   renderScorecards();
   renderGaps();
   renderMatrixButtons();
   renderMetricMatrix();
   renderActionBoard();
+  renderSeoPlaybooks();
   renderStructuredDataCompare();
   renderTrustSignalsCompare();
   renderConversionBalanceCompare();

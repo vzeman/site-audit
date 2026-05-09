@@ -963,6 +963,524 @@ def _action_board_payload(projects: list[_Project]) -> dict:
     }
 
 
+def _playbook_slug(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")[:90] or "playbook"
+
+
+def _playbook_blueprint(category: str, source_type: str, pattern: str) -> dict:
+    text = f"{category} {source_type} {pattern}".lower()
+    if "link" in text or "anchor" in text or "pagerank" in text:
+        return {
+            "owner": "SEO",
+            "trigger_conditions": [
+                "Target page has search demand or conversion value but weaker internal support than comparable winning pages.",
+                "A source page or hub can add a descriptive contextual link without exceeding paragraph link-density limits.",
+            ],
+            "implementation_steps": [
+                "Confirm the target page and the source-page paragraph are topically aligned.",
+                "Add the link in main content using the suggested or closest natural anchor.",
+                "Avoid repeated template/sidebar-only links when a contextual placement is available.",
+                "Re-crawl and confirm in-degree, click depth, and authority-demand alignment improved.",
+            ],
+            "acceptance_criteria": [
+                "Every listed target has at least one relevant new contextual internal link.",
+                "Anchor text describes the target topic and does not repeat the same exact phrase site-wide.",
+                "The target appears in the next link graph with improved internal support.",
+            ],
+            "validation_metric": "Target in-degree, click depth, traffic-weighted PageRank, authority-demand alignment, and target-page organic traffic.",
+        }
+    if "schema" in text or "structured" in text or "faqpage" in text or "article" in text:
+        return {
+            "owner": "SEO",
+            "trigger_conditions": [
+                "Target page contains visible content that supports a schema type used by stronger competing pages.",
+                "The current page has missing or invalid structured data for that content type.",
+            ],
+            "implementation_steps": [
+                "Map the visible page content to the required and recommended schema properties.",
+                "Add JSON-LD only for content that is actually visible on the page.",
+                "Validate the markup and fix warnings that affect eligibility.",
+                "Re-run the audit and verify schema coverage and invalid-block counts.",
+            ],
+            "acceptance_criteria": [
+                "All listed pages contain valid JSON-LD for the recommended schema type.",
+                "Required properties are populated from visible page content.",
+                "No new invalid JSON-LD blocks are introduced.",
+            ],
+            "validation_metric": "Valid schema blocks, schema coverage by cluster, invalid JSON-LD count, and rich-result eligibility checks.",
+        }
+    if "fresh" in text or "date" in text or "updated" in text:
+        return {
+            "owner": "Content",
+            "trigger_conditions": [
+                "Winning pages expose fresher evidence or updated dates while target pages are stale or missing date signals.",
+                "The page carries traffic or ranking keywords where freshness can affect user trust.",
+            ],
+            "implementation_steps": [
+                "Review outdated claims, screenshots, statistics, integrations, pricing references, and examples.",
+                "Update the affected sections with current evidence and remove stale claims.",
+                "Expose a visible published or updated date when appropriate for the content type.",
+                "Re-run freshness and readiness checks after publishing.",
+            ],
+            "acceptance_criteria": [
+                "All listed pages move out of stale or unknown freshness buckets where a date is appropriate.",
+                "Updated claims include current evidence or citations.",
+                "Freshness risk and traffic-at-risk metrics decline on the next report.",
+            ],
+            "validation_metric": "Freshness bucket, visible date coverage, freshness-impact risk, and organic traffic on refreshed pages.",
+        }
+    if "conversion" in text or "cta" in text or "form" in text or "lead" in text:
+        return {
+            "owner": "CRO",
+            "trigger_conditions": [
+                "A page has search demand or commercial intent but weaker conversion support than winning pages.",
+                "Comparable successful templates expose a primary CTA, form, demo path, or lead capture element.",
+            ],
+            "implementation_steps": [
+                "Match the CTA to the page intent and avoid adding competing primary actions.",
+                "Place the primary CTA near the high-intent section or after the main answer.",
+                "Add supporting proof or objection-handling copy near the conversion path.",
+                "Validate conversion support and CTA overload metrics after release.",
+            ],
+            "acceptance_criteria": [
+                "Every target page has a clear primary conversion path appropriate for its intent.",
+                "Lead pages include a form, contact path, demo path, or equivalent capture mechanism.",
+                "Conversion balance improves without creating CTA overload.",
+            ],
+            "validation_metric": "Primary CTA coverage, form/contact coverage, conversion balance score, lead-page capture rate, and conversions if available.",
+        }
+    if "title" in text or "metadata" in text or "h1" in text:
+        return {
+            "owner": "SEO",
+            "trigger_conditions": [
+                "Target pages have metadata, title, or heading alignment issues on pages with search demand.",
+                "Search keywords, page title, and visible H1/H2 language are semantically misaligned.",
+            ],
+            "implementation_steps": [
+                "Map the primary ranking keyword and intent to the title, H1, and opening section.",
+                "Rewrite metadata and headings using natural, specific language rather than keyword stuffing.",
+                "Keep one clear H1 and preserve page intent during the rewrite.",
+                "Re-run metadata and semantic alignment checks.",
+            ],
+            "acceptance_criteria": [
+                "Target pages have unique, intent-matched titles and descriptions.",
+                "The H1 and main headings align with the target page topic.",
+                "Metadata quality issues are cleared for the listed URLs.",
+            ],
+            "validation_metric": "Metadata issue share, title-to-content alignment, title/H1 alignment, rankings, and CTR where available.",
+        }
+    return {
+        "owner": "Content",
+        "trigger_conditions": [
+            "A target cluster or page lacks a content pattern repeatedly present in stronger pages.",
+            "The missing pattern matches the page intent, template, or keyword cluster instead of being copied blindly.",
+        ],
+        "implementation_steps": [
+            "Review the source examples and identify the role the pattern plays in the page.",
+            "Add or rewrite the missing section using domain-specific examples, entities, and proof.",
+            "Align headings, paragraphs, and internal links to the target keyword cluster.",
+            "Re-run comparison and domain reports to confirm support-score and priority-score movement.",
+        ],
+        "acceptance_criteria": [
+            "Every listed target page contains the recommended pattern in a page-specific form.",
+            "The new section is supported by visible headings, paragraphs, examples, and internal links.",
+            "Keyword-content support and priority scores improve in the next comparison.",
+        ],
+        "validation_metric": "Keyword-content support score, paragraph archetype coverage, entity coverage, priority score, rankings, and organic traffic.",
+    }
+
+
+def _seo_playbooks_payload(
+    projects: list[_Project],
+    *,
+    winning_patterns: dict,
+    paragraph_archetypes: dict,
+    template_patterns: dict,
+    structured_data_opportunities: dict,
+    internal_link_patterns: dict,
+    action_board: dict,
+) -> dict:
+    domains = [p.domain for p in projects]
+    playbooks: dict[str, dict] = {}
+
+    def ensure(
+        key: str,
+        *,
+        pattern: str,
+        category: str,
+        source_type: str,
+        cluster: str = "",
+        cluster_label: str = "",
+        source_domain: str = "",
+    ) -> dict:
+        blueprint = _playbook_blueprint(category, source_type, pattern)
+        row = playbooks.setdefault(key, {
+            "playbook_id": key,
+            "pattern": pattern,
+            "category": category or "content",
+            "source_type": source_type,
+            "source_types": [],
+            "owner": blueprint["owner"],
+            "cluster": cluster,
+            "cluster_label": cluster_label or cluster,
+            "priority_score": 0.0,
+            "confidence": 0.0,
+            "expected_benefit_score": 0.0,
+            "traffic_opportunity": 0.0,
+            "trigger_conditions": list(blueprint["trigger_conditions"]),
+            "implementation_steps": list(blueprint["implementation_steps"]),
+            "acceptance_criteria": list(blueprint["acceptance_criteria"]),
+            "validation_metric": blueprint["validation_metric"],
+            "evidence": [],
+            "source_examples": [],
+            "targets": [],
+            "_target_keys": set(),
+            "_evidence_keys": set(),
+            "_example_keys": set(),
+            "_domains": Counter(),
+            "_source_domains": Counter(),
+            "_confidence_sum": 0.0,
+            "_confidence_count": 0,
+        })
+        if source_type not in row["source_types"]:
+            row["source_types"].append(source_type)
+        if source_domain:
+            row["_source_domains"][source_domain] += 1
+        return row
+
+    def add_evidence(pb: dict, evidence: dict) -> None:
+        compact = {k: v for k, v in evidence.items() if v not in (None, "", [], {})}
+        if not compact:
+            return
+        key = json.dumps(compact, sort_keys=True, default=str)[:500]
+        if key in pb["_evidence_keys"]:
+            return
+        pb["_evidence_keys"].add(key)
+        pb["evidence"].append(compact)
+
+    def add_example(pb: dict, example: dict) -> None:
+        compact = {k: v for k, v in example.items() if v not in (None, "", [], {})}
+        if not compact:
+            return
+        key = "|".join(str(compact.get(k, "")) for k in ("domain", "url", "title", "excerpt", "label"))
+        if key in pb["_example_keys"]:
+            return
+        pb["_example_keys"].add(key)
+        pb["source_examples"].append(compact)
+
+    def target_rows_from_action(row: dict) -> list[dict]:
+        targets = row.get("targets") or []
+        if not isinstance(targets, list) or not targets:
+            return [row]
+        out = []
+        for url in targets:
+            out.append({**row, "target_url": url, "target_title": row.get("title") or url})
+        return out
+
+    def add_target(pb: dict, row: dict, *, action_override: str = "") -> None:
+        domain = row.get("target_domain") or row.get("domain") or ""
+        url = row.get("target_url") or row.get("url") or row.get("source_url") or ""
+        title = row.get("target_title") or row.get("title") or row.get("source_title") or url
+        action = (
+            action_override
+            or row.get("concrete_change")
+            or row.get("action")
+            or row.get("instruction")
+            or row.get("recommended_action")
+            or row.get("reason")
+            or pb.get("pattern")
+            or ""
+        )
+        key = f"{domain}|{url}|{action[:140]}"
+        if key in pb["_target_keys"]:
+            return
+        priority = max(
+            _safe_float(row.get("priority_score")),
+            _safe_float(row.get("expected_benefit_score")),
+            _safe_float(row.get("impact")),
+        )
+        confidence = _safe_float(row.get("confidence"))
+        traffic = max(
+            _safe_float(row.get("traffic_opportunity")),
+            _safe_float(row.get("target_traffic")),
+            _safe_float(row.get("traffic")),
+            _safe_float(row.get("opportunity")),
+        )
+        target = {
+            "domain": domain,
+            "url": url,
+            "title": title,
+            "cluster": row.get("cluster") or row.get("cluster_label") or pb.get("cluster") or "",
+            "page_type": row.get("target_page_type") or row.get("page_type") or "",
+            "owner": row.get("owner") or pb.get("owner") or "",
+            "type": row.get("type") or row.get("category") or pb.get("category") or "",
+            "priority_score": round(priority, 2),
+            "confidence": round(confidence, 3),
+            "traffic_opportunity": round(traffic, 1),
+            "action": action,
+            "missing_element": row.get("missing_element") or row.get("missing_pattern") or row.get("schema_type") or "",
+            "suggested_anchor": row.get("suggested_anchor") or "",
+            "suggested_target_url": row.get("suggested_target_url") or "",
+            "source_recommendation_id": row.get("id") or row.get("pattern_key") or row.get("pattern_id") or "",
+        }
+        pb["_target_keys"].add(key)
+        pb["targets"].append(target)
+        if domain:
+            pb["_domains"][domain] += 1
+        pb["priority_score"] = max(_safe_float(pb.get("priority_score")), priority)
+        pb["traffic_opportunity"] = _safe_float(pb.get("traffic_opportunity")) + traffic
+        if confidence:
+            pb["_confidence_sum"] += confidence
+            pb["_confidence_count"] += 1
+
+    # Winning-pattern transfer already merges competitor cluster gaps,
+    # template transplants, and structural metric gaps.
+    for pattern in (winning_patterns or {}).get("patterns") or []:
+        targets = pattern.get("target_recommendations") or []
+        if not targets:
+            continue
+        key = f"winning::{_playbook_slug(pattern.get('pattern_key') or pattern.get('title'))}"
+        pb = ensure(
+            key,
+            pattern=pattern.get("title") or "Transfer winning SEO pattern",
+            category=pattern.get("category") or "content",
+            source_type="winning_pattern_transfer",
+            cluster=pattern.get("cluster") or "",
+            cluster_label=pattern.get("cluster_label") or "",
+            source_domain=pattern.get("source_domain") or "",
+        )
+        source_evidence = pattern.get("source_evidence") or {}
+        add_evidence(pb, {"type": "winning_pattern", "source_domain": pattern.get("source_domain") or "", **source_evidence})
+        if source_evidence.get("source_url") or source_evidence.get("source_title"):
+            add_example(pb, {
+                "domain": pattern.get("source_domain") or "",
+                "url": source_evidence.get("source_url") or "",
+                "title": source_evidence.get("source_title") or "",
+                "detail": source_evidence.get("evidence_type") or pattern.get("category") or "",
+            })
+        for rec in targets:
+            add_target(pb, rec)
+
+    # Template success patterns: reusable page-structure and conversion blocks.
+    template_examples: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for row in (template_patterns or {}).get("examples") or []:
+        feature = str(row.get("feature_key") or row.get("label") or "template")
+        page_type = str(row.get("page_type") or "")
+        template_examples[(feature, page_type)].append(row)
+    for rec in (template_patterns or {}).get("recommendations") or []:
+        feature = str(rec.get("feature_key") or rec.get("missing_pattern") or "template")
+        page_type = str(rec.get("page_type") or "")
+        pattern_label = rec.get("missing_pattern") or feature
+        key = f"template::{_playbook_slug(feature)}::{_playbook_slug(page_type)}"
+        pb = ensure(
+            key,
+            pattern=f"Add {pattern_label} to {page_type or 'matching'} pages",
+            category=rec.get("category") or "content",
+            source_type="template_success_pattern",
+        )
+        add_evidence(pb, {
+            "type": "template_success_pattern",
+            "feature_key": feature,
+            "page_type": page_type,
+            "confidence": rec.get("confidence"),
+            "observed_lift": rec.get("observed_lift"),
+        })
+        for example in template_examples.get((feature, page_type), [])[:4]:
+            add_example(pb, {
+                "domain": example.get("domain") or "",
+                "label": example.get("label") or feature,
+                "detail": example.get("recommendation") or "",
+                "confidence": example.get("confidence"),
+                "observed_lift": example.get("observed_lift"),
+            })
+            for sample in (example.get("sample_urls") or [])[:3]:
+                add_example(pb, {"domain": example.get("domain") or "", **sample})
+        add_target(pb, rec)
+
+    # Paragraph archetypes: repeatable content roles seen on stronger pages.
+    for rec in (paragraph_archetypes or {}).get("recommendations") or []:
+        archetype = rec.get("label") or rec.get("archetype") or "paragraph archetype"
+        key = f"paragraph::{_playbook_slug(rec.get('cluster'))}::{_playbook_slug(rec.get('archetype') or archetype)}"
+        pb = ensure(
+            key,
+            pattern=f"Add {str(archetype).lower()} sections to {rec.get('cluster_label') or rec.get('cluster') or 'matching'} pages",
+            category="content",
+            source_type="paragraph_archetype",
+            cluster=rec.get("cluster") or "",
+            cluster_label=rec.get("cluster_label") or "",
+            source_domain=rec.get("source_domain") or "",
+        )
+        add_evidence(pb, {
+            "type": "paragraph_archetype",
+            "source_domain": rec.get("source_domain"),
+            "archetype": rec.get("archetype"),
+            "traffic_opportunity": rec.get("traffic_opportunity"),
+        })
+        for example in (rec.get("source_examples") or [])[:6]:
+            add_example(pb, {"domain": rec.get("source_domain") or "", **example})
+        add_target(pb, rec)
+
+    # Structured-data opportunities aggregate schema tasks by type and cluster.
+    for rec in (structured_data_opportunities or {}).get("recommendations") or []:
+        schema_type = rec.get("schema_type") or "schema"
+        cluster = rec.get("cluster") or rec.get("cluster_label") or ""
+        key = f"schema::{_playbook_slug(schema_type)}::{_playbook_slug(cluster)}"
+        pb = ensure(
+            key,
+            pattern=f"Add valid {schema_type} structured data",
+            category="schema",
+            source_type="schema_opportunity",
+            cluster=cluster,
+            cluster_label=cluster,
+        )
+        add_evidence(pb, {
+            "type": "schema_opportunity",
+            "schema_type": schema_type,
+            "reason": rec.get("reason"),
+            "missing_evidence": rec.get("missing_evidence"),
+            "missing_recommended_properties": rec.get("missing_recommended_properties"),
+            "guideline_url": rec.get("guideline_url"),
+        })
+        add_target(pb, rec, action_override=rec.get("reason") or f"Add {schema_type} schema if visible content supports it.")
+
+    # Internal-link pattern gaps are reusable architecture rules.
+    link_examples: dict[str, list[dict]] = defaultdict(list)
+    for row in (internal_link_patterns or {}).get("examples") or []:
+        for key in (row.get("pattern_id"), row.get("rule_key"), row.get("inferred_rule")):
+            if key:
+                link_examples[str(key)].append(row)
+    for rec in (internal_link_patterns or {}).get("recommendations") or []:
+        pattern_key = str(rec.get("pattern_id") or rec.get("rule_key") or rec.get("missing_pattern") or "internal-link")
+        label = rec.get("missing_pattern") or rec.get("recommended_action") or pattern_key
+        key = f"internal::{_playbook_slug(pattern_key)}"
+        pb = ensure(
+            key,
+            pattern=f"Apply internal-link pattern: {label}",
+            category="link",
+            source_type="internal_link_pattern",
+        )
+        add_evidence(pb, {
+            "type": "internal_link_pattern",
+            "pattern_id": rec.get("pattern_id"),
+            "missing_pattern": rec.get("missing_pattern"),
+            "confidence": rec.get("confidence"),
+            "lift_score_difference": rec.get("lift_score_difference"),
+        })
+        for example in link_examples.get(pattern_key, [])[:5]:
+            add_example(pb, {
+                "domain": example.get("domain") or "",
+                "label": example.get("inferred_rule") or pattern_key,
+                "support_count": example.get("support_count"),
+                "confidence": example.get("confidence"),
+            })
+            for sample in (example.get("sample_links") or [])[:4]:
+                add_example(pb, {"domain": example.get("domain") or "", **sample})
+        add_target(pb, rec)
+
+    # Priority action board: captures recurring fixes that were not generated
+    # from a cross-domain transfer section above.
+    action_groups: dict[str, list[dict]] = defaultdict(list)
+    for row in (action_board or {}).get("items") or []:
+        key = "::".join([
+            "action",
+            _playbook_slug(row.get("category") or "action"),
+            _playbook_slug(row.get("type") or row.get("title") or "fix"),
+            _playbook_slug(row.get("cluster") or "global"),
+        ])
+        action_groups[key].append(row)
+    for key, rows in action_groups.items():
+        max_priority = max((_safe_float(row.get("priority_score")) for row in rows), default=0.0)
+        if len(rows) < 2 and max_priority < 60.0:
+            continue
+        sample = rows[0]
+        label = str(sample.get("type") or sample.get("title") or "SEO fix").replace("_", " ")
+        cluster = sample.get("cluster") or ""
+        pb = ensure(
+            key,
+            pattern=f"Repeatable fix: {label}{' in ' + str(cluster) if cluster else ''}",
+            category=sample.get("category") or "content",
+            source_type="fix_priority_score",
+            cluster=cluster,
+            cluster_label=cluster,
+        )
+        add_evidence(pb, {
+            "type": "fix_priority_score",
+            "recommendation_type": sample.get("type"),
+            "category": sample.get("category"),
+            "priority_model": ((action_board or {}).get("score_model") or {}).get("model"),
+            "grouped_recommendations": len(rows),
+        })
+        for row in rows:
+            for target in target_rows_from_action(row):
+                add_target(pb, target)
+
+    rows: list[dict] = []
+    for pb in playbooks.values():
+        if not pb["targets"]:
+            continue
+        pb["targets"].sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("traffic_opportunity"))), reverse=True)
+        domain_rows = []
+        for domain, count in pb["_domains"].most_common():
+            domain_targets = [t for t in pb["targets"] if t.get("domain") == domain]
+            domain_rows.append({
+                "domain": domain,
+                "target_count": count,
+                "traffic_opportunity": round(sum(_safe_float(t.get("traffic_opportunity")) for t in domain_targets), 1),
+                "avg_priority_score": round(sum(_safe_float(t.get("priority_score")) for t in domain_targets) / max(1, len(domain_targets)), 2),
+            })
+        confidence_count = _safe_int(pb.get("_confidence_count"))
+        pb["confidence"] = round(pb["_confidence_sum"] / confidence_count, 3) if confidence_count else round(_safe_float(pb.get("confidence")), 3)
+        pb["traffic_opportunity"] = round(_safe_float(pb.get("traffic_opportunity")), 1)
+        pb["target_count"] = len(pb["targets"])
+        pb["affected_domains"] = domain_rows
+        pb["source_domains"] = [domain for domain, _ in pb["_source_domains"].most_common()]
+        pb["expected_benefit_score"] = round(min(100.0, _safe_float(pb.get("priority_score")) * 0.72 + min(24.0, math.log1p(pb["traffic_opportunity"]) * 3.8) + min(12.0, pb["target_count"] * 1.6)), 2)
+        pb["expected_benefit"] = (
+            f"{int(round(pb['traffic_opportunity'])):,} traffic opportunity across {pb['target_count']} target page"
+            f"{'' if pb['target_count'] == 1 else 's'}"
+        )
+        pb["reusable_scope"] = "cross-domain" if len(domain_rows) > 1 or len(pb["source_domains"]) > 1 else "domain-pattern"
+        first_trigger = (pb.get("trigger_conditions") or ["matching pages meet the trigger conditions"])[0]
+        pb["portable_template"] = f"Reuse when {first_trigger[:1].lower() + first_trigger[1:]}"
+        pb["checklist"] = [
+            {
+                "task": f"{target.get('domain')}: {target.get('action') or pb.get('pattern')}",
+                "target_url": target.get("url") or "",
+                "target_title": target.get("title") or "",
+                "owner": target.get("owner") or pb.get("owner") or "",
+            }
+            for target in pb["targets"][:80]
+        ]
+        for key in list(pb.keys()):
+            if key.startswith("_"):
+                del pb[key]
+        pb["evidence"] = pb["evidence"][:10]
+        pb["source_examples"] = pb["source_examples"][:10]
+        pb["targets"] = pb["targets"][:140]
+        rows.append(pb)
+
+    rows.sort(key=lambda r: (_safe_float(r.get("expected_benefit_score")), _safe_float(r.get("priority_score")), _safe_int(r.get("target_count"))), reverse=True)
+    return {
+        "summary": {
+            "status": "ok" if rows else "no_playbooks",
+            "model": "cross_domain_seo_playbooks_v1",
+            "playbooks": len(rows),
+            "targets": sum(_safe_int(row.get("target_count")) for row in rows),
+            "domains": len(domains),
+            "cross_domain": sum(1 for row in rows if row.get("reusable_scope") == "cross-domain"),
+            "traffic_opportunity": round(sum(_safe_float(row.get("traffic_opportunity")) for row in rows), 1),
+        },
+        "filters": {
+            "domains": domains,
+            "categories": sorted({str(row.get("category") or "") for row in rows if row.get("category")}),
+            "source_types": sorted({source for row in rows for source in (row.get("source_types") or [])}),
+            "clusters": sorted({str(row.get("cluster_label") or row.get("cluster") or "") for row in rows if row.get("cluster_label") or row.get("cluster")})[:250],
+            "owners": sorted({str(row.get("owner") or "") for row in rows if row.get("owner")}),
+        },
+        "playbooks": rows[:220],
+    }
+
+
 # --- distributions (overlay charts) --------------------------------------
 
 
@@ -4900,6 +5418,19 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         winning_patterns,
     )
     paragraph_archetypes = _paragraph_archetype_comparison(projects, strongest_clusters)
+    structured_data_opportunities = _structured_data_opportunity_comparison(projects)
+    template_patterns = _template_patterns_comparison(projects)
+    internal_link_patterns = _internal_link_patterns_comparison(projects)
+    action_board = _action_board_payload(projects)
+    seo_playbooks = _seo_playbooks_payload(
+        projects,
+        winning_patterns=winning_patterns,
+        paragraph_archetypes=paragraph_archetypes,
+        template_patterns=template_patterns,
+        structured_data_opportunities=structured_data_opportunities,
+        internal_link_patterns=internal_link_patterns,
+        action_board=action_board,
+    )
     best_page_explainers = build_best_page_comparison([
         {"domain": p.domain, "best_pages": p.best_pages or {}}
         for p in projects
@@ -4917,14 +5448,14 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "entity_alignment": _entity_alignment_comparison(projects),
         "entity_coverage": _entity_coverage_comparison(projects),
         "information_gain": _information_gain_comparison(projects),
-        "structured_data_opportunities": _structured_data_opportunity_comparison(projects),
+        "structured_data_opportunities": structured_data_opportunities,
         "trust_signals": _trust_signal_comparison(projects),
         "conversion_balance": _conversion_balance_comparison(projects),
         "answer_blocks": _answer_blocks_comparison(projects),
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),
         "duplicate_fragments": _duplicate_fragments_comparison(projects),
-        "template_patterns": _template_patterns_comparison(projects),
+        "template_patterns": template_patterns,
         "keyword_gaps": _keyword_gap_payload(projects),
         "keyword_cluster_gaps": keyword_cluster_gaps,
         "strongest_clusters": strongest_clusters,
@@ -4932,7 +5463,8 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "keyword_content_matrix": keyword_content_matrix,
         "paragraph_archetypes": paragraph_archetypes,
         "best_page_explainers": best_page_explainers,
-        "action_board": _action_board_payload(projects),
+        "action_board": action_board,
+        "seo_playbooks": seo_playbooks,
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),
@@ -4942,7 +5474,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "anchor_relevance": _anchor_relevance_comparison(projects),
         "contextual_link_impact": _contextual_link_comparison(projects),
         "high_demand_low_link": _high_demand_low_link_comparison(projects),
-        "internal_link_patterns": _internal_link_patterns_comparison(projects),
+        "internal_link_patterns": internal_link_patterns,
         "internal_link_architecture": _internal_link_architecture_comparison(projects),
         "pattern_transplants": pattern_transplants,
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
