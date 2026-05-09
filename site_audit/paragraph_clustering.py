@@ -204,6 +204,7 @@ def to_scatter_payload(
         rows.append({
             "url": pages[pi].url,
             "title": pages[pi].title,
+            "paragraph_index": int(para_i),
             "excerpt": text[:200],
             "cluster": int(cluster_labels[int(ci)]),
             "cluster_label": (cluster_label_lookup or {}).get(int(cluster_labels[int(ci)]), ""),

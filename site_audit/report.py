@@ -282,6 +282,7 @@ def write_all(
     paragraph_clusters: Optional[list] = None,
     paragraph_scatter: Optional[dict] = None,
     paragraph_fanout: Optional[list] = None,
+    paragraph_impact: Optional[dict] = None,
     title_mismatch: Optional[list] = None,
     wrong_home: Optional[list] = None,
     page_improvement: Optional[list] = None,
@@ -330,6 +331,8 @@ def write_all(
         _write_json(output_dir / "paragraph_scatter.json", paragraph_scatter)
     if paragraph_fanout is not None:
         _write_json(output_dir / "paragraph_fanout.json", paragraph_fanout)
+    if paragraph_impact is not None:
+        _write_json(output_dir / "paragraph_impact.json", paragraph_impact)
     if title_mismatch is not None:
         _write_json(output_dir / "title_mismatch.json", title_mismatch)
     if wrong_home is not None:

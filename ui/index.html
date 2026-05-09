@@ -564,6 +564,18 @@
       </div>
     </div>
 
+    <!-- Paragraph impact -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="paragraph-impact-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">High-impact paragraphs</h3>
+        <p class="text-xs text-gray-500 mt-1" id="paragraph-impact-meta">
+          Estimated paragraph contribution to organic demand. This attributes page traffic across paragraphs using keyword similarity, term coverage, heading alignment, position, link context, freshness, and page demand.
+        </p>
+      </div>
+      <div id="paragraph-impact-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div id="paragraph-impact-table" class="text-xs max-h-[520px] overflow-y-auto"></div>
+    </div>
+
     <!-- Cluster overlap heatmap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
       <div class="mb-3">
@@ -1167,6 +1179,7 @@
 <script type="application/json" id="data-paragraph-clusters">__PARAGRAPH_CLUSTERS_JSON__</script>
 <script type="application/json" id="data-paragraph-scatter">__PARAGRAPH_SCATTER_JSON__</script>
 <script type="application/json" id="data-paragraph-fanout">__PARAGRAPH_FANOUT_JSON__</script>
+<script type="application/json" id="data-paragraph-impact">__PARAGRAPH_IMPACT_JSON__</script>
 <script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
 <script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
@@ -1266,6 +1279,7 @@
       const inlinedParaClusters = readInlined('data-paragraph-clusters');
       const inlinedParaScatter = readInlined('data-paragraph-scatter');
       const inlinedFanout = readInlined('data-paragraph-fanout');
+      const inlinedParagraphImpact = readInlined('data-paragraph-impact');
       const inlinedTitleMismatch = readInlined('data-title-mismatch');
       const inlinedWrongHome = readInlined('data-wrong-home');
       const inlinedImprovement = readInlined('data-page-improvement');
@@ -1286,7 +1300,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1303,6 +1317,7 @@
         paraClusters = inlinedParaClusters || [];
         paraScatter = inlinedParaScatter || {};
         fanout = inlinedFanout || [];
+        paragraphImpact = inlinedParagraphImpact || {};
         titleMismatch = inlinedTitleMismatch || [];
         wrongHome = inlinedWrongHome || [];
         improvement = inlinedImprovement || [];
@@ -1323,7 +1338,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1339,6 +1354,7 @@
           loadJSON('paragraph_clusters.json').catch(() => []),
           loadJSON('paragraph_scatter.json').catch(() => ({})),
           loadJSON('paragraph_fanout.json').catch(() => []),
+          loadJSON('paragraph_impact.json').catch(() => ({})),
           loadJSON('title_mismatch.json').catch(() => []),
           loadJSON('wrong_home_paragraphs.json').catch(() => []),
           loadJSON('page_improvement.json').catch(() => []),
@@ -1376,6 +1392,7 @@
       state.paraClusters = paraClusters;
       state.paraScatter = paraScatter;
       state.fanout = fanout;
+      state.paragraphImpact = paragraphImpact || {};
       state.titleMismatch = titleMismatch;
       state.wrongHome = wrongHome;
       state.improvement = improvement;
@@ -1415,6 +1432,7 @@
       renderClusters();
       renderTreemap();
       renderAhrefs();
+      renderParagraphImpact();
       renderHeatmap();
       renderCoverage('all');
       renderIndexability();
@@ -2210,6 +2228,80 @@
       </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No keywords.</div>';
   }
 
+  function paragraphImpactKey(url, paragraphIndex) {
+    return `${url || ''}#${Number(paragraphIndex || 0)}`;
+  }
+
+  function buildParagraphImpactMap() {
+    const rows = ((state.paragraphImpact || {}).top_paragraphs || []);
+    state.paragraphImpactByKey = new Map(rows.map(r => [paragraphImpactKey(r.url, r.paragraph_index), r]));
+  }
+
+  function paragraphImpactForDot(d) {
+    if (!state.paragraphImpactByKey) buildParagraphImpactMap();
+    return state.paragraphImpactByKey.get(paragraphImpactKey(d.url, d.paragraph_index)) || null;
+  }
+
+  function renderParagraphImpact() {
+    const block = document.getElementById('paragraph-impact-block');
+    const data = state.paragraphImpact || {};
+    const summary = data.summary || {};
+    const rows = data.top_paragraphs || [];
+    buildParagraphImpactMap();
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const provider = summary.provider || 'search';
+    document.getElementById('paragraph-impact-meta').textContent =
+      `${rows.length.toLocaleString()} top paragraphs from ${Number(summary.scored_paragraphs || 0).toLocaleString()} scored · ${provider} traffic attributed by semantic and lexical keyword fit.`;
+    document.getElementById('paragraph-impact-summary').innerHTML =
+      card('scored paragraphs', Number(summary.scored_paragraphs || 0).toLocaleString(), `${Number(summary.total_paragraphs || 0).toLocaleString()} extracted`) +
+      card('attributed traffic', Number(summary.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), 'estimated organic visits') +
+      card('pages with data', Number(summary.pages_with_search_data || 0).toLocaleString(), 'matched search URLs') +
+      card('high impact', Number(summary.high_impact_count || 0).toLocaleString(), 'top 10% of scored paragraphs');
+    document.getElementById('paragraph-impact-table').innerHTML = `
+      <table class="w-full">
+        <thead class="text-gray-500 sticky top-0 bg-white">
+          <tr>
+            <th class="text-left py-1 pr-2">Paragraph</th>
+            <th class="text-left py-1 pr-2">Best keyword</th>
+            <th class="text-right py-1 pl-2">Impact</th>
+            <th class="text-right py-1 pl-2">Traffic</th>
+            <th class="text-right py-1 pl-2">Fit</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.slice(0, 160).map(r => {
+            const comps = r.components || {};
+            const tier = r.impact_tier === 'high' ? 'bg-emerald-100 text-emerald-800' : (r.impact_tier === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700');
+            const kws = (r.matched_keywords || []).slice(0, 3).map(k => `${escapeHtml(k.keyword)} (${Number(k.similarity || 0).toFixed(2)})`).join(' · ');
+            return `<tr class="border-b border-gray-100 align-top">
+              <td class="py-2 pr-3">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[11px] px-1.5 py-0.5 rounded ${tier}">${escapeHtml(r.impact_tier || '')}</span>
+                  <span class="text-gray-500">para ${Number(r.paragraph_index || 0)}</span>
+                  ${r.heading ? `<span class="text-gray-400 truncate">· ${escapeHtml(r.heading)}</span>` : ''}
+                </div>
+                <a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+                <div class="text-gray-500 mt-0.5">${escapeHtml(r.section || '')}</div>
+                <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
+              </td>
+              <td class="py-2 pr-3">
+                <div class="font-medium text-gray-900">${escapeHtml(r.best_keyword || r.top_page_keyword || '')}</div>
+                <div class="text-gray-500">${kws}</div>
+                <div class="text-gray-400 mt-1">semantic ${Number(comps.semantic || 0).toFixed(2)} · overlap ${Number(comps.keyword_overlap || 0).toFixed(2)} · heading ${Number(comps.heading_match || 0).toFixed(2)}</div>
+              </td>
+              <td class="py-2 pl-2 text-right font-mono">${Number(r.impact_score || 0).toFixed(1)}</td>
+              <td class="py-2 pl-2 text-right font-mono">${Number(r.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+              <td class="py-2 pl-2 text-right font-mono">${Number(r.relevance_score || 0).toFixed(0)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+
   function renderSections() {
     const el = document.getElementById('audit-sections');
     if (!Array.isArray(state.sections) || !state.sections.length) {
@@ -2352,8 +2444,17 @@
     const trafficRadius = maxTraffic > 0
       ? d3.scaleSqrt().domain([0, maxTraffic]).range([3, 13])
       : null;
+    if (isPara && !state.paragraphImpactByKey) buildParagraphImpactMap();
+    const maxParaImpactTraffic = isPara
+      ? d3.max(data, d => Number((paragraphImpactForDot(d) || {}).attributed_traffic || 0)) || 0
+      : 0;
+    const paraImpactRadius = maxParaImpactTraffic > 0
+      ? d3.scaleSqrt().domain([0, maxParaImpactTraffic]).range([2.2, 11])
+      : null;
     const baseR = isHeader ? 3 : (isPara ? 2.5 : 4);
-    const dotRadius = d => trafficRadius ? trafficRadius(Number(state.ahrefsTrafficByUrl.get(d.url) || 0)) : baseR;
+    const dotRadius = d => paraImpactRadius
+      ? paraImpactRadius(Number((paragraphImpactForDot(d) || {}).attributed_traffic || 0))
+      : (trafficRadius ? trafficRadius(Number(state.ahrefsTrafficByUrl.get(d.url) || 0)) : baseR);
     const hoverR = isHeader ? 6 : (isPara ? 5 : 7);
     const baseOpacity = isHeader ? 0.8 : (isPara ? 0.65 : 0.75);
     const baseStroke = isHeader ? 0.5 : (isPara ? 0.3 : 0.5);
@@ -2391,11 +2492,16 @@
           <br><span style="font-size:11px;color:#60a5fa">Click to open the parent page</span>`;
       } else if (isPara) {
         const sec = state.urlToSection.get(d.url) || '(root)';
+        const impact = paragraphImpactForDot(d);
+        const impactLine = impact
+          ? `<br><span style="font-size:12px;color:#86efac">impact ${Number(impact.impact_score || 0).toFixed(1)} · attributed traffic ${Number(impact.attributed_traffic || 0).toLocaleString(undefined, {maximumFractionDigits: 1})} · ${escapeHtml(impact.best_keyword || '')}</span>`
+          : '';
         body = `
           <strong>${escapeHtml(d.title || '(untitled)')}</strong>
           <br><span style="font-size:12px;color:#93c5fd">${escapeHtml(d.url)}</span>
           <br><span style="font-size:12px;color:#9ca3af">Section: ${escapeHtml(sec)} · Paragraph cluster ${d.cluster}${d.cluster_label ? ' — ' + escapeHtml(d.cluster_label) : ''}</span>
           <br><span style="font-size:12px;color:#fbbf24;font-style:italic">"${escapeHtml(d.excerpt || '')}"</span>
+          ${impactLine}
           <br><span style="font-size:11px;color:#60a5fa">Click to open page</span>`;
       } else {
         const traffic = state.ahrefsTrafficByUrl ? Number(state.ahrefsTrafficByUrl.get(d.url) || 0) : 0;

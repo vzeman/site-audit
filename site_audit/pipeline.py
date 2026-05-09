@@ -91,6 +91,7 @@ from .page_types import to_payload as page_types_payload
 from .paragraph_density import compute_rows as compute_paragraph_density_rows
 from .paragraph_density import density_lookup as paragraph_density_lookup
 from .paragraph_density import to_payload as paragraph_density_payload
+from .paragraph_impact import build_paragraph_impact
 from .paragraph_links import recommend as recommend_paragraph_links
 from .paragraph_links import to_payload as paragraph_links_payload
 from .performance import analyze as analyze_performance
@@ -146,6 +147,7 @@ class PipelineConfig:
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
     enable_paragraph_clustering: bool = True
+    enable_paragraph_impact: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -539,7 +541,13 @@ def run(config: PipelineConfig) -> dict:
 
     # 11) Paragraph extraction + embedding (shared by every paragraph-level analysis below)
     paragraph_records: list = []
-    if config.enable_paragraph_links or config.enable_paragraph_clustering or config.enable_content_quality or config.enable_paragraph_fanout:
+    if (
+        config.enable_paragraph_links
+        or config.enable_paragraph_clustering
+        or config.enable_paragraph_impact
+        or config.enable_content_quality
+        or config.enable_paragraph_fanout
+    ):
         paragraph_cache = ParagraphEmbeddingCache(
             cache_dir / f"paragraphs_{config.model.replace('/', '_').replace('-', '_')}.npz"
         )
@@ -853,6 +861,25 @@ def run(config: PipelineConfig) -> dict:
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
 
+    paragraph_impact_data: dict = {}
+    if config.enable_paragraph_impact and paragraph_records and ahrefs_data:
+        paragraph_impact_data = build_paragraph_impact(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            ahrefs_data,
+            embedder=embedder,
+        )
+        pi_summary = paragraph_impact_data.get("summary", {}) or {}
+        if pi_summary.get("status") == "ok":
+            LOG.info(
+                "  paragraph impact: %d scored paragraphs · %.0f attributed organic visits",
+                pi_summary.get("scored_paragraphs", 0),
+                pi_summary.get("attributed_traffic", 0.0),
+            )
+        elif pi_summary:
+            LOG.info("  paragraph impact: %s", pi_summary.get("status", "unavailable"))
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -902,6 +929,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_clusters=paragraph_clusters_data,
         paragraph_scatter=paragraph_scatter_data,
         paragraph_fanout=paragraph_fanout_payload,
+        paragraph_impact=paragraph_impact_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -944,6 +972,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_clusters=paragraph_clusters_data,
             paragraph_scatter=paragraph_scatter_data,
             paragraph_fanout=paragraph_fanout_payload,
+            paragraph_impact=paragraph_impact_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,
