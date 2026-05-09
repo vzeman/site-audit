@@ -27,6 +27,20 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--sitemap-lastmod-within-days",
             "365",
             "--no-paragraph-links",
+            "--search-provider",
+            "gsc",
+            "--gsc-property-url",
+            "sc-domain:example.com",
+            "--gsc-start-date",
+            "2026-04-01",
+            "--gsc-end-date",
+            "2026-04-30",
+            "--gsc-top-pages-limit",
+            "300",
+            "--gsc-keywords-limit",
+            "600",
+            "--gsc-refresh",
+            "--no-gsc",
             "--ahrefs-country",
             "US",
             "--ahrefs-date",
@@ -59,6 +73,14 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.sitemap_lastmod_after == "2025-05-04"
     assert args.sitemap_lastmod_within_days == 365
     assert args.no_paragraph_links is True
+    assert args.search_provider == "gsc"
+    assert args.gsc_property_url == "sc-domain:example.com"
+    assert args.gsc_start_date == "2026-04-01"
+    assert args.gsc_end_date == "2026-04-30"
+    assert args.gsc_top_pages_limit == 300
+    assert args.gsc_keywords_limit == 600
+    assert args.gsc_refresh is True
+    assert args.no_gsc is True
     assert args.ahrefs_country == "US"
     assert args.ahrefs_date == "2026-05-08"
     assert args.ahrefs_top_pages_limit == 250

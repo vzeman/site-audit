@@ -2351,7 +2351,7 @@
             <div><div class="text-xl font-semibold">${matched.toLocaleString()}</div><div class="text-gray-500">matched traffic</div></div>
             <div><div class="text-xl font-semibold">${Math.round(share * 100)}%</div><div class="text-gray-500">matched share</div></div>
           </div>
-          <div class="text-xs text-gray-500 mt-3">cache ${(s.meta || {}).cache_status || 'unknown'}${((s.meta || {}).params || {}).date ? ' · ' + (s.meta.params.date) : ''}</div>
+          <div class="text-xs text-gray-500 mt-3">${escapeHtml((s.meta || {}).provider_label || (s.meta || {}).provider || 'search')} · cache ${(s.meta || {}).cache_status || 'unknown'}${((s.meta || {}).params || {}).start_date ? ' · ' + (s.meta.params.start_date) + ' to ' + ((s.meta || {}).params || {}).end_date : ''}${((s.meta || {}).params || {}).date ? ' · ' + (s.meta.params.date) : ''}</div>
         </article>`;
     }).join('');
     renderSearchDirectoryChart();

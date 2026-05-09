@@ -77,6 +77,8 @@ from .extractor import extract
 from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
 from .freshness_impact import build_freshness_impact
+from .gsc import GSCConfig, build_analysis as build_gsc_analysis
+from .gsc import fetch_snapshot as fetch_gsc_snapshot
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
@@ -204,6 +206,13 @@ class PipelineConfig:
     link_recommendations_top_k: int = 75
     search_provider: str = "auto"
     save_snapshot: bool = True
+    enable_gsc: bool = True
+    gsc_property_url: Optional[str] = None
+    gsc_start_date: Optional[str] = None
+    gsc_end_date: Optional[str] = None
+    gsc_top_pages_limit: int = 1000
+    gsc_keywords_limit: int = 1000
+    gsc_refresh: bool = False
     enable_dataforseo: bool = True
     enable_ahrefs: bool = True
     ahrefs_date: Optional[str] = None
@@ -805,12 +814,47 @@ def run(config: PipelineConfig) -> dict:
             s.get("image_links_no_alt", 0),
         )
 
-    # 11.g) Organic search enrichment. Cache-first by default. Ahrefs remains
-    # the primary provider; DataForSEO is fetched only when selected or when
-    # Ahrefs has no usable cache/API payload.
+    # 11.g) Organic search enrichment. Cache-first by default. GSC is the
+    # preferred first-party provider in auto mode; Ahrefs/DataForSEO remain
+    # fallback proxy providers when GSC is unavailable.
     ahrefs_data: dict = {}
     provider_choice = (config.search_provider or "auto").lower()
     if provider_choice not in {"none", "disabled", "off"}:
+        if config.enable_gsc and provider_choice in {"auto", "gsc"}:
+            gsc_config = GSCConfig(
+                enabled=True,
+                property_url=config.gsc_property_url,
+                start_date=config.gsc_start_date,
+                end_date=config.gsc_end_date,
+                top_pages_limit=config.gsc_top_pages_limit,
+                keywords_limit=config.gsc_keywords_limit,
+                refresh=config.gsc_refresh,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            snapshot = fetch_gsc_snapshot(host, cache_dir, gsc_config)
+            gsc_analysis = build_gsc_analysis(
+                snapshot,
+                pages,
+                embeddings,
+                coords=coords,
+                cluster_labels=labels,
+                cluster_summaries=cluster_summaries,
+                extracted_pages=extracted_pages,
+                paragraph_records=paragraph_records,
+                linkbuilding=linkbuilding_data,
+                embedder=embedder,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            candidate = gsc_analysis.payload
+            if _search_payload_usable(candidate) or provider_choice == "gsc":
+                ahrefs_data = candidate
+                write_ahrefs_semantic_cache(
+                    cache_dir,
+                    config.model,
+                    gsc_analysis.semantic_rows,
+                    gsc_analysis.semantic_embeddings,
+                )
+
         ahrefs_config = AhrefsConfig(
             enabled=True,
             date=config.ahrefs_date,
@@ -821,7 +865,10 @@ def run(config: PipelineConfig) -> dict:
             refresh=config.ahrefs_refresh,
             semantic_sample_cap=config.ahrefs_semantic_sample,
         )
-        if config.enable_ahrefs and provider_choice in {"auto", "ahrefs"}:
+        needs_ahrefs = provider_choice == "ahrefs" or (
+            provider_choice == "auto" and not _search_payload_usable(ahrefs_data)
+        )
+        if config.enable_ahrefs and needs_ahrefs:
             snapshot = fetch_ahrefs_snapshot(host, cache_dir, ahrefs_config)
             ahrefs_analysis = build_ahrefs_analysis(
                 snapshot,

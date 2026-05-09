@@ -93,18 +93,23 @@ site-audit run flowhunt.io --sitemap-url https://www.flowhunt.io/sitemap.xml \
 
 **Optional search-demand data**
 
-If you have Ahrefs or DataForSEO API credentials, add them to a local
+If you have Google Search Console, Ahrefs, or DataForSEO credentials, add
+them to a local
 `.env` file. The file is ignored by git.
 
 ```bash
+GSC_PROPERTY_URL=sc-domain:example.com
+GSC_ACCESS_TOKEN=...
+# or:
+GSC_SERVICE_ACCOUNT_FILE=/absolute/path/to/service-account.json
 AHREFS_API_KEY=...
 DATAFORSEO_LOGIN=you@example.com
 DATAFORSEO_PASSWORD=...
 ```
 
 By default, `site-audit run` uses cached provider snapshots first,
-tries Ahrefs when `AHREFS_API_KEY` is available, and falls back to
-DataForSEO when Ahrefs is unavailable. Provider data is cached under
+tries Google Search Console first when GSC credentials are available, then
+falls back to Ahrefs/DataForSEO when GSC is unavailable. Provider data is cached under
 `projects/<domain>/cache/` so repeat reports do not spend API credits
 unless you request a refresh.
 
@@ -112,8 +117,10 @@ Useful flags:
 
 ```bash
 site-audit run example.com --search-provider auto
+site-audit run example.com --search-provider gsc --gsc-property-url sc-domain:example.com --gsc-start-date 2026-04-01 --gsc-end-date 2026-04-30
 site-audit run example.com --search-provider ahrefs --ahrefs-country US
 site-audit run example.com --search-provider dataforseo --dataforseo-location-code 2840 --dataforseo-language-code en
+site-audit run example.com --gsc-refresh
 site-audit run example.com --ahrefs-refresh
 site-audit run example.com --dataforseo-refresh
 site-audit run example.com --no-search-data

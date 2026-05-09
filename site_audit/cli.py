@@ -112,6 +112,13 @@ def _run_command(args: argparse.Namespace) -> int:
         sitemap_lastmod_within_days=args.sitemap_lastmod_within_days,
         search_provider="none" if args.no_search_data else args.search_provider,
         save_snapshot=not args.no_snapshot,
+        enable_gsc=not args.no_gsc,
+        gsc_property_url=args.gsc_property_url,
+        gsc_start_date=args.gsc_start_date,
+        gsc_end_date=args.gsc_end_date,
+        gsc_top_pages_limit=args.gsc_top_pages_limit,
+        gsc_keywords_limit=args.gsc_keywords_limit,
+        gsc_refresh=args.gsc_refresh,
         enable_dataforseo=not args.no_dataforseo,
         enable_ahrefs=not args.no_ahrefs,
         ahrefs_date=args.ahrefs_date,
@@ -347,14 +354,28 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
     run_p.add_argument("--search-provider", default="auto",
-                       choices=["auto", "ahrefs", "dataforseo", "none"],
-                       help="Search-demand data source. auto uses Ahrefs first, then DataForSEO fallback")
+                       choices=["auto", "gsc", "ahrefs", "dataforseo", "none"],
+                       help="Search-demand data source. auto uses GSC first, then Ahrefs/DataForSEO fallback")
     run_p.add_argument("--no-search-data", action="store_true",
                        help="Skip all paid search-data provider enrichment")
+    run_p.add_argument("--no-gsc", action="store_true",
+                       help="Skip Google Search Console enrichment even when GSC credentials are set")
     run_p.add_argument("--no-ahrefs", action="store_true",
                        help="Skip Ahrefs API enrichment even when AHREFS_API_KEY is set")
     run_p.add_argument("--no-dataforseo", action="store_true",
                        help="Skip DataForSEO fallback enrichment even when DATAFORSEO credentials are set")
+    run_p.add_argument("--gsc-refresh", action="store_true",
+                       help="Ignore cached Google Search Console snapshots and fetch fresh API data")
+    run_p.add_argument("--gsc-property-url", default=None,
+                       help="GSC property URL, e.g. sc-domain:example.com or https://www.example.com/")
+    run_p.add_argument("--gsc-start-date", default=None,
+                       help="GSC start date in YYYY-MM-DD. Default: 28-day window ending 3 days ago")
+    run_p.add_argument("--gsc-end-date", default=None,
+                       help="GSC end date in YYYY-MM-DD. Default: 3 days ago")
+    run_p.add_argument("--gsc-top-pages-limit", type=int, default=1000,
+                       help="Rows to request from GSC page report (default: 1000)")
+    run_p.add_argument("--gsc-keywords-limit", type=int, default=1000,
+                       help="Rows to request from GSC query/page report (default: 1000)")
     run_p.add_argument("--ahrefs-refresh", action="store_true",
                        help="Ignore cached Ahrefs snapshots and fetch fresh API data")
     run_p.add_argument("--ahrefs-date", default=None,

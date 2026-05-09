@@ -417,6 +417,9 @@ def write_all(
     if ahrefs is not None:
         _write_json(output_dir / "search.json", ahrefs)
         _write_json(output_dir / "ahrefs.json", ahrefs)
+        provider = str((ahrefs.get("meta", {}) or {}).get("provider", "")).lower()
+        if provider in {"gsc", "dataforseo"}:
+            _write_json(output_dir / f"{provider}.json", ahrefs)
     if best_pages is not None:
         _write_json(output_dir / "best_pages.json", best_pages)
     if performance_explainer is not None:

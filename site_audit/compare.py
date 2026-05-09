@@ -2744,7 +2744,7 @@ def _keyword_cluster_gap_payload(projects: list[_Project]) -> dict:
         "section_diffs": section_diffs[:250],
         "cache": {
             "status": "derived_from_cached_provider_snapshots",
-            "description": "No per-keyword provider calls are made here; rows are derived from cached Ahrefs/DataForSEO domain snapshots and keyed by domain, keyword, and provider.",
+            "description": "No per-keyword provider calls are made here; rows are derived from cached GSC/Ahrefs/DataForSEO domain snapshots and keyed by domain, keyword, and provider.",
             "entries": cache_entry_count,
             "samples": cache_samples,
         },

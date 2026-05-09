@@ -570,6 +570,11 @@
         </p>
       </div>
       <div id="ahrefs-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="gsc-trend-panel" class="mb-6" style="display:none;">
+        <h4 class="text-sm font-semibold mb-1">GSC daily trend</h4>
+        <p class="text-xs text-gray-500 mb-2">Clicks, impressions, and average position across the selected Search Console date range.</p>
+        <div id="gsc-daily-trend" class="w-full" style="min-height: 260px;"></div>
+      </div>
       <div class="grid lg:grid-cols-2 gap-6 mb-6">
         <div>
           <h4 class="text-sm font-semibold mb-1">Traffic by topic cluster</h4>
@@ -2867,17 +2872,26 @@
     const params = meta.params || {};
     const metaEl = document.getElementById('ahrefs-meta');
     const providerLabel = summary.provider_label || meta.provider_label || meta.provider || 'Search provider';
-    metaEl.textContent = `${providerLabel} status: ${meta.status || 'unknown'} · cache ${meta.cache_status || 'unknown'}${params.date ? ' · date ' + params.date : ''}${params.country ? ' · country ' + params.country : ''}${params.location_code ? ' · location ' + params.location_code : ''}${summary.api_cost_usd ? ' · API cost $' + Number(summary.api_cost_usd).toFixed(4) : ''}. Traffic and value are provider estimates.`;
+    const isGsc = (meta.provider || summary.provider || '').toLowerCase() === 'gsc';
+    metaEl.textContent = `${providerLabel} status: ${meta.status || 'unknown'} · cache ${meta.cache_status || 'unknown'}${params.start_date ? ' · ' + params.start_date + ' to ' + (params.end_date || '') : ''}${params.date ? ' · date ' + params.date : ''}${params.country ? ' · country ' + params.country : ''}${params.location_code ? ' · location ' + params.location_code : ''}${summary.api_cost_usd ? ' · API cost $' + Number(summary.api_cost_usd).toFixed(4) : ''}. ${isGsc ? 'GSC rows are first-party Google clicks, impressions, CTR, and average position.' : 'Traffic and value are provider estimates.'}`;
 
     const metrics = ah.metrics || {};
     const money = v => '$' + Math.round(Number(v || 0)).toLocaleString();
-    document.getElementById('ahrefs-summary').innerHTML =
+    document.getElementById('ahrefs-summary').innerHTML = isGsc ? (
+      card('GSC clicks', Number(metrics.gsc_clicks || metrics.org_traffic || summary.total_clicks || 0).toLocaleString(), `${providerLabel} selected range`) +
+      card('GSC impressions', Number(metrics.gsc_impressions || summary.total_impressions || 0).toLocaleString(), 'Google Search impressions') +
+      card('CTR', `${(Number(metrics.gsc_ctr || summary.avg_ctr || 0) * 100).toFixed(2)}%`, 'clicks / impressions') +
+      card('Avg position', Number(metrics.gsc_avg_position || summary.avg_position || 0).toFixed(2), 'lower is better') +
+      card('Top pages loaded', Number(summary.top_pages || 0).toLocaleString(), `${Number(summary.matched_top_pages || 0).toLocaleString()} matched to crawl`)
+    ) : (
       card('Organic traffic', Number(metrics.org_traffic || summary.top_pages_traffic || 0).toLocaleString(), `${providerLabel} monthly estimate`) +
       card('Organic keywords', Number(metrics.org_keywords || summary.organic_keywords || 0).toLocaleString(), `${Number(metrics.org_keywords_1_3 || summary.top3_keywords || 0).toLocaleString()} top 3 · ${Number(metrics.org_keywords_1_10 || summary.top10_keywords || 0).toLocaleString()} top 10`) +
       card('Top pages loaded', Number(summary.top_pages || 0).toLocaleString(), `${Number(summary.matched_top_pages || 0).toLocaleString()} matched to crawl`) +
       card('Matched traffic', Number(summary.matched_traffic || 0).toLocaleString(), `${Math.round(Number(summary.matched_traffic_share || 0) * 100)}% of top-page traffic`) +
-      card('Traffic value', money(summary.top_pages_value_usd || metrics.org_cost), `USD estimate${summary.paid_traffic ? ' · paid traffic ' + Number(summary.paid_traffic).toLocaleString() : ''}`);
+      card('Traffic value', money(summary.top_pages_value_usd || metrics.org_cost), `USD estimate${summary.paid_traffic ? ' · paid traffic ' + Number(summary.paid_traffic).toLocaleString() : ''}`)
+    );
 
+    renderGscTrend(isGsc);
     renderAhrefsClusterBubbles();
     renderAhrefsDirectoryBars();
     renderAhrefsPositionBars();
@@ -2886,6 +2900,39 @@
     renderAhrefsSemanticMap();
     renderEntityAlignment();
     renderAhrefsTables();
+  }
+
+  function renderGscTrend(isGsc) {
+    const panel = document.getElementById('gsc-trend-panel');
+    const container = document.getElementById('gsc-daily-trend');
+    const rows = ((state.ahrefs || {}).daily || []).filter(r => r.date);
+    if (!panel || !container || !isGsc || rows.length < 2) {
+      if (panel) panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = '';
+    container.innerHTML = '';
+    const margin = { top: 18, right: 70, bottom: 40, left: 58 };
+    const width = Math.max(520, container.offsetWidth || 900) - margin.left - margin.right;
+    const height = 260 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', width + margin.left + margin.right).attr('height', 260)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scalePoint().domain(rows.map(r => r.date)).range([0, width]).padding(0.35);
+    const maxMetric = d3.max(rows, r => Math.max(Number(r.clicks || 0), Number(r.impressions || 0))) || 1;
+    const y = d3.scaleLinear().domain([0, maxMetric]).nice().range([height, 0]);
+    const posMax = d3.max(rows, r => Number(r.position || 0)) || 1;
+    const posY = d3.scaleLinear().domain([0, posMax]).nice().range([height, 0]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).tickValues(x.domain().filter((_, i) => i % Math.ceil(rows.length / 7) === 0)));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('g').attr('transform', `translate(${width},0)`).call(d3.axisRight(posY).ticks(5));
+    const line = key => d3.line().x(r => x(r.date)).y(r => y(Number(r[key] || 0)));
+    const posLine = d3.line().x(r => x(r.date)).y(r => posY(Number(r.position || 0)));
+    svg.append('path').datum(rows).attr('fill','none').attr('stroke','#2563eb').attr('stroke-width',2).attr('d', line('clicks'));
+    svg.append('path').datum(rows).attr('fill','none').attr('stroke','#7c3aed').attr('stroke-width',2).attr('stroke-opacity',0.65).attr('d', line('impressions'));
+    svg.append('path').datum(rows).attr('fill','none').attr('stroke','#ea580c').attr('stroke-width',2).attr('stroke-dasharray','4 3').attr('d', posLine);
+    svg.append('text').attr('x', width - 210).attr('y', 12).attr('font-size', 11).attr('fill', '#2563eb').text('clicks');
+    svg.append('text').attr('x', width - 160).attr('y', 12).attr('font-size', 11).attr('fill', '#7c3aed').text('impressions');
+    svg.append('text').attr('x', width - 80).attr('y', 12).attr('font-size', 11).attr('fill', '#ea580c').text('position');
   }
 
   function renderAhrefsClusterBubbles() {
@@ -3161,24 +3208,42 @@
 
   function renderAhrefsTables() {
     const ah = state.ahrefs || {};
+    const meta = ah.meta || {};
+    const isGsc = (meta.provider || (ah.summary || {}).provider || '').toLowerCase() === 'gsc';
     const topPages = (ah.top_pages || []).slice(0, 80);
     const keywords = (ah.organic_keywords || []).slice(0, 80);
-    document.getElementById('ahrefs-top-pages').innerHTML = topPages.length ? `
+    document.getElementById('ahrefs-top-pages').innerHTML = topPages.length ? (isGsc ? `
+      <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Page</th><th class="text-right">Clicks</th><th class="text-right">Impr.</th><th class="text-right">CTR</th><th class="text-right">Pos</th></tr></thead><tbody>
+      ${topPages.map(r => `<tr class="border-b border-gray-100">
+        <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.top_keyword_title || r.url)}</a><div class="text-gray-500">${escapeHtml(r.top_keyword || '')}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}${Number(r.paid_traffic || 0) ? ' · paid ' + Number(r.paid_traffic || 0).toLocaleString() : ''}</div></td>
+        <td class="text-right font-mono">${Number(r.clicks || r.traffic || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.impressions || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${(Number(r.ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.position || 0).toFixed(1)}</td>
+      </tr>`).join('')}</tbody></table>` : `
       <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Page</th><th class="text-right">Traffic</th><th class="text-right">KW</th><th class="text-right">Top10</th></tr></thead><tbody>
       ${topPages.map(r => `<tr class="border-b border-gray-100">
         <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.top_keyword_title || r.url)}</a><div class="text-gray-500">${escapeHtml(r.top_keyword || '')}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}${Number(r.paid_traffic || 0) ? ' · paid ' + Number(r.paid_traffic || 0).toLocaleString() : ''}</div></td>
         <td class="text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
         <td class="text-right font-mono text-gray-600">${Number(r.keywords || 0).toLocaleString()}</td>
         <td class="text-right font-mono text-gray-600">${Number(r.top10_keywords || 0).toLocaleString()}</td>
-      </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No top pages.</div>';
-    document.getElementById('ahrefs-top-keywords').innerHTML = keywords.length ? `
+      </tr>`).join('')}</tbody></table>`) : '<div class="text-gray-500">No top pages.</div>';
+    document.getElementById('ahrefs-top-keywords').innerHTML = keywords.length ? (isGsc ? `
+      <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Query</th><th class="text-right">Clicks</th><th class="text-right">Impr.</th><th class="text-right">CTR</th><th class="text-right">Pos</th></tr></thead><tbody>
+      ${keywords.map(r => `<tr class="border-b border-gray-100">
+        <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.keyword)}</a><div class="text-gray-500">${escapeHtml(r.section || '')}${r.serp_type ? ' · ' + escapeHtml(r.serp_type) : ''}${(r.intents || []).length ? ' · ' + escapeHtml((r.intents || []).join('/')) : ''}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}</div></td>
+        <td class="text-right font-mono">${Number(r.clicks || r.traffic || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.impressions || r.volume || 0).toLocaleString()}</td>
+        <td class="text-right font-mono text-gray-600">${(Number(r.ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="text-right font-mono text-gray-600">${Number(r.position || 0).toFixed(1)}</td>
+      </tr>`).join('')}</tbody></table>` : `
       <table class="w-full"><thead class="text-gray-500"><tr><th class="text-left py-1">Keyword</th><th class="text-right">Traffic</th><th class="text-right">Vol</th><th class="text-right">Pos</th></tr></thead><tbody>
       ${keywords.map(r => `<tr class="border-b border-gray-100">
         <td class="py-1 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.matched_url || r.url)}" target="_blank" rel="noopener">${escapeHtml(r.keyword)}</a><div class="text-gray-500">${escapeHtml(r.section || '')}${r.serp_type ? ' · ' + escapeHtml(r.serp_type) : ''}${(r.intents || []).length ? ' · ' + escapeHtml((r.intents || []).join('/')) : ''}${r.cluster_label ? ' · ' + escapeHtml(r.cluster_label) : ''}</div></td>
         <td class="text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
         <td class="text-right font-mono text-gray-600">${Number(r.volume || 0).toLocaleString()}</td>
         <td class="text-right font-mono text-gray-600">${Number(r.position || 0) || '—'}</td>
-      </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No keywords.</div>';
+      </tr>`).join('')}</tbody></table>`) : '<div class="text-gray-500">No keywords.</div>';
   }
 
   function renderBestPages() {
