@@ -472,6 +472,51 @@ def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:
     assert row["traffic"] == 321
 
 
+def test_compare_payload_includes_unified_action_board(tmp_path: Path) -> None:
+    _write_report(
+        tmp_path,
+        "alpha.example",
+        {"page_count": 1},
+        {
+            "recommendations.json": json.dumps({
+                "total": 1,
+                "by_category": {"linking": 1},
+                "by_priority": {"high": 1, "medium": 0, "low": 0},
+                "score_model": {"model": "fix_priority_score_v1"},
+                "items": [
+                    {
+                        "id": "plink-1",
+                        "category": "linking",
+                        "type": "paragraph_link",
+                        "priority": "high",
+                        "priority_score": 71.5,
+                        "impact": 84,
+                        "confidence": 78,
+                        "effort": "quick",
+                        "effort_score": 25,
+                        "risk": 14,
+                        "owner": "SEO",
+                        "cluster": "support",
+                        "traffic_opportunity": 500,
+                        "title": "Add in-paragraph link",
+                        "instruction": "Add link.",
+                        "targets": ["https://alpha.example/a", "https://alpha.example/b"],
+                        "evidence": {"score_components": {"priority_score": 71.5}},
+                    }
+                ],
+            })
+        },
+        pages=[{"url": "https://alpha.example/a", "title": "A", "section": "blog"}],
+    )
+
+    payload = build_payload(["alpha.example"], tmp_path)
+
+    assert payload["action_board"]["summary"]["actions"] == 1
+    assert payload["action_board"]["items"][0]["domain"] == "alpha.example"
+    assert payload["action_board"]["items"][0]["priority_score"] == 71.5
+    assert payload["action_board"]["filters"]["owners"] == ["SEO"]
+
+
 def test_package_comparison_includes_reports_and_excludes_caches(tmp_path: Path) -> None:
     out_dir = tmp_path / "_compare" / "customer"
     out_dir.mkdir(parents=True)

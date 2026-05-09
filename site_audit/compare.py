@@ -904,6 +904,65 @@ def _leaderboard_row(proj: _Project) -> dict:
     }
 
 
+def _action_board_payload(projects: list[_Project]) -> dict:
+    items: list[dict] = []
+    by_domain: dict[str, dict] = {}
+    score_model = {}
+    for proj in projects:
+        payload = proj.recommendations or {}
+        score_model = score_model or payload.get("score_model") or {}
+        domain_stats = by_domain.setdefault(proj.domain, {
+            "domain": proj.domain,
+            "actions": 0,
+            "high": 0,
+            "traffic_opportunity": 0.0,
+            "avg_priority_score": 0.0,
+        })
+        for row in payload.get("items") or []:
+            if not isinstance(row, dict):
+                continue
+            item = {"domain": proj.domain, **row}
+            items.append(item)
+            domain_stats["actions"] += 1
+            if row.get("priority") == "high":
+                domain_stats["high"] += 1
+            domain_stats["traffic_opportunity"] += _safe_float(row.get("traffic_opportunity"))
+            domain_stats["avg_priority_score"] += _safe_float(row.get("priority_score"))
+
+    for stat in by_domain.values():
+        if stat["actions"]:
+            stat["avg_priority_score"] = round(stat["avg_priority_score"] / stat["actions"], 1)
+        stat["traffic_opportunity"] = round(stat["traffic_opportunity"], 1)
+
+    items.sort(key=lambda r: (
+        _safe_float(r.get("priority_score")),
+        _safe_float(r.get("impact")),
+        _safe_float(r.get("traffic_opportunity")),
+    ), reverse=True)
+    filters = {
+        "domains": [p.domain for p in projects],
+        "priorities": ["high", "medium", "low"],
+        "categories": sorted({str(r.get("category") or "") for r in items if r.get("category")}),
+        "types": sorted({str(r.get("type") or "") for r in items if r.get("type")}),
+        "owners": sorted({str(r.get("owner") or "") for r in items if r.get("owner")}),
+        "clusters": sorted({str(r.get("cluster") or "") for r in items if r.get("cluster")})[:250],
+    }
+    return {
+        "summary": {
+            "status": "ok" if items else "no_recommendations",
+            "model": "comparison_action_board_v1",
+            "actions": len(items),
+            "domains": len(projects),
+            "high": sum(1 for r in items if r.get("priority") == "high"),
+            "traffic_opportunity": round(sum(_safe_float(r.get("traffic_opportunity")) for r in items), 1),
+        },
+        "score_model": score_model,
+        "filters": filters,
+        "domains": sorted(by_domain.values(), key=lambda r: (_safe_int(r.get("high")), _safe_float(r.get("avg_priority_score"))), reverse=True),
+        "items": items[:1000],
+    }
+
+
 # --- distributions (overlay charts) --------------------------------------
 
 
@@ -4873,6 +4932,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "keyword_content_matrix": keyword_content_matrix,
         "paragraph_archetypes": paragraph_archetypes,
         "best_page_explainers": best_page_explainers,
+        "action_board": _action_board_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

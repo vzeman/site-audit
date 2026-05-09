@@ -299,6 +299,46 @@
       </div>
     </section>
 
+    <!-- Unified action board -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="action-board-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Unified action board</h2>
+        <p class="text-xs text-gray-500 mt-1" id="action-board-meta">
+          Recommendations from every domain ranked by priority, impact, confidence, effort, and risk.
+        </p>
+      </div>
+      <div id="action-board-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
+      <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
+        <select id="compare-action-domain" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-action-owner" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-action-type" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-action-cluster" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-action-sort" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="priority_score">Sort by priority</option>
+          <option value="impact">Sort by impact</option>
+          <option value="effort_score">Sort by effort</option>
+          <option value="confidence">Sort by confidence</option>
+          <option value="risk">Sort by risk</option>
+        </select>
+        <select id="compare-action-group" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="">No grouping</option>
+          <option value="domain">Group by domain</option>
+          <option value="owner">Group by owner</option>
+          <option value="type">Group by type</option>
+          <option value="cluster">Group by cluster</option>
+          <option value="category">Group by category</option>
+        </select>
+        <button id="compare-action-export" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export CSV</button>
+      </div>
+      <div id="compare-action-matrix" class="w-full mb-4" style="min-height: 320px;"></div>
+      <div class="overflow-x-auto border border-gray-100 rounded">
+        <table class="min-w-full text-xs" id="compare-action-table">
+          <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Structured data opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="structured-data-compare-section">
       <div class="mb-4">
@@ -1025,6 +1065,20 @@
     unknown: 'Missing date',
     future: 'Future date',
   };
+  const ACTION_COLORS = {
+    content_debt: '#dc2626',
+    coverage: '#2563eb',
+    geo: '#7c3aed',
+    linking: '#16a34a',
+    onpage: '#f59e0b',
+  };
+  const ACTION_LABELS = {
+    content_debt: 'Content debt',
+    coverage: 'Coverage',
+    geo: 'GEO',
+    linking: 'Linking',
+    onpage: 'On-page',
+  };
 
   function normalizedNeedle(inputRef) {
     const el = typeof inputRef === 'string' ? document.getElementById(inputRef) : inputRef;
@@ -1486,10 +1540,210 @@
     }).join('');
   }
 
+  function prepareActionBoardFilters(payload) {
+    data._actionFilters = data._actionFilters || { domain: '', owner: '', type: '', cluster: '', sort: 'priority_score', group: '' };
+    const filters = payload.filters || {};
+    data._actionFilters.domain = setCompareSelectOptions('compare-action-domain', 'domains', filters.domains || data.domains || [], renderActionBoard);
+    data._actionFilters.owner = setCompareSelectOptions('compare-action-owner', 'owners', filters.owners || [], renderActionBoard);
+    data._actionFilters.type = setCompareSelectOptions('compare-action-type', 'types', filters.types || [], renderActionBoard);
+    data._actionFilters.cluster = setCompareSelectOptions('compare-action-cluster', 'clusters', filters.clusters || [], renderActionBoard);
+    const sort = document.getElementById('compare-action-sort');
+    if (sort && !sort.dataset.ready) {
+      sort.dataset.ready = '1';
+      sort.onchange = () => {
+        data._actionFilters.sort = sort.value || 'priority_score';
+        renderActionBoard();
+      };
+    }
+    if (sort) sort.value = data._actionFilters.sort || 'priority_score';
+    const group = document.getElementById('compare-action-group');
+    if (group && !group.dataset.ready) {
+      group.dataset.ready = '1';
+      group.onchange = () => {
+        data._actionFilters.group = group.value || '';
+        renderActionBoard();
+      };
+    }
+    if (group) group.value = data._actionFilters.group || '';
+    const exportBtn = document.getElementById('compare-action-export');
+    if (exportBtn && !exportBtn.dataset.ready) {
+      exportBtn.dataset.ready = '1';
+      exportBtn.onclick = exportCompareActionCsv;
+    }
+  }
+
+  function filteredCompareActions() {
+    const payload = data.action_board || {};
+    const filters = data._actionFilters || {};
+    let rows = (payload.items || []).slice();
+    if (filters.domain) rows = rows.filter(r => r.domain === filters.domain);
+    if (filters.owner) rows = rows.filter(r => r.owner === filters.owner);
+    if (filters.type) rows = rows.filter(r => r.type === filters.type);
+    if (filters.cluster) rows = rows.filter(r => r.cluster === filters.cluster);
+    const sortKey = filters.sort || 'priority_score';
+    const asc = sortKey === 'effort_score' || sortKey === 'risk';
+    rows.sort((a, b) => {
+      const delta = Number(a[sortKey] || 0) - Number(b[sortKey] || 0);
+      return asc ? delta : -delta;
+    });
+    return rows;
+  }
+
+  function renderActionBoard() {
+    const section = document.getElementById('action-board-section');
+    if (!section) return;
+    const payload = data.action_board || {};
+    const items = payload.items || [];
+    if (!items.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    prepareActionBoardFilters(payload);
+    const summary = payload.summary || {};
+    const rows = filteredCompareActions();
+    document.getElementById('action-board-meta').textContent =
+      `${Number(summary.actions || items.length).toLocaleString()} actions · ${Number(summary.high || 0).toLocaleString()} high priority · ${Number(summary.traffic_opportunity || 0).toLocaleString()} traffic opportunity · showing ${rows.length.toLocaleString()}/${items.length.toLocaleString()}`;
+    const domainLeader = ((payload.domains || [])[0] || {});
+    document.getElementById('action-board-summary').innerHTML = [
+      ['Actions', Number(summary.actions || items.length).toLocaleString(), 'all domains'],
+      ['High priority', Number(summary.high || 0).toLocaleString(), 'top queue'],
+      ['Traffic opp.', Number(summary.traffic_opportunity || 0).toLocaleString(), 'mapped target traffic'],
+      ['Most actions', domainLeader.domain || '-', `${Number(domainLeader.actions || 0).toLocaleString()} actions`],
+    ].map(card => `
+      <article class="border border-gray-200 rounded-lg p-4 bg-white">
+        <div class="text-xl font-semibold">${escapeHtml(card[1])}</div>
+        <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(card[2])}</div>
+      </article>`).join('');
+    drawCompareActionMatrix(rows);
+    renderCompareActionTable(rows);
+  }
+
+  function drawCompareActionMatrix(rows) {
+    const container = document.getElementById('compare-action-matrix');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-14">No actions match these filters.</div>';
+      return;
+    }
+    const shown = rows.slice(0, 240);
+    const margin = { top: 18, right: 20, bottom: 38, left: 48 };
+    const outerWidth = Math.max(480, container.offsetWidth || 900);
+    const outerHeight = 320;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+    const maxTraffic = d3.max(shown, d => Number(d.traffic_opportunity || 0)) || 1;
+    const radius = d3.scaleSqrt().domain([0, maxTraffic]).range([4, 20]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('text').attr('x', width / 2).attr('y', height + 32).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('effort score');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -36).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('impact score');
+    svg.append('line').attr('x1', x(50)).attr('x2', x(50)).attr('y1', 0).attr('y2', height).attr('stroke', '#e5e7eb');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(50)).attr('y2', y(50)).attr('stroke', '#e5e7eb');
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','400px');
+    svg.selectAll('circle').data(shown).join('circle')
+      .attr('cx', d => x(Number(d.effort_score || 0)))
+      .attr('cy', d => y(Number(d.impact || 0)))
+      .attr('r', d => radius(Number(d.traffic_opportunity || 0)))
+      .attr('fill', d => ACTION_COLORS[d.category] || domainColor(d.domain))
+      .attr('fill-opacity', 0.72)
+      .attr('stroke', d => d.priority === 'high' ? '#111827' : 'white')
+      .attr('stroke-width', d => d.priority === 'high' ? 1.5 : 0.7)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-width', 2.2);
+        tooltip.style('visibility','visible').html(
+          `<strong>${escapeHtml(d.domain || '')}</strong><br>` +
+          `${escapeHtml(d.title || '')}<br>` +
+          `<span style="color:#fbbf24">priority ${Number(d.priority_score || 0).toFixed(1)} · impact ${Number(d.impact || 0).toFixed(1)} · effort ${Number(d.effort_score || 0).toFixed(1)} · risk ${Number(d.risk || 0).toFixed(1)}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-width', d => d.priority === 'high' ? 1.5 : 0.7); tooltip.style('visibility','hidden'); });
+  }
+
+  function renderCompareActionTable(rows) {
+    const tbl = document.getElementById('compare-action-table');
+    if (!tbl) return;
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Action</th>
+        <th class="px-2 py-2 text-left">Owner/type</th>
+        <th class="px-2 py-2 text-right">Priority</th>
+        <th class="px-2 py-2 text-right">Impact</th>
+        <th class="px-2 py-2 text-right">Effort</th>
+        <th class="px-2 py-2 text-right">Risk</th>
+      </tr>`;
+    const renderRow = r => `
+      <tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain || '')}</td>
+        <td class="px-2 py-1.5">
+          <div class="font-medium">${escapeHtml(r.title || '')}</div>
+          <div class="text-gray-600">${escapeHtml(truncateMiddle(r.instruction || '', 130))}</div>
+          <div class="text-gray-500">${(r.targets || []).slice(0, 2).map(u => `<a class="text-blue-600 hover:underline" href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(u, 52))}</a>`).join(' · ')}</div>
+        </td>
+        <td class="px-2 py-1.5">${escapeHtml(r.owner || '')}<div class="text-gray-500">${escapeHtml((r.type || r.category || '').replaceAll('_', ' '))}${r.cluster ? ' · ' + escapeHtml(truncateMiddle(r.cluster, 34)) : ''}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.priority_score || 0).toFixed(1)}<div class="text-gray-500">${escapeHtml(r.priority || '')}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.impact || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.effort_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.risk || 0).toFixed(1)}</td>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = `<tr><td class="px-2 py-8 text-center text-gray-500" colspan="7">No actions match these filters.</td></tr>`;
+      return;
+    }
+    const shown = rows.slice(0, 160);
+    const groupKey = (data._actionFilters || {}).group || '';
+    if (!groupKey) {
+      tbl.querySelector('tbody').innerHTML = shown.map(renderRow).join('');
+      return;
+    }
+    const groups = new Map();
+    shown.forEach(row => {
+      const key = row[groupKey] || 'Unassigned';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    tbl.querySelector('tbody').innerHTML = Array.from(groups.entries()).map(([key, groupRows]) => `
+      <tr class="bg-gray-50"><td class="px-2 py-1.5 text-xs uppercase tracking-wide font-semibold text-gray-500" colspan="7">${escapeHtml(String(key).replaceAll('_', ' '))} · ${groupRows.length}</td></tr>
+      ${groupRows.map(renderRow).join('')}
+    `).join('');
+  }
+
+  function exportCompareActionCsv() {
+    const rows = filteredCompareActions();
+    const cols = ['domain','priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','title','instruction','targets'];
+    const csv = [cols.join(',')].concat(rows.map(row => cols.map(col => {
+      const value = col === 'targets' ? (row.targets || []).join(' | ') : row[col];
+      return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+    }).join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'comparison-action-board.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   renderScorecards();
   renderGaps();
   renderMatrixButtons();
   renderMetricMatrix();
+  renderActionBoard();
   renderStructuredDataCompare();
   renderTrustSignalsCompare();
   renderConversionBalanceCompare();

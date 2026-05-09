@@ -296,6 +296,27 @@
           <button data-rec-cat="onpage" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">On-page</button>
         </div>
       </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
+        <select id="rec-owner-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="rec-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="rec-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="rec-sort" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="priority_score">Sort by priority</option>
+          <option value="impact">Sort by impact</option>
+          <option value="effort_score">Sort by effort</option>
+          <option value="confidence">Sort by confidence</option>
+          <option value="risk">Sort by risk</option>
+        </select>
+        <select id="rec-group" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="">No grouping</option>
+          <option value="owner">Group by owner</option>
+          <option value="type">Group by type</option>
+          <option value="cluster">Group by cluster</option>
+          <option value="category">Group by category</option>
+        </select>
+        <button id="rec-export-csv" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export CSV</button>
+      </div>
+      <div id="action-priority-matrix" class="w-full mb-4" style="min-height: 280px;"></div>
       <div id="audit-action-plan" class="text-sm">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -2034,6 +2055,11 @@
       state.recommendations = recommendations || {};
       state.recPriFilter = 'all';
       state.recCatFilter = 'all';
+      state.recOwnerFilter = 'all';
+      state.recTypeFilter = 'all';
+      state.recClusterFilter = 'all';
+      state.recSort = 'priority_score';
+      state.recGroup = '';
       state.paraDensity = paraDensity || {};
       state.headerAnalysis = headerAnalysis || {};
       state.headerScatter = headerScatter || {};
@@ -2150,21 +2176,71 @@
     linking: 'Linking',
     onpage: 'On-page',
   };
+  const REC_CAT_COLORS = {
+    content_debt: '#dc2626',
+    coverage: '#2563eb',
+    geo: '#7c3aed',
+    linking: '#16a34a',
+    onpage: '#f59e0b',
+  };
+
+  function setSelectOptions(select, values, allLabel) {
+    if (!select) return;
+    const previous = select.value || 'all';
+    select.innerHTML = `<option value="all">${escapeHtml(allLabel)}</option>` +
+      (values || []).filter(Boolean).map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    select.value = Array.from(select.options).some(o => o.value === previous) ? previous : 'all';
+  }
+
+  function prepareActionPlanControls(items) {
+    const filters = (state.recommendations || {}).filters || {};
+    const ownerSelect = document.getElementById('rec-owner-filter');
+    const typeSelect = document.getElementById('rec-type-filter');
+    const clusterSelect = document.getElementById('rec-cluster-filter');
+    setSelectOptions(ownerSelect, filters.owners || Array.from(new Set(items.map(r => r.owner).filter(Boolean))).sort(), 'All owners');
+    setSelectOptions(typeSelect, filters.types || Array.from(new Set(items.map(r => r.type).filter(Boolean))).sort(), 'All types');
+    setSelectOptions(clusterSelect, filters.clusters || Array.from(new Set(items.map(r => r.cluster).filter(Boolean))).sort(), 'All clusters');
+    if (ownerSelect) state.recOwnerFilter = ownerSelect.value || 'all';
+    if (typeSelect) state.recTypeFilter = typeSelect.value || 'all';
+    if (clusterSelect) state.recClusterFilter = clusterSelect.value || 'all';
+    const sort = document.getElementById('rec-sort');
+    if (sort) sort.value = state.recSort || 'priority_score';
+    const group = document.getElementById('rec-group');
+    if (group) group.value = state.recGroup || '';
+  }
+
+  function filteredActionItems() {
+    let filtered = ((state.recommendations || {}).items || []).slice();
+    if (state.recPriFilter !== 'all') filtered = filtered.filter(x => x.priority === state.recPriFilter);
+    if (state.recCatFilter !== 'all') filtered = filtered.filter(x => x.category === state.recCatFilter);
+    if (state.recOwnerFilter !== 'all') filtered = filtered.filter(x => x.owner === state.recOwnerFilter);
+    if (state.recTypeFilter !== 'all') filtered = filtered.filter(x => x.type === state.recTypeFilter);
+    if (state.recClusterFilter !== 'all') filtered = filtered.filter(x => x.cluster === state.recClusterFilter);
+    const sortKey = state.recSort || 'priority_score';
+    const asc = sortKey === 'effort_score' || sortKey === 'risk';
+    filtered.sort((a, b) => {
+      const delta = Number(a[sortKey] || 0) - Number(b[sortKey] || 0);
+      return asc ? delta : -delta;
+    });
+    return filtered;
+  }
 
   function renderActionPlan() {
     const block = document.getElementById('action-plan-block');
     const r = state.recommendations || {};
     const items = (r.items || []);
     if (!items.length) { block.style.display = 'none'; return; }
+    prepareActionPlanControls(items);
 
     const meta = document.getElementById('action-plan-meta');
     const counts = r.by_priority || {};
     const catCounts = r.by_category || {};
+    const summary = r.summary || {};
     const catParts = Object.keys(REC_CAT_LABELS)
       .filter(k => catCounts[k])
       .map(k => `${REC_CAT_LABELS[k]} ${catCounts[k]}`)
       .join(' · ');
-    meta.textContent = `${r.total} actions · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} — ${catParts}`;
+    meta.textContent = `${r.total} actions · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} · avg priority ${Number(summary.avg_priority_score || 0).toFixed(1)} — ${catParts}`;
 
     document.querySelectorAll('.rec-pri-btn').forEach(b => {
       const on = b.dataset.recPri === state.recPriFilter;
@@ -2179,9 +2255,8 @@
       b.classList.toggle('border-blue-600', on);
     });
 
-    let filtered = items;
-    if (state.recPriFilter !== 'all') filtered = filtered.filter(x => x.priority === state.recPriFilter);
-    if (state.recCatFilter !== 'all') filtered = filtered.filter(x => x.category === state.recCatFilter);
+    const filtered = filteredActionItems();
+    drawActionPriorityMatrix(filtered);
 
     if (!filtered.length) {
       document.getElementById('audit-action-plan').innerHTML =
@@ -2189,7 +2264,7 @@
       return;
     }
 
-    const html = filtered.map(rec => {
+    const renderRec = rec => {
       const priClass = rec.priority === 'high' ? 'bg-red-100 text-red-800'
         : rec.priority === 'medium' ? 'bg-orange-100 text-orange-800'
         : 'bg-gray-100 text-gray-700';
@@ -2216,21 +2291,118 @@
       if (ev.paragraph_excerpt) evidenceBits.push(`para: "${String(ev.paragraph_excerpt).slice(0, 140)}…"`);
       const evidenceLine = evidenceBits.length
         ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(evidenceBits.join(' · '))}</div>` : '';
+      const scoreLine = `
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] mt-2">
+          <span class="bg-gray-50 rounded px-2 py-1">Priority <strong>${Number(rec.priority_score || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Impact <strong>${Number(rec.impact || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Conf. <strong>${Number(rec.confidence || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Effort <strong>${Number(rec.effort_score || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Risk <strong>${Number(rec.risk || 0).toFixed(1)}</strong></span>
+        </div>`;
       return `
         <div class="py-3 border-b border-gray-100">
           <div class="flex items-start gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${rec.priority}</span>
             <span class="text-xs px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${rec.effort}</span>
             <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${REC_CAT_LABELS[rec.category] || rec.category}</span>
+            ${rec.owner ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(rec.owner)}</span>` : ''}
+            ${rec.cluster ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(truncateMiddle(rec.cluster, 32))}</span>` : ''}
             <span class="font-medium text-gray-900">${escapeHtml(rec.title)}</span>
           </div>
           <div class="text-sm text-gray-700 mt-1.5">${escapeHtml(rec.instruction)}</div>
           ${targets ? `<div class="text-xs mt-1">${targets}</div>` : ''}
           ${evidenceLine}
+          ${scoreLine}
         </div>`;
-    }).join('');
+    };
+    let html = '';
+    if (state.recGroup) {
+      const groups = new Map();
+      filtered.forEach(rec => {
+        const key = rec[state.recGroup] || 'Unassigned';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(rec);
+      });
+      html = Array.from(groups.entries()).map(([key, rows]) => `
+        <div class="mt-4 first:mt-0">
+          <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-1">${escapeHtml(String(key).replaceAll('_', ' '))} · ${rows.length}</div>
+          ${rows.map(renderRec).join('')}
+        </div>`).join('');
+    } else {
+      html = filtered.map(renderRec).join('');
+    }
     document.getElementById('audit-action-plan').innerHTML =
       `<div class="text-xs text-gray-500 mb-2">${filtered.length}/${items.length} actions shown</div>` + html;
+  }
+
+  function drawActionPriorityMatrix(rows) {
+    const container = document.getElementById('action-priority-matrix');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No actions match the filters.</div>';
+      return;
+    }
+    const shown = rows.slice(0, 180);
+    const margin = { top: 16, right: 20, bottom: 36, left: 46 };
+    const outerWidth = Math.max(420, container.offsetWidth || 720);
+    const outerHeight = 280;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+    const maxTraffic = d3.max(shown, d => Number(d.traffic_opportunity || 0)) || 1;
+    const radius = d3.scaleSqrt().domain([0, maxTraffic]).range([4, 18]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('text').attr('x', width / 2).attr('y', height + 31).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('effort score');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -34).attr('text-anchor', 'middle')
+      .style('font-size', '11px').style('fill', '#6b7280').text('impact score');
+    svg.append('line').attr('x1', x(50)).attr('x2', x(50)).attr('y1', 0).attr('y2', height).attr('stroke', '#e5e7eb');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(50)).attr('y2', y(50)).attr('stroke', '#e5e7eb');
+    const tooltip = d3.select('body').append('div')
+      .style('position', 'absolute').style('visibility', 'hidden').style('background', 'rgba(0,0,0,.92)')
+      .style('color', 'white').style('padding', '7px 10px').style('border-radius', '6px')
+      .style('font-size', '12px').style('pointer-events', 'none').style('z-index', '1000').style('max-width', '380px');
+    svg.selectAll('circle').data(shown).join('circle')
+      .attr('cx', d => x(Number(d.effort_score || 0)))
+      .attr('cy', d => y(Number(d.impact || 0)))
+      .attr('r', d => radius(Number(d.traffic_opportunity || 0)))
+      .attr('fill', d => REC_CAT_COLORS[d.category] || '#64748b')
+      .attr('fill-opacity', 0.72)
+      .attr('stroke', d => d.priority === 'high' ? '#111827' : 'white')
+      .attr('stroke-width', d => d.priority === 'high' ? 1.5 : 0.7)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-width', 2.2);
+        tooltip.style('visibility', 'visible').html(
+          `<strong>${escapeHtml(d.title || '')}</strong><br>` +
+          `${escapeHtml(REC_CAT_LABELS[d.category] || d.category || '')} · ${escapeHtml(d.owner || '')}<br>` +
+          `<span style="color:#fbbf24">priority ${Number(d.priority_score || 0).toFixed(1)} · impact ${Number(d.impact || 0).toFixed(1)} · effort ${Number(d.effort_score || 0).toFixed(1)} · risk ${Number(d.risk || 0).toFixed(1)}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top', (e.pageY - 10) + 'px').style('left', (e.pageX + 10) + 'px'))
+      .on('mouseout', function() { d3.select(this).attr('stroke-width', d => d.priority === 'high' ? 1.5 : 0.7); tooltip.style('visibility', 'hidden'); });
+  }
+
+  function exportActionPlanCsv() {
+    const rows = filteredActionItems();
+    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','title','instruction','targets'];
+    const csv = [cols.join(',')].concat(rows.map(row => cols.map(col => {
+      const value = col === 'targets' ? (row.targets || []).join(' | ') : row[col];
+      return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+    }).join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(state.metrics || {}).domain || 'site'}-action-plan.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function wireActionPlanButtons() {
@@ -2242,6 +2414,26 @@
       state.recCatFilter = b.dataset.recCat;
       renderActionPlan();
     }));
+    [
+      ['rec-owner-filter', 'recOwnerFilter'],
+      ['rec-type-filter', 'recTypeFilter'],
+      ['rec-cluster-filter', 'recClusterFilter'],
+      ['rec-sort', 'recSort'],
+      ['rec-group', 'recGroup'],
+    ].forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.bound) return;
+      el.dataset.bound = '1';
+      el.addEventListener('change', () => {
+        state[key] = key === 'recGroup' ? (el.value || '') : (el.value || 'all');
+        renderActionPlan();
+      });
+    });
+    const exportBtn = document.getElementById('rec-export-csv');
+    if (exportBtn && !exportBtn.dataset.bound) {
+      exportBtn.dataset.bound = '1';
+      exportBtn.addEventListener('click', exportActionPlanCsv);
+    }
   }
 
   function renderLinkCounts() {

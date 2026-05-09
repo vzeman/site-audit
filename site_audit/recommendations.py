@@ -27,7 +27,9 @@ high-PageRank pages — fixing the load-bearing pages compounds.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Iterable, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 @dataclass
@@ -41,9 +43,253 @@ class Recommendation:
     evidence: dict = field(default_factory=dict)
     effort: str = "medium"  # quick | medium | deep
     score: float = 0.0
+    impact: float = 0.0
+    confidence: float = 0.0
+    effort_score: float = 0.0
+    risk: float = 0.0
+    priority_score: float = 0.0
+    owner: str = ""
+    type: str = ""
+    cluster: str = ""
+    traffic_opportunity: float = 0.0
 
 
 _PRI_RANK = {"high": 0, "medium": 1, "low": 2}
+_EFFORT_SCORE = {"quick": 25.0, "medium": 55.0, "deep": 85.0}
+_CATEGORY_CONFIDENCE = {
+    "content_debt": 72.0,
+    "coverage": 68.0,
+    "geo": 62.0,
+    "linking": 70.0,
+    "onpage": 66.0,
+}
+_CATEGORY_RISK = {
+    "content_debt": 44.0,
+    "coverage": 38.0,
+    "geo": 22.0,
+    "linking": 16.0,
+    "onpage": 20.0,
+}
+_CATEGORY_OWNER = {
+    "content_debt": "Content",
+    "coverage": "Content strategy",
+    "geo": "Content",
+    "linking": "SEO",
+    "onpage": "SEO",
+}
+_TYPE_BY_PREFIX = {
+    "dup": "merge_duplicate",
+    "out": "refocus_outlier",
+    "wh": "move_paragraph",
+    "gap": "coverage_gap",
+    "cann": "cannibalization",
+    "geo": "answerability",
+    "geo-cite": "citation_gap",
+    "link": "internal_link",
+    "plink": "paragraph_link",
+    "orphan": "orphan_page",
+    "deep": "click_depth",
+    "title": "title_rewrite",
+    "anchor": "anchor_rewrite",
+}
+
+SCORE_MODEL = {
+    "model": "fix_priority_score_v1",
+    "components": {
+        "impact": "0-100 estimate from traffic opportunity, existing recommendation score, PageRank, ranking/search gap, and issue severity.",
+        "confidence": "0-100 estimate from recommendation class and evidence completeness.",
+        "effort_score": "0-100 estimated implementation effort. Quick edits are lower, deep content/template work is higher.",
+        "risk": "0-100 estimated downside risk. Redirects and consolidation are higher risk than links or metadata edits.",
+        "priority_score": "0.45*impact + 0.25*confidence - 0.18*effort_score - 0.12*risk, clamped to 0-100.",
+    },
+    "priority_thresholds": {"high": 60, "medium": 35, "low": 0},
+}
+
+
+def _clip(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    return max(lo, min(hi, value))
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(float(str(value).replace(",", "")))
+    except (TypeError, ValueError):
+        return default
+
+
+def _url_keys(url: object) -> set[str]:
+    raw = str(url or "").strip()
+    if not raw:
+        return set()
+    keys = {raw, raw.rstrip("/")}
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return {k for k in keys if k}
+    if not parts.netloc:
+        return {k for k in keys if k}
+    scheme = (parts.scheme or "https").lower()
+    netloc = parts.netloc.lower()
+    path = parts.path or "/"
+    path_trimmed = path.rstrip("/") or "/"
+    netlocs = {netloc, netloc[4:] if netloc.startswith("www.") else f"www.{netloc}"}
+    schemes = {scheme}
+    if scheme in {"http", "https"}:
+        schemes.add("https" if scheme == "http" else "http")
+    for candidate_scheme in schemes:
+        for candidate_netloc in netlocs:
+            for candidate_path in {path, path_trimmed}:
+                normalized = urlunsplit((candidate_scheme, candidate_netloc, candidate_path, "", ""))
+                keys.add(normalized)
+                keys.add(normalized.rstrip("/"))
+    return {k for k in keys if k}
+
+
+def _store_context(out: dict[str, dict], url: object, context: dict) -> None:
+    for key in _url_keys(url):
+        current = out.get(key)
+        if current is None or _safe_float(context.get("traffic")) > _safe_float(current.get("traffic")):
+            out[key] = context
+
+
+def _target_context_lookup(linkgraph_payload: dict | None, search_payload: dict | None) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in ((search_payload or {}).get("top_pages") or []):
+        url = row.get("matched_url") or row.get("url")
+        if not url:
+            continue
+        _store_context(out, url, {
+            "traffic": _safe_float(row.get("traffic")),
+            "keywords": _safe_int(row.get("keywords")),
+            "cluster": row.get("cluster_label") or row.get("cluster") or row.get("section") or "",
+            "top_keyword": row.get("top_keyword") or "",
+        })
+    for row in (((linkgraph_payload or {}).get("traffic_weighted_pagerank") or {}).get("pages") or []):
+        url = row.get("url")
+        if not url:
+            continue
+        _store_context(out, url, {
+            "traffic": _safe_float(row.get("traffic")),
+            "keywords": _safe_int(row.get("keywords")),
+            "cluster": row.get("cluster") or row.get("section") or row.get("directory") or "",
+            "pagerank": _safe_float(row.get("pagerank")),
+            "authority_gap": _safe_float(row.get("authority_traffic_gap")),
+        })
+    return out
+
+
+def _lookup_context(context: dict[str, dict], targets: Iterable[str]) -> dict:
+    best: dict = {}
+    for target in targets:
+        for key in _url_keys(target):
+            row = context.get(key)
+            if row and _safe_float(row.get("traffic")) >= _safe_float(best.get("traffic")):
+                best = row
+    return best
+
+
+def _rec_type(rec: Recommendation) -> str:
+    prefix = rec.id.split("-", 1)[0]
+    if rec.id.startswith("geo-cite"):
+        return "citation_gap"
+    return _TYPE_BY_PREFIX.get(prefix, rec.category)
+
+
+def _component_scores(rec: Recommendation, context: dict[str, dict]) -> dict:
+    evidence = rec.evidence or {}
+    target_context = _lookup_context(context, rec.targets)
+    traffic = max(
+        _safe_float(target_context.get("traffic")),
+        _safe_float(evidence.get("traffic")),
+        _safe_float(evidence.get("traffic_opportunity")),
+        _safe_float(evidence.get("target_traffic")),
+    )
+    pagerank = max(_safe_float(evidence.get("pagerank")), _safe_float(target_context.get("pagerank")))
+    severity = max(
+        _safe_float(rec.score),
+        _safe_float(evidence.get("similarity")) * 100.0,
+        _safe_float(evidence.get("lift")) * 200.0,
+        _safe_float(evidence.get("lift_to_suggested")) * 180.0,
+        max(0.0, 4.0 - _safe_float(evidence.get("answerability_score"), 4.0)) * 18.0,
+        max(0.0, 0.55 - _safe_float(evidence.get("title_to_content"), 0.55)) * 140.0,
+        _safe_float(evidence.get("candidates_above_threshold")) * 14.0,
+        _safe_float(evidence.get("generic_anchor_share")) * 80.0,
+        _safe_float(evidence.get("click_depth")) * 6.0,
+    )
+    impact = _clip(
+        min(62.0, severity)
+        + min(25.0, math.log1p(max(traffic, 0.0)) * 3.2)
+        + min(18.0, pagerank * 2500.0)
+        + min(14.0, _safe_float(target_context.get("authority_gap")) * 14.0)
+    )
+    evidence_count = sum(1 for value in evidence.values() if value not in (None, "", [], {}))
+    confidence = _clip(_CATEGORY_CONFIDENCE.get(rec.category, 62.0) + min(16.0, evidence_count * 2.5))
+    effort_score = _clip(_EFFORT_SCORE.get(rec.effort, 55.0) + max(0, len([t for t in rec.targets if t]) - 1) * 5.0)
+    risk = _CATEGORY_RISK.get(rec.category, 25.0)
+    if rec.id.startswith("dup") or rec.id.startswith("cann"):
+        risk += 18.0
+    if rec.effort == "deep":
+        risk += 8.0
+    if len([t for t in rec.targets if t]) > 1:
+        risk += 6.0
+    risk = _clip(risk)
+    priority_score = _clip(0.45 * impact + 0.25 * confidence - 0.18 * effort_score - 0.12 * risk)
+    return {
+        "impact": round(impact, 1),
+        "confidence": round(confidence, 1),
+        "effort_score": round(effort_score, 1),
+        "risk": round(risk, 1),
+        "priority_score": round(priority_score, 1),
+        "traffic_opportunity": round(traffic, 1),
+        "cluster": str(target_context.get("cluster") or evidence.get("query") or ""),
+    }
+
+
+def _priority_bucket(priority_score: float) -> str:
+    if priority_score >= 60.0:
+        return "high"
+    if priority_score >= 35.0:
+        return "medium"
+    return "low"
+
+
+def _finalize(recs: list[Recommendation], *, linkgraph_payload: dict | None = None, search_payload: dict | None = None) -> list[Recommendation]:
+    context = _target_context_lookup(linkgraph_payload, search_payload)
+    for rec in recs:
+        scores = _component_scores(rec, context)
+        rec.impact = scores["impact"]
+        rec.confidence = scores["confidence"]
+        rec.effort_score = scores["effort_score"]
+        rec.risk = scores["risk"]
+        rec.priority_score = scores["priority_score"]
+        rec.priority = _priority_bucket(rec.priority_score)
+        rec.owner = rec.owner or _CATEGORY_OWNER.get(rec.category, "SEO")
+        rec.type = rec.type or _rec_type(rec)
+        rec.cluster = rec.cluster or scores["cluster"]
+        rec.traffic_opportunity = scores["traffic_opportunity"]
+        rec.evidence = {
+            **(rec.evidence or {}),
+            "score_components": {
+                "impact": rec.impact,
+                "confidence": rec.confidence,
+                "effort_score": rec.effort_score,
+                "risk": rec.risk,
+                "priority_score": rec.priority_score,
+            },
+        }
+    recs.sort(key=lambda r: (-r.priority_score, _PRI_RANK.get(r.priority, 9), -r.impact, r.effort_score, r.id))
+    return recs
 
 
 def _pr_lookup(linkgraph_payload: dict | None) -> dict[str, float]:
@@ -463,6 +709,7 @@ def synthesize(
     coverage_payload: list[dict] | None = None,
     answerability_payload: list[dict] | None = None,
     linkgraph_payload: dict | None = None,
+    search_payload: dict | None = None,
     paragraph_links: list[dict] | None = None,
     wrong_home_payload: list[dict] | None = None,
     title_mismatch: list[dict] | None = None,
@@ -480,9 +727,7 @@ def synthesize(
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, pr)
 
-    # Sort: priority bucket first, then per-rec score within bucket
-    recs.sort(key=lambda r: (_PRI_RANK.get(r.priority, 9), -r.score))
-    return recs[:max_total]
+    return _finalize(recs, linkgraph_payload=linkgraph_payload, search_payload=search_payload)[:max_total]
 
 
 def to_payload(recs: Iterable[Recommendation]) -> dict:
@@ -492,20 +737,50 @@ def to_payload(recs: Iterable[Recommendation]) -> dict:
     for r in items:
         by_category[r.category] = by_category.get(r.category, 0) + 1
         by_priority[r.priority] = by_priority.get(r.priority, 0) + 1
+    owners = sorted({r.owner for r in items if r.owner})
+    types = sorted({r.type for r in items if r.type})
+    clusters = sorted({r.cluster for r in items if r.cluster})
+    avg = lambda attr: round(sum(float(getattr(r, attr, 0.0) or 0.0) for r in items) / max(len(items), 1), 1)
     return {
         "total": len(items),
         "by_category": by_category,
         "by_priority": by_priority,
+        "score_model": SCORE_MODEL,
+        "filters": {
+            "owners": owners,
+            "types": types,
+            "clusters": clusters[:200],
+            "categories": sorted(by_category),
+            "priorities": ["high", "medium", "low"],
+        },
+        "summary": {
+            "avg_impact": avg("impact"),
+            "avg_confidence": avg("confidence"),
+            "avg_effort_score": avg("effort_score"),
+            "avg_risk": avg("risk"),
+            "avg_priority_score": avg("priority_score"),
+            "traffic_opportunity": round(sum(float(r.traffic_opportunity or 0.0) for r in items), 1),
+        },
         "items": [
             {
                 "id": r.id,
                 "category": r.category,
+                "type": r.type,
                 "priority": r.priority,
+                "priority_score": r.priority_score,
+                "impact": r.impact,
+                "confidence": r.confidence,
+                "effort_score": r.effort_score,
+                "risk": r.risk,
+                "owner": r.owner,
+                "cluster": r.cluster,
+                "traffic_opportunity": r.traffic_opportunity,
                 "title": r.title,
                 "instruction": r.instruction,
                 "targets": r.targets,
                 "evidence": r.evidence,
                 "effort": r.effort,
+                "score": r.score,
             }
             for r in items
         ],

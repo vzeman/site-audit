@@ -1345,6 +1345,7 @@ def run(config: PipelineConfig) -> dict:
         coverage_payload=coverage_payload,
         answerability_payload=ans_payload,
         linkgraph_payload=link_payload,
+        search_payload=ahrefs_data,
         paragraph_links=paragraph_recs_payload,
         wrong_home_payload=wrong_home_data,
         title_mismatch=title_mismatch_data,
