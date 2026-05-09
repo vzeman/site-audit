@@ -1,7 +1,7 @@
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import analyze, hub_bottleneck_payload, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -119,3 +119,25 @@ def test_traffic_weighted_pagerank_flags_mismatches_and_nonindexable_search_page
     assert demand["mismatch_label"] in {"ranked_orphan", "high_traffic_low_authority"}
     assert payload["summary"]["high_traffic_low_authority_pages"] >= 1
     assert payload["mismatches"]["non_indexable_search_pages"][0]["url"] == "https://example.com/noindex"
+
+
+def test_hub_bottleneck_payload_detects_cluster_bridges() -> None:
+    pages = [
+        PageInfo(url="https://example.com/a", title="A", description="", section="alpha", word_count=100, language="en"),
+        PageInfo(url="https://example.com/bridge", title="Bridge", description="", section="hub", word_count=100, language="en"),
+        PageInfo(url="https://example.com/b", title="B", description="", section="beta", word_count=100, language="en"),
+        PageInfo(url="https://example.com/c", title="C", description="", section="gamma", word_count=100, language="en"),
+    ]
+    outlinks = [
+        (pages[0].url, [(pages[1].url, "bridge")]),
+        (pages[1].url, [(pages[2].url, "beta"), (pages[3].url, "gamma")]),
+        (pages[2].url, []),
+        (pages[3].url, []),
+    ]
+    result = analyze(pages, np.eye(4, dtype=np.float32), outlinks, home_url=pages[0].url)
+    payload = hub_bottleneck_payload(result, pages)
+
+    bridge = next(row for row in payload["pages"] if row["url"] == pages[1].url)
+    assert bridge["role"] in {"bottleneck", "cluster_bridge"}
+    assert bridge["cluster_bridge_count"] >= 2
+    assert payload["cluster_edges"]

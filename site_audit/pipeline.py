@@ -91,6 +91,7 @@ from .keyword_coverage import (
 )
 from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
+from .linkgraph import hub_bottleneck_payload
 from .linkgraph import link_removal_simulation_payload
 from .linkgraph import link_flow_payload
 from .linkgraph import to_payload as linkgraph_payload
@@ -1217,6 +1218,20 @@ def run(config: PipelineConfig) -> dict:
                 (twpr_summary.get("authority_traffic_alignment", 0.0) or 0.0) * 100,
                 twpr_summary.get("high_traffic_low_authority_pages", 0),
                 twpr_summary.get("high_authority_low_value_pages", 0),
+            )
+        link_payload["hub_bottlenecks"] = hub_bottleneck_payload(
+            link_result,
+            pages,
+            traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
+            page_types=page_types_data,
+        )
+        hub_summary = (link_payload.get("hub_bottlenecks") or {}).get("summary", {}) or {}
+        if hub_summary.get("status") == "ok":
+            LOG.info(
+                "  hub/bottleneck pages: %d bottlenecks · %d bridges · %.0f%% resilience",
+                hub_summary.get("bottleneck_pages", 0),
+                hub_summary.get("bridge_pages", 0),
+                (hub_summary.get("architecture_resilience", 0.0) or 0.0) * 100,
             )
         link_payload["link_removal_simulation"] = link_removal_simulation_payload(
             link_result,

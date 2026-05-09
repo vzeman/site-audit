@@ -26,7 +26,7 @@ import bisect
 import logging
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Iterable
 from urllib.parse import urlparse
@@ -164,6 +164,46 @@ def weighted_pagerank(
 
     total = sum(pr.values()) or 1.0
     return {u: v / total for u, v in pr.items()}
+
+
+def betweenness_centrality(graph: dict[str, list[str]], *, max_sources: int = 450) -> dict[str, float]:
+    nodes = list(graph.keys())
+    if not nodes:
+        return {}
+    degree = {u: len(graph.get(u, [])) for u in nodes}
+    for outs in graph.values():
+        for v in outs:
+            degree[v] = degree.get(v, 0) + 1
+    sources = sorted(nodes, key=lambda u: degree.get(u, 0), reverse=True)[:max_sources]
+    cb = {v: 0.0 for v in nodes}
+    for s in sources:
+        stack: list[str] = []
+        pred: dict[str, list[str]] = {w: [] for w in nodes}
+        sigma = dict.fromkeys(nodes, 0.0)
+        dist = dict.fromkeys(nodes, -1)
+        sigma[s] = 1.0
+        dist[s] = 0
+        queue = collections.deque([s])
+        while queue:
+            v = queue.popleft()
+            stack.append(v)
+            for w in graph.get(v, []):
+                if dist[w] < 0:
+                    queue.append(w)
+                    dist[w] = dist[v] + 1
+                if dist[w] == dist[v] + 1:
+                    sigma[w] += sigma[v]
+                    pred[w].append(v)
+        delta = dict.fromkeys(nodes, 0.0)
+        while stack:
+            w = stack.pop()
+            for v in pred[w]:
+                if sigma[w]:
+                    delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+            if w != s:
+                cb[w] += delta[w]
+    scale = 1.0 / max(1, len(sources))
+    return {u: v * scale for u, v in cb.items()}
 
 
 def edge_anchor_quality(anchors_by_edge: dict[tuple[str, str], list[str]]) -> dict[tuple[str, str], float]:
@@ -978,6 +1018,150 @@ def traffic_weighted_pagerank_payload(
 
 _NAV_LINK_RE = re.compile(r"\b(home|menu|login|sign in|account|cart|privacy|terms|contact|pricing|demo|about)\b", re.I)
 _NAV_TARGET_RE = re.compile(r"^/(login|sign-in|signin|account|cart|checkout|privacy|terms|legal|contact|about|pricing|demo)/?$", re.I)
+
+
+def hub_bottleneck_payload(
+    result: LinkGraphResult,
+    pages,
+    *,
+    traffic_authority: dict | None = None,
+    page_types: dict | None = None,
+) -> dict:
+    if not result.graph:
+        return {"summary": {"status": "no_graph", "total_pages": 0}, "pages": [], "cluster_edges": []}
+
+    page_by_url = {p.url: p for p in pages}
+    authority_by_url = {
+        row.get("url"): row
+        for row in (traffic_authority or {}).get("pages", [])
+        if row.get("url")
+    }
+    type_by_url = _page_type_lookup(page_types)
+    reverse: dict[str, list[str]] = defaultdict(list)
+    for src, targets in result.graph.items():
+        for tgt in targets:
+            reverse[tgt].append(src)
+    between = betweenness_centrality(result.graph)
+    between_pct = _percentile_lookup(between)
+    pagerank_pct = _percentile_lookup({url: float(result.pagerank.get(url, 0.0)) for url in result.graph})
+    traffic_pct = _percentile_lookup({url: float((authority_by_url.get(url) or {}).get("traffic", 0) or 0) for url in result.graph})
+    bridge_values: dict[str, int] = {}
+    cluster_edges: Counter[tuple[str, str]] = Counter()
+
+    def cluster_for(url: str) -> str:
+        page = page_by_url.get(url)
+        return str((authority_by_url.get(url) or {}).get("cluster") or (page.section if page else "") or _directory(url))
+
+    rows = []
+    for url in result.graph:
+        incoming = reverse.get(url, [])
+        outgoing = result.graph.get(url, [])
+        source_clusters = sorted({cluster_for(src) for src in incoming if cluster_for(src)})
+        target_clusters = sorted({cluster_for(tgt) for tgt in outgoing if cluster_for(tgt)})
+        pairs = {(src_c, tgt_c) for src_c in source_clusters for tgt_c in target_clusters if src_c != tgt_c}
+        for pair in pairs:
+            cluster_edges[pair] += 1
+        bridge_values[url] = len(pairs)
+    bridge_pct = _percentile_lookup({url: float(v) for url, v in bridge_values.items()})
+
+    for url in result.graph:
+        page = page_by_url.get(url)
+        incoming = reverse.get(url, [])
+        outgoing = result.graph.get(url, [])
+        authority = authority_by_url.get(url) or {}
+        source_clusters = sorted({cluster_for(src) for src in incoming if cluster_for(src)})
+        target_clusters = sorted({cluster_for(tgt) for tgt in outgoing if cluster_for(tgt)})
+        affected_clusters = sorted(set(source_clusters + target_clusters))
+        risk = (
+            between_pct.get(url, 0.0) * 34.0
+            + bridge_pct.get(url, 0.0) * 26.0
+            + pagerank_pct.get(url, 0.0) * 18.0
+            + traffic_pct.get(url, 0.0) * 12.0
+            + (10.0 if (len(incoming) <= 1 or len(outgoing) <= 1) and (incoming or outgoing) else 0.0)
+        )
+        if len(incoming) == 0:
+            role = "orphan_risk"
+        elif len(outgoing) == 0:
+            role = "dead_end_risk"
+        elif between_pct.get(url, 0.0) >= 0.8 and bridge_values.get(url, 0) > 0:
+            role = "bottleneck"
+        elif bridge_values.get(url, 0) >= 2:
+            role = "cluster_bridge"
+        elif pagerank_pct.get(url, 0.0) >= 0.8 and len(outgoing) >= 2:
+            role = "authority_hub"
+        else:
+            role = "support_page"
+        row = {
+            "url": url,
+            "title": page.title if page else url,
+            "section": page.section if page else "",
+            "directory": _directory(url),
+            "page_type": type_by_url.get(_canonical_url(url), ""),
+            "cluster": cluster_for(url),
+            "role": role,
+            "traffic": _safe_int(authority.get("traffic")),
+            "pagerank": round(float(result.pagerank.get(url, 0.0)), 8),
+            "betweenness": round(float(between.get(url, 0.0)), 8),
+            "betweenness_percentile": between_pct.get(url, 0.0),
+            "pagerank_percentile": pagerank_pct.get(url, 0.0),
+            "traffic_percentile": traffic_pct.get(url, 0.0),
+            "cluster_bridge_count": bridge_values.get(url, 0),
+            "source_clusters": source_clusters[:20],
+            "target_clusters": target_clusters[:20],
+            "affected_clusters": affected_clusters[:30],
+            "incoming_pages": [{"url": src, "title": getattr(page_by_url.get(src), "title", src), "cluster": cluster_for(src)} for src in incoming[:20]],
+            "outgoing_pages": [{"url": tgt, "title": getattr(page_by_url.get(tgt), "title", tgt), "cluster": cluster_for(tgt)} for tgt in outgoing[:20]],
+            "in_degree": len(incoming),
+            "out_degree": len(outgoing),
+            "resilience_risk": round(max(0.0, min(100.0, risk)), 2),
+        }
+        row["recommended_action"] = (
+            "Add redundant paths between affected clusters and protect this page during navigation/template edits."
+            if role == "bottleneck"
+            else "Create alternate cross-links so this page is not the only bridge between clusters."
+            if role == "cluster_bridge"
+            else "Use this hub to distribute links to under-supported demand pages."
+            if role == "authority_hub"
+            else "Add relevant outbound links so visitors and crawlers can continue to related pages."
+            if role == "dead_end_risk"
+            else "Link to this page from a relevant hub or remove it from the indexable set."
+            if role == "orphan_risk"
+            else "No urgent architecture change."
+        )
+        rows.append(row)
+
+    rows.sort(key=lambda r: (_safe_float(r.get("resilience_risk")), _safe_float(r.get("betweenness"))), reverse=True)
+    role_counts = collections.Counter(row["role"] for row in rows)
+    bottlenecks = [r for r in rows if r["role"] == "bottleneck"]
+    bridges = [r for r in rows if r["role"] == "cluster_bridge"]
+    cluster_edge_rows = [
+        {"source_cluster": src, "target_cluster": tgt, "bridge_pages": count}
+        for (src, tgt), count in cluster_edges.most_common(300)
+    ]
+    resilience = max(0.0, 1.0 - (len(bottlenecks) + len(bridges) * 0.5 + role_counts.get("dead_end_risk", 0) * 0.25) / max(1, len(rows)))
+    return {
+        "summary": {
+            "status": "ok",
+            "model": "hub_bottleneck_v1",
+            "total_pages": len(rows),
+            "architecture_resilience": round(resilience, 4),
+            "bottleneck_pages": len(bottlenecks),
+            "bridge_pages": len(bridges),
+            "authority_hubs": role_counts.get("authority_hub", 0),
+            "dead_end_risks": role_counts.get("dead_end_risk", 0),
+            "orphan_risks": role_counts.get("orphan_risk", 0),
+        },
+        "pages": rows,
+        "bottlenecks": bottlenecks[:200],
+        "bridges": bridges[:200],
+        "authority_hubs": [r for r in rows if r["role"] == "authority_hub"][:200],
+        "risks": [r for r in rows if r["role"] in {"bottleneck", "cluster_bridge", "dead_end_risk", "orphan_risk"}][:300],
+        "cluster_edges": cluster_edge_rows,
+        "interpretation": {
+            "betweenness": "How often a page sits on shortest internal-link paths in an approximate directed Brandes pass.",
+            "cluster_bridge_count": "Number of source-cluster to target-cluster relationships this page connects.",
+        },
+    }
 
 
 def _edge_placement(src: str, tgt: str, anchors: list[str], anchor_quality: float, relevance: float, target_in_degree: int) -> str:

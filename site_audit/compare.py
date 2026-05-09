@@ -484,6 +484,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "anchor_relevance_weak_links", "label": "Weak anchors", "better": "low", "fmt": "int"},
             {"key": "contextual_link_avg_impact", "label": "Context link impact", "better": "high", "fmt": "0.0"},
             {"key": "contextual_template_links", "label": "Template links", "better": "low", "fmt": "int"},
+            {"key": "architecture_resilience", "label": "Architecture resilience", "better": "high", "fmt": "pct"},
+            {"key": "bottleneck_pages", "label": "Bottlenecks", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -665,6 +667,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {}).get("summary", {}) or {}
     anchor_rel = ((proj.linkgraph or {}).get("anchor_relevance") or {}).get("summary", {}) or {}
     context_links = ((proj.linkgraph or {}).get("contextual_link_impact") or {}).get("summary", {}) or {}
+    hubs = ((proj.linkgraph or {}).get("hub_bottlenecks") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -721,6 +724,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "contextual_link_avg_impact": float(context_links.get("avg_contextual_impact", 0.0)),
         "contextual_template_links": int(context_links.get("template_links", 0)),
         "contextual_high_impact_links": int(context_links.get("high_impact_contextual_links", 0)),
+        "architecture_resilience": float(hubs.get("architecture_resilience", 0.0)),
+        "bottleneck_pages": int(hubs.get("bottleneck_pages", 0)),
+        "bridge_pages": int(hubs.get("bridge_pages", 0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2490,6 +2496,24 @@ def _contextual_link_comparison(projects: list[_Project]) -> dict:
     return {"domains": domains, "top_contextual_links": top_links[:400], "source_pages": source_pages[:250]}
 
 
+def _hub_bottleneck_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    pages: list[dict] = []
+    cluster_edges: list[dict] = []
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("hub_bottlenecks") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("risks") or []:
+            pages.append({"domain": proj.domain, **row})
+        for row in payload.get("cluster_edges") or []:
+            cluster_edges.append({"domain": proj.domain, **row})
+    pages.sort(key=lambda r: _safe_float(r.get("resilience_risk")), reverse=True)
+    cluster_edges.sort(key=lambda r: _safe_int(r.get("bridge_pages")), reverse=True)
+    return {"domains": domains, "risks": pages[:400], "cluster_edges": cluster_edges[:300]}
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2681,6 +2705,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "link_addition_simulation": _link_addition_comparison(projects),
         "anchor_relevance": _anchor_relevance_comparison(projects),
         "contextual_link_impact": _contextual_link_comparison(projects),
+        "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

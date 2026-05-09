@@ -1271,6 +1271,27 @@
       </div>
     </div>
 
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="hub-bottleneck-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Hub and bottleneck pages</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Identifies authority hubs, cluster bridges, bottlenecks, dead ends, and orphan risks using PageRank, betweenness, cluster bridging, traffic, and link degree.
+        </p>
+      </div>
+      <div id="hub-bottleneck-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="hub-bottleneck-cluster-graph" class="w-full mb-5" style="min-height: 320px;"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Bottlenecks and bridges</h4>
+          <div id="hub-bottleneck-risks" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Authority hubs</h4>
+          <div id="hub-bottleneck-hubs" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-removal-block">
       <div class="mb-3">
         <h3 class="text-lg font-semibold">Internal link removal simulation</h3>
@@ -1999,6 +2020,7 @@
       renderDuplicateFragments();
       renderLinkgraph();
       renderTrafficPagerank();
+      renderHubBottlenecks();
       renderLinkRemovalSimulation();
       renderLinkFlow();
       renderLinkbuilding();
@@ -5040,6 +5062,71 @@
         <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
       </div>
     `).join('') || '<div class="text-gray-500">No non-indexable search-demand pages.</div>';
+  }
+
+  function renderHubBottlenecks() {
+    const block = document.getElementById('hub-bottleneck-block');
+    const payload = ((state.linkgraph || {}).hub_bottlenecks || {});
+    const summary = payload.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('hub-bottleneck-summary').innerHTML =
+      card('Resilience', `${((summary.architecture_resilience || 0) * 100).toFixed(0)}%`, 'higher is safer') +
+      card('Bottlenecks', Number(summary.bottleneck_pages || 0).toLocaleString(), 'protect/redundancy') +
+      card('Bridge pages', Number(summary.bridge_pages || 0).toLocaleString(), 'cross-cluster connectors') +
+      card('Authority hubs', Number(summary.authority_hubs || 0).toLocaleString(), 'link distributors') +
+      card('Dead/orphan risks', Number((summary.dead_end_risks || 0) + (summary.orphan_risks || 0)).toLocaleString(), 'navigation gaps');
+    drawClusterBridgeGraph(document.getElementById('hub-bottleneck-cluster-graph'), payload.cluster_edges || []);
+    renderHubRoleList('hub-bottleneck-risks', payload.risks || [], 'No hub or bottleneck risks.');
+    renderHubRoleList('hub-bottleneck-hubs', payload.authority_hubs || [], 'No authority hubs detected.');
+  }
+
+  function renderHubRoleList(id, rows, empty) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = (rows || []).slice(0, 140).map(r => `
+      <div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <span class="px-1.5 py-0.5 rounded ${r.role === 'bottleneck' ? 'bg-red-50 text-red-700' : r.role === 'cluster_bridge' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}">${escapeHtml(r.role || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.resilience_risk || 0).toFixed(1)}</span>
+        </div>
+        <a class="text-blue-600 hover:underline break-all mt-1 inline-block" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+        <div class="text-gray-500 mt-1">PR pct ${(Number(r.pagerank_percentile || 0) * 100).toFixed(0)} · betweenness pct ${(Number(r.betweenness_percentile || 0) * 100).toFixed(0)} · bridges ${Number(r.cluster_bridge_count || 0).toLocaleString()} · in ${Number(r.in_degree || 0).toLocaleString()} / out ${Number(r.out_degree || 0).toLocaleString()}</div>
+        <div class="text-gray-600 mt-1">${(r.affected_clusters || []).slice(0, 6).map(escapeHtml).join(' · ')}</div>
+        <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
+      </div>
+    `).join('') || `<div class="text-gray-500">${escapeHtml(empty)}</div>`;
+  }
+
+  function drawClusterBridgeGraph(container, rows) {
+    if (!container) return;
+    container.innerHTML = '';
+    const data = (rows || []).slice(0, 80);
+    if (!data.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-10">No cross-cluster bridge edges.</div>';
+      return;
+    }
+    const clusters = Array.from(new Set(data.flatMap(r => [r.source_cluster, r.target_cluster]).filter(Boolean))).slice(0, 40);
+    const nodes = clusters.map(id => ({id}));
+    const links = data.filter(r => clusters.includes(r.source_cluster) && clusters.includes(r.target_cluster)).map(r => ({source: r.source_cluster, target: r.target_cluster, value: Number(r.bridge_pages || 1)}));
+    const width = Math.max(560, container.offsetWidth || 760);
+    const height = 320;
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    const weight = d3.scaleSqrt().domain([1, d3.max(links, d => d.value) || 1]).range([1, 5]);
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(90))
+      .force('charge', d3.forceManyBody().strength(-220))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .stop();
+    for (let i = 0; i < 120; i++) sim.tick();
+    svg.append('g').attr('stroke', '#94a3b8').attr('stroke-opacity', 0.55).selectAll('line').data(links).join('line')
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y).attr('stroke-width', d => weight(d.value));
+    const node = svg.append('g').selectAll('g').data(nodes).join('g').attr('transform', d => `translate(${d.x},${d.y})`);
+    node.append('circle').attr('r', 8).attr('fill', '#2563eb').attr('fill-opacity', 0.75);
+    node.append('text').attr('x', 12).attr('y', 4).style('font-size', '10px').style('fill', '#374151').text(d => truncateMiddle(d.id, 22));
   }
 
   function renderLinkRemovalSimulation() {

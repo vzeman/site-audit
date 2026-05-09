@@ -564,6 +564,16 @@
           </table>
         </div>
       </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">Hub and bottleneck risks</h3>
+        <p class="text-xs text-gray-500 mb-2">Pages that concentrate shortest paths, bridge clusters, or create dead-end/orphan architecture risk.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="hub-bottleneck-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <div>
         <h3 class="text-sm font-semibold mb-1">High-traffic readiness gaps</h3>
         <p class="text-xs text-gray-500 mb-2">Traffic-weighted pages where GEO, schema, metadata, freshness, conversion, or internal-link readiness is weak.</p>
@@ -910,6 +920,8 @@
       { key: 'anchor_relevance_weak_links', label: 'Weak anchors', better: 'low', fmt: 'int' },
       { key: 'contextual_link_avg_impact', label: 'Context impact', better: 'high', fmt: '0.0' },
       { key: 'contextual_template_links', label: 'Template links', better: 'low', fmt: 'int' },
+      { key: 'architecture_resilience', label: 'Arch resilience', better: 'high', fmt: 'pct' },
+      { key: 'bottleneck_pages', label: 'Bottlenecks', better: 'low', fmt: 'int' },
     ],
     metadata: [
       { key: 'pages',                   label: 'Pages', better: 'na', fmt: 'int' },
@@ -1869,6 +1881,7 @@
     renderLinkAdditionTable();
     renderAnchorRelevanceTable();
     renderContextualLinkTable();
+    renderHubBottleneckTable();
     renderReadinessGapTable();
   }
 
@@ -2355,6 +2368,34 @@
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.contextual_link_impact || 0).toFixed(1)}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.contextual_similarity || 0).toFixed(2)}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.structural_authority_score || 0).toFixed(1)}</td>
+      </tr>`).join('');
+  }
+
+  function renderHubBottleneckTable() {
+    const tbl = document.getElementById('hub-bottleneck-table');
+    if (!tbl) return;
+    const rows = ((data.hub_bottlenecks || {}).risks || []).slice(0, 90);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Role</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">Risk</th>
+        <th class="px-2 py-2 text-right">Bridge</th>
+        <th class="px-2 py-2 text-left">Clusters</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No hub/bottleneck risks.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5">${escapeHtml(r.role || '')}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.title || r.url || '', 62))}</a><div class="text-[11px] text-gray-500">in ${Number(r.in_degree || 0).toLocaleString()} · out ${Number(r.out_degree || 0).toLocaleString()}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.resilience_risk || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.cluster_bridge_count || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-gray-600">${(r.affected_clusters || []).slice(0, 4).map(escapeHtml).join(' · ')}</td>
       </tr>`).join('');
   }
 
