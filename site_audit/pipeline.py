@@ -79,6 +79,7 @@ from .keyword_coverage import (
     match_queries_to_paragraphs, paragraph_match_payload,
     to_payload as queries_payload,
 )
+from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import link_flow_payload
 from .linkgraph import to_payload as linkgraph_payload
@@ -150,6 +151,7 @@ class PipelineConfig:
     enable_paragraph_clustering: bool = True
     enable_paragraph_impact: bool = True
     enable_semantic_ablation: bool = True
+    enable_keyword_attribution: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -548,6 +550,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_paragraph_clustering
         or config.enable_paragraph_impact
         or config.enable_semantic_ablation
+        or config.enable_keyword_attribution
         or config.enable_content_quality
         or config.enable_paragraph_fanout
     ):
@@ -903,6 +906,25 @@ def run(config: PipelineConfig) -> dict:
         elif ab_summary:
             LOG.info("  semantic ablation: %s", ab_summary.get("status", "unavailable"))
 
+    keyword_attribution_data: dict = {}
+    if config.enable_keyword_attribution and paragraph_records and ahrefs_data:
+        keyword_attribution_data = build_keyword_attribution(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            ahrefs_data,
+            embedder=embedder,
+        )
+        ka_summary = keyword_attribution_data.get("summary", {}) or {}
+        if ka_summary.get("status") == "ok":
+            LOG.info(
+                "  keyword attribution: %d keywords · %d unmatched",
+                ka_summary.get("keyword_rows", 0),
+                ka_summary.get("unmatched_keywords", 0),
+            )
+        elif ka_summary:
+            LOG.info("  keyword attribution: %s", ka_summary.get("status", "unavailable"))
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -954,6 +976,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_fanout=paragraph_fanout_payload,
         paragraph_impact=paragraph_impact_data,
         semantic_ablation=semantic_ablation_data,
+        keyword_attribution=keyword_attribution_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -998,6 +1021,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_fanout=paragraph_fanout_payload,
             paragraph_impact=paragraph_impact_data,
             semantic_ablation=semantic_ablation_data,
+            keyword_attribution=keyword_attribution_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,

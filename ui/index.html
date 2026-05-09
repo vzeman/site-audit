@@ -597,6 +597,31 @@
       </div>
     </div>
 
+    <!-- Keyword attribution -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="keyword-attribution-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Keyword traffic attribution</h3>
+        <p class="text-xs text-gray-500 mt-1" id="keyword-attribution-meta">
+          Maps each ranking keyword to the best matching heading and paragraph on its ranking URL, then rolls keyword traffic up to sections and paragraphs.
+        </p>
+      </div>
+      <div id="keyword-attribution-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Top headings by attributed traffic</h4>
+          <div id="keyword-attribution-headings" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Top paragraphs by attributed traffic</h4>
+          <div id="keyword-attribution-paragraphs" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold mb-2">Weak or unmatched keyword support</h4>
+        <div id="keyword-attribution-gaps" class="text-xs max-h-96 overflow-y-auto"></div>
+      </div>
+    </div>
+
     <!-- Cluster overlap heatmap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
       <div class="mb-3">
@@ -1202,6 +1227,7 @@
 <script type="application/json" id="data-paragraph-fanout">__PARAGRAPH_FANOUT_JSON__</script>
 <script type="application/json" id="data-paragraph-impact">__PARAGRAPH_IMPACT_JSON__</script>
 <script type="application/json" id="data-semantic-ablation">__SEMANTIC_ABLATION_JSON__</script>
+<script type="application/json" id="data-keyword-attribution">__KEYWORD_ATTRIBUTION_JSON__</script>
 <script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
 <script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
@@ -1303,6 +1329,7 @@
       const inlinedFanout = readInlined('data-paragraph-fanout');
       const inlinedParagraphImpact = readInlined('data-paragraph-impact');
       const inlinedSemanticAblation = readInlined('data-semantic-ablation');
+      const inlinedKeywordAttribution = readInlined('data-keyword-attribution');
       const inlinedTitleMismatch = readInlined('data-title-mismatch');
       const inlinedWrongHome = readInlined('data-wrong-home');
       const inlinedImprovement = readInlined('data-page-improvement');
@@ -1323,7 +1350,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1342,6 +1369,7 @@
         fanout = inlinedFanout || [];
         paragraphImpact = inlinedParagraphImpact || {};
         semanticAblation = inlinedSemanticAblation || {};
+        keywordAttribution = inlinedKeywordAttribution || {};
         titleMismatch = inlinedTitleMismatch || [];
         wrongHome = inlinedWrongHome || [];
         improvement = inlinedImprovement || [];
@@ -1362,7 +1390,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1380,6 +1408,7 @@
           loadJSON('paragraph_fanout.json').catch(() => []),
           loadJSON('paragraph_impact.json').catch(() => ({})),
           loadJSON('semantic_ablation.json').catch(() => ({})),
+          loadJSON('keyword_attribution.json').catch(() => ({})),
           loadJSON('title_mismatch.json').catch(() => []),
           loadJSON('wrong_home_paragraphs.json').catch(() => []),
           loadJSON('page_improvement.json').catch(() => []),
@@ -1419,6 +1448,7 @@
       state.fanout = fanout;
       state.paragraphImpact = paragraphImpact || {};
       state.semanticAblation = semanticAblation || {};
+      state.keywordAttribution = keywordAttribution || {};
       state.titleMismatch = titleMismatch;
       state.wrongHome = wrongHome;
       state.improvement = improvement;
@@ -1460,6 +1490,7 @@
       renderAhrefs();
       renderParagraphImpact();
       renderSemanticAblation();
+      renderKeywordAttribution();
       renderHeatmap();
       renderCoverage('all');
       renderIndexability();
@@ -2365,6 +2396,60 @@
 
     document.getElementById('semantic-ablation-carriers').innerHTML = carriers.length ? list(carriers) : '<div class="text-gray-500">No topic carriers above threshold.</div>';
     document.getElementById('semantic-ablation-noise').innerHTML = noise.length ? list(noise) : '<div class="text-gray-500">No noise candidates above threshold.</div>';
+  }
+
+  function renderKeywordAttribution() {
+    const block = document.getElementById('keyword-attribution-block');
+    const data = state.keywordAttribution || {};
+    const summary = data.summary || {};
+    const keywords = data.keywords || [];
+    const headings = data.headings || [];
+    const paragraphs = data.paragraphs || [];
+    if (!keywords.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('keyword-attribution-meta').textContent =
+      `${Number(summary.keyword_rows || 0).toLocaleString()} keyword rows · ${Number(summary.attributed_traffic || 0).toLocaleString()} attributed visits · ${escapeHtml(summary.provider || 'search')} data.`;
+    document.getElementById('keyword-attribution-summary').innerHTML =
+      card('matched keywords', Number(summary.matched_keywords || 0).toLocaleString(), 'heading + paragraph support') +
+      card('unmatched', Number(summary.unmatched_keywords || 0).toLocaleString(), 'weak visible support') +
+      card('heading targets', Number(summary.heading_targets || 0).toLocaleString(), 'sections receiving demand') +
+      card('paragraph targets', Number(summary.paragraph_targets || 0).toLocaleString(), 'paragraphs receiving demand');
+
+    const chips = kws => (kws || []).slice(0, 4).map(k => `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(k.keyword)} ${Number(k.traffic || 0).toLocaleString()}</span>`).join('');
+    const aggregateList = (rows, kind) => rows.slice(0, 80).map(r => `
+      <div class="border border-gray-100 rounded p-2 mb-2">
+        <div class="flex items-center justify-between gap-3">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono">${Number(r.traffic || 0).toLocaleString()}</span>
+        </div>
+        <div class="font-medium text-gray-900 mt-1">${escapeHtml(kind === 'heading' ? r.heading : (r.heading || ('para ' + r.paragraph_index)))}</div>
+        ${kind === 'paragraph' ? `<div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>` : ''}
+        <div class="text-gray-500 mt-1">${Number(r.keyword_count || 0).toLocaleString()} keywords</div>
+        <div class="mt-1">${chips(r.keywords)}</div>
+      </div>`).join('');
+
+    document.getElementById('keyword-attribution-headings').innerHTML = headings.length ? aggregateList(headings, 'heading') : '<div class="text-gray-500">No heading attribution.</div>';
+    document.getElementById('keyword-attribution-paragraphs').innerHTML = paragraphs.length ? aggregateList(paragraphs, 'paragraph') : '<div class="text-gray-500">No paragraph attribution.</div>';
+
+    const gaps = keywords.filter(r => r.status !== 'matched').slice(0, 120);
+    document.getElementById('keyword-attribution-gaps').innerHTML = gaps.length ? `
+      <table class="w-full">
+        <thead class="text-gray-500 sticky top-0 bg-white">
+          <tr><th class="text-left py-1">Keyword</th><th class="text-left py-1">Page</th><th class="text-right py-1">Traffic</th><th class="text-right py-1">H</th><th class="text-right py-1">P</th></tr>
+        </thead>
+        <tbody>
+          ${gaps.map(r => `<tr class="border-b border-gray-100 align-top">
+            <td class="py-1.5 pr-2"><span class="font-medium">${escapeHtml(r.keyword)}</span><div class="text-gray-500">${escapeHtml(r.status)}</div></td>
+            <td class="py-1.5 pr-2"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a><div class="text-gray-500">${escapeHtml(r.best_heading || '')}${r.best_paragraph_heading ? ' · ' + escapeHtml(r.best_paragraph_heading) : ''}</div></td>
+            <td class="py-1.5 pl-2 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+            <td class="py-1.5 pl-2 text-right font-mono">${Number(r.best_heading_score || 0).toFixed(2)}</td>
+            <td class="py-1.5 pl-2 text-right font-mono">${Number(r.best_paragraph_score || 0).toFixed(2)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<div class="text-gray-500">No weak or unmatched keyword support detected.</div>';
   }
 
   function renderSections() {
