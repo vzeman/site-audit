@@ -427,6 +427,18 @@ def _percentile(values: list[float], p: float) -> float:
     return float(s[i])
 
 
+def _gini(values: list[float]) -> float:
+    positive = sorted(float(v) for v in values if float(v) > 0)
+    if not positive:
+        return 0.0
+    n = len(positive)
+    total = sum(positive)
+    if total <= 0:
+        return 0.0
+    weighted = sum((i + 1) * value for i, value in enumerate(positive))
+    return max(0.0, min(1.0, (2.0 * weighted) / (n * total) - (n + 1.0) / n))
+
+
 COMPARISON_METRIC_GROUPS = [
     {
         "key": "search",
@@ -3923,6 +3935,440 @@ def _internal_link_patterns_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _internal_link_architecture_comparison(projects: list[_Project]) -> dict:
+    domains = [p.domain for p in projects]
+    scorecards: list[dict] = []
+    cluster_domains: dict[str, dict[str, dict]] = defaultdict(dict)
+    cluster_edges: list[dict] = []
+    recommendations: list[dict] = []
+
+    def directory_from_url(url: object) -> str:
+        try:
+            parts = [part for part in (urlsplit(str(url or "")).path or "/").split("/") if part]
+        except ValueError:
+            return "/"
+        if not parts:
+            return "/"
+        return "/" + parts[0] + "/"
+
+    def cluster_name(value: object, fallback: object = "") -> str:
+        raw = str(value or fallback or "").strip()
+        if not raw:
+            return "root"
+        key = _cluster_key(raw)
+        return key if key != "unknown" else raw[:80]
+
+    def page_cluster(row: dict) -> str:
+        return cluster_name(
+            row.get("cluster")
+            or row.get("cluster_label")
+            or row.get("section")
+            or row.get("directory")
+            or row.get("page_type")
+            or directory_from_url(row.get("url"))
+        )
+
+    def money_page_type(value: object) -> bool:
+        return str(value or "").lower() in {"product", "service", "home", "contact", "pricing", "demo", "signup"}
+
+    def add_recommendation(row: dict) -> None:
+        if not row.get("target_url") or not row.get("source_url"):
+            return
+        row.setdefault("priority_score", 0.0)
+        row["priority_score"] = round(_safe_float(row.get("priority_score")), 2)
+        row["confidence"] = round(_safe_float(row.get("confidence"), 0.62), 3)
+        recommendations.append(row)
+
+    for proj in projects:
+        lg = proj.linkgraph or {}
+        page_rows = list(proj.page_link_counts or [])
+        row_count = len(page_rows)
+        node_count = _safe_int(lg.get("node_count")) or row_count or len(proj.pages)
+        total_edges = _safe_int(lg.get("edge_count")) or sum(_safe_int(r.get("out_degree")) for r in page_rows)
+        orphan_count = _safe_int(lg.get("orphan_count"), -1)
+        if orphan_count < 0:
+            orphan_count = sum(1 for r in page_rows if _safe_int(r.get("in_degree")) == 0)
+        dead_end_count = _safe_int(lg.get("dead_end_count"), -1)
+        if dead_end_count < 0:
+            dead_end_count = sum(1 for r in page_rows if _safe_int(r.get("out_degree")) == 0)
+        deep_count = _safe_int(lg.get("deep_page_count"), -1)
+        if deep_count < 0:
+            deep_count = sum(1 for r in page_rows if r.get("click_depth") is not None and _safe_int(r.get("click_depth")) >= 4)
+
+        pagerank_values = [_safe_float(r.get("pagerank")) for r in page_rows if _safe_float(r.get("pagerank")) > 0]
+        if not pagerank_values:
+            pagerank_values = [_safe_float(r.get("pagerank")) for r in (lg.get("top_authority_pages") or []) if _safe_float(r.get("pagerank")) > 0]
+        pr_total = sum(pagerank_values) or 0.0
+        pr_sorted = sorted(pagerank_values, reverse=True)
+        pagerank_top1_share = (sum(pr_sorted[:1]) / pr_total) if pr_total else 0.0
+        pagerank_top5_share = (sum(pr_sorted[:5]) / pr_total) if pr_total else 0.0
+        pagerank_hhi = sum((value / pr_total) ** 2 for value in pagerank_values) if pr_total else 0.0
+
+        context_summary = ((lg.get("contextual_link_impact") or {}).get("summary") or {})
+        total_context_links = _safe_int(context_summary.get("total_links")) or total_edges
+        contextual_links = _safe_int(context_summary.get("main_content_links"))
+        template_links = _safe_int(context_summary.get("template_links"))
+        if not contextual_links and total_context_links and template_links:
+            contextual_links = max(0, total_context_links - template_links)
+        contextual_share = contextual_links / max(1, total_context_links) if total_context_links else 0.0
+        template_share = template_links / max(1, total_context_links) if total_context_links else 0.0
+
+        twpr = ((lg.get("traffic_weighted_pagerank") or {}).get("summary") or {})
+        hdl = ((lg.get("high_demand_low_link") or {}).get("summary") or {})
+        hubs = ((lg.get("hub_bottlenecks") or {}).get("summary") or {})
+        top_pages_total = sum(_safe_int(r.get("traffic")) for r in ((proj.ahrefs or {}).get("top_pages") or []))
+        high_demand_pages = _safe_int(hdl.get("high_demand_low_support_pages") or hdl.get("opportunity_pages"))
+        high_demand_traffic = _safe_int(hdl.get("high_demand_low_support_traffic") or hdl.get("opportunity_traffic"))
+        classified_pages = _safe_int(hdl.get("classified_top_pages")) or len(((lg.get("high_demand_low_link") or {}).get("pages") or []))
+        high_demand_rate = high_demand_pages / max(1, classified_pages) if classified_pages else 0.0
+        high_demand_traffic_share = high_demand_traffic / max(1, top_pages_total) if top_pages_total else 0.0
+        authority_alignment = _safe_float(twpr.get("authority_traffic_alignment"))
+        demand_support_alignment = _safe_float(hdl.get("demand_support_alignment"))
+        resilience = _safe_float(hubs.get("architecture_resilience"))
+
+        link_lookup = _page_link_lookup(proj)
+        authority_lookup = _authority_lookup(proj)
+        money_rows: dict[str, dict] = {}
+        for row in ((proj.conversion_balance or {}).get("pages") or []):
+            if row.get("money_page") or money_page_type(row.get("page_type")):
+                url = row.get("url") or ""
+                if url:
+                    money_rows[url] = row
+        for row in ((lg.get("high_demand_low_link") or {}).get("pages") or []):
+            if money_page_type(row.get("page_type")):
+                url = row.get("url") or ""
+                if url:
+                    money_rows.setdefault(url, row)
+
+        money_scores: list[float] = []
+        weak_money_pages = 0
+        weak_money_traffic = 0
+        money_inlinks: list[float] = []
+        for url, row in money_rows.items():
+            link = _lookup_url(link_lookup, url)
+            auth = _lookup_url(authority_lookup, url)
+            in_degree = _safe_int(link.get("in_degree") if link else row.get("in_degree"))
+            click_depth = link.get("click_depth") if link else row.get("click_depth")
+            weighted_pct = _safe_float(auth.get("weighted_pagerank_percentile") or row.get("weighted_pagerank_percentile"))
+            depth_component = 0.5
+            if click_depth is not None:
+                depth_component = max(0.0, min(1.0, 1.0 - (_safe_int(click_depth) - 1) / 5.0))
+            support = min(1.0, in_degree / 5.0) * 0.45 + weighted_pct * 0.35 + depth_component * 0.20
+            money_scores.append(support)
+            money_inlinks.append(float(in_degree))
+            if support < 0.45 or row.get("balance_label") == "high_risk_money_page":
+                weak_money_pages += 1
+                weak_money_traffic += _safe_int(row.get("traffic"))
+        money_page_support_score = round(sum(money_scores) / len(money_scores) * 100.0, 2) if money_scores else 0.0
+        avg_money_inlinks = sum(money_inlinks) / len(money_inlinks) if money_inlinks else 0.0
+
+        orphan_rate = orphan_count / max(1, node_count)
+        dead_end_rate = dead_end_count / max(1, node_count)
+        deep_page_rate = deep_count / max(1, node_count)
+        balanced_authority = 1.0 - min(1.0, max(0.0, pagerank_top5_share - 0.35) / 0.55)
+        money_component = money_page_support_score / 100.0 if money_scores else 0.65
+        architecture_score = round(100.0 * (
+            (1.0 - orphan_rate) * 0.14
+            + (1.0 - dead_end_rate) * 0.10
+            + (1.0 - deep_page_rate) * 0.09
+            + balanced_authority * 0.12
+            + contextual_share * 0.14
+            + authority_alignment * 0.14
+            + demand_support_alignment * 0.13
+            + resilience * 0.08
+            + money_component * 0.06
+        ), 2)
+
+        scorecards.append({
+            "domain": proj.domain,
+            "architecture_score": architecture_score,
+            "pages": node_count,
+            "internal_edges": total_edges,
+            "avg_in_degree": round(sum(_safe_int(r.get("in_degree")) for r in page_rows) / max(1, row_count), 2) if row_count else 0.0,
+            "avg_out_degree": round(sum(_safe_int(r.get("out_degree")) for r in page_rows) / max(1, row_count), 2) if row_count else 0.0,
+            "orphan_count": orphan_count,
+            "orphan_rate": round(orphan_rate, 4),
+            "dead_end_count": dead_end_count,
+            "dead_end_rate": round(dead_end_rate, 4),
+            "deep_page_count": deep_count,
+            "deep_page_rate": round(deep_page_rate, 4),
+            "pagerank_top1_share": round(pagerank_top1_share, 4),
+            "pagerank_top5_share": round(pagerank_top5_share, 4),
+            "pagerank_gini": round(_gini(pagerank_values), 4),
+            "pagerank_hhi": round(pagerank_hhi, 4),
+            "contextual_link_share": round(contextual_share, 4),
+            "template_link_share": round(template_share, 4),
+            "authority_traffic_alignment": round(authority_alignment, 4),
+            "demand_support_alignment": round(demand_support_alignment, 4),
+            "high_demand_low_link_pages": high_demand_pages,
+            "high_demand_low_link_rate": round(high_demand_rate, 4),
+            "high_demand_low_link_traffic": high_demand_traffic,
+            "high_demand_low_link_traffic_share": round(high_demand_traffic_share, 4),
+            "architecture_resilience": round(resilience, 4),
+            "bottleneck_pages": _safe_int(hubs.get("bottleneck_pages")),
+            "bridge_pages": _safe_int(hubs.get("bridge_pages")),
+            "money_pages": len(money_scores),
+            "money_page_support_score": money_page_support_score,
+            "avg_money_page_inlinks": round(avg_money_inlinks, 2),
+            "weak_money_pages": weak_money_pages,
+            "weak_money_traffic": weak_money_traffic,
+        })
+
+        cluster_bucket: dict[str, dict] = defaultdict(lambda: {
+            "domain": proj.domain,
+            "cluster": "",
+            "label": "",
+            "pages": 0,
+            "traffic": 0,
+            "keywords": 0,
+            "inbound_links": 0,
+            "outbound_links": 0,
+            "orphan_pages": 0,
+            "dead_end_pages": 0,
+            "deep_pages": 0,
+            "pagerank": 0.0,
+            "weighted_pagerank": 0.0,
+            "underserved_pages": 0,
+            "opportunities": 0,
+            "opportunity_traffic": 0,
+            "avg_support_score": 0.0,
+            "support_rows": 0,
+            "cross_inbound_links": 0,
+            "cross_outbound_links": 0,
+            "source_clusters": Counter(),
+            "target_clusters": Counter(),
+        })
+
+        authority_pages = ((lg.get("traffic_weighted_pagerank") or {}).get("pages") or [])
+        source_rows = authority_pages if authority_pages else page_rows
+        page_cluster_lookup: dict[str, str] = {}
+        for row in source_rows:
+            url = row.get("url") or ""
+            cluster = page_cluster(row)
+            if url:
+                page_cluster_lookup[url] = cluster
+            bucket = cluster_bucket[cluster]
+            bucket["cluster"] = cluster
+            bucket["label"] = row.get("cluster") or row.get("cluster_label") or row.get("section") or cluster
+            bucket["pages"] += 1
+            bucket["traffic"] += _safe_int(row.get("traffic"))
+            bucket["keywords"] += _safe_int(row.get("keywords"))
+            bucket["inbound_links"] += _safe_int(row.get("in_degree"))
+            bucket["outbound_links"] += _safe_int(row.get("out_degree"))
+            bucket["pagerank"] += _safe_float(row.get("pagerank"))
+            bucket["weighted_pagerank"] += _safe_float(row.get("weighted_pagerank"))
+            if _safe_int(row.get("in_degree")) <= 0:
+                bucket["orphan_pages"] += 1
+            if _safe_int(row.get("out_degree")) <= 0:
+                bucket["dead_end_pages"] += 1
+            if row.get("click_depth") is not None and _safe_int(row.get("click_depth")) >= 4:
+                bucket["deep_pages"] += 1
+            if row.get("mismatch_label") in {"high_traffic_low_authority", "ranked_orphan", "buried_demand"}:
+                bucket["underserved_pages"] += 1
+
+        for row in ((lg.get("high_demand_low_link") or {}).get("clusters") or []):
+            cluster = cluster_name(row.get("cluster") or row.get("label"))
+            bucket = cluster_bucket[cluster]
+            bucket["cluster"] = cluster
+            bucket["label"] = row.get("label") or row.get("cluster") or cluster
+            bucket["opportunities"] += _safe_int(row.get("opportunities"))
+            bucket["opportunity_traffic"] += _safe_int(row.get("opportunity_traffic"))
+            bucket["avg_support_score"] += _safe_float(row.get("avg_support_score"))
+            bucket["support_rows"] += 1
+            if not bucket["traffic"]:
+                bucket["traffic"] += _safe_int(row.get("traffic"))
+            if not bucket["pages"]:
+                bucket["pages"] += _safe_int(row.get("pages"))
+
+        flow = lg.get("link_flow") or {}
+        flow_nodes = {row.get("url"): row for row in (flow.get("nodes") or []) if row.get("url")}
+        for url, row in flow_nodes.items():
+            page_cluster_lookup.setdefault(url, page_cluster(row))
+        for edge in flow.get("edges") or []:
+            source_url = edge.get("source")
+            target_url = edge.get("target")
+            source_cluster = page_cluster_lookup.get(source_url) or page_cluster(flow_nodes.get(source_url) or {"url": source_url})
+            target_cluster = page_cluster_lookup.get(target_url) or page_cluster(flow_nodes.get(target_url) or {"url": target_url})
+            weight = max(1, _safe_int(edge.get("weight"), 1))
+            target_bucket = cluster_bucket[target_cluster]
+            source_bucket = cluster_bucket[source_cluster]
+            if target_cluster != source_cluster:
+                target_bucket["cross_inbound_links"] += weight
+                target_bucket["source_clusters"][source_cluster] += weight
+                source_bucket["cross_outbound_links"] += weight
+                source_bucket["target_clusters"][target_cluster] += weight
+            cluster_edges.append({
+                "domain": proj.domain,
+                "source_cluster": source_cluster,
+                "target_cluster": target_cluster,
+                "links": weight,
+                "target_traffic": _safe_int(edge.get("target_traffic")),
+                "source_pagerank": _safe_float(edge.get("source_pagerank")),
+                "contextual_link_impact": _safe_float(edge.get("contextual_link_impact")),
+            })
+
+        if not flow.get("edges"):
+            for edge in ((lg.get("hub_bottlenecks") or {}).get("cluster_edges") or []):
+                source_cluster = cluster_name(edge.get("source_cluster"))
+                target_cluster = cluster_name(edge.get("target_cluster"))
+                links = max(1, _safe_int(edge.get("bridge_pages"), 1))
+                cluster_bucket[source_cluster]["target_clusters"][target_cluster] += links
+                cluster_bucket[source_cluster]["cross_outbound_links"] += links
+                cluster_bucket[target_cluster]["source_clusters"][source_cluster] += links
+                cluster_bucket[target_cluster]["cross_inbound_links"] += links
+                cluster_edges.append({
+                    "domain": proj.domain,
+                    "source_cluster": source_cluster,
+                    "target_cluster": target_cluster,
+                    "links": links,
+                    "target_traffic": 0,
+                    "source_pagerank": 0.0,
+                    "contextual_link_impact": 0.0,
+                })
+
+        for cluster, bucket in cluster_bucket.items():
+            support_score = bucket["avg_support_score"] / max(1, bucket["support_rows"]) if bucket["support_rows"] else 0.0
+            link_score = min(30.0, math.log1p(bucket["inbound_links"]) * 8.0)
+            cross_score = min(20.0, len(bucket["source_clusters"]) * 5.0 + math.log1p(bucket["cross_inbound_links"]) * 3.0)
+            demand_penalty = min(28.0, math.log1p(bucket["opportunity_traffic"]) * 3.0 + bucket["opportunities"] * 3.0)
+            orphan_penalty = min(18.0, bucket["orphan_pages"] * 5.0)
+            connectivity_score = max(0.0, min(100.0, support_score * 0.42 + link_score + cross_score - demand_penalty - orphan_penalty + 22.0))
+            cluster_domains[cluster][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": cluster,
+                "label": bucket["label"] or cluster,
+                "pages": _safe_int(bucket["pages"]),
+                "traffic": _safe_int(bucket["traffic"]),
+                "keywords": _safe_int(bucket["keywords"]),
+                "inbound_links": _safe_int(bucket["inbound_links"]),
+                "outbound_links": _safe_int(bucket["outbound_links"]),
+                "cross_inbound_links": _safe_int(bucket["cross_inbound_links"]),
+                "cross_outbound_links": _safe_int(bucket["cross_outbound_links"]),
+                "source_clusters": [key for key, _ in bucket["source_clusters"].most_common(6)],
+                "target_clusters": [key for key, _ in bucket["target_clusters"].most_common(6)],
+                "orphan_pages": _safe_int(bucket["orphan_pages"]),
+                "dead_end_pages": _safe_int(bucket["dead_end_pages"]),
+                "deep_pages": _safe_int(bucket["deep_pages"]),
+                "underserved_pages": _safe_int(bucket["underserved_pages"]),
+                "opportunities": _safe_int(bucket["opportunities"]),
+                "opportunity_traffic": _safe_int(bucket["opportunity_traffic"]),
+                "avg_support_score": round(support_score, 2),
+                "connectivity_score": round(connectivity_score, 2),
+                "pagerank": round(_safe_float(bucket["pagerank"]), 8),
+                "weighted_pagerank": round(_safe_float(bucket["weighted_pagerank"]), 8),
+            }
+
+        for row in ((lg.get("link_addition_simulation") or {}).get("recommendations") or [])[:120]:
+            add_recommendation({
+                "domain": proj.domain,
+                "type": "link_addition",
+                "reason": "High expected-benefit internal link placement",
+                "source_url": row.get("source_url") or "",
+                "source_title": row.get("source_title") or row.get("source_url") or "",
+                "target_url": row.get("target_url") or "",
+                "target_title": row.get("target_title") or row.get("target_url") or "",
+                "target_cluster": cluster_name(row.get("target_cluster") or row.get("cluster") or row.get("target_directory")),
+                "suggested_anchor": row.get("suggested_anchor") or "",
+                "paragraph_index": row.get("paragraph_index"),
+                "paragraph_excerpt": row.get("paragraph_excerpt") or "",
+                "priority_score": _safe_float(row.get("expected_benefit_score")),
+                "confidence": 0.72 if row.get("priority") == "high" else 0.62,
+            })
+
+        for row in ((lg.get("high_demand_low_link") or {}).get("opportunities") or [])[:120]:
+            candidate = (row.get("source_candidates") or [{}])[0]
+            add_recommendation({
+                "domain": proj.domain,
+                "type": "high_demand_low_support",
+                "reason": "High-demand page has weaker internal support than its search demand",
+                "source_url": candidate.get("source_url") or "",
+                "source_title": candidate.get("source_title") or candidate.get("source_url") or "",
+                "target_url": row.get("url") or "",
+                "target_title": row.get("title") or row.get("url") or "",
+                "target_cluster": cluster_name(row.get("cluster") or row.get("section")),
+                "suggested_anchor": candidate.get("suggested_anchor") or (row.get("suggested_anchors") or [""])[0],
+                "paragraph_index": candidate.get("paragraph_index"),
+                "paragraph_excerpt": candidate.get("paragraph_excerpt") or "",
+                "traffic": _safe_int(row.get("traffic")),
+                "priority_score": _safe_float(row.get("opportunity_score")) or (_safe_float(row.get("demand_support_gap")) + math.log1p(_safe_int(row.get("traffic"))) * 6.0),
+                "confidence": 0.7,
+            })
+
+        for row in ((lg.get("internal_link_patterns") or {}).get("recommendations") or [])[:80]:
+            target = (row.get("suggested_targets") or [{}])[0]
+            add_recommendation({
+                "domain": proj.domain,
+                "type": "missing_link_pattern",
+                "reason": row.get("recommended_action") or row.get("missing_pattern") or "Missing internal link pattern",
+                "source_url": row.get("source_url") or "",
+                "source_title": row.get("source_title") or row.get("source_url") or "",
+                "target_url": target.get("url") or row.get("target_url") or "",
+                "target_title": target.get("title") or row.get("target_title") or target.get("url") or "",
+                "target_cluster": cluster_name(target.get("cluster") or row.get("target_cluster") or row.get("source_page_type")),
+                "suggested_anchor": row.get("suggested_anchor") or "",
+                "traffic": _safe_int(row.get("traffic")),
+                "priority_score": _safe_float(row.get("lift_score_difference")) + _safe_float(row.get("confidence")) * 55.0,
+                "confidence": _safe_float(row.get("confidence"), 0.55),
+            })
+
+    scorecards.sort(key=lambda r: _safe_float(r.get("architecture_score")), reverse=True)
+    leader = scorecards[0] if scorecards else {}
+    for rec in recommendations:
+        rec["benchmark_domain"] = leader.get("domain") or ""
+    recommendations.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_int(r.get("traffic"))), reverse=True)
+
+    cluster_rows = []
+    for cluster, values in cluster_domains.items():
+        domain_rows = []
+        for domain in domains:
+            domain_rows.append(values.get(domain, {
+                "domain": domain,
+                "cluster": cluster,
+                "label": cluster,
+                "pages": 0,
+                "traffic": 0,
+                "keywords": 0,
+                "inbound_links": 0,
+                "outbound_links": 0,
+                "cross_inbound_links": 0,
+                "cross_outbound_links": 0,
+                "source_clusters": [],
+                "target_clusters": [],
+                "orphan_pages": 0,
+                "dead_end_pages": 0,
+                "deep_pages": 0,
+                "underserved_pages": 0,
+                "opportunities": 0,
+                "opportunity_traffic": 0,
+                "avg_support_score": 0.0,
+                "connectivity_score": 0.0,
+                "pagerank": 0.0,
+                "weighted_pagerank": 0.0,
+            }))
+        cluster_rows.append({
+            "cluster": cluster,
+            "label": next((row.get("label") for row in domain_rows if row.get("label") and row.get("label") != cluster), cluster),
+            "total_traffic": sum(_safe_int(row.get("traffic")) for row in domain_rows),
+            "total_opportunity_traffic": sum(_safe_int(row.get("opportunity_traffic")) for row in domain_rows),
+            "domains": domain_rows,
+        })
+    cluster_rows.sort(key=lambda r: (_safe_int(r.get("total_opportunity_traffic")), _safe_int(r.get("total_traffic"))), reverse=True)
+    cluster_edges.sort(key=lambda r: (_safe_int(r.get("links")), _safe_int(r.get("target_traffic"))), reverse=True)
+
+    return {
+        "summary": {
+            "domains": len(domains),
+            "clusters": len(cluster_rows),
+            "recommendations": len(recommendations),
+            "leader_domain": leader.get("domain") or "",
+        },
+        "scorecards": scorecards,
+        "clusters": cluster_rows[:160],
+        "cluster_edges": cluster_edges[:600],
+        "recommendations": recommendations[:400],
+    }
+
+
 def _pattern_transplant_payload(projects: list[_Project]) -> dict:
     domains = [p.domain for p in projects]
     pattern_domains: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -4395,6 +4841,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "contextual_link_impact": _contextual_link_comparison(projects),
         "high_demand_low_link": _high_demand_low_link_comparison(projects),
         "internal_link_patterns": _internal_link_patterns_comparison(projects),
+        "internal_link_architecture": _internal_link_architecture_comparison(projects),
         "pattern_transplants": pattern_transplants,
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),

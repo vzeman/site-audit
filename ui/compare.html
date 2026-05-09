@@ -569,6 +569,45 @@
       </div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="internal-architecture-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Internal link architecture comparison</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Normalized architecture metrics by domain and cluster: orphan/dead-end rates, PageRank concentration, contextual share, money-page support, and high-demand low-link gaps.
+        </p>
+      </div>
+      <div id="internal-architecture-scorecards" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Architecture scorecard</h3>
+          <p class="text-xs text-gray-500 mb-2">Higher scores combine crawlability, balanced authority, contextual links, demand support, resilience, and money-page support.</p>
+          <div id="internal-architecture-score-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Hub concentration vs money-page support</h3>
+          <p class="text-xs text-gray-500 mb-2">X = PageRank top-5 concentration, Y = money-page internal support, dot size = high-demand low-link traffic.</p>
+          <div id="hub-money-chart" class="w-full" style="min-height: 390px;"></div>
+        </div>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster connectivity heatmap</h3>
+          <p class="text-xs text-gray-500 mb-2">Darker cells have stronger inbound/internal support after penalties for orphan pages and demand gaps.</p>
+          <div id="cluster-connectivity-heatmap" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Source-target link opportunities</h3>
+          <p class="text-xs text-gray-500 mb-2">Concrete internal links to add, ranked by expected benefit, demand gap, and missing link patterns.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded max-h-[430px]">
+            <table class="min-w-full text-xs" id="architecture-link-rec-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase sticky top-0"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Competitive opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="opportunity-section">
       <div class="mb-4">
@@ -2763,11 +2802,215 @@
     `;
   }
 
+  function renderInternalArchitecture() {
+    const section = document.getElementById('internal-architecture-section');
+    if (!section) return;
+    const payload = data.internal_link_architecture || {};
+    if (!((payload.scorecards || []).length)) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    renderInternalArchitectureScorecards(payload);
+    drawInternalArchitectureScoreChart(payload);
+    drawHubMoneyChart(payload);
+    drawClusterConnectivityHeatmap(payload);
+    renderArchitectureLinkRecommendations(payload);
+  }
+
+  function renderInternalArchitectureScorecards(payload) {
+    const root = document.getElementById('internal-architecture-scorecards');
+    if (!root) return;
+    const leader = (payload.summary || {}).leader_domain || ((payload.scorecards || [])[0] || {}).domain || '';
+    root.innerHTML = (payload.scorecards || []).slice(0, 8).map(row => `
+      <article class="border border-gray-200 rounded-lg p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="font-semibold text-sm"><span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(row.domain)}"></span>${escapeHtml(row.domain || '')}</div>
+          ${row.domain === leader ? '<span class="text-[10px] uppercase tracking-wide text-green-700 bg-green-50 rounded px-2 py-0.5">leader</span>' : ''}
+        </div>
+        <div class="text-3xl font-semibold mt-2">${Number(row.architecture_score || 0).toFixed(0)}</div>
+        <div class="text-xs text-gray-500 mt-1">${Number(row.pages || 0).toLocaleString()} pages · ${Number(row.internal_edges || 0).toLocaleString()} internal links</div>
+        <div class="grid grid-cols-2 gap-2 mt-3 text-[11px]">
+          <div><span class="text-gray-500">Orphans</span><div class="font-mono">${(Number(row.orphan_rate || 0) * 100).toFixed(0)}%</div></div>
+          <div><span class="text-gray-500">Dead ends</span><div class="font-mono">${(Number(row.dead_end_rate || 0) * 100).toFixed(0)}%</div></div>
+          <div><span class="text-gray-500">Context</span><div class="font-mono">${(Number(row.contextual_link_share || 0) * 100).toFixed(0)}%</div></div>
+          <div><span class="text-gray-500">Money support</span><div class="font-mono">${Number(row.money_page_support_score || 0).toFixed(0)}</div></div>
+        </div>
+      </article>
+    `).join('');
+  }
+
+  function drawInternalArchitectureScoreChart(payload) {
+    const container = document.getElementById('internal-architecture-score-chart');
+    if (!container) return;
+    const rows = (payload.scorecards || []).slice().sort((a, b) => Number(b.architecture_score || 0) - Number(a.architecture_score || 0));
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No architecture scores.</div>';
+      return;
+    }
+    const metrics = [
+      ['contextual_link_share', 'Contextual links', true],
+      ['authority_traffic_alignment', 'Authority/traffic', true],
+      ['demand_support_alignment', 'Demand support', true],
+      ['architecture_resilience', 'Resilience', true],
+      ['orphan_rate', 'Orphans', false],
+      ['dead_end_rate', 'Dead ends', false],
+    ];
+    const margin = {top: 18, right: 28, bottom: 72, left: 132};
+    const outerWidth = Math.max(560, container.offsetWidth || 720);
+    const outerHeight = Math.max(360, rows.length * 46 + margin.top + margin.bottom);
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const y = d3.scaleBand().domain(rows.map(r => r.domain)).range([0, height]).padding(0.32);
+    const x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+    svg.append('g').call(d3.axisLeft(y).tickSize(0)).selectAll('text').style('font-size', '11px');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    rows.forEach(row => {
+      const score = Number(row.architecture_score || 0);
+      svg.append('rect')
+        .attr('x', 0).attr('y', y(row.domain))
+        .attr('width', x(score)).attr('height', y.bandwidth())
+        .attr('fill', domainColor(row.domain)).attr('fill-opacity', 0.72).attr('rx', 3);
+      svg.append('text').attr('x', x(score) + 5).attr('y', y(row.domain) + y.bandwidth() / 2 + 4)
+        .style('font-size', '11px').style('fill', '#374151').text(score.toFixed(0));
+      const pills = metrics.map(([key, label, highGood]) => {
+        const raw = Number(row[key] || 0);
+        const healthy = highGood ? raw >= 0.65 : raw <= 0.12;
+        return `<span class="${healthy ? 'text-green-700' : 'text-orange-700'}">${label} ${(raw * 100).toFixed(0)}%</span>`;
+      }).join(' · ');
+      svg.append('foreignObject').attr('x', 0).attr('y', y(row.domain) + y.bandwidth() + 2).attr('width', width).attr('height', 18)
+        .append('xhtml:div').attr('class', 'text-[10px] text-gray-500').html(pills);
+    });
+  }
+
+  function drawHubMoneyChart(payload) {
+    const container = document.getElementById('hub-money-chart');
+    if (!container) return;
+    const points = (payload.scorecards || []).filter(r => Number(r.pages || 0) > 0);
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No hub/money-page data.</div>';
+      return;
+    }
+    const margin = {top: 18, right: 24, bottom: 46, left: 58};
+    const outerWidth = Math.max(520, container.offsetWidth || 620);
+    const outerHeight = 390;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, Math.max(1, d3.max(points, d => Number(d.pagerank_top5_share || 0)) || 1)]).nice().range([0, width]);
+    const y = d3.scaleLinear().domain([0, 100]).range([height, 0]);
+    const r = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.high_demand_low_link_traffic || 0)) || 1]).range([7, 26]);
+    svg.append('rect').attr('x', x(0.45)).attr('y', 0).attr('width', Math.max(0, width - x(0.45))).attr('height', height).attr('fill', '#fee2e2').attr('opacity', 0.35);
+    svg.append('rect').attr('x', 0).attr('y', y(45)).attr('width', width).attr('height', Math.max(0, height - y(45))).attr('fill', '#ffedd5').attr('opacity', 0.35);
+    svg.append('line').attr('x1', x(0.45)).attr('x2', x(0.45)).attr('y1', 0).attr('y2', height).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(45)).attr('y2', y(45)).attr('stroke', '#d1d5db').attr('stroke-dasharray', '4 4');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5).tickFormat(d => `${Math.round(d * 100)}%`));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('PageRank top-5 concentration');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -42).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('money-page support score');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','360px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.pagerank_top5_share || 0)))
+      .attr('cy', d => y(Number(d.money_page_support_score || 0)))
+      .attr('r', d => r(Number(d.high_demand_low_link_traffic || 0)))
+      .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.68)
+      .attr('stroke', d => Number(d.orphan_rate || 0) > 0.08 || Number(d.dead_end_rate || 0) > 0.08 ? '#dc2626' : '#111827')
+      .attr('stroke-width', d => Number(d.orphan_rate || 0) > 0.08 || Number(d.dead_end_rate || 0) > 0.08 ? 2 : 0.8)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('fill-opacity', 0.92);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br>score ${Number(d.architecture_score || 0).toFixed(0)} · PR top-5 ${(Number(d.pagerank_top5_share || 0) * 100).toFixed(0)}%<br>money support ${Number(d.money_page_support_score || 0).toFixed(0)} · weak money pages ${Number(d.weak_money_pages || 0).toLocaleString()}<br><span style="color:#fbbf24">high-demand low-link traffic ${Number(d.high_demand_low_link_traffic || 0).toLocaleString()}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('fill-opacity',0.68); tooltip.style('visibility','hidden'); });
+    svg.selectAll('text.domain-label').data(points).join('text')
+      .attr('class', 'domain-label')
+      .attr('x', d => x(Number(d.pagerank_top5_share || 0)) + r(Number(d.high_demand_low_link_traffic || 0)) + 4)
+      .attr('y', d => y(Number(d.money_page_support_score || 0)) + 4)
+      .style('font-size', '10px').style('fill', '#374151').text(d => d.domain);
+  }
+
+  function drawClusterConnectivityHeatmap(payload) {
+    const container = document.getElementById('cluster-connectivity-heatmap');
+    if (!container) return;
+    const rows = (payload.clusters || []).slice(0, 70);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No cluster connectivity data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 126;
+    const cellH = 30;
+    const left = 210;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 44;
+    const color = d3.scaleSequential(d3.interpolateGnBu).domain([0, 100]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 18).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.label || row.cluster || '').slice(0, 36));
+      (row.domains || []).forEach((d, di) => {
+        const score = Number(d.connectivity_score || 0);
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', score ? color(score) : '#f3f4f6').attr('rx', 2)
+          .attr('stroke', Number(d.opportunity_traffic || 0) > 0 ? '#d97706' : 'none')
+          .attr('stroke-width', Number(d.opportunity_traffic || 0) > 0 ? 1 : 0)
+          .append('title').text(`${d.domain} · ${row.label || row.cluster}\nconnectivity ${score.toFixed(1)}\ntraffic ${Number(d.traffic || 0).toLocaleString()} · inbound ${Number(d.inbound_links || 0).toLocaleString()} · cross-in ${Number(d.cross_inbound_links || 0).toLocaleString()}\nopportunity traffic ${Number(d.opportunity_traffic || 0).toLocaleString()}\nsource clusters ${(d.source_clusters || []).join(' · ')}`);
+        if (score || Number(d.opportunity_traffic || 0)) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 17)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', score > 56 ? 'white' : '#111827')
+            .text(`${score.toFixed(0)} · ${Number(d.opportunity_traffic || d.traffic || 0).toLocaleString()}`);
+        }
+      });
+    });
+  }
+
+  function renderArchitectureLinkRecommendations(payload) {
+    const tbl = document.getElementById('architecture-link-rec-table');
+    if (!tbl) return;
+    const rows = (payload.recommendations || []).slice(0, 90);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Reason</th>
+        <th class="px-2 py-2 text-left">Source</th>
+        <th class="px-2 py-2 text-left">Target</th>
+        <th class="px-2 py-2 text-left">Anchor</th>
+        <th class="px-2 py-2 text-right">Priority</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No source-target link opportunities.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain || '')}</td>
+        <td class="px-2 py-1.5"><span class="inline-block rounded bg-blue-50 text-blue-700 px-1.5 py-0.5 mb-1">${escapeHtml((r.type || '').replaceAll('_', ' '))}</span><div class="text-gray-600">${escapeHtml(truncateMiddle(r.reason || '', 74))}</div></td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.source_title || r.source_url || '', 46))}</a><div class="text-[11px] text-gray-500">${r.paragraph_index == null ? '' : 'para ' + Number(r.paragraph_index).toLocaleString()}</div></td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.target_title || r.target_url || '', 46))}</a><div class="text-[11px] text-gray-500">${escapeHtml(r.target_cluster || '')} · traffic ${Number(r.traffic || 0).toLocaleString()}</div></td>
+        <td class="px-2 py-1.5 font-mono">${escapeHtml(r.suggested_anchor || '')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.priority_score || 0).toFixed(1)}</td>
+      </tr>`).join('');
+  }
+
   renderSearchDemand();
   renderStrongestClusters();
   renderWinningPatterns();
   renderKeywordContentMatrix();
   renderParagraphArchetypes();
+  renderInternalArchitecture();
 
   // ============================================================
   // Competitive opportunity comparisons

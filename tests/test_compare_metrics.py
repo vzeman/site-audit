@@ -372,6 +372,12 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["high_demand_low_link"]["directories"][0]["domains"][0]["opportunity_traffic"] == 100
     assert payload["leaderboard"][0]["architecture_resilience"] == 0.9
     assert payload["hub_bottlenecks"]["risks"][0]["domain"] == "beta.example"
+    architecture = payload["internal_link_architecture"]
+    assert architecture["scorecards"]
+    assert any(row["domain"] == "alpha.example" and row["orphan_rate"] > 0 for row in architecture["scorecards"])
+    assert architecture["clusters"]
+    assert architecture["recommendations"][0]["source_url"]
+    assert architecture["recommendations"][0]["target_url"]
     assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35
     assert payload["leaderboard"][1]["authority_traffic_alignment"] == 0.9
     assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url
