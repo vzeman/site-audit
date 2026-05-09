@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from site_audit.compare import build_payload
@@ -100,3 +101,51 @@ def test_compare_leaderboard_includes_performance_metrics(tmp_path: Path) -> Non
     assert rows["a.example"]["avg_resource_tags_per_page"] == 7.5
     assert rows["b.example"]["median_html_weight_bytes"] == 80000
     assert rows["b.example"]["heavy_page_share"] == 0.2
+
+
+def test_compare_payload_includes_performance_explainer(tmp_path: Path) -> None:
+    for domain, coef in [("a.example", 0.42), ("b.example", -0.25)]:
+        report_dir = tmp_path / domain / "report"
+        report_dir.mkdir(parents=True)
+        (report_dir / "site_metrics.json").write_text(
+            json.dumps({"domain": domain, "model": "test-model", "page_count": 3}),
+            encoding="utf-8",
+        )
+        (report_dir / "pages.json").write_text("[]", encoding="utf-8")
+        (report_dir / "performance_explainer.json").write_text(
+            json.dumps({
+                "summary": {"status": "ok", "sample_size": 12, "validation_r2": 0.31, "warnings": ["Correlation model only."]},
+                "features": [
+                    {
+                        "feature": "links_in_degree_log",
+                        "label": "Inbound internal links",
+                        "group": "links",
+                        "coefficient": coef,
+                        "direction": "positive" if coef > 0 else "negative",
+                        "permutation_importance": abs(coef) / 10,
+                        "abs_coefficient": abs(coef),
+                    }
+                ],
+                "pages": [
+                    {
+                        "url": f"https://{domain}/a",
+                        "title": "A",
+                        "section": "blog",
+                        "traffic": 100,
+                        "predicted_traffic": 80,
+                        "residual_log": 0.2,
+                        "top_positive": [{"feature": "links_in_degree_log", "label": "Inbound internal links", "group": "links", "contribution": coef}],
+                        "top_negative": [],
+                    }
+                ],
+            }),
+            encoding="utf-8",
+        )
+
+    payload = build_payload(["a.example", "b.example"], tmp_path)
+
+    explainer = payload["performance_explainer"]
+    assert explainer["summary"]["features"] == 1
+    assert explainer["features"][0]["feature"] == "links_in_degree_log"
+    assert explainer["features"][0]["domains"][0]["domain"] == "a.example"
+    assert explainer["pages"][0]["domain"] in {"a.example", "b.example"}

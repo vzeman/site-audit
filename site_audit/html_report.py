@@ -68,6 +68,7 @@ _PLACEHOLDERS = {
     "__PERFORMANCE_JSON__": "performance",
     "__AHREFS_JSON__": "ahrefs",
     "__BEST_PAGES_JSON__": "best_pages",
+    "__PERFORMANCE_EXPLAINER_JSON__": "performance_explainer",
 }
 
 
@@ -282,6 +283,7 @@ def write_html_report(
     performance: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
+    performance_explainer: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -336,6 +338,7 @@ def write_html_report(
         "performance": performance or {},
         "ahrefs": ahrefs or {},
         "best_pages": best_pages or {},
+        "performance_explainer": performance_explainer or {},
     }
 
     rendered = template

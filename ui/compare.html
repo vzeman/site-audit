@@ -299,6 +299,33 @@
       </div>
     </section>
 
+    <!-- Performance explainer comparison -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-explainer-compare-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Regression performance explainer</h2>
+        <p class="text-xs text-gray-500 mt-1" id="performance-explainer-compare-meta">
+          Cross-domain feature importance from local correlation models. These are estimates, not direct ranking factors.
+        </p>
+      </div>
+      <div id="performance-explainer-domain-summary" class="grid md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5 text-xs"></div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-5">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Feature importance by domain</h3>
+          <div id="performance-explainer-feature-chart" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Section contribution patterns</h3>
+          <div id="performance-explainer-cluster-chart" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
+        </div>
+      </div>
+      <div class="overflow-x-auto border border-gray-100 rounded">
+        <table class="min-w-full text-xs" id="performance-explainer-page-table">
+          <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Unified action board -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="action-board-section">
       <div class="mb-4">
@@ -1569,6 +1596,106 @@
     }).join('');
   }
 
+  function drawExplainerHeatmap(container, rows, valueFn, signFn, labelFn) {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No explainer rows.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const visible = rows.slice(0, 36);
+    const cellW = 118;
+    const cellH = 30;
+    const left = 190;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + visible.length * cellH + 36;
+    const maxVal = d3.max(visible.flatMap(row => (row.domains || []).map(valueFn))) || 1;
+    const opacity = d3.scaleSqrt().domain([0, maxVal]).range([0.10, 0.86]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    visible.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 19).style('font-size', '10px').style('fill', '#374151')
+        .text(truncateMiddle(labelFn(row), 34));
+      (row.domains || []).forEach((domainRow, di) => {
+        const value = Number(valueFn(domainRow) || 0);
+        const sign = Number(signFn(domainRow) || 0);
+        const fill = sign < 0 ? '#dc2626' : sign > 0 ? '#16a34a' : '#94a3b8';
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 4).attr('height', cellH - 5)
+          .attr('fill', fill).attr('fill-opacity', value ? opacity(value) : 0.08).attr('rx', 2)
+          .append('title').text(`${domainRow.domain}\n${labelFn(row)}\nimportance ${value.toFixed(4)}\nsigned ${sign.toFixed(4)}`);
+        if (value) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', opacity(value) > 0.55 ? 'white' : '#111827')
+            .text(value.toFixed(3));
+        }
+      });
+    });
+  }
+
+  function renderPerformanceExplainerCompare() {
+    const section = document.getElementById('performance-explainer-compare-section');
+    if (!section) return;
+    const payload = data.performance_explainer || {};
+    const features = payload.features || [];
+    const pages = payload.pages || [];
+    if (!features.length && !pages.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const summary = payload.summary || {};
+    document.getElementById('performance-explainer-compare-meta').textContent =
+      `${Number(summary.features || features.length).toLocaleString()} features · ${Number(summary.pages || pages.length).toLocaleString()} page explanations · correlation estimates, not direct ranking factors`;
+    const domainRows = payload.domains || [];
+    document.getElementById('performance-explainer-domain-summary').innerHTML = domainRows.map(row => `
+      <article class="border border-gray-200 rounded-lg p-3 bg-white">
+        <div class="font-semibold"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(row.domain)}"></span>${escapeHtml(row.domain || '')}</div>
+        <div class="text-lg font-mono mt-1">${row.validation_r2 == null ? 'n/a' : Number(row.validation_r2 || 0).toFixed(3)}</div>
+        <div class="text-gray-500">R2 · ${Number(row.sample_size || 0).toLocaleString()} pages</div>
+      </article>`).join('');
+    drawExplainerHeatmap(
+      document.getElementById('performance-explainer-feature-chart'),
+      features,
+      row => Number(row.permutation_importance || 0),
+      row => Number(row.coefficient || 0),
+      row => `${row.label || row.feature || ''} (${row.group || ''})`,
+    );
+    drawExplainerHeatmap(
+      document.getElementById('performance-explainer-cluster-chart'),
+      payload.clusters || [],
+      row => Number(row.importance_sum || 0),
+      row => Number(row.positive_sum || 0) + Number(row.negative_sum || 0),
+      row => `${row.section || ''}: ${row.label || row.feature || ''}`,
+    );
+    const tbl = document.getElementById('performance-explainer-page-table');
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-right">Pred.</th>
+        <th class="px-2 py-2 text-left">Helping</th>
+        <th class="px-2 py-2 text-left">Hurting</th>
+      </tr>`;
+    const fmtFactors = factors => (factors || []).slice(0, 3).map(f => `${f.label}: ${Number(f.contribution || 0).toFixed(2)}`).join(' · ');
+    tbl.querySelector('tbody').innerHTML = pages.slice(0, 120).map(row => `
+      <tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(row.domain)}"></span>${escapeHtml(row.domain || '')}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.title || row.url || '', 72))}</a><div class="text-gray-500">${escapeHtml(row.section || '')}${row.top_keyword ? ' · ' + escapeHtml(row.top_keyword) : ''}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(row.traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(row.predicted_traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-green-700">${escapeHtml(fmtFactors(row.top_positive))}</td>
+        <td class="px-2 py-1.5 text-red-700">${escapeHtml(fmtFactors(row.top_negative))}</td>
+      </tr>`).join('') || '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No page explanations.</td></tr>';
+  }
+
   function prepareActionBoardFilters(payload) {
     data._actionFilters = data._actionFilters || { domain: '', owner: '', type: '', cluster: '', sort: 'priority_score', group: '' };
     const filters = payload.filters || {};
@@ -2038,6 +2165,7 @@
   renderGaps();
   renderMatrixButtons();
   renderMetricMatrix();
+  renderPerformanceExplainerCompare();
   renderActionBoard();
   renderSeoPlaybooks();
   renderStructuredDataCompare();

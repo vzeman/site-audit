@@ -114,6 +114,7 @@ from .paragraph_links import recommend as recommend_paragraph_links
 from .paragraph_links import to_payload as paragraph_links_payload
 from .performance import analyze as analyze_performance
 from .performance import to_payload as performance_payload
+from .performance_explainer import build_performance_explainer
 from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
@@ -1385,6 +1386,32 @@ def run(config: PipelineConfig) -> dict:
             bp_summary.get("clusters", 0),
         )
 
+    performance_explainer_data = build_performance_explainer(
+        pages,
+        extracted_pages,
+        search_payload=ahrefs_data,
+        linkgraph=link_payload,
+        structured_data=structured_data_data,
+        freshness=freshness_data,
+        entities=entities_data,
+        entity_coverage=entity_coverage_data,
+        information_gain=information_gain_data,
+        answerability=ans_payload,
+        conversion=conversion_data,
+        conversion_balance=conversion_balance_data,
+        performance=performance_data,
+        metadata_quality=metadata_quality_data,
+        media_accessibility=media_accessibility_data,
+        paragraph_density=paragraph_density_data,
+    )
+    pe_summary = performance_explainer_data.get("summary", {}) or {}
+    LOG.info(
+        "  performance explainer: %s · %d pages · cv R2 %.3f",
+        pe_summary.get("status", "unknown"),
+        pe_summary.get("sample_size", 0),
+        pe_summary.get("validation_r2", 0.0) or 0.0,
+    )
+
     # 13) Reports
     summary = write_all(
         report_dir,
@@ -1438,6 +1465,7 @@ def run(config: PipelineConfig) -> dict:
         performance=performance_data,
         ahrefs=ahrefs_data,
         best_pages=best_pages_data,
+        performance_explainer=performance_explainer_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -1496,6 +1524,7 @@ def run(config: PipelineConfig) -> dict:
             performance=performance_data,
             ahrefs=ahrefs_data,
             best_pages=best_pages_data,
+            performance_explainer=performance_explainer_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

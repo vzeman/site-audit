@@ -77,6 +77,7 @@ class _Project:
     performance: dict
     ahrefs: dict
     best_pages: dict
+    performance_explainer: dict
     ahrefs_semantic_rows: list[dict]
     ahrefs_semantic_embeddings: Optional[np.ndarray]
     embeddings: Optional[np.ndarray]    # aligned with pages
@@ -148,6 +149,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     performance = _load_json(report / "performance.json", {})
     ahrefs = _load_json(report / "ahrefs.json", {})
     best_pages = _load_json(report / "best_pages.json", {})
+    performance_explainer = _load_json(report / "performance_explainer.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     link_flow = (linkgraph.get("link_flow") or {}) if isinstance(linkgraph, dict) else {}
@@ -199,6 +201,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         performance=performance,
         ahrefs=ahrefs,
         best_pages=best_pages,
+        performance_explainer=performance_explainer,
         ahrefs_semantic_rows=ahrefs_semantic_rows,
         ahrefs_semantic_embeddings=ahrefs_semantic_embeddings,
         embeddings=embed_array,
@@ -5375,6 +5378,135 @@ def _readiness_payload(projects: list[_Project]) -> dict:
     }
 
 
+def _performance_explainer_comparison(projects: list[_Project]) -> dict:
+    domains = [p.domain for p in projects]
+    summaries: list[dict] = []
+    feature_groups: dict[str, dict[str, dict]] = defaultdict(dict)
+    page_rows: list[dict] = []
+    cluster_groups: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
+
+    for proj in projects:
+        payload = proj.performance_explainer or {}
+        summary = payload.get("summary") or {}
+        if summary:
+            summaries.append({"domain": proj.domain, **summary})
+        for feature in payload.get("features") or []:
+            key = feature.get("feature") or feature.get("label") or ""
+            if not key:
+                continue
+            feature_groups[key][proj.domain] = {
+                "domain": proj.domain,
+                "feature": key,
+                "label": feature.get("label") or key,
+                "group": feature.get("group") or "",
+                "coefficient": _safe_float(feature.get("coefficient")),
+                "direction": feature.get("direction") or "",
+                "permutation_importance": _safe_float(feature.get("permutation_importance")),
+                "abs_coefficient": _safe_float(feature.get("abs_coefficient")),
+            }
+        for page in (payload.get("pages") or [])[:180]:
+            item = {"domain": proj.domain, **page}
+            page_rows.append(item)
+            section = page.get("section") or "unknown"
+            for factor in (page.get("top_positive") or [])[:4] + (page.get("top_negative") or [])[:4]:
+                feature_key = factor.get("feature") or ""
+                if not feature_key:
+                    continue
+                bucket = cluster_groups[(section, feature_key)].setdefault(proj.domain, {
+                    "domain": proj.domain,
+                    "section": section,
+                    "feature": feature_key,
+                    "label": factor.get("label") or feature_key,
+                    "group": factor.get("group") or "",
+                    "importance_sum": 0.0,
+                    "positive_sum": 0.0,
+                    "negative_sum": 0.0,
+                    "pages": 0,
+                    "traffic": 0.0,
+                })
+                contribution = _safe_float(factor.get("contribution"))
+                bucket["importance_sum"] += abs(contribution)
+                if contribution > 0:
+                    bucket["positive_sum"] += contribution
+                elif contribution < 0:
+                    bucket["negative_sum"] += contribution
+                bucket["pages"] += 1
+                bucket["traffic"] += _safe_float(page.get("traffic"))
+
+    feature_matrix = []
+    for feature_key, values in feature_groups.items():
+        label = next((v.get("label") for v in values.values() if v.get("label")), feature_key)
+        group = next((v.get("group") for v in values.values() if v.get("group")), "")
+        feature_matrix.append({
+            "feature": feature_key,
+            "label": label,
+            "group": group,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "feature": feature_key,
+                    "label": label,
+                    "group": group,
+                    "coefficient": 0.0,
+                    "direction": "neutral",
+                    "permutation_importance": 0.0,
+                    "abs_coefficient": 0.0,
+                })
+                for domain in domains
+            ],
+        })
+    feature_matrix.sort(
+        key=lambda row: (
+            sum(_safe_float(d.get("permutation_importance")) for d in row["domains"]),
+            sum(_safe_float(d.get("abs_coefficient")) for d in row["domains"]),
+        ),
+        reverse=True,
+    )
+
+    cluster_matrix = []
+    for (section, feature_key), values in cluster_groups.items():
+        label = next((v.get("label") for v in values.values() if v.get("label")), feature_key)
+        cluster_matrix.append({
+            "section": section,
+            "feature": feature_key,
+            "label": label,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "section": section,
+                    "feature": feature_key,
+                    "label": label,
+                    "importance_sum": 0.0,
+                    "positive_sum": 0.0,
+                    "negative_sum": 0.0,
+                    "pages": 0,
+                    "traffic": 0.0,
+                })
+                for domain in domains
+            ],
+        })
+    cluster_matrix.sort(
+        key=lambda row: sum(_safe_float(d.get("importance_sum")) for d in row["domains"]),
+        reverse=True,
+    )
+    page_rows.sort(key=lambda r: (_safe_float(r.get("traffic")), abs(_safe_float(r.get("residual_log")))), reverse=True)
+
+    return {
+        "summary": {
+            "status": "ok" if feature_matrix or page_rows else "no_models",
+            "model": "comparison_performance_explainer_v1",
+            "domains": len(domains),
+            "features": len(feature_matrix),
+            "pages": len(page_rows),
+            "clusters": len(cluster_matrix),
+        },
+        "domains": summaries,
+        "features": feature_matrix[:120],
+        "clusters": cluster_matrix[:180],
+        "pages": page_rows[:500],
+    }
+
+
 # --- public entrypoint ----------------------------------------------------
 
 
@@ -5479,6 +5611,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "pattern_transplants": pattern_transplants,
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
+        "performance_explainer": _performance_explainer_comparison(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}
             for p in projects

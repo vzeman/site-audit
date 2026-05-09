@@ -1115,6 +1115,32 @@
       </div>
     </div>
 
+    <!-- Performance explainer -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-explainer-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Performance explainer</h3>
+        <p class="text-xs text-gray-500 mt-1" id="performance-explainer-meta">
+          Correlation model using observed page features and search traffic labels. Estimates are not direct ranking factors.
+        </p>
+      </div>
+      <div id="performance-explainer-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="performance-explainer-warnings" class="text-xs bg-amber-50 text-amber-900 border border-amber-200 rounded p-3 mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs mb-5">
+        <div>
+          <h4 class="font-semibold mb-2">Top positive correlations</h4>
+          <div id="performance-explainer-positive" class="max-h-80 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Top negative correlations</h4>
+          <div id="performance-explainer-negative" class="max-h-80 overflow-y-auto"></div>
+        </div>
+      </div>
+      <div>
+        <h4 class="font-semibold mb-2 text-sm">Per-page explanations</h4>
+        <div id="performance-explainer-pages" class="text-xs max-h-[560px] overflow-y-auto"></div>
+      </div>
+    </div>
+
     <!-- Conversion signals -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="conversion-block">
       <div class="mb-3">
@@ -1802,6 +1828,7 @@
 <script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
 <script type="application/json" id="data-ahrefs">__AHREFS_JSON__</script>
 <script type="application/json" id="data-best-pages">__BEST_PAGES_JSON__</script>
+<script type="application/json" id="data-performance-explainer">__PERFORMANCE_EXPLAINER_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -1917,8 +1944,9 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
       const inlinedBestPages = readInlined('data-best-pages');
+      const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1970,8 +1998,9 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
         bestPages = inlinedBestPages || {};
+        performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2022,6 +2051,7 @@
           loadJSON('performance.json').catch(() => ({})),
           loadJSON('ahrefs.json').catch(() => ({})),
           loadJSON('best_pages.json').catch(() => ({})),
+          loadJSON('performance_explainer.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -2082,6 +2112,7 @@
       state.performance = performance || {};
       state.ahrefs = ahrefs || {};
       state.bestPages = bestPages || {};
+      state.performanceExplainer = performanceExplainer || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -2121,6 +2152,7 @@
       renderFreshness();
       renderFreshnessImpact();
       renderPerformance();
+      renderPerformanceExplainer();
       renderConversion();
       renderAnswerability();
       renderAnswerBlocks();
@@ -5240,6 +5272,70 @@
       (data.top_heavy_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No heavy pages found.</div>';
     document.getElementById('audit-performance-blocking').innerHTML =
       (data.render_blocking_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No render-blocking resources found.</div>';
+  }
+
+  function renderPerformanceExplainer() {
+    const block = document.getElementById('performance-explainer-block');
+    const data = state.performanceExplainer || {};
+    const summary = data.summary || {};
+    if (!summary.sample_size) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const status = summary.status || 'unknown';
+    document.getElementById('performance-explainer-meta').textContent =
+      `${status} · ${Number(summary.sample_size || 0).toLocaleString()} pages · ${Number(summary.feature_count || 0).toLocaleString()} features · outputs are correlations/estimates, not direct ranking factors`;
+    document.getElementById('performance-explainer-summary').innerHTML =
+      card('Sample size', Number(summary.sample_size || 0).toLocaleString(), `${Number(summary.positive_label_pages || 0).toLocaleString()} pages with traffic labels`) +
+      card('Validation R2', summary.validation_r2 == null ? 'n/a' : Number(summary.validation_r2 || 0).toFixed(3), summary.validation_metric || 'not available', (summary.validation_r2 || 0) > 0.2 ? 'text-green-600' : 'text-orange-600') +
+      card('MAE log', summary.validation_mae_log == null ? 'n/a' : Number(summary.validation_mae_log || 0).toFixed(3), `${Number(summary.folds || 0)} folds`) +
+      card('Features', Number(summary.feature_count || 0).toLocaleString(), 'stable URL-level definitions') +
+      card('Warnings', Number((summary.warnings || []).length).toLocaleString(), 'confidence guards');
+    document.getElementById('performance-explainer-warnings').innerHTML =
+      (summary.warnings || []).map(w => `<div>${escapeHtml(w)}</div>`).join('') || 'No model warnings.';
+
+    const featureRow = f => `
+      <div class="border-b border-gray-100 py-2">
+        <div class="flex justify-between gap-3">
+          <div>
+            <div class="font-medium">${escapeHtml(f.label || f.feature || '')}</div>
+            <div class="text-gray-500">${escapeHtml(f.group || '')} · ${escapeHtml(f.definition || '')}</div>
+          </div>
+          <div class="text-right font-mono whitespace-nowrap">
+            <div>${Number(f.permutation_importance || 0).toFixed(4)}</div>
+            <div class="${Number(f.coefficient || 0) >= 0 ? 'text-green-700' : 'text-red-700'}">${Number(f.coefficient || 0).toFixed(3)}</div>
+          </div>
+        </div>
+      </div>`;
+    const features = data.features || [];
+    document.getElementById('performance-explainer-positive').innerHTML =
+      features.filter(f => Number(f.coefficient || 0) > 0).slice(0, 25).map(featureRow).join('') || '<div class="text-gray-500">No positive feature correlations.</div>';
+    document.getElementById('performance-explainer-negative').innerHTML =
+      features.filter(f => Number(f.coefficient || 0) < 0).slice(0, 25).map(featureRow).join('') || '<div class="text-gray-500">No negative feature correlations.</div>';
+
+    const pageRow = row => {
+      const pos = (row.top_positive || []).slice(0, 3).map(f => `${f.label}: +${Number(f.contribution || 0).toFixed(2)}`).join(' · ');
+      const neg = (row.top_negative || []).slice(0, 3).map(f => `${f.label}: ${Number(f.contribution || 0).toFixed(2)}`).join(' · ');
+      return `
+        <div class="border-b border-gray-100 py-2">
+          <div class="flex justify-between gap-3">
+            <div class="min-w-0">
+              <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(row.title || row.url || '')}</a>
+              <div class="text-gray-500">${escapeHtml(row.section || '')}${row.top_keyword ? ' · ' + escapeHtml(row.top_keyword) : ''}</div>
+              <div class="text-green-700 mt-1">${escapeHtml(pos || 'No positive contribution above zero.')}</div>
+              <div class="text-red-700">${escapeHtml(neg || 'No negative contribution below zero.')}</div>
+            </div>
+            <div class="text-right font-mono whitespace-nowrap">
+              <div>${Number(row.traffic || 0).toLocaleString()}</div>
+              <div class="text-gray-500">pred ${Number(row.predicted_traffic || 0).toLocaleString()}</div>
+              <div class="${Number(row.residual_log || 0) >= 0 ? 'text-green-700' : 'text-red-700'}">${Number(row.residual_log || 0).toFixed(2)}</div>
+            </div>
+          </div>
+        </div>`;
+    };
+    document.getElementById('performance-explainer-pages').innerHTML =
+      (data.pages || []).slice(0, 160).map(pageRow).join('') || '<div class="text-gray-500">No page explanations available.</div>';
   }
 
   function renderConversion() {
