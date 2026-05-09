@@ -350,6 +350,23 @@
       </div>
     </section>
 
+    <!-- Conversion balance comparison -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="conversion-balance-compare-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Conversion vs SEO balance</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Cluster-level conversion support for pages with search demand. Higher cells mean more traffic lands on pages with clear next steps.
+        </p>
+      </div>
+      <div id="conversion-balance-compare-chart" class="w-full overflow-x-auto mb-5" style="min-height: 340px;"></div>
+      <div class="overflow-x-auto border border-gray-100 rounded">
+        <table class="min-w-full text-xs" id="conversion-balance-risk-table">
+          <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Ahrefs search demand -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="search-demand-section">
       <div class="mb-4">
@@ -874,6 +891,8 @@
       { key: 'cta_coverage',               label: 'CTA coverage', better: 'high', fmt: 'pct' },
       { key: 'primary_cta_coverage',       label: 'Primary CTA %', better: 'high', fmt: 'pct' },
       { key: 'form_coverage',              label: 'Form coverage', better: 'high', fmt: 'pct' },
+      { key: 'conversion_balance_efficiency', label: 'Traffic conv support', better: 'high', fmt: 'pct' },
+      { key: 'conversion_balance_high_risk', label: 'High-risk money', better: 'low', fmt: 'int' },
       { key: 'avg_ctas_per_page',          label: 'Avg CTAs/page', better: 'na', fmt: '0.0' },
       { key: 'lead_pages_without_capture', label: 'Lead leaks', better: 'low', fmt: 'int' },
       { key: 'cta_overload_pages',         label: 'CTA overload', better: 'low', fmt: 'int' },
@@ -1139,6 +1158,7 @@
   renderMetricMatrix();
   renderStructuredDataCompare();
   renderTrustSignalsCompare();
+  renderConversionBalanceCompare();
 
   function renderStructuredHeatmap(container, rows, labelKey, valueKey, formatValue) {
     if (!container) return;
@@ -1241,6 +1261,37 @@
         <td class="px-2 py-1.5 text-gray-600">${escapeHtml(r.missing_signal || '')}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.trust_score || 0).toFixed(1)}</td>
       </tr>`).join('') : '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="5">No missing evidence rows.</td></tr>';
+  }
+
+  function renderConversionBalanceCompare() {
+    const section = document.getElementById('conversion-balance-compare-section');
+    const payload = data.conversion_balance || {};
+    if (!((payload.clusters || []).length || (payload.high_risk || []).length)) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    renderStructuredHeatmap(document.getElementById('conversion-balance-compare-chart'), payload.clusters || [], 'cluster', 'avg_conversion_support', v => Number(v || 0).toFixed(0));
+    const tbl = document.getElementById('conversion-balance-risk-table');
+    const rows = (payload.high_risk || []).slice(0, 120);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-left">Label</th>
+        <th class="px-2 py-2 text-right">SEO</th>
+        <th class="px-2 py-2 text-right">Conv.</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+      </tr>`;
+    tbl.querySelector('tbody').innerHTML = rows.length ? rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url || '')}</a></td>
+        <td class="px-2 py-1.5">${escapeHtml(r.balance_label || '')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.seo_support || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.conversion_support || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+      </tr>`).join('') : '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No high-risk money pages.</td></tr>';
   }
 
   // ============================================================

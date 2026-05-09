@@ -61,6 +61,7 @@ class _Project:
     header_analysis: dict
     structured_data: dict
     trust_signals: dict
+    conversion_balance: dict
     metadata_quality: dict
     media_accessibility: dict
     page_types: dict
@@ -130,6 +131,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     header_analysis = _load_json(report / "header_analysis.json", {})
     structured_data = _load_json(report / "structured_data.json", {})
     trust_signals = _load_json(report / "trust_signals.json", {})
+    conversion_balance = _load_json(report / "conversion_balance.json", {})
     metadata_quality = _load_json(report / "metadata_quality.json", {})
     media_accessibility = _load_json(report / "media_accessibility.json", {})
     page_types = _load_json(report / "page_types.json", {})
@@ -179,6 +181,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         header_analysis=header_analysis,
         structured_data=structured_data,
         trust_signals=trust_signals,
+        conversion_balance=conversion_balance,
         metadata_quality=metadata_quality,
         media_accessibility=media_accessibility,
         page_types=page_types,
@@ -515,6 +518,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "cta_coverage", "label": "CTA coverage", "better": "high", "fmt": "pct"},
             {"key": "primary_cta_coverage", "label": "Primary CTA coverage", "better": "high", "fmt": "pct"},
             {"key": "form_coverage", "label": "Form coverage", "better": "high", "fmt": "pct"},
+            {"key": "conversion_balance_efficiency", "label": "Traffic conversion support", "better": "high", "fmt": "pct"},
+            {"key": "conversion_balance_high_risk", "label": "High-risk money pages", "better": "low", "fmt": "int"},
             {"key": "lead_pages_without_capture", "label": "Lead leaks", "better": "low", "fmt": "int"},
             {"key": "cta_overload_pages", "label": "CTA overload", "better": "low", "fmt": "int"},
         ],
@@ -631,6 +636,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ha = (proj.header_analysis or {}).get("summary", {}) or {}
     sd = (proj.structured_data or {}).get("summary", {}) or {}
     ts = (proj.trust_signals or {}).get("summary", {}) or {}
+    cb = (proj.conversion_balance or {}).get("summary", {}) or {}
     mq = (proj.metadata_quality or {}).get("summary", {}) or {}
     ma = (proj.media_accessibility or {}).get("summary", {}) or {}
     pt = (proj.page_types or {}).get("summary", {}) or {}
@@ -746,6 +752,10 @@ def _leaderboard_row(proj: _Project) -> dict:
         "cta_coverage": float(cv.get("cta_coverage", 0.0)),
         "primary_cta_coverage": float(cv.get("primary_cta_coverage", 0.0)),
         "form_coverage": float(cv.get("form_coverage", 0.0)),
+        "conversion_balance_efficiency": float(cb.get("conversion_efficiency", 0.0)),
+        "conversion_balance_high_risk": int(cb.get("high_risk_money_pages", 0)),
+        "conversion_balance_avg_seo": float(cb.get("avg_seo_support", 0.0)),
+        "conversion_balance_avg_conversion": float(cb.get("avg_conversion_support", 0.0)),
         "avg_ctas_per_page": float(cv.get("avg_ctas_per_page", 0.0)),
         "lead_pages_without_capture": int(cv.get("lead_pages_without_capture", 0)),
         "cta_overload_pages": int(cv.get("cta_overload_pages", 0)),
@@ -1083,6 +1093,49 @@ def _trust_signal_comparison(projects: list[_Project]) -> dict:
     missing.sort(key=lambda r: (1 if r.get("priority") == "high" else 0, _safe_int(r.get("traffic"))), reverse=True)
     pages.sort(key=lambda r: ({"high": 2, "medium": 1, "low": 0}.get(r.get("priority"), 0), _safe_int(r.get("traffic"))), reverse=True)
     return {"domains": domains, "clusters": matrix[:100], "missing_evidence": missing[:300], "pages": pages[:240]}
+
+
+def _conversion_balance_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    pages: list[dict] = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    high_risk: list[dict] = []
+    for proj in projects:
+        payload = proj.conversion_balance or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        by_cluster: dict[str, list[dict]] = defaultdict(list)
+        for row in payload.get("pages") or []:
+            item = {"domain": proj.domain, **row}
+            pages.append(item)
+            by_cluster[str(row.get("cluster") or "unclustered")].append(row)
+            if row.get("balance_label") == "high_risk_money_page" or (row.get("money_page") and _safe_float(row.get("conversion_support")) < 45):
+                high_risk.append(item)
+        for cluster, rows in by_cluster.items():
+            clusters[cluster][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": cluster,
+                "pages": len(rows),
+                "traffic": sum(_safe_int(r.get("traffic")) for r in rows),
+                "avg_seo_support": sum(_safe_float(r.get("seo_support")) for r in rows) / max(1, len(rows)),
+                "avg_conversion_support": sum(_safe_float(r.get("conversion_support")) for r in rows) / max(1, len(rows)),
+                "high_risk": sum(1 for r in rows if r.get("balance_label") == "high_risk_money_page"),
+            }
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {"domain": domain, "cluster": cluster, "pages": 0, "traffic": 0, "avg_seo_support": 0.0, "avg_conversion_support": 0.0, "high_risk": 0})
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("traffic")) for d in r["domains"]), reverse=True)
+    pages.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_float(r.get("seo_support")) - _safe_float(r.get("conversion_support"))), reverse=True)
+    high_risk.sort(key=lambda r: _safe_int(r.get("traffic")), reverse=True)
+    return {"domains": domains, "clusters": matrix[:100], "pages": pages[:500], "high_risk": high_risk[:200]}
 
 
 def _answer_blocks_comparison(projects: list[_Project]) -> dict:
@@ -2411,6 +2464,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "information_gain": _information_gain_comparison(projects),
         "structured_data_opportunities": _structured_data_opportunity_comparison(projects),
         "trust_signals": _trust_signal_comparison(projects),
+        "conversion_balance": _conversion_balance_comparison(projects),
         "answer_blocks": _answer_blocks_comparison(projects),
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),

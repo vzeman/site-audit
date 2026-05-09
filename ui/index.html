@@ -848,6 +848,28 @@
       </div>
     </div>
 
+    <!-- Conversion balance -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="conversion-balance-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Conversion vs SEO balance</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          SEO support versus CTA/form/journey support. Dot size is organic traffic; money pages are flagged before informational pages.
+        </p>
+      </div>
+      <div id="conversion-balance-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div id="conversion-balance-scatter" class="w-full mb-5" style="min-height: 420px;"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">High-traffic weak conversion</h4>
+          <div id="conversion-balance-pages" class="max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">CTA proximity warnings</h4>
+          <div id="conversion-balance-warnings" class="max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- SERP metadata -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="metadata-quality-block">
       <div class="mb-3">
@@ -1558,6 +1580,7 @@
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script type="application/json" id="data-trust-signals">__TRUST_SIGNALS_JSON__</script>
+<script type="application/json" id="data-conversion-balance">__CONVERSION_BALANCE_JSON__</script>
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
 <script type="application/json" id="data-media-accessibility">__MEDIA_ACCESSIBILITY_JSON__</script>
 <script type="application/json" id="data-page-types">__PAGE_TYPES_JSON__</script>
@@ -1671,6 +1694,7 @@
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
       const inlinedTrustSignals = readInlined('data-trust-signals');
+      const inlinedConversionBalance = readInlined('data-conversion-balance');
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
       const inlinedMediaAccessibility = readInlined('data-media-accessibility');
       const inlinedPageTypes = readInlined('data-page-types');
@@ -1683,7 +1707,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1722,6 +1746,7 @@
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
         trustSignals = inlinedTrustSignals || {};
+        conversionBalance = inlinedConversionBalance || {};
         metadataQuality = inlinedMetadataQuality || {};
         mediaAccessibility = inlinedMediaAccessibility || {};
         pageTypes = inlinedPageTypes || {};
@@ -1734,7 +1759,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1772,6 +1797,7 @@
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
           loadJSON('trust_signals.json').catch(() => ({})),
+          loadJSON('conversion_balance.json').catch(() => ({})),
           loadJSON('metadata_quality.json').catch(() => ({})),
           loadJSON('media_accessibility.json').catch(() => ({})),
           loadJSON('page_types.json').catch(() => ({})),
@@ -1825,6 +1851,7 @@
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
       state.trustSignals = trustSignals || {};
+      state.conversionBalance = conversionBalance || {};
       state.metadataQuality = metadataQuality || {};
       state.mediaAccessibility = mediaAccessibility || {};
       state.pageTypes = pageTypes || {};
@@ -1863,6 +1890,7 @@
       renderIndexability();
       renderStructuredData();
       renderTrustSignals();
+      renderConversionBalance();
       renderMetadataQuality();
       renderMediaAccessibility();
       renderPageTypes();
@@ -4045,6 +4073,63 @@
             <div class="mt-1">${leaders}</div>
           </div>`;
       }).join('') || '<div class="text-gray-500">No cluster trust benchmarks.</div>';
+  }
+
+  function renderConversionBalance() {
+    const block = document.getElementById('conversion-balance-block');
+    const data = state.conversionBalance || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('conversion-balance-summary').innerHTML =
+      card('SEO support', Number(summary.avg_seo_support || 0).toFixed(1), 'avg 0-100') +
+      card('Conversion support', Number(summary.avg_conversion_support || 0).toFixed(1), 'avg 0-100') +
+      card('Traffic conversion', `${((summary.conversion_efficiency || 0) * 100).toFixed(0)}%`, 'traffic on supported pages') +
+      card('High-risk money', Number(summary.high_risk_money_pages || 0).toLocaleString(), 'money pages with weak conversion') +
+      card('CTA warnings', Number(summary.cta_warnings || 0).toLocaleString(), 'high-traffic weak next steps');
+    const container = document.getElementById('conversion-balance-scatter');
+    container.innerHTML = '';
+    const rows = data.scatter || [];
+    if (rows.length) {
+      const width = Math.max(520, container.offsetWidth || 700);
+      const height = 420;
+      const margin = {top: 18, right: 20, bottom: 42, left: 48};
+      const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+      const x = d3.scaleLinear().domain([0, 100]).range([margin.left, width - margin.right]);
+      const y = d3.scaleLinear().domain([0, 100]).range([height - margin.bottom, margin.top]);
+      const size = d3.scaleSqrt().domain([0, d3.max(rows, r => Number(r.traffic || 0)) || 1]).range([3, 18]);
+      const color = d => d.balance_label === 'balanced' ? '#16a34a' : d.balance_label === 'high_risk_money_page' ? '#dc2626' : d.balance_label === 'seo_heavy' || d.balance_label === 'seo_heavy_informational' ? '#f59e0b' : d.balance_label === 'conversion_heavy' ? '#2563eb' : '#6b7280';
+      svg.append('line').attr('x1', x(50)).attr('x2', x(50)).attr('y1', y(0)).attr('y2', y(100)).attr('stroke', '#e5e7eb');
+      svg.append('line').attr('x1', x(0)).attr('x2', x(100)).attr('y1', y(50)).attr('y2', y(50)).attr('stroke', '#e5e7eb');
+      svg.append('g').attr('transform', `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5));
+      svg.append('g').attr('transform', `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+      svg.append('text').attr('x', width / 2).attr('y', height - 8).attr('text-anchor', 'middle').style('font-size', '11px').text('SEO support');
+      svg.append('text').attr('x', -height / 2).attr('y', 13).attr('transform', 'rotate(-90)').attr('text-anchor', 'middle').style('font-size', '11px').text('Conversion support');
+      svg.selectAll('circle').data(rows).enter().append('circle')
+        .attr('cx', d => x(Number(d.seo_support || 0))).attr('cy', d => y(Number(d.conversion_support || 0)))
+        .attr('r', d => size(Number(d.traffic || 0))).attr('fill', color).attr('fill-opacity', 0.75).attr('stroke', '#fff')
+        .append('title').text(d => `${d.title || d.url}\n${d.balance_label}\nSEO ${Number(d.seo_support || 0).toFixed(1)} · conversion ${Number(d.conversion_support || 0).toFixed(1)}\ntraffic ${Number(d.traffic || 0).toLocaleString()}\n${d.recommended_action || ''}`);
+    }
+    document.getElementById('conversion-balance-pages').innerHTML =
+      (data.high_traffic_weak_conversion || []).slice(0, 120).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <div class="text-gray-500 mt-1">${escapeHtml(r.balance_label || '')} · SEO ${Number(r.seo_support || 0).toFixed(1)} · conversion ${Number(r.conversion_support || 0).toFixed(1)} · traffic ${Number(r.traffic || 0).toLocaleString()}</div>
+          <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
+        </div>
+      `).join('') || '<div class="text-gray-500">No high-traffic weak-conversion pages.</div>';
+    document.getElementById('conversion-balance-warnings').innerHTML =
+      (data.cta_warnings || []).slice(0, 120).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <div class="font-medium mt-1">${escapeHtml(r.section || '')}</div>
+          <div class="text-gray-700 mt-1">${escapeHtml(r.warning || '')}</div>
+          <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || '')} · traffic ${Number(r.traffic || 0).toLocaleString()}</div>
+        </div>
+      `).join('') || '<div class="text-gray-500">No CTA proximity warnings.</div>';
   }
 
   function renderMetadataQuality() {

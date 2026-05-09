@@ -56,6 +56,7 @@ from .content_quality import (
 )
 from .conversion import analyze as analyze_conversion
 from .conversion import to_payload as conversion_payload
+from .conversion_balance import build_conversion_balance
 from .paragraph_clustering import (
     cluster_and_label as cluster_paragraphs,
     project_paragraphs,
@@ -162,6 +163,7 @@ class PipelineConfig:
     enable_duplicate_fragments: bool = True
     enable_template_patterns: bool = True
     enable_trust_signals: bool = True
+    enable_conversion_balance: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -914,6 +916,22 @@ def run(config: PipelineConfig) -> dict:
                 ts_summary.get("missing_evidence_items", 0),
             )
 
+    conversion_balance_data: dict = {}
+    if config.enable_conversion_balance:
+        conversion_balance_data = build_conversion_balance(
+            pages,
+            extracted_pages,
+            search_payload=ahrefs_data,
+        )
+        cb_summary = conversion_balance_data.get("summary", {}) or {}
+        if cb_summary.get("status") == "ok":
+            LOG.info(
+                "  conversion balance: SEO %.1f · conversion %.1f · %d high-risk money pages",
+                cb_summary.get("avg_seo_support", 0.0),
+                cb_summary.get("avg_conversion_support", 0.0),
+                cb_summary.get("high_risk_money_pages", 0),
+            )
+
     entity_coverage_data: dict = {}
     if config.enable_entity_coverage:
         entity_coverage_data = build_entity_coverage(
@@ -1251,6 +1269,7 @@ def run(config: PipelineConfig) -> dict:
         linkbuilding=linkbuilding_data,
         structured_data=structured_data_data,
         trust_signals=trust_signals_data,
+        conversion_balance=conversion_balance_data,
         metadata_quality=metadata_quality_data,
         media_accessibility=media_accessibility_data,
         page_types=page_types_data,
@@ -1307,6 +1326,7 @@ def run(config: PipelineConfig) -> dict:
             linkbuilding=linkbuilding_data,
             structured_data=structured_data_data,
             trust_signals=trust_signals_data,
+            conversion_balance=conversion_balance_data,
             metadata_quality=metadata_quality_data,
             media_accessibility=media_accessibility_data,
             page_types=page_types_data,

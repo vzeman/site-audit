@@ -82,6 +82,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":1000,"heavy_page_share":0.1,"render_blocking_share":0.2}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":0,"pages_multi_h1":0}}',
             "conversion.json": '{"summary":{"cta_coverage":1,"primary_cta_coverage":0.9,"form_coverage":0.8}}',
+            "conversion_balance.json": '{"summary":{"conversion_efficiency":0.9,"high_risk_money_pages":0,"avg_seo_support":70,"avg_conversion_support":80},"clusters":[{"cluster":"support","pages":2,"traffic":100,"avg_seo_support":70,"avg_conversion_support":80,"high_risk":0}],"pages":[{"url":"https://strong.example/a","title":"A","cluster":"support","traffic":100,"money_page":true,"seo_support":70,"conversion_support":80,"balance_label":"balanced"}],"high_traffic_weak_conversion":[]}',
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":2,"opportunity_queries":0,"strong_blocks":6},"clusters":[{"label":"support","queries":4,"traffic":100,"strong_query_share":1,"avg_best_score":82,"opportunity_queries":0,"recommended_format":"","status":"strong"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":1,"paragraph_conflicts":2,"traffic_at_risk":15},"page_conflicts":[{"classification":"duplicate_competing_page","traffic_at_risk":15,"traffic":100,"label":"support","preferred_winner_url":"https://strong.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":2,"strong_patterns":1,"harmful_boilerplate":1},"groups":[{"classification":"strong_reusable_pattern","count":1,"attributed_traffic":50,"page_traffic_sum":100}]}',
@@ -116,6 +117,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "performance.json": '{"summary":{"median_html_weight_bytes":5000,"heavy_page_share":0.8,"render_blocking_share":1}}',
             "header_analysis.json": '{"summary":{"total_pages":10,"pages_missing_h1":5,"pages_multi_h1":3}}',
             "conversion.json": '{"summary":{"cta_coverage":0.2,"primary_cta_coverage":0.1,"form_coverage":0}}',
+            "conversion_balance.json": '{"summary":{"conversion_efficiency":0.1,"high_risk_money_pages":2,"avg_seo_support":65,"avg_conversion_support":20},"clusters":[{"cluster":"support","pages":2,"traffic":80,"avg_seo_support":65,"avg_conversion_support":20,"high_risk":2}],"pages":[{"url":"https://weak.example/a","title":"A","cluster":"support","traffic":80,"money_page":true,"seo_support":65,"conversion_support":20,"balance_label":"high_risk_money_page"}],"high_traffic_weak_conversion":[{"url":"https://weak.example/a","title":"A","cluster":"support","traffic":80,"money_page":true,"seo_support":65,"conversion_support":20,"balance_label":"high_risk_money_page"}]}',
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":0,"opportunity_queries":5,"strong_blocks":1},"clusters":[{"label":"support","queries":3,"traffic":80,"strong_query_share":0,"avg_best_score":42,"opportunity_queries":3,"recommended_format":"faq","status":"gap"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":3,"paragraph_conflicts":4,"traffic_at_risk":90},"page_conflicts":[{"classification":"consolidation_candidate","traffic_at_risk":90,"traffic":120,"label":"support","preferred_winner_url":"https://weak.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":5,"strong_patterns":0,"harmful_boilerplate":4},"groups":[{"classification":"harmful_boilerplate","count":4,"attributed_traffic":0,"page_traffic_sum":0}]}',
@@ -157,6 +159,9 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["trust_signals"]["clusters"]
     assert payload["leaderboard"][0]["trust_avg_score"] == 82
     assert payload["leaderboard"][1]["trust_high_priority_pages"] == 2
+    assert payload["conversion_balance"]["clusters"]
+    assert payload["leaderboard"][0]["conversion_balance_efficiency"] == 0.9
+    assert payload["leaderboard"][1]["conversion_balance_high_risk"] == 2
     assert payload["keyword_cluster_gaps"]["clusters"]
     assert payload["keyword_cluster_gaps"]["clusters"][0]["leader_domain"] == "strong.example"
     assert payload["keyword_cluster_gaps"]["recommendations"]

@@ -42,6 +42,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--no-duplicate-fragments",
             "--no-template-patterns",
             "--no-trust-signals",
+            "--no-conversion-balance",
         ]
     )
 
@@ -68,3 +69,4 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.no_duplicate_fragments is True
     assert args.no_template_patterns is True
     assert args.no_trust_signals is True
+    assert args.no_conversion_balance is True
