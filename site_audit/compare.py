@@ -2940,6 +2940,194 @@ def _winning_pattern_transfer_payload(
     }
 
 
+def _keyword_content_matrix_payload(
+    projects: list[_Project],
+    strongest_clusters: dict,
+    keyword_cluster_gaps: dict,
+    winning_patterns: dict,
+) -> dict:
+    domains = [p.domain for p in projects]
+    gap_lookup: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    rec_lookup: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    winning_lookup: dict[tuple[str, str], list[dict]] = defaultdict(list)
+
+    for row in keyword_cluster_gaps.get("section_diffs") or []:
+        gap_lookup[(row.get("cluster") or "", row.get("domain") or "")].append(row)
+    for row in keyword_cluster_gaps.get("recommendations") or []:
+        rec_lookup[(row.get("cluster") or "", row.get("domain") or "")].append(row)
+    for row in winning_patterns.get("recommendations") or []:
+        winning_lookup[(row.get("cluster") or "", row.get("target_domain") or "")].append(row)
+
+    def component_scores(row: dict, gaps: list[dict]) -> tuple[dict, list[dict]]:
+        missing: list[dict] = []
+        top_pages = row.get("top_pages") or []
+        keywords = row.get("keywords") or []
+        headings = row.get("headings") or []
+        paragraphs = row.get("paragraphs") or row.get("paragraph_examples") or []
+        entities = row.get("entities") or []
+        schema_types = row.get("schema_types") or []
+        gap_headings = list(dict.fromkeys(h for gap in gaps for h in (gap.get("missing_headings") or [])))[:8]
+        gap_entities = list(dict.fromkeys(e for gap in gaps for e in (gap.get("missing_entities") or [])))[:8]
+        gap_schema = list(dict.fromkeys(s for gap in gaps for s in (gap.get("missing_schema") or [])))[:6]
+        answer_gap = any(bool(gap.get("answer_block_gap")) for gap in gaps)
+        freshness_gap = any(bool(gap.get("freshness_gap")) for gap in gaps)
+        link_gap = any(bool(gap.get("link_gap")) for gap in gaps)
+
+        title_score = 1.0 if top_pages or row.get("top_url") else 0.0
+        if not title_score:
+            missing.append({"type": "title", "label": "target page title", "action": "Create or map a target page for this keyword cluster."})
+        heading_score = 1.0 if headings and not gap_headings else (0.55 if headings else 0.0)
+        for heading in gap_headings[:4]:
+            missing.append({"type": "heading", "label": heading, "action": "Add or rename an H2/H3 section matching the winning outline."})
+        paragraph_score = min(1.0, _safe_int(row.get("paragraph_count")) / 3.0) if paragraphs else 0.0
+        if paragraph_score < 0.5:
+            missing.append({"type": "paragraph", "label": "supporting paragraph examples", "action": "Add explanatory paragraphs that directly support ranking keywords."})
+        entity_score = max(_safe_float(row.get("entity_coverage")), min(1.0, len(entities) / 10.0))
+        for entity in gap_entities[:4]:
+            missing.append({"type": "entity", "label": entity, "action": "Cover this missing entity in body copy or headings."})
+        schema_score = 1.0 if schema_types and not gap_schema else (0.55 if schema_types else 0.0)
+        for schema in gap_schema[:3]:
+            missing.append({"type": "schema", "label": schema, "action": "Add schema when the page content supports it."})
+        answer_score = _safe_float(row.get("answer_block_share"))
+        if answer_gap or answer_score < 0.4:
+            missing.append({"type": "answer_block", "label": "snippet-ready answer block", "action": "Add a concise answer block for the cluster's primary questions."})
+        link_score = min(1.0, _safe_float(row.get("avg_in_degree")) / 4.0)
+        if link_gap or link_score < 0.5:
+            missing.append({"type": "link", "label": "descriptive internal links", "action": "Add internal links from relevant hubs and neighboring pages."})
+        freshness_score = _safe_float(row.get("freshness_score"))
+        if freshness_gap or freshness_score < 0.45:
+            missing.append({"type": "freshness", "label": "fresh or updated evidence", "action": "Refresh the page and expose date evidence where appropriate."})
+        conversion_score = _safe_float(row.get("conversion_score"))
+
+        components = {
+            "title": round(title_score, 4),
+            "headings": round(heading_score, 4),
+            "paragraphs": round(paragraph_score, 4),
+            "entities": round(entity_score, 4),
+            "schema": round(schema_score, 4),
+            "answer_blocks": round(answer_score, 4),
+            "links": round(link_score, 4),
+            "freshness": round(freshness_score, 4),
+            "conversion": round(conversion_score, 4),
+        }
+        return components, missing
+
+    weights = {
+        "title": 12.0,
+        "headings": 13.0,
+        "paragraphs": 13.0,
+        "entities": 14.0,
+        "schema": 10.0,
+        "answer_blocks": 10.0,
+        "links": 12.0,
+        "freshness": 8.0,
+        "conversion": 8.0,
+    }
+    matrix: list[dict] = []
+    flat_cells: list[dict] = []
+    intents = Counter()
+    directories = Counter()
+
+    for cluster in strongest_clusters.get("clusters") or []:
+        cluster_key = cluster.get("cluster") or ""
+        cluster_label = cluster.get("cluster_label") or cluster_key
+        domain_cells = []
+        winner = next((d for d in cluster.get("domains") or [] if d.get("domain") == cluster.get("winner_domain")), {})
+        winner_traffic = _safe_int(winner.get("traffic"))
+        row_intents = Counter()
+        row_directories = Counter()
+        for domain_row in cluster.get("domains") or []:
+            domain = domain_row.get("domain") or ""
+            gaps = gap_lookup.get((cluster_key, domain), [])
+            components, missing = component_scores(domain_row, gaps)
+            support_score = round(sum(components[key] * weight for key, weight in weights.items()), 2)
+            top_pages = domain_row.get("top_pages") or []
+            top_keywords = domain_row.get("keywords") or []
+            for intent in domain_row.get("intents") or []:
+                intents[str(intent)] += 1
+                row_intents[str(intent)] += 1
+            for page in top_pages:
+                directory = page.get("section") or domain_row.get("section") or ""
+                if directory:
+                    directories[directory] += 1
+                    row_directories[directory] += 1
+            recommendations = []
+            for rec in rec_lookup.get((cluster_key, domain), [])[:8]:
+                recommendations.append({
+                    "source": "cluster_gap",
+                    "type": rec.get("missing_type") or "",
+                    "label": rec.get("missing_element") or "",
+                    "action": rec.get("action") or "",
+                    "priority_score": _safe_float(rec.get("traffic_opportunity")),
+                    "confidence": _safe_float(rec.get("competitor_prevalence")),
+                    "target_url": rec.get("target_url") or "",
+                    "target_title": rec.get("target_title") or "",
+                })
+            for rec in winning_lookup.get((cluster_key, domain), [])[:8]:
+                recommendations.append({
+                    "source": "winning_pattern",
+                    "type": rec.get("category") or "",
+                    "label": rec.get("missing_element") or "",
+                    "action": rec.get("concrete_change") or "",
+                    "priority_score": _safe_float(rec.get("priority_score")),
+                    "confidence": _safe_float(rec.get("confidence")),
+                    "target_url": rec.get("target_url") or "",
+                    "target_title": rec.get("target_title") or "",
+                })
+            recommendations.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("confidence"))), reverse=True)
+            cell = {
+                "domain": domain,
+                "cluster": cluster_key,
+                "cluster_label": cluster_label,
+                "support_score": support_score,
+                "components": components,
+                "missing": missing[:18],
+                "recommendations": recommendations[:12],
+                "target_url": (top_pages[0] or {}).get("url") if top_pages else domain_row.get("top_url") or "",
+                "target_title": (top_pages[0] or {}).get("title") if top_pages else domain_row.get("top_title") or "",
+                "traffic": _safe_int(domain_row.get("traffic")),
+                "traffic_potential": max(0, winner_traffic - _safe_int(domain_row.get("traffic"))),
+                "keywords": _safe_int(domain_row.get("keyword_rows")),
+                "avg_position": _safe_float(domain_row.get("avg_position")),
+                "pages": _safe_int(domain_row.get("pages")),
+                "paragraphs": _safe_int(domain_row.get("paragraph_count")),
+                "top_pages": top_pages[:6],
+                "top_keywords": top_keywords[:8],
+                "intents": list(domain_row.get("intents") or [])[:6],
+                "directory": (top_pages[0] or {}).get("section") if top_pages else domain_row.get("section") or "",
+            }
+            domain_cells.append(cell)
+            flat_cells.append(cell)
+        matrix.append({
+            "cluster": cluster_key,
+            "cluster_label": cluster_label,
+            "winner_domain": cluster.get("winner_domain") or "",
+            "total_traffic": _safe_int(cluster.get("total_traffic")),
+            "traffic_potential": sum(_safe_int(cell.get("traffic_potential")) for cell in domain_cells),
+            "intents": [intent for intent, _ in row_intents.most_common(6)],
+            "directories": [directory for directory, _ in row_directories.most_common(6)],
+            "domains": domain_cells,
+        })
+
+    matrix.sort(key=lambda row: (_safe_int(row.get("traffic_potential")), _safe_int(row.get("total_traffic"))), reverse=True)
+    flat_cells.sort(key=lambda row: (_safe_int(row.get("traffic_potential")), -_safe_float(row.get("support_score"))), reverse=True)
+    return {
+        "summary": {
+            "clusters": len(matrix),
+            "cells": len(flat_cells),
+            "domains": len(domains),
+        },
+        "domains": domains,
+        "components": [{"key": key, "label": key.replace("_", " ").title(), "weight": weight} for key, weight in weights.items()],
+        "filters": {
+            "intents": [key for key, _ in intents.most_common(30)],
+            "directories": [key for key, _ in directories.most_common(40)],
+        },
+        "matrix": matrix[:180],
+        "cells": flat_cells[:900],
+    }
+
+
 def _serp_feature_payload(projects: list[_Project]) -> dict:
     by_feature: dict[str, dict[str, dict]] = {}
     for proj in projects:
@@ -3918,6 +4106,12 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         keyword_cluster_gaps,
         pattern_transplants,
     )
+    keyword_content_matrix = _keyword_content_matrix_payload(
+        projects,
+        strongest_clusters,
+        keyword_cluster_gaps,
+        winning_patterns,
+    )
 
     return {
         "domains": [p.domain for p in projects],
@@ -3943,6 +4137,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "keyword_cluster_gaps": keyword_cluster_gaps,
         "strongest_clusters": strongest_clusters,
         "winning_patterns": winning_patterns,
+        "keyword_content_matrix": keyword_content_matrix,
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

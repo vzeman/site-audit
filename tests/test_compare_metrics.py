@@ -183,6 +183,11 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert first_pattern["target_recommendations"][0]["priority_score"] > 0
     assert first_pattern["target_recommendations"][0]["confidence"] > 0
     assert payload["winning_patterns"]["coverage"]
+    assert payload["keyword_content_matrix"]["matrix"]
+    matrix_cell = payload["keyword_content_matrix"]["matrix"][0]["domains"][1]
+    assert matrix_cell["components"]["headings"] >= 0
+    assert matrix_cell["missing"]
+    assert any(cell["recommendations"] for cell in payload["keyword_content_matrix"]["cells"])
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
