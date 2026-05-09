@@ -596,6 +596,46 @@
       <div id="paragraph-impact-table" class="text-xs max-h-[520px] overflow-y-auto"></div>
     </div>
 
+    <!-- Weak paragraphs -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="weak-paragraphs-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Weak paragraphs and content decay</h3>
+        <p class="text-xs text-gray-500 mt-1" id="weak-paragraphs-meta">
+          Paragraph-level edit targets scored from thinness, genericness, duplication, stale evidence, link density, semantic drift, and ranking-intent mismatch.
+        </p>
+      </div>
+      <div id="weak-paragraphs-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <input id="weak-paragraphs-search" type="search" autocomplete="off" placeholder="Search paragraph, URL, reason, keyword..."
+               class="w-full sm:w-80 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <select id="weak-paragraphs-issue" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
+        <select id="weak-paragraphs-directory" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
+        <select id="weak-paragraphs-cluster" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
+        <select id="weak-paragraphs-traffic" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="all">All traffic</option>
+          <option value="with">With opportunity</option>
+          <option value="high">High opportunity</option>
+          <option value="none">No traffic data</option>
+        </select>
+        <select id="weak-paragraphs-kind" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="all">All content</option>
+          <option value="main">Main content</option>
+          <option value="template">Template/boilerplate</option>
+        </select>
+        <span id="weak-paragraphs-count" class="text-xs text-gray-500"></span>
+      </div>
+      <div class="grid lg:grid-cols-5 gap-6">
+        <div class="lg:col-span-3">
+          <h4 class="text-sm font-semibold mb-2">Flagged paragraphs</h4>
+          <div id="weak-paragraphs-table" class="text-xs max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div class="lg:col-span-2">
+          <h4 class="text-sm font-semibold mb-2">Per-page weak-block heatmap</h4>
+          <div id="weak-paragraphs-heatmap" class="text-xs max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Semantic ablation -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="semantic-ablation-block">
       <div class="mb-4">
@@ -1249,6 +1289,7 @@
 <script type="application/json" id="data-semantic-ablation">__SEMANTIC_ABLATION_JSON__</script>
 <script type="application/json" id="data-keyword-attribution">__KEYWORD_ATTRIBUTION_JSON__</script>
 <script type="application/json" id="data-winning-paragraphs">__WINNING_PARAGRAPHS_JSON__</script>
+<script type="application/json" id="data-weak-paragraphs">__WEAK_PARAGRAPHS_JSON__</script>
 <script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
 <script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
@@ -1352,6 +1393,7 @@
       const inlinedSemanticAblation = readInlined('data-semantic-ablation');
       const inlinedKeywordAttribution = readInlined('data-keyword-attribution');
       const inlinedWinningParagraphs = readInlined('data-winning-paragraphs');
+      const inlinedWeakParagraphs = readInlined('data-weak-paragraphs');
       const inlinedTitleMismatch = readInlined('data-title-mismatch');
       const inlinedWrongHome = readInlined('data-wrong-home');
       const inlinedImprovement = readInlined('data-page-improvement');
@@ -1372,7 +1414,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1393,6 +1435,7 @@
         semanticAblation = inlinedSemanticAblation || {};
         keywordAttribution = inlinedKeywordAttribution || {};
         winningParagraphs = inlinedWinningParagraphs || {};
+        weakParagraphs = inlinedWeakParagraphs || {};
         titleMismatch = inlinedTitleMismatch || [];
         wrongHome = inlinedWrongHome || [];
         improvement = inlinedImprovement || [];
@@ -1413,7 +1456,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1433,6 +1476,7 @@
           loadJSON('semantic_ablation.json').catch(() => ({})),
           loadJSON('keyword_attribution.json').catch(() => ({})),
           loadJSON('winning_paragraphs.json').catch(() => ({})),
+          loadJSON('weak_paragraphs.json').catch(() => ({})),
           loadJSON('title_mismatch.json').catch(() => []),
           loadJSON('wrong_home_paragraphs.json').catch(() => []),
           loadJSON('page_improvement.json').catch(() => []),
@@ -1474,6 +1518,7 @@
       state.semanticAblation = semanticAblation || {};
       state.keywordAttribution = keywordAttribution || {};
       state.winningParagraphs = winningParagraphs || {};
+      state.weakParagraphs = weakParagraphs || {};
       state.titleMismatch = titleMismatch;
       state.wrongHome = wrongHome;
       state.improvement = improvement;
@@ -1514,6 +1559,7 @@
       renderTreemap();
       renderAhrefs();
       renderParagraphImpact();
+      renderWeakParagraphs();
       renderSemanticAblation();
       renderKeywordAttribution();
       renderHeatmap();
@@ -2431,6 +2477,168 @@
     a.download = 'winning_paragraphs.csv';
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  const WEAK_ISSUE_LABELS = {
+    thin: 'Thin',
+    generic: 'Generic',
+    duplicate: 'Duplicate',
+    off_topic: 'Off-topic',
+    stale: 'Stale',
+    excessive_links: 'Excessive links',
+    intent_mismatch: 'Intent mismatch',
+    missing_evidence: 'Missing evidence',
+    missing_internal_link: 'Missing internal link',
+  };
+
+  function weakIssueLabel(issue) {
+    return WEAK_ISSUE_LABELS[issue] || String(issue || '').replace(/_/g, ' ');
+  }
+
+  function renderWeakParagraphs() {
+    const block = document.getElementById('weak-paragraphs-block');
+    const data = state.weakParagraphs || {};
+    const summary = data.summary || {};
+    const rows = data.rows || [];
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('weak-paragraphs-meta').textContent =
+      `${Number(summary.flagged_rows || rows.length).toLocaleString()} flagged paragraphs · ${Number(summary.main_content_rows || 0).toLocaleString()} main-content · ${Number(summary.template_rows || 0).toLocaleString()} template/boilerplate · ${Number(summary.total_traffic_opportunity || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} traffic opportunity.`;
+    document.getElementById('weak-paragraphs-summary').innerHTML =
+      card('flagged paragraphs', Number(summary.flagged_rows || rows.length).toLocaleString(), `${Number(summary.total_paragraphs || 0).toLocaleString()} scanned`) +
+      card('high severity', Number(summary.high_severity_rows || 0).toLocaleString(), 'rewrite/remove/move first') +
+      card('template rows', Number(summary.template_rows || 0).toLocaleString(), 'separated from editorial') +
+      card('recoverable traffic', Number(summary.estimated_recoverable_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), 'directional estimate');
+
+    const searchEl = document.getElementById('weak-paragraphs-search');
+    const issueEl = document.getElementById('weak-paragraphs-issue');
+    const dirEl = document.getElementById('weak-paragraphs-directory');
+    const clusterEl = document.getElementById('weak-paragraphs-cluster');
+    const trafficEl = document.getElementById('weak-paragraphs-traffic');
+    const kindEl = document.getElementById('weak-paragraphs-kind');
+    const countEl = document.getElementById('weak-paragraphs-count');
+    const tableEl = document.getElementById('weak-paragraphs-table');
+    const heatmapEl = document.getElementById('weak-paragraphs-heatmap');
+    const trafficValues = rows.map(r => Number(r.traffic_opportunity || 0)).filter(v => v > 0).sort((a, b) => a - b);
+    const highTrafficCut = trafficValues.length ? Math.max(10, trafficValues[Math.floor(trafficValues.length * 0.75)]) : 10;
+
+    if (!issueEl.dataset.ready) {
+      issueEl.dataset.ready = '1';
+      const issueRows = Object.entries(summary.issue_counts || {}).sort((a, b) => b[1] - a[1]);
+      issueEl.innerHTML = '<option value="all">All issues</option>' + issueRows.map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(weakIssueLabel(k))} (${v})</option>`).join('');
+      const dirs = (summary.directories || []).slice(0, 80);
+      dirEl.innerHTML = '<option value="all">All directories</option>' + dirs.map(d => `<option value="${escapeHtml(d.key)}">${escapeHtml(d.key)} (${d.count})</option>`).join('');
+      const clusters = (summary.clusters || []).slice(0, 80);
+      clusterEl.innerHTML = '<option value="all">All clusters</option>' + clusters.map(c => `<option value="${escapeHtml(c.key)}">Cluster ${escapeHtml(c.key)} (${c.count})</option>`).join('');
+    }
+
+    const filteredRows = () => {
+      const q = (searchEl.value || '').trim().toLowerCase();
+      const issue = issueEl.value || 'all';
+      const directory = dirEl.value || 'all';
+      const cluster = clusterEl.value || 'all';
+      const traffic = trafficEl.value || 'all';
+      const kind = kindEl.value || 'all';
+      return rows.filter(r => {
+        const opportunity = Number(r.traffic_opportunity || 0);
+        if (issue !== 'all' && !(r.issue_types || []).includes(issue)) return false;
+        if (directory !== 'all' && r.directory !== directory) return false;
+        if (cluster !== 'all' && String(r.cluster) !== cluster) return false;
+        if (kind !== 'all' && r.content_kind !== kind) return false;
+        if (traffic === 'with' && opportunity <= 0) return false;
+        if (traffic === 'high' && opportunity < highTrafficCut) return false;
+        if (traffic === 'none' && opportunity > 0) return false;
+        if (!q) return true;
+        return semanticSearchText(r).includes(q);
+      });
+    };
+
+    const severityClass = row => row.severity === 'high' ? 'bg-red-100 text-red-800'
+      : row.severity === 'medium' ? 'bg-amber-100 text-amber-800'
+      : 'bg-gray-100 text-gray-700';
+    const actionClass = row => row.recommended_action === 'move' || row.recommended_action === 'remove' ? 'bg-red-100 text-red-800'
+      : row.recommended_action === 'update' || row.recommended_action === 'cite' ? 'bg-blue-100 text-blue-800'
+      : 'bg-gray-100 text-gray-700';
+
+    const renderFiltered = () => {
+      const filtered = filteredRows();
+      countEl.textContent = `${filtered.length.toLocaleString()} shown`;
+      tableEl.innerHTML = filtered.length ? `
+        <table class="w-full">
+          <thead class="text-gray-500 sticky top-0 bg-white">
+            <tr>
+              <th class="text-left py-1 pr-2">Paragraph</th>
+              <th class="text-left py-1 pr-2">Reasons / edit</th>
+              <th class="text-right py-1 pl-2">Score</th>
+              <th class="text-right py-1 pl-2">Traffic</th>
+              <th class="text-right py-1 pl-2">After</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.slice(0, 220).map(r => {
+              const issues = (r.issue_types || []).slice(0, 5).map(i => `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(weakIssueLabel(i))}</span>`).join('');
+              const reasons = (r.reasons || []).slice(0, 3).map(reason => `<li>${escapeHtml(reason)}</li>`).join('');
+              const kws = (r.attributed_keywords || []).slice(0, 3).map(k => `${escapeHtml(k.keyword)} ${Number(k.traffic || 0).toLocaleString()}`).join(' · ');
+              return `<tr class="border-b border-gray-100 align-top">
+                <td class="py-2 pr-3">
+                  <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="text-[11px] px-1.5 py-0.5 rounded ${severityClass(r)}">${escapeHtml(r.severity || '')}</span>
+                    <span class="text-[11px] px-1.5 py-0.5 rounded ${r.content_kind === 'template' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'}">${escapeHtml(r.content_kind || '')}</span>
+                    <span class="text-gray-500">para ${Number(r.paragraph_index || 0)}</span>
+                    ${r.cluster != null ? `<span class="text-gray-400">cluster ${escapeHtml(r.cluster)}</span>` : ''}
+                  </div>
+                  <a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+                  <div class="text-gray-500">${escapeHtml(r.directory || r.section || '')}${r.heading ? ' · ' + escapeHtml(r.heading) : ''}</div>
+                  <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
+                </td>
+                <td class="py-2 pr-3">
+                  <div class="mb-1">${issues}</div>
+                  <ul class="list-disc list-inside text-gray-600 space-y-0.5">${reasons}</ul>
+                  <div class="mt-1"><span class="text-[11px] px-1.5 py-0.5 rounded ${actionClass(r)}">${escapeHtml(r.recommended_action_label || r.recommended_action || '')}</span></div>
+                  ${kws ? `<div class="text-gray-400 mt-1">${kws}</div>` : ''}
+                </td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.severity_score || 0).toFixed(1)}</td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.traffic_opportunity || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.current_quality_score || 0).toFixed(0)}&rarr;${Number(r.potential_quality_score || 0).toFixed(0)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>` : '<div class="text-gray-500">No weak paragraphs match the filters.</div>';
+
+      const byUrl = new Map();
+      filtered.forEach(r => {
+        const group = byUrl.get(r.url) || { url: r.url, title: r.title, directory: r.directory, traffic: 0, rows: [] };
+        group.traffic += Number(r.traffic_opportunity || 0);
+        group.rows.push(r);
+        byUrl.set(r.url, group);
+      });
+      const pages = Array.from(byUrl.values()).sort((a, b) => b.traffic - a.traffic || b.rows.length - a.rows.length).slice(0, 80);
+      heatmapEl.innerHTML = pages.length ? pages.map(p => {
+        const blocks = p.rows.slice(0, 18).map(r => {
+          const color = r.severity === 'high' ? '#dc2626' : (r.severity === 'medium' ? '#d97706' : '#9ca3af');
+          const title = `${r.paragraph_index}: ${(r.issue_types || []).map(weakIssueLabel).join(', ')}`;
+          return `<span title="${escapeHtml(title)}" class="inline-block w-5 h-5 rounded-sm mr-1 mb-1" style="background:${color};opacity:${r.content_kind === 'template' ? 0.45 : 0.9};"></span>`;
+        }).join('');
+        return `<div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>
+            <span class="font-mono text-gray-600">${Number(p.traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+          </div>
+          <div class="text-gray-500 mb-1">${escapeHtml(p.directory || '')} · ${p.rows.length} weak blocks</div>
+          <div>${blocks}</div>
+        </div>`;
+      }).join('') : '<div class="text-gray-500">No pages match the filters.</div>';
+    };
+
+    if (!searchEl.dataset.bound) {
+      searchEl.dataset.bound = '1';
+      [searchEl, issueEl, dirEl, clusterEl, trafficEl, kindEl].forEach(el => el.addEventListener('input', renderFiltered));
+      [issueEl, dirEl, clusterEl, trafficEl, kindEl].forEach(el => el.addEventListener('change', renderFiltered));
+    }
+    renderFiltered();
   }
 
   function renderSemanticAblation() {

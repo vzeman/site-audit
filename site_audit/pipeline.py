@@ -104,6 +104,7 @@ from .scatter import project
 from .semantic_ablation import build_semantic_ablation
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
+from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
@@ -153,6 +154,7 @@ class PipelineConfig:
     enable_paragraph_impact: bool = True
     enable_semantic_ablation: bool = True
     enable_keyword_attribution: bool = True
+    enable_weak_paragraphs: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -552,6 +554,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_paragraph_impact
         or config.enable_semantic_ablation
         or config.enable_keyword_attribution
+        or config.enable_weak_paragraphs
         or config.enable_content_quality
         or config.enable_paragraph_fanout
     ):
@@ -941,6 +944,33 @@ def run(config: PipelineConfig) -> dict:
                 wp_summary.get("topic_carriers", 0),
             )
 
+    weak_paragraphs_data: dict = {}
+    if config.enable_weak_paragraphs and paragraph_records:
+        weak_paragraphs_data = build_weak_paragraphs(
+            pages,
+            embeddings,
+            extracted_pages,
+            paragraph_records,
+            search_payload=ahrefs_data,
+            paragraph_impact=paragraph_impact_data,
+            semantic_ablation=semantic_ablation_data,
+            keyword_attribution=keyword_attribution_data,
+            paragraph_density_rows=paragraph_density_rows,
+            freshness=freshness_data,
+            cluster_labels=labels,
+        )
+        wp_summary = weak_paragraphs_data.get("summary", {}) or {}
+        if wp_summary.get("status") == "ok":
+            LOG.info(
+                "  weak paragraphs: %d flagged · %d main-content · %d template · %.0f traffic opportunity",
+                wp_summary.get("flagged_rows", 0),
+                wp_summary.get("main_content_rows", 0),
+                wp_summary.get("template_rows", 0),
+                wp_summary.get("total_traffic_opportunity", 0.0),
+            )
+        elif wp_summary:
+            LOG.info("  weak paragraphs: %s", wp_summary.get("status", "unavailable"))
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -994,6 +1024,7 @@ def run(config: PipelineConfig) -> dict:
         semantic_ablation=semantic_ablation_data,
         keyword_attribution=keyword_attribution_data,
         winning_paragraphs=winning_paragraphs_data,
+        weak_paragraphs=weak_paragraphs_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -1040,6 +1071,7 @@ def run(config: PipelineConfig) -> dict:
             semantic_ablation=semantic_ablation_data,
             keyword_attribution=keyword_attribution_data,
             winning_paragraphs=winning_paragraphs_data,
+            weak_paragraphs=weak_paragraphs_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,

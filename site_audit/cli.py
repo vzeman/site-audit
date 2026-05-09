@@ -79,6 +79,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_external_links=not args.no_external_links,
         enable_paragraph_links=not args.no_paragraph_links,
         enable_paragraph_clustering=not args.no_paragraph_clustering,
+        enable_weak_paragraphs=not args.no_weak_paragraphs,
         enable_content_quality=not args.no_content_quality,
         enable_paragraph_fanout=not args.no_paragraph_fanout,
         check_external_links=args.check_external,
@@ -262,6 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-paragraph-links", action="store_true",
                        help="Skip paragraph-level internal link recommendation embeddings")
     run_p.add_argument("--no-paragraph-clustering", action="store_true")
+    run_p.add_argument("--no-weak-paragraphs", action="store_true")
     run_p.add_argument("--no-content-quality", action="store_true")
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
