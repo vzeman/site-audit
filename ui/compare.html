@@ -432,6 +432,55 @@
       </div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="strongest-clusters-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Strongest cluster comparison</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Normalized cluster strength across domains with raw traffic, keyword demand, page depth, freshness, conversion, entity coverage, and internal-link support preserved for drilldown.
+        </p>
+      </div>
+      <div id="strongest-cluster-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6 text-xs"></div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
+          <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+            <div>
+              <h3 class="text-sm font-semibold">Semantic cluster facets</h3>
+              <p class="text-xs text-gray-500">Each facet uses the same semantic coordinates; dot size is organic traffic.</p>
+            </div>
+            <select id="strongest-cluster-metric" class="rounded border border-gray-300 px-2 py-1 text-xs"></select>
+          </div>
+          <div id="strongest-cluster-bubbles" class="w-full" style="min-height: 430px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster strength matrix</h3>
+          <p class="text-xs text-gray-500 mb-2">Darker cells are stronger normalized ownership inside that domain. Cell labels keep the raw traffic visible.</p>
+          <div id="strongest-cluster-matrix" class="w-full overflow-x-auto" style="min-height: 430px;"></div>
+        </div>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster leaderboard</h3>
+          <p class="text-xs text-gray-500 mb-2">Winning domain and gap size per shared cluster.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="strongest-cluster-leaderboard">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+            <div>
+              <h3 class="text-sm font-semibold">Cluster drilldown</h3>
+              <p class="text-xs text-gray-500">Pages, ranking keywords, paragraphs, and important links for the selected domain cluster.</p>
+            </div>
+            <select id="strongest-cluster-drilldown-select" class="rounded border border-gray-300 px-2 py-1 text-xs"></select>
+          </div>
+          <div id="strongest-cluster-drilldown" class="text-xs border border-gray-100 rounded p-3 bg-gray-50 min-h-[320px]"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Competitive opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="opportunity-section">
       <div class="mb-4">
@@ -1899,7 +1948,297 @@
     ).join(''));
   }
 
+  function renderStrongestClusters() {
+    const section = document.getElementById('strongest-clusters-section');
+    if (!section) return;
+    const payload = data.strongest_clusters || {};
+    const clusters = payload.clusters || [];
+    if (!clusters.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const summary = payload.summary || {};
+    const leaders = payload.leaderboard || [];
+    const topLeader = leaders[0] || {};
+    const summaryRoot = document.getElementById('strongest-cluster-summary');
+    const cards = [
+      ['Clusters', summary.clusters || clusters.length, 'shared demand groups'],
+      ['Semantic points', summary.semantic_points || 0, 'cluster metric dots'],
+      ['Top winner', topLeader.winner_domain || '-', topLeader.cluster_label || topLeader.cluster || ''],
+      ['JSON export', 'comparison.json', payload.export_note || 'embedded payload'],
+    ];
+    summaryRoot.innerHTML = cards.map(card => `
+      <article class="border border-gray-200 rounded-lg p-4 bg-white">
+        <div class="text-xl font-semibold">${escapeHtml(card[1])}</div>
+        <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(card[2])}</div>
+      </article>
+    `).join('');
+
+    const metricSelect = document.getElementById('strongest-cluster-metric');
+    const facets = payload.metric_facets || [];
+    if (metricSelect && !metricSelect.dataset.ready) {
+      metricSelect.dataset.ready = '1';
+      metricSelect.innerHTML = facets.map(f => `<option value="${escapeHtml(f.key)}">${escapeHtml(f.label)}</option>`).join('');
+      metricSelect.value = facets.some(f => f.key === 'traffic') ? 'traffic' : ((facets[0] || {}).key || '');
+      metricSelect.addEventListener('change', drawStrongestClusterBubbles);
+    }
+
+    renderStrongestClusterMatrix();
+    renderStrongestClusterLeaderboard();
+    prepareStrongestClusterChoices();
+    drawStrongestClusterBubbles();
+    renderStrongestClusterDrilldown();
+  }
+
+  function drawStrongestClusterBubbles() {
+    const container = document.getElementById('strongest-cluster-bubbles');
+    const payload = data.strongest_clusters || {};
+    if (!container) return;
+    const metric = (document.getElementById('strongest-cluster-metric') || {}).value || 'traffic';
+    const points = (payload.semantic_points || []).filter(p => p.metric_type === metric && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-16">No shared semantic coordinates for cluster bubbles yet.</div>';
+      return;
+    }
+    const margin = { top: 18, right: 18, bottom: 34, left: 40 };
+    const outerWidth = Math.max(360, container.offsetWidth || 640);
+    const outerHeight = 430;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => Number(d.x));
+    const yExt = d3.extent(points, d => Number(d.y));
+    const xPad = (xExt[1] - xExt[0]) * 0.08 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.08 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([4, 24]);
+    const metricMax = d3.max(points, d => Number(d.metric_value || 0)) || 1;
+    const opacity = d3.scaleLinear().domain([0, metricMax]).range([0.34, 0.86]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
+    svg.append('g').call(d3.axisLeft(y).ticks(6));
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.x))).attr('cy', d => y(Number(d.y)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => domainColor(d.domain))
+      .attr('fill-opacity', d => opacity(Number(d.metric_value || 0)))
+      .attr('stroke', '#111827')
+      .attr('stroke-opacity', 0.28)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => selectStrongestClusterChoice(d.cluster, d.domain))
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.9).attr('stroke-width', 2);
+        tooltip.style('visibility','visible').html(
+          `<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br>` +
+          `<strong>${escapeHtml(d.cluster_label || d.cluster)}</strong><br>` +
+          `${escapeHtml(d.metric_label || d.metric_type)}: ${Number(d.metric_value || 0).toLocaleString()}<br>` +
+          `<span style="color:#fbbf24">traffic ${Number(d.traffic || 0).toLocaleString()} · keywords ${Number(d.keywords || 0).toLocaleString()} · pages ${Number(d.pages || 0).toLocaleString()}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-opacity',0.28).attr('stroke-width',1); tooltip.style('visibility','hidden'); });
+    const legend = d3.select(container).append('div').attr('class', 'text-xs text-gray-600 mt-2 flex flex-wrap gap-3');
+    legend.html(data.domains.map(d =>
+      `<span class="inline-flex items-center"><span class="w-2.5 h-2.5 rounded-full mr-1" style="background:${domainColor(d)}"></span>${escapeHtml(d)}</span>`
+    ).join(''));
+  }
+
+  function renderStrongestClusterMatrix() {
+    const container = document.getElementById('strongest-cluster-matrix');
+    if (!container) return;
+    const payload = data.strongest_clusters || {};
+    const rows = (payload.matrix || []).slice(0, 60);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-16">No cluster matrix data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 134;
+    const cellH = 31;
+    const left = 200;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 44;
+    const maxScore = d3.max(rows.flatMap(r => (r.domains || []).map(d => Number(d.strength_score || 0)))) || 1;
+    const color = d3.scaleSequential(d3.interpolateYlGnBu).domain([0, maxScore]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 20).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.cluster_label || row.cluster || '').slice(0, 36));
+      domains.forEach((domain, di) => {
+        const d = (row.domains || []).find(v => v.domain === domain) || {};
+        const score = Number(d.strength_score || 0);
+        const isWinner = domain === row.winner_domain;
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', score ? color(score) : '#f3f4f6').attr('rx', 2)
+          .attr('stroke', isWinner ? '#111827' : 'none').attr('stroke-width', isWinner ? 1.6 : 0)
+          .style('cursor', 'pointer')
+          .on('click', () => selectStrongestClusterChoice(row.cluster, domain))
+          .append('title').text(`${domain} · ${row.cluster_label}\nstrength ${score.toFixed(1)}\ntraffic ${Number(d.traffic || 0).toLocaleString()}\nkeywords ${Number(d.keywords || 0).toLocaleString()}\npages ${Number(d.pages || 0).toLocaleString()}`);
+        if (score) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', score > maxScore * 0.55 ? 'white' : '#111827')
+            .text(`${score.toFixed(0)} · ${Number(d.traffic || 0).toLocaleString()}`);
+        }
+      });
+    });
+  }
+
+  function renderStrongestClusterLeaderboard() {
+    const tbl = document.getElementById('strongest-cluster-leaderboard');
+    if (!tbl) return;
+    const rows = ((data.strongest_clusters || {}).leaderboard || []).slice(0, 90);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Cluster</th>
+        <th class="px-2 py-2 text-left">Winner</th>
+        <th class="px-2 py-2 text-right">Score</th>
+        <th class="px-2 py-2 text-right">Traffic</th>
+        <th class="px-2 py-2 text-right">Gap</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="5">No cluster leaderboard.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" data-cluster="${escapeHtml(r.cluster)}" data-domain="${escapeHtml(r.winner_domain || '')}">
+        <td class="px-2 py-1.5 font-medium">${escapeHtml(r.cluster_label || r.cluster)}<div class="text-gray-500">${escapeHtml((r.top_keywords || []).slice(0, 2).map(k => k.keyword).join(' · '))}</div></td>
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.winner_domain)}"></span>${escapeHtml(r.winner_domain || '')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.winner_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.winner_traffic || 0).toLocaleString()}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.score_gap || 0).toFixed(1)}</td>
+      </tr>
+    `).join('');
+    tbl.querySelectorAll('tbody tr[data-cluster]').forEach(row => {
+      row.addEventListener('click', () => selectStrongestClusterChoice(row.dataset.cluster, row.dataset.domain));
+    });
+  }
+
+  function prepareStrongestClusterChoices() {
+    const select = document.getElementById('strongest-cluster-drilldown-select');
+    if (!select) return;
+    const clusters = ((data.strongest_clusters || {}).clusters || []);
+    const choices = [];
+    clusters.forEach((cluster, clusterIndex) => {
+      (cluster.domains || []).forEach(domainRow => {
+        if (!Number(domainRow.traffic || 0) && !Number(domainRow.strength_score || 0)) return;
+        choices.push({
+          clusterIndex,
+          cluster: cluster.cluster,
+          clusterLabel: cluster.cluster_label || cluster.cluster,
+          domain: domainRow.domain,
+          score: Number(domainRow.strength_score || 0),
+          traffic: Number(domainRow.traffic || 0),
+        });
+      });
+    });
+    data._strongestClusterChoices = choices;
+    const previous = select.value;
+    select.innerHTML = choices.map((choice, i) => `
+      <option value="${i}">${escapeHtml(choice.clusterLabel)} · ${escapeHtml(choice.domain)} · ${choice.score.toFixed(0)} pts · ${choice.traffic.toLocaleString()} traffic</option>
+    `).join('');
+    if (previous && Number(previous) < choices.length) select.value = previous;
+    select.onchange = renderStrongestClusterDrilldown;
+  }
+
+  function selectStrongestClusterChoice(clusterKey, domain) {
+    const select = document.getElementById('strongest-cluster-drilldown-select');
+    const choices = data._strongestClusterChoices || [];
+    const index = choices.findIndex(choice => choice.cluster === clusterKey && choice.domain === domain);
+    if (select && index >= 0) {
+      select.value = String(index);
+      renderStrongestClusterDrilldown();
+      document.getElementById('strongest-cluster-drilldown')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  function renderStrongestClusterDrilldown() {
+    const root = document.getElementById('strongest-cluster-drilldown');
+    const select = document.getElementById('strongest-cluster-drilldown-select');
+    if (!root || !select) return;
+    const clusters = ((data.strongest_clusters || {}).clusters || []);
+    const choices = data._strongestClusterChoices || [];
+    if (!choices.length) {
+      root.innerHTML = '<div class="text-gray-500 text-center py-12">No cluster drilldown data.</div>';
+      return;
+    }
+    const choice = choices[Number(select.value || 0)] || choices[0];
+    const cluster = clusters[choice.clusterIndex] || {};
+    const row = (cluster.domains || []).find(d => d.domain === choice.domain) || {};
+    const tableRows = (items, columns, empty) => items.length ? `
+      <div class="overflow-x-auto border border-gray-200 rounded bg-white mb-3">
+        <table class="min-w-full text-[11px]">
+          <thead class="bg-gray-100 text-gray-600 uppercase"><tr>${columns.map(c => `<th class="px-2 py-1.5 text-left">${escapeHtml(c[0])}</th>`).join('')}</tr></thead>
+          <tbody>${items.map(item => `<tr class="border-t border-gray-100">${columns.map(c => `<td class="px-2 py-1.5">${c[1](item)}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+    ` : `<div class="text-gray-500 mb-3">${escapeHtml(empty)}</div>`;
+    root.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-wide text-gray-500">${escapeHtml(choice.domain)}</div>
+          <h4 class="text-sm font-semibold">${escapeHtml(cluster.cluster_label || cluster.cluster || '')}</h4>
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-semibold">${Number(row.strength_score || 0).toFixed(1)}</div>
+          <div class="text-[10px] text-gray-500">normalized strength</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        ${[
+          ['Traffic', Number(row.traffic || 0).toLocaleString()],
+          ['Keywords', Number(row.keyword_rows || 0).toLocaleString()],
+          ['Pages', Number(row.pages || 0).toLocaleString()],
+          ['Avg pos.', Number(row.avg_position || 0).toFixed(1)],
+          ['Paragraphs', Number(row.paragraph_count || 0).toLocaleString()],
+          ['Entity cov.', `${Math.round(Number(row.entity_coverage || 0) * 100)}%`],
+          ['Freshness', `${Math.round(Number(row.freshness_score || 0) * 100)}%`],
+          ['Link support', Number(row.avg_in_degree || 0).toFixed(1)],
+        ].map(card => `<div class="bg-white rounded border border-gray-200 p-2"><div class="font-semibold">${escapeHtml(card[1])}</div><div class="text-gray-500">${escapeHtml(card[0])}</div></div>`).join('')}
+      </div>
+      <h5 class="font-semibold mb-1">Pages</h5>
+      ${tableRows(row.top_pages || [], [
+        ['Page', item => `<a class="text-blue-600 hover:underline" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(item.title || item.url || '', 46))}</a>`],
+        ['Traffic', item => Number(item.traffic || 0).toLocaleString()],
+        ['Links', item => `${Number(item.in_degree || 0).toLocaleString()} in / ${Number(item.out_degree || 0).toLocaleString()} out`],
+      ], 'No page drilldown rows.')}
+      <h5 class="font-semibold mb-1">Ranking Keywords</h5>
+      ${tableRows(row.keywords || [], [
+        ['Keyword', item => escapeHtml(truncateMiddle(item.keyword || '', 42))],
+        ['Pos.', item => Number(item.position || 0).toFixed(0)],
+        ['Traffic', item => Number(item.traffic || 0).toLocaleString()],
+      ], 'No keyword rows.')}
+      <h5 class="font-semibold mb-1">Paragraph Examples</h5>
+      ${tableRows(row.paragraphs || [], [
+        ['Paragraph', item => escapeHtml(truncateMiddle(item.excerpt || '', 90))],
+        ['Page', item => `<a class="text-blue-600 hover:underline" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">para ${item.paragraph_index == null ? 'n/a' : Number(item.paragraph_index).toLocaleString()}</a>`],
+      ], 'No paragraph examples.')}
+      <h5 class="font-semibold mb-1">Links</h5>
+      ${tableRows(row.links || [], [
+        ['Type', item => `${escapeHtml(item.type || '')}<div class="text-gray-500">${escapeHtml(item.direction || '')}</div>`],
+        ['Edge', item => `<a class="text-blue-600 hover:underline" href="${escapeHtml(item.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(item.source_title || item.source_url || '', 34))}</a><div class="text-gray-500">→ ${escapeHtml(truncateMiddle(item.target_title || item.target_url || '', 34))}</div>`],
+        ['Score', item => Number(item.score || 0).toFixed(1)],
+      ], 'No important link rows.')}
+    `;
+  }
+
   renderSearchDemand();
+  renderStrongestClusters();
 
   // ============================================================
   // Competitive opportunity comparisons

@@ -2122,6 +2122,477 @@ def _keyword_cluster_gap_payload(projects: list[_Project]) -> dict:
     }
 
 
+def _strongest_cluster_payload(
+    projects: list[_Project],
+    page_scatter: list[dict],
+    semantic_scatter: list[dict],
+) -> dict:
+    domains = [p.domain for p in projects]
+    per_project = {proj.domain: _project_cluster_entries(proj) for proj in projects}
+    cluster_maps: dict[str, dict] = {}
+    entries_by_domain: dict[str, dict[str, dict]] = {}
+
+    def cluster_maps_for(proj: _Project) -> dict:
+        id_to_key: dict[str, str] = {}
+        label_by_key: dict[str, str] = {}
+        raw_by_key: dict[str, dict] = {}
+        url_lookup: dict[str, dict] = {}
+
+        def put_url(url: object, key: str) -> None:
+            if url and key and key != "unknown":
+                _store_url_lookup(url_lookup, url, {"cluster": key})
+
+        for row in ((proj.ahrefs or {}).get("clusters") or []):
+            label = row.get("label") or row.get("key") or row.get("cluster")
+            key = _cluster_key(label)
+            if key == "unknown":
+                continue
+            label_by_key.setdefault(key, str(label or key))
+            raw_by_key[key] = row
+            for ident in (row.get("cluster"), row.get("key")):
+                if ident is not None:
+                    id_to_key[str(ident)] = key
+            for page in row.get("top_pages") or []:
+                put_url(page.get("matched_url") or page.get("url"), key)
+
+        for row in ((proj.ahrefs or {}).get("top_pages") or []):
+            key = id_to_key.get(str(row.get("cluster"))) if row.get("cluster") is not None else ""
+            key = key or _cluster_key(row.get("cluster_label") or row.get("top_keyword") or "")
+            if key != "unknown":
+                put_url(row.get("matched_url") or row.get("url"), key)
+
+        for row in ((proj.ahrefs or {}).get("organic_keywords") or []):
+            key = id_to_key.get(str(row.get("cluster"))) if row.get("cluster") is not None else ""
+            key = key or _cluster_key(row.get("cluster_label") or "")
+            if key != "unknown":
+                put_url(row.get("matched_url") or row.get("url"), key)
+
+        return {
+            "id_to_key": id_to_key,
+            "label_by_key": label_by_key,
+            "raw_by_key": raw_by_key,
+            "url_lookup": url_lookup,
+        }
+
+    def key_for_row(domain: str, row: dict) -> str:
+        maps = cluster_maps.get(domain) or {}
+        id_to_key = maps.get("id_to_key") or {}
+        cluster_ref = row.get("cluster")
+        if cluster_ref is not None and str(cluster_ref) in id_to_key:
+            return id_to_key[str(cluster_ref)]
+        url = row.get("matched_url") or row.get("url")
+        if url:
+            found = _lookup_url(maps.get("url_lookup") or {}, url)
+            if found.get("cluster"):
+                return str(found["cluster"])
+        key = _cluster_key(row.get("cluster_label") or row.get("label") or "")
+        return key if key != "unknown" else ""
+
+    def key_for_url(domain: str, url: object) -> str:
+        found = _lookup_url((cluster_maps.get(domain) or {}).get("url_lookup") or {}, url)
+        return str(found.get("cluster") or "")
+
+    for proj in projects:
+        cluster_maps[proj.domain] = cluster_maps_for(proj)
+
+    coord_samples: dict[tuple[str, str], list[tuple[float, float, float]]] = defaultdict(list)
+    for row in semantic_scatter or []:
+        domain = row.get("domain") or ""
+        key = key_for_row(domain, row)
+        if not key or row.get("x") is None or row.get("y") is None:
+            continue
+        weight = 1.0 + math.log1p(max(0.0, _safe_float(row.get("size") or row.get("traffic") or row.get("volume"))))
+        coord_samples[(domain, key)].append((float(row["x"]), float(row["y"]), weight))
+    for row in page_scatter or []:
+        domain = row.get("domain") or ""
+        key = key_for_url(domain, row.get("url"))
+        if not key or row.get("x") is None or row.get("y") is None:
+            continue
+        weight = 1.0 + math.log1p(max(0.0, _safe_float(row.get("traffic"))))
+        coord_samples[(domain, key)].append((float(row["x"]), float(row["y"]), weight))
+
+    def coords_for(domain: str, key: str) -> tuple[float | None, float | None]:
+        samples = coord_samples.get((domain, key)) or []
+        if not samples:
+            return None, None
+        total = sum(sample[2] for sample in samples) or 1.0
+        return (
+            sum(sample[0] * sample[2] for sample in samples) / total,
+            sum(sample[1] * sample[2] for sample in samples) / total,
+        )
+
+    def avg(values: list[float]) -> float:
+        return sum(values) / len(values) if values else 0.0
+
+    def freshness_value(bucket: str) -> float:
+        return {
+            "fresh": 1.0,
+            "aging": 0.72,
+            "stale": 0.38,
+            "very_stale": 0.12,
+            "future": 0.45,
+            "unknown": 0.0,
+            "": 0.0,
+        }.get(str(bucket or "").lower(), 0.0)
+
+    def page_rows_for(proj: _Project, key: str, entry: dict) -> list[dict]:
+        page_lookup = _url_lookup_from_rows(proj.pages or [], ("url",))
+        top_page_lookup = _url_lookup_from_rows(((proj.ahrefs or {}).get("top_pages") or []), ("matched_url", "url"), score_key="traffic")
+        link_lookup = _page_link_lookup(proj)
+        authority_lookup = _authority_lookup(proj)
+        freshness_lookup = _freshness_lookup(proj)
+        conversion_lookup = _url_lookup_from_rows(((proj.conversion or {}).get("per_page") or []), ("url",))
+        urls = list(dict.fromkeys((entry.get("owned_urls") or []) + ([entry.get("top_url")] if entry.get("top_url") else [])))
+        rows = []
+        for url in urls[:16]:
+            page = _lookup_url(page_lookup, url)
+            search = _lookup_url(top_page_lookup, url)
+            link = _lookup_url(link_lookup, url)
+            authority = _lookup_url(authority_lookup, url)
+            freshness = _lookup_url(freshness_lookup, url)
+            conversion = _lookup_url(conversion_lookup, url)
+            rows.append({
+                "url": url,
+                "title": search.get("title") or page.get("title") or url,
+                "section": search.get("section") or page.get("section") or "",
+                "traffic": _safe_int(search.get("traffic")),
+                "keywords": _safe_int(search.get("keywords")),
+                "top_keyword": search.get("top_keyword") or "",
+                "word_count": _safe_int(page.get("word_count")),
+                "in_degree": _safe_int(link.get("in_degree")),
+                "out_degree": _safe_int(link.get("out_degree")),
+                "pagerank": _safe_float(authority.get("pagerank") if authority else link.get("pagerank")),
+                "freshness_bucket": freshness.get("bucket") or "",
+                "primary_cta_count": _safe_int(conversion.get("primary_cta_count")),
+                "cta_count": _safe_int(conversion.get("cta_count")),
+            })
+        rows.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_float(r.get("pagerank"))), reverse=True)
+        return rows[:10]
+
+    def keyword_rows_for(proj: _Project, key: str) -> list[dict]:
+        rows = []
+        for row in ((proj.ahrefs or {}).get("organic_keywords") or []):
+            if key_for_row(proj.domain, row) != key:
+                continue
+            rows.append({
+                "keyword": row.get("keyword") or "",
+                "url": row.get("matched_url") or row.get("url") or "",
+                "page_title": row.get("page_title") or row.get("title") or "",
+                "position": _safe_float(row.get("position")),
+                "traffic": _safe_int(row.get("traffic")),
+                "volume": _safe_int(row.get("volume")),
+                "intents": _string_list(row.get("intents"), "intent")[:5],
+                "serp_features": _string_list(row.get("serp_features"), "feature")[:6],
+            })
+        rows.sort(key=lambda r: (_safe_int(r.get("traffic")), -_safe_float(r.get("position"), 999.0)), reverse=True)
+        return rows[:18]
+
+    def paragraph_rows_for(proj: _Project, key: str) -> list[dict]:
+        rows = []
+        for row in proj.ahrefs_semantic_rows or []:
+            if row.get("type") != "paragraph" or key_for_row(proj.domain, row) != key:
+                continue
+            label = str(row.get("label") or "").strip()
+            if not label:
+                continue
+            rows.append({
+                "url": row.get("url") or "",
+                "paragraph_index": row.get("paragraph_index"),
+                "excerpt": label[:260],
+                "traffic": _safe_int(row.get("traffic")),
+            })
+        rows.sort(key=lambda r: _safe_int(r.get("traffic")), reverse=True)
+        return rows[:8]
+
+    def link_rows_for(proj: _Project, key: str) -> list[dict]:
+        rows = []
+        removal = ((proj.linkgraph or {}).get("link_removal_simulation") or {})
+        for row in removal.get("links") or removal.get("critical_links") or []:
+            src_key = key_for_url(proj.domain, row.get("source_url"))
+            tgt_key = key_for_url(proj.domain, row.get("target_url"))
+            if key not in {src_key, tgt_key}:
+                continue
+            rows.append({
+                "type": "existing",
+                "source_url": row.get("source_url") or "",
+                "source_title": row.get("source_title") or row.get("source_url") or "",
+                "target_url": row.get("target_url") or "",
+                "target_title": row.get("target_title") or row.get("target_url") or "",
+                "anchor_samples": (row.get("anchor_samples") or [])[:4],
+                "score": _safe_float(row.get("removal_loss_score") or row.get("contextual_link_impact")),
+                "classification": row.get("classification") or row.get("placement") or "",
+                "direction": "within_cluster" if src_key == tgt_key == key else ("incoming" if tgt_key == key else "outgoing"),
+            })
+        addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {})
+        for row in addition.get("recommendations") or []:
+            src_key = key_for_url(proj.domain, row.get("source_url"))
+            tgt_key = key_for_url(proj.domain, row.get("target_url"))
+            if key not in {src_key, tgt_key}:
+                continue
+            rows.append({
+                "type": "recommended",
+                "source_url": row.get("source_url") or "",
+                "source_title": row.get("source_title") or row.get("source_url") or "",
+                "target_url": row.get("target_url") or "",
+                "target_title": row.get("target_title") or row.get("target_url") or "",
+                "anchor_samples": [row.get("suggested_anchor") or ""],
+                "score": _safe_float(row.get("expected_benefit_score")),
+                "classification": row.get("priority") or "",
+                "direction": "within_cluster" if src_key == tgt_key == key else ("incoming" if tgt_key == key else "outgoing"),
+            })
+        rows.sort(key=lambda r: _safe_float(r.get("score")), reverse=True)
+        return rows[:10]
+
+    for proj in projects:
+        entries = {}
+        raw_by_key = cluster_maps[proj.domain]["raw_by_key"]
+        total_domain_pages = max(_safe_int(proj.metrics.get("page_count")), len(proj.pages), 1)
+        entity_cluster_lookup = _cluster_lookup_rows(((proj.entity_coverage or {}).get("clusters") or []), ("label", "cluster"))
+        for key, base_entry in per_project.get(proj.domain, {}).items():
+            raw = raw_by_key.get(key, {})
+            entry = dict(base_entry)
+            pages = page_rows_for(proj, key, entry)
+            keywords = keyword_rows_for(proj, key)
+            paragraphs = paragraph_rows_for(proj, key)
+            links = link_rows_for(proj, key)
+            x, y = coords_for(proj.domain, key)
+            positions = [_safe_float(row.get("position")) for row in keywords if _safe_float(row.get("position")) > 0]
+            page_count = max(
+                _safe_int(raw.get("pages")),
+                _safe_int(raw.get("matched_pages")),
+                _safe_int(raw.get("page_count")),
+                len(entry.get("owned_urls") or []),
+                len(pages),
+            )
+            entity_cluster = entity_cluster_lookup.get(key, {})
+            entity_coverage = _safe_float(entity_cluster.get("avg_coverage"), default=-1.0)
+            if entity_coverage < 0:
+                entity_coverage = min(1.0, len(entry.get("entities") or []) / 10.0)
+            avg_pagerank = avg([_safe_float(page.get("pagerank")) for page in pages if page.get("pagerank") is not None])
+            avg_in_degree = avg([float(_safe_int(page.get("in_degree"))) for page in pages])
+            freshness_score = avg([freshness_value(page.get("freshness_bucket") or entry.get("freshness_bucket")) for page in pages]) or freshness_value(entry.get("freshness_bucket"))
+            conversion_score = avg([
+                1.0 if _safe_int(page.get("primary_cta_count")) else (0.55 if _safe_int(page.get("cta_count")) else 0.0)
+                for page in pages
+            ])
+            word_counts = [_safe_int(page.get("word_count")) for page in pages if _safe_int(page.get("word_count"))]
+            traffic = _safe_int(entry.get("traffic"))
+            keyword_rows = max(_safe_int(entry.get("keyword_rows")), len(keywords))
+            keywords_total = max(_safe_int(entry.get("keywords_total")), keyword_rows)
+            top3_keywords = _safe_int(entry.get("top3_keywords"))
+            avg_position = avg(positions)
+            entry.update({
+                "cluster": key,
+                "cluster_label": entry.get("cluster_label") or (cluster_maps[proj.domain]["label_by_key"].get(key) or key),
+                "traffic": traffic,
+                "keywords_total": keywords_total,
+                "keyword_rows": keyword_rows,
+                "avg_position": round(avg_position, 2) if avg_position else 0.0,
+                "pages": page_count,
+                "matched_pages": max(_safe_int(raw.get("matched_pages")), len(pages)),
+                "paragraph_count": len(paragraphs),
+                "entity_coverage": round(entity_coverage, 4),
+                "avg_pagerank": round(avg_pagerank, 8),
+                "avg_in_degree": round(avg_in_degree, 2),
+                "freshness_score": round(freshness_score, 4),
+                "conversion_score": round(conversion_score, 4),
+                "avg_word_count": round(avg(word_counts), 1) if word_counts else 0.0,
+                "domain_page_share": round(page_count / total_domain_pages, 4),
+                "x": x,
+                "y": y,
+                "top_pages": pages,
+                "keywords": keywords,
+                "paragraphs": paragraphs,
+                "links": links,
+            })
+            entries[key] = entry
+        entries_by_domain[proj.domain] = entries
+
+    domain_totals = {}
+    for domain, entries in entries_by_domain.items():
+        domain_totals[domain] = {
+            "traffic": sum(_safe_int(entry.get("traffic")) for entry in entries.values()),
+            "keywords": sum(_safe_int(entry.get("keyword_rows")) for entry in entries.values()),
+            "pages": max(_safe_int(next((p.metrics.get("page_count") for p in projects if p.domain == domain), 0)), len(next((p.pages for p in projects if p.domain == domain), [])), 1),
+        }
+
+    cluster_keys = sorted({key for entries in entries_by_domain.values() for key in entries})
+    clusters: list[dict] = []
+    leaderboard: list[dict] = []
+    semantic_points: list[dict] = []
+    metric_specs = [
+        ("traffic", "Traffic"),
+        ("keyword_rows", "Keywords"),
+        ("pages", "Pages"),
+        ("entity_coverage", "Entity coverage"),
+        ("freshness_score", "Freshness"),
+        ("avg_in_degree", "Link support"),
+        ("conversion_score", "Conversion"),
+    ]
+
+    for key in cluster_keys:
+        domain_rows = []
+        labels = [entries_by_domain.get(domain, {}).get(key, {}).get("cluster_label") for domain in domains if entries_by_domain.get(domain, {}).get(key)]
+        label = str(next((v for v in labels if v), key))
+        for domain in domains:
+            entry = dict(entries_by_domain.get(domain, {}).get(key) or {
+                "domain": domain,
+                "cluster": key,
+                "cluster_label": label,
+                "traffic": 0,
+                "keyword_rows": 0,
+                "keywords_total": 0,
+                "avg_position": 0.0,
+                "pages": 0,
+                "paragraph_count": 0,
+                "entity_coverage": 0.0,
+                "avg_pagerank": 0.0,
+                "avg_in_degree": 0.0,
+                "freshness_score": 0.0,
+                "conversion_score": 0.0,
+                "avg_word_count": 0.0,
+                "domain_page_share": 0.0,
+                "top_pages": [],
+                "keywords": [],
+                "paragraphs": [],
+                "links": [],
+                "x": None,
+                "y": None,
+            })
+            totals = domain_totals.get(domain, {})
+            traffic_share = _safe_int(entry.get("traffic")) / max(1, _safe_int(totals.get("traffic")))
+            keyword_share = _safe_int(entry.get("keyword_rows")) / max(1, _safe_int(totals.get("keywords")))
+            position_score = max(0.0, (21.0 - _safe_float(entry.get("avg_position"), 21.0)) / 20.0) if _safe_float(entry.get("avg_position")) else 0.0
+            authority_score = min(1.0, _safe_float(entry.get("avg_in_degree")) / 8.0)
+            strength = (
+                traffic_share * 32.0
+                + keyword_share * 18.0
+                + position_score * 15.0
+                + _safe_float(entry.get("entity_coverage")) * 10.0
+                + authority_score * 10.0
+                + _safe_float(entry.get("freshness_score")) * 8.0
+                + _safe_float(entry.get("conversion_score")) * 7.0
+            )
+            raw_strength = (
+                math.log1p(_safe_int(entry.get("traffic"))) * 18.0
+                + math.sqrt(max(0, _safe_int(entry.get("keyword_rows")))) * 8.0
+                + _safe_int(entry.get("top3_keywords")) * 4.0
+                + authority_score * 10.0
+            )
+            entry.update({
+                "traffic_share": round(traffic_share, 4),
+                "keyword_share": round(keyword_share, 4),
+                "position_score": round(position_score, 4),
+                "authority_score": round(authority_score, 4),
+                "strength_score": round(strength, 2),
+                "raw_strength_score": round(raw_strength, 2),
+            })
+            domain_rows.append(entry)
+            if entry.get("x") is not None and entry.get("y") is not None:
+                for metric_key, metric_label in metric_specs:
+                    semantic_points.append({
+                        "domain": domain,
+                        "cluster": key,
+                        "cluster_label": label,
+                        "metric_type": metric_key,
+                        "metric_label": metric_label,
+                        "metric_value": _safe_float(entry.get(metric_key)),
+                        "traffic": _safe_int(entry.get("traffic")),
+                        "keywords": _safe_int(entry.get("keyword_rows")),
+                        "pages": _safe_int(entry.get("pages")),
+                        "strength_score": _safe_float(entry.get("strength_score")),
+                        "x": float(entry["x"]),
+                        "y": float(entry["y"]),
+                    })
+        leader = max(domain_rows, key=lambda row: (_safe_float(row.get("strength_score")), _safe_int(row.get("traffic"))))
+        runner = max([r for r in domain_rows if r.get("domain") != leader.get("domain")] or [{}], key=lambda row: (_safe_float(row.get("strength_score")), _safe_int(row.get("traffic"))))
+        total_traffic = sum(_safe_int(row.get("traffic")) for row in domain_rows)
+        total_keywords = sum(_safe_int(row.get("keyword_rows")) for row in domain_rows)
+        traffic_gap = sum(max(0, _safe_int(leader.get("traffic")) - _safe_int(row.get("traffic"))) for row in domain_rows if row.get("domain") != leader.get("domain"))
+        matrix_domains = [
+            {
+                "domain": row.get("domain"),
+                "traffic": _safe_int(row.get("traffic")),
+                "keyword_rows": _safe_int(row.get("keyword_rows")),
+                "pages": _safe_int(row.get("pages")),
+                "paragraph_count": _safe_int(row.get("paragraph_count")),
+                "avg_position": _safe_float(row.get("avg_position")),
+                "entity_coverage": _safe_float(row.get("entity_coverage")),
+                "avg_in_degree": _safe_float(row.get("avg_in_degree")),
+                "freshness_score": _safe_float(row.get("freshness_score")),
+                "conversion_score": _safe_float(row.get("conversion_score")),
+                "strength_score": _safe_float(row.get("strength_score")),
+                "traffic_share": _safe_float(row.get("traffic_share")),
+                "keyword_share": _safe_float(row.get("keyword_share")),
+            }
+            for row in domain_rows
+        ]
+        cluster_row = {
+            "cluster": key,
+            "cluster_label": label,
+            "winner_domain": leader.get("domain") or "",
+            "winner_score": _safe_float(leader.get("strength_score")),
+            "runner_domain": runner.get("domain") or "",
+            "runner_score": _safe_float(runner.get("strength_score")),
+            "score_gap": round(_safe_float(leader.get("strength_score")) - _safe_float(runner.get("strength_score")), 2),
+            "total_traffic": total_traffic,
+            "total_keywords": total_keywords,
+            "traffic_gap": traffic_gap,
+            "domains": domain_rows,
+        }
+        clusters.append(cluster_row)
+        leaderboard.append({
+            "cluster": key,
+            "cluster_label": label,
+            "winner_domain": leader.get("domain") or "",
+            "winner_score": _safe_float(leader.get("strength_score")),
+            "winner_traffic": _safe_int(leader.get("traffic")),
+            "runner_domain": runner.get("domain") or "",
+            "runner_score": _safe_float(runner.get("strength_score")),
+            "score_gap": cluster_row["score_gap"],
+            "traffic_gap": traffic_gap,
+            "total_traffic": total_traffic,
+            "total_keywords": total_keywords,
+            "top_page": (leader.get("top_pages") or [{}])[0],
+            "top_keywords": (leader.get("keywords") or [])[:5],
+        })
+
+    clusters.sort(key=lambda r: (_safe_int(r.get("total_traffic")), _safe_float(r.get("score_gap"))), reverse=True)
+    leaderboard.sort(key=lambda r: (_safe_int(r.get("total_traffic")), _safe_float(r.get("score_gap"))), reverse=True)
+    matrix = [
+        {
+            "cluster": row["cluster"],
+            "cluster_label": row["cluster_label"],
+            "winner_domain": row["winner_domain"],
+            "domains": [
+                {
+                    "domain": domain_row.get("domain"),
+                    "strength_score": domain_row.get("strength_score"),
+                    "traffic": domain_row.get("traffic"),
+                    "keywords": domain_row.get("keyword_rows"),
+                    "pages": domain_row.get("pages"),
+                }
+                for domain_row in row["domains"]
+            ],
+        }
+        for row in clusters[:120]
+    ]
+    return {
+        "summary": {
+            "clusters": len(clusters),
+            "semantic_points": len(semantic_points),
+            "metric_facets": len(metric_specs),
+            "domains": len(domains),
+        },
+        "metric_facets": [{"key": key, "label": label} for key, label in metric_specs],
+        "leaderboard": leaderboard[:160],
+        "matrix": matrix,
+        "clusters": clusters[:160],
+        "semantic_points": semantic_points[:1600],
+        "export_note": "All cluster metrics and drilldowns are embedded in comparison.json under strongest_clusters.",
+    }
+
+
 def _serp_feature_payload(projects: list[_Project]) -> dict:
     by_feature: dict[str, dict[str, dict]] = {}
     for proj in projects:
@@ -3114,6 +3585,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "template_patterns": _template_patterns_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "keyword_cluster_gaps": _keyword_cluster_gap_payload(projects),
+        "strongest_clusters": _strongest_cluster_payload(projects, scatter_rows, ahrefs_semantic_rows),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

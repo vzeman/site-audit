@@ -35,8 +35,8 @@ def _write_semantic_cache(root: Path, domain: str) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         {"type": "link_title", "label": f"{domain} anchor", "count": 4, "size": 4},
-        {"type": "header", "label": f"{domain} H1", "level": 1, "size": 10},
-        {"type": "page_title", "label": f"{domain} title", "traffic": 20, "size": 20},
+        {"type": "header", "label": f"{domain} H1", "url": f"https://{domain}/a", "cluster": "support", "level": 1, "traffic": 20, "size": 10},
+        {"type": "page_title", "label": f"{domain} title", "url": f"https://{domain}/a", "cluster": "support", "traffic": 20, "size": 20},
     ]
     (cache_dir / "semantic_entities_test_model.meta.json").write_text(
         json.dumps(rows),
@@ -172,6 +172,11 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["keyword_cluster_gaps"]["clusters"][0]["leader_domain"] == "strong.example"
     assert payload["keyword_cluster_gaps"]["recommendations"]
     assert payload["keyword_cluster_gaps"]["cache"]["entries"] >= 2
+    assert payload["strongest_clusters"]["leaderboard"]
+    assert payload["strongest_clusters"]["leaderboard"][0]["winner_domain"] == "strong.example"
+    assert payload["strongest_clusters"]["matrix"]
+    assert payload["strongest_clusters"]["semantic_points"]
+    assert payload["strongest_clusters"]["clusters"][0]["domains"][0]["keywords"]
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
@@ -350,6 +355,12 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35
     assert payload["leaderboard"][1]["authority_traffic_alignment"] == 0.9
     assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url
+    assert any(
+        domain_row.get("links")
+        for cluster in payload["strongest_clusters"]["clusters"]
+        for domain_row in cluster["domains"]
+        if domain_row["domain"] == "alpha.example"
+    )
 
 
 def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:
