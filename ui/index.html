@@ -386,6 +386,46 @@
       </div>
     </div>
 
+    <!-- Heading impact -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heading-impact-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Heading impact map</h3>
+        <p class="text-xs text-gray-500 mt-1" id="heading-impact-meta">
+          Section-level demand and support scores for H1-H6 headings, using attributed keyword traffic, paragraph impact, entity coverage, and freshness.
+        </p>
+      </div>
+      <div id="heading-impact-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-6 mb-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Strongest headings</h4>
+          <div id="heading-impact-strongest" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Rename or expand opportunities</h4>
+          <div id="heading-impact-weakest" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-5 gap-6">
+        <div class="lg:col-span-3">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <h4 class="text-sm font-semibold">Per-page heading tree</h4>
+            <input id="heading-impact-tree-search" type="search" autocomplete="off" placeholder="Search page, heading, keyword..."
+                   class="w-full sm:w-72 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          </div>
+          <div id="heading-impact-tree" class="text-xs max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div class="lg:col-span-2">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <h4 class="text-sm font-semibold">Header demand scatter</h4>
+            <input id="heading-impact-scatter-search" type="search" autocomplete="off" placeholder="Find heading..."
+                   class="w-full sm:w-56 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          </div>
+          <div id="heading-impact-scatter" class="w-full" style="min-height: 420px;"></div>
+          <div id="heading-impact-scatter-count" class="text-xs text-gray-500 mt-1"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Scatterplot -->
     <div class="bg-gray-50 rounded-lg shadow p-6 mb-6">
       <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -1298,6 +1338,7 @@
 <script type="application/json" id="data-paragraph-density">__PARAGRAPH_DENSITY_JSON__</script>
 <script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
+<script type="application/json" id="data-heading-impact">__HEADING_IMPACT_JSON__</script>
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
@@ -1402,6 +1443,7 @@
       const inlinedParaDensity = readInlined('data-paragraph-density');
       const inlinedHeaderAnalysis = readInlined('data-header-analysis');
       const inlinedHeaderScatter = readInlined('data-header-scatter');
+      const inlinedHeadingImpact = readInlined('data-heading-impact');
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
@@ -1414,7 +1456,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1444,6 +1486,7 @@
         paraDensity = inlinedParaDensity || {};
         headerAnalysis = inlinedHeaderAnalysis || {};
         headerScatter = inlinedHeaderScatter || {};
+        headingImpact = inlinedHeadingImpact || {};
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
         metadataQuality = inlinedMetadataQuality || {};
@@ -1456,7 +1499,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1485,6 +1528,7 @@
           loadJSON('paragraph_density.json').catch(() => ({})),
           loadJSON('header_analysis.json').catch(() => ({})),
           loadJSON('header_scatter.json').catch(() => ({})),
+          loadJSON('heading_impact.json').catch(() => ({})),
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
           loadJSON('metadata_quality.json').catch(() => ({})),
@@ -1529,6 +1573,7 @@
       state.paraDensity = paraDensity || {};
       state.headerAnalysis = headerAnalysis || {};
       state.headerScatter = headerScatter || {};
+      state.headingImpact = headingImpact || {};
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
       state.metadataQuality = metadataQuality || {};
@@ -1589,6 +1634,7 @@
       renderImprovement();
       renderTitleMismatch();
       renderHeaderAnalysis();
+      renderHeadingImpact();
       renderWrongHome();
       renderParaClusters();
       renderFanout('all');
@@ -4253,6 +4299,158 @@
     }).join('');
     document.getElementById('audit-headers-keywords').innerHTML = cols ||
       '<div class="text-gray-500">No header keyword data.</div>';
+  }
+
+  function headingImpactUrlKey(url) {
+    try {
+      const u = new URL(url);
+      let path = u.pathname || '/';
+      if (path !== '/') path = path.replace(/\/+$/, '');
+      return `${u.protocol.toLowerCase()}//${u.host.toLowerCase()}${path || '/'}`;
+    } catch (e) {
+      return String(url || '').replace(/\/+$/, '').toLowerCase();
+    }
+  }
+
+  function headingImpactKey(url, order, text) {
+    return `${headingImpactUrlKey(url)}#${Number(order || 0)}#${String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')}`;
+  }
+
+  function buildHeadingImpactLookup() {
+    const rows = (state.headingImpact || {}).rows || [];
+    state.headingImpactByKey = new Map(rows.map(r => [r.heading_key || headingImpactKey(r.url, r.order, r.heading), r]));
+  }
+
+  function renderHeadingImpact() {
+    const block = document.getElementById('heading-impact-block');
+    const data = state.headingImpact || {};
+    const summary = data.summary || {};
+    const rows = data.rows || [];
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    buildHeadingImpactLookup();
+    document.getElementById('heading-impact-meta').textContent =
+      `${Number(summary.headings || rows.length).toLocaleString()} headings across ${Number(summary.pages_with_heading_metrics || 0).toLocaleString()} pages · ${Number(summary.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} attributed visits · ${Number(summary.rename_opportunities || 0).toLocaleString()} rename opportunities.`;
+    document.getElementById('heading-impact-summary').innerHTML =
+      card('headings analyzed', Number(summary.headings || rows.length).toLocaleString(), `${Number(summary.pages || 0).toLocaleString()} pages`) +
+      card('with demand', Number(summary.headings_with_demand || 0).toLocaleString(), 'traffic or keywords attached') +
+      card('low support', Number(summary.low_support_high_demand || 0).toLocaleString(), 'demand > section support') +
+      card('rename / expand', `${Number(summary.rename_opportunities || 0).toLocaleString()} / ${Number(summary.expand_opportunities || 0).toLocaleString()}`, 'opportunity headings');
+
+    const headingList = list => (list || []).slice(0, 80).map(r => {
+      const issues = (r.issue_labels || []).slice(0, 4).map(x => `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(x)}</span>`).join('');
+      const kws = (r.keywords || []).slice(0, 3).map(k => `${escapeHtml(k.keyword)} ${Number(k.traffic || 0).toLocaleString()}`).join(' · ');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.heading || r.title || r.url)}</a>
+          <span class="font-mono text-gray-700">${Number(r.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+        </div>
+        <div class="text-gray-500">H${Number(r.level || 1)} · ${escapeHtml(r.title || '')}</div>
+        ${issues ? `<div class="mt-1">${issues}</div>` : ''}
+        ${kws ? `<div class="text-gray-400 mt-1">${kws}</div>` : ''}
+        <div class="text-gray-400 mt-1">support ${Number(r.support_score || 0).toFixed(0)} · demand ${Number(r.demand_score || 0).toFixed(0)} · entities ${Number(r.entity_count || 0)}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('heading-impact-strongest').innerHTML = headingList(data.strongest_headings) || '<div class="text-gray-500">No demand-bearing headings.</div>';
+    document.getElementById('heading-impact-weakest').innerHTML = headingList(data.weakest_headings) || '<div class="text-gray-500">No heading opportunities.</div>';
+
+    const treeSearch = document.getElementById('heading-impact-tree-search');
+    const renderTree = () => {
+      const q = (treeSearch.value || '').trim().toLowerCase();
+      const perPage = data.per_page || [];
+      const maxTraffic = Math.max(1, d3.max(rows, r => Number(r.attributed_traffic || 0)) || 1);
+      const pages = perPage.filter(p => !q || semanticSearchText(p).includes(q)).slice(0, 120);
+      document.getElementById('heading-impact-tree').innerHTML = pages.length ? pages.map(p => {
+        const headings = (p.headings || []).slice(0, 48).map(h => {
+          const width = Math.max(2, Math.round((Number(h.attributed_traffic || 0) / maxTraffic) * 100));
+          const issues = (h.issue_labels || []).slice(0, 3).map(x => `<span class="text-[10px] bg-gray-100 text-gray-700 rounded px-1 py-0.5 mr-1">${escapeHtml(x)}</span>`).join('');
+          const indent = Math.min(72, Math.max(0, (Number(h.level || 1) - 1) * 14));
+          return `<div class="py-1.5 border-b border-gray-50" style="padding-left:${indent}px">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate"><span class="font-mono text-gray-500">H${Number(h.level || 1)}</span> ${escapeHtml(h.heading || '')}</span>
+              <span class="font-mono text-gray-600">${Number(h.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded mt-1 overflow-hidden"><div class="h-full bg-blue-500" style="width:${width}%"></div></div>
+            <div class="text-gray-400 mt-1">support ${Number(h.support_score || 0).toFixed(0)} · demand ${Number(h.demand_score || 0).toFixed(0)} · ${Number(h.paragraph_count || 0)} paragraphs ${issues}</div>
+          </div>`;
+        }).join('');
+        return `<div class="mb-3 border border-gray-100 rounded p-2">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>
+            <span class="text-gray-500 font-mono">${Number(p.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+          </div>
+          ${headings}
+        </div>`;
+      }).join('') : '<div class="text-gray-500">No pages match the search.</div>';
+    };
+    if (!treeSearch.dataset.bound) {
+      treeSearch.dataset.bound = '1';
+      treeSearch.addEventListener('input', renderTree);
+    }
+    renderTree();
+    renderHeadingImpactScatter();
+  }
+
+  function renderHeadingImpactScatter() {
+    const container = document.getElementById('heading-impact-scatter');
+    const countEl = document.getElementById('heading-impact-scatter-count');
+    const searchEl = document.getElementById('heading-impact-scatter-search');
+    const scatterRows = ((state.headerScatter || {}).headers || []);
+    if (!state.headingImpactByKey) buildHeadingImpactLookup();
+    const points = scatterRows.map(d => {
+      const row = state.headingImpactByKey.get(headingImpactKey(d.url, d.order, d.text));
+      return row ? { ...d, ...row, label: row.heading || d.text } : null;
+    }).filter(Boolean);
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 py-8">Header scatter coordinates are not available for the impact rows.</div>';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    const margin = { top: 10, right: 12, bottom: 28, left: 34 };
+    const width = Math.max(260, container.offsetWidth || 360) - margin.left - margin.right;
+    const height = 420 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', width + margin.left + margin.right).attr('height', 420);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxTraffic = d3.max(points, d => Number(d.attributed_traffic || 0)) || 1;
+    const r = d3.scaleSqrt().domain([0, maxTraffic]).range([4, 18]);
+    const levelColor = state.headerLevelColor || d3.scaleOrdinal().domain([1,2,3,4,5,6]).range(['#dc2626', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#94a3b8']);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5));
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
+      .attr('r', d => r(Number(d.attributed_traffic || 0)))
+      .attr('fill', d => levelColor(Number(d.level || 1)))
+      .attr('fill-opacity', 0.72)
+      .attr('stroke', 'white').attr('stroke-width', 0.6)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => window.open(d.url, '_blank', 'noopener'));
+    dots.append('title').text(d => `H${d.level} ${d.label}\ntraffic ${Number(d.attributed_traffic || 0).toLocaleString()}\nsupport ${Number(d.support_score || 0).toFixed(0)} · demand ${Number(d.demand_score || 0).toFixed(0)}`);
+    const applySearch = () => {
+      const q = (searchEl.value || '').trim().toLowerCase();
+      let matches = 0;
+      dots.attr('stroke', d => {
+        const hit = q && semanticSearchText(d).includes(q);
+        if (hit) matches += 1;
+        return hit ? '#111827' : 'white';
+      }).attr('stroke-width', d => (q && semanticSearchText(d).includes(q)) ? 2.4 : 0.6)
+        .attr('fill-opacity', d => (!q || semanticSearchText(d).includes(q)) ? 0.78 : 0.22);
+      if (countEl) countEl.textContent = q ? `${matches.toLocaleString()} matches` : `${points.length.toLocaleString()} headings shown · dot size = attributed traffic`;
+    };
+    if (!searchEl.dataset.bound) {
+      searchEl.dataset.bound = '1';
+      searchEl.addEventListener('input', applySearch);
+    }
+    applySearch();
   }
 
   function renderTitleMismatch() {

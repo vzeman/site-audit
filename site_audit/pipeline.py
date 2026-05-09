@@ -70,6 +70,7 @@ from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
+from .heading_impact import build_heading_impact
 from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
 from .indexability import analyze as analyze_indexability
@@ -155,6 +156,7 @@ class PipelineConfig:
     enable_semantic_ablation: bool = True
     enable_keyword_attribution: bool = True
     enable_weak_paragraphs: bool = True
+    enable_heading_impact: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -555,6 +557,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_semantic_ablation
         or config.enable_keyword_attribution
         or config.enable_weak_paragraphs
+        or config.enable_heading_impact
         or config.enable_content_quality
         or config.enable_paragraph_fanout
     ):
@@ -971,6 +974,28 @@ def run(config: PipelineConfig) -> dict:
         elif wp_summary:
             LOG.info("  weak paragraphs: %s", wp_summary.get("status", "unavailable"))
 
+    heading_impact_data: dict = {}
+    if config.enable_heading_impact and paragraph_records:
+        heading_impact_data = build_heading_impact(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            paragraph_impact=paragraph_impact_data,
+            keyword_attribution=keyword_attribution_data,
+            freshness=freshness_data,
+            cluster_labels=labels,
+        )
+        hi_summary = heading_impact_data.get("summary", {}) or {}
+        if hi_summary.get("status") == "ok":
+            LOG.info(
+                "  heading impact: %d headings · %d high-demand · %d rename opportunities",
+                hi_summary.get("headings", 0),
+                hi_summary.get("high_demand_headings", 0),
+                hi_summary.get("rename_opportunities", 0),
+            )
+        elif hi_summary:
+            LOG.info("  heading impact: %s", hi_summary.get("status", "unavailable"))
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -1025,6 +1050,7 @@ def run(config: PipelineConfig) -> dict:
         keyword_attribution=keyword_attribution_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
+        heading_impact=heading_impact_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -1072,6 +1098,7 @@ def run(config: PipelineConfig) -> dict:
             keyword_attribution=keyword_attribution_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
+            heading_impact=heading_impact_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,

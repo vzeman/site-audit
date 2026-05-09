@@ -406,6 +406,7 @@ def headers_for_scatter(
                     "url": pages[pi].url,
                     "title": pages[pi].title,
                     "level": int(h["level"]),
+                    "order": int(h["order"]),
                     "text": h["text"],
                     "x": float(coords[k, 0]),
                     "y": float(coords[k, 1]),
