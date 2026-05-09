@@ -67,6 +67,7 @@ _PLACEHOLDERS = {
     "__INDEXABILITY_JSON__": "indexability",
     "__PERFORMANCE_JSON__": "performance",
     "__AHREFS_JSON__": "ahrefs",
+    "__BEST_PAGES_JSON__": "best_pages",
 }
 
 
@@ -280,6 +281,7 @@ def write_html_report(
     indexability: Optional[dict] = None,
     performance: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
+    best_pages: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
 
@@ -333,6 +335,7 @@ def write_html_report(
         "indexability": indexability or {},
         "performance": performance or {},
         "ahrefs": ahrefs or {},
+        "best_pages": best_pages or {},
     }
 
     rendered = template

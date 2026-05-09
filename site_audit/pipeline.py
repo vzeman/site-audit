@@ -38,6 +38,7 @@ from .dataforseo import DataForSEOConfig, build_analysis as build_dataforseo_ana
 from .dataforseo import fetch_snapshot as fetch_dataforseo_snapshot
 from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
+from .best_pages import build_best_page_explainers
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
 from .cannibalization import build_cannibalization
 from .duplicate_fragments import build_duplicate_fragments
@@ -1358,6 +1359,31 @@ def run(config: PipelineConfig) -> dict:
         recommendations_data["by_priority"].get("low", 0),
     )
 
+    best_pages_data = build_best_page_explainers(
+        pages,
+        search_payload=ahrefs_data,
+        linkgraph=link_payload,
+        structured_data=structured_data_data,
+        freshness=freshness_data,
+        entity_coverage=entity_coverage_data,
+        information_gain=information_gain_data,
+        paragraph_impact=paragraph_impact_data,
+        winning_paragraphs=winning_paragraphs_data,
+        template_patterns=template_patterns_data,
+        header_analysis=header_analysis_data,
+        answerability=ans_payload,
+        conversion_balance=conversion_balance_data,
+        metadata_quality=metadata_quality_data,
+        page_types=page_types_data,
+    )
+    bp_summary = best_pages_data.get("summary", {}) or {}
+    if bp_summary.get("status") == "ok":
+        LOG.info(
+            "  best pages: %d explainers across %d clusters",
+            bp_summary.get("pages", 0),
+            bp_summary.get("clusters", 0),
+        )
+
     # 13) Reports
     summary = write_all(
         report_dir,
@@ -1410,6 +1436,7 @@ def run(config: PipelineConfig) -> dict:
         indexability=indexability_data,
         performance=performance_data,
         ahrefs=ahrefs_data,
+        best_pages=best_pages_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -1467,6 +1494,7 @@ def run(config: PipelineConfig) -> dict:
             indexability=indexability_data,
             performance=performance_data,
             ahrefs=ahrefs_data,
+            best_pages=best_pages_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

@@ -32,6 +32,7 @@ from urllib.parse import urlsplit, urlunsplit
 import numpy as np
 
 from .ahrefs import load_semantic_cache
+from .best_pages import build_best_page_comparison
 
 LOG = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class _Project:
     indexability: dict
     performance: dict
     ahrefs: dict
+    best_pages: dict
     ahrefs_semantic_rows: list[dict]
     ahrefs_semantic_embeddings: Optional[np.ndarray]
     embeddings: Optional[np.ndarray]    # aligned with pages
@@ -145,6 +147,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     indexability = _load_json(report / "indexability.json", {})
     performance = _load_json(report / "performance.json", {})
     ahrefs = _load_json(report / "ahrefs.json", {})
+    best_pages = _load_json(report / "best_pages.json", {})
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     link_flow = (linkgraph.get("link_flow") or {}) if isinstance(linkgraph, dict) else {}
@@ -195,6 +198,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         indexability=indexability,
         performance=performance,
         ahrefs=ahrefs,
+        best_pages=best_pages,
         ahrefs_semantic_rows=ahrefs_semantic_rows,
         ahrefs_semantic_embeddings=ahrefs_semantic_embeddings,
         embeddings=embed_array,
@@ -4837,6 +4841,10 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         winning_patterns,
     )
     paragraph_archetypes = _paragraph_archetype_comparison(projects, strongest_clusters)
+    best_page_explainers = build_best_page_comparison([
+        {"domain": p.domain, "best_pages": p.best_pages or {}}
+        for p in projects
+    ])
 
     return {
         "domains": [p.domain for p in projects],
@@ -4864,6 +4872,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "winning_patterns": winning_patterns,
         "keyword_content_matrix": keyword_content_matrix,
         "paragraph_archetypes": paragraph_archetypes,
+        "best_page_explainers": best_page_explainers,
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

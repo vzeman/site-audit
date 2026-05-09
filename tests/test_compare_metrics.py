@@ -277,6 +277,20 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                 "clusters": [{"key": "c1", "label": "ai workflow", "traffic": 100, "pages": 1, "matched_pages": 1, "keywords_total": 8, "keyword_rows": 2, "top3_keywords": 1, "top_keywords": [{"keyword": "ai workflow", "traffic": 70}]}],
                 "directories": [{"key": "blog", "label": "blog", "traffic": 100, "pages": 1, "matched_pages": 1, "keywords_total": 8, "keyword_rows": 2, "top3_keywords": 1}],
             }),
+            "best_pages.json": json.dumps({
+                "summary": {"status": "ok", "pages": 1, "clusters": 1, "causation_note": "Observed correlations, not confirmed causation."},
+                "pages": [{
+                    "url": alpha_url,
+                    "title": "AI workflow",
+                    "cluster_label": "ai workflow",
+                    "traffic": 100,
+                    "keywords": 8,
+                    "performance_score": 82,
+                    "copy_recommendations": ["Promote the page from related workflow hubs."],
+                    "strengths": [{"category": "Internal Links", "label": "Critical links", "evidence": "Home page passes authority."}],
+                    "weak_spots": [],
+                }],
+            }),
         },
         pages=[{"url": alpha_url, "title": "AI workflow", "section": "blog"}],
     )
@@ -347,6 +361,20 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                 "clusters": [{"key": "c2", "label": "automation", "traffic": 15, "pages": 1, "matched_pages": 1, "keywords_total": 2, "keyword_rows": 1, "top3_keywords": 0}],
                 "directories": [{"key": "blog", "label": "blog", "traffic": 15, "pages": 1, "matched_pages": 1, "keywords_total": 2, "keyword_rows": 1, "top3_keywords": 0}],
             }),
+            "best_pages.json": json.dumps({
+                "summary": {"status": "ok", "pages": 1, "clusters": 1, "causation_note": "Observed correlations, not confirmed causation."},
+                "pages": [{
+                    "url": beta_url,
+                    "title": "Automation tool",
+                    "cluster_label": "ai workflow",
+                    "traffic": 15,
+                    "keywords": 2,
+                    "performance_score": 48,
+                    "copy_recommendations": [],
+                    "strengths": [],
+                    "weak_spots": [{"category": "Internal Links", "label": "Weak anchors", "evidence": "Anchors are vague."}],
+                }],
+            }),
         },
         pages=[{"url": beta_url, "title": "Automation tool", "section": "blog"}],
     )
@@ -395,6 +423,7 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
         if domain_row["domain"] == "alpha.example"
     )
     assert any(pattern["category"] == "link" for pattern in payload["winning_patterns"]["patterns"])
+    assert payload["best_page_explainers"]["recommendations"][0]["source_domain"] == "alpha.example"
 
 
 def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:

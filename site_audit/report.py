@@ -316,6 +316,7 @@ def write_all(
     indexability: Optional[dict] = None,
     performance: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
+    best_pages: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
@@ -414,4 +415,6 @@ def write_all(
     if ahrefs is not None:
         _write_json(output_dir / "search.json", ahrefs)
         _write_json(output_dir / "ahrefs.json", ahrefs)
+    if best_pages is not None:
+        _write_json(output_dir / "best_pages.json", best_pages)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

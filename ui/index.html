@@ -611,6 +611,27 @@
       </div>
     </div>
 
+    <!-- Best page reverse engineering -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="best-pages-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Best page reverse engineering</h3>
+        <p class="text-xs text-gray-500 mt-1" id="best-pages-meta">
+          Highest-demand pages explained with search, content, schema, freshness, internal-link, and template evidence. Findings are observed correlations, not proof of direct ranking causes.
+        </p>
+      </div>
+      <div id="best-pages-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid xl:grid-cols-3 gap-5">
+        <div class="xl:col-span-1">
+          <h4 class="text-sm font-semibold mb-2">Winning pages</h4>
+          <div id="best-page-cards" class="space-y-2 text-xs max-h-[34rem] overflow-y-auto"></div>
+        </div>
+        <div class="xl:col-span-2">
+          <h4 class="text-sm font-semibold mb-2">Explainer</h4>
+          <div id="best-page-detail" class="text-xs bg-gray-50 border border-gray-200 rounded-lg p-4 min-h-[20rem]"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Paragraph impact -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="paragraph-impact-block">
       <div class="mb-4">
@@ -1759,6 +1780,7 @@
 <script type="application/json" id="data-indexability">__INDEXABILITY_JSON__</script>
 <script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
 <script type="application/json" id="data-ahrefs">__AHREFS_JSON__</script>
+<script type="application/json" id="data-best-pages">__BEST_PAGES_JSON__</script>
 <script>
 (function() {
   const basePath = '/data';
@@ -1873,8 +1895,9 @@
       const inlinedIndexability = readInlined('data-indexability');
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
+      const inlinedBestPages = readInlined('data-best-pages');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1925,8 +1948,9 @@
         indexability = inlinedIndexability || {};
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
+        bestPages = inlinedBestPages || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1976,6 +2000,7 @@
           loadJSON('indexability.json').catch(() => ({})),
           loadJSON('performance.json').catch(() => ({})),
           loadJSON('ahrefs.json').catch(() => ({})),
+          loadJSON('best_pages.json').catch(() => ({})),
         ]);
       }
       state.scatter = scatter;
@@ -2030,6 +2055,7 @@
       state.indexability = indexability || {};
       state.performance = performance || {};
       state.ahrefs = ahrefs || {};
+      state.bestPages = bestPages || {};
       state.linkCountMode = 'hist';
       document.getElementById('header-domain').textContent =
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
@@ -2048,6 +2074,7 @@
       renderClusters();
       renderTreemap();
       renderAhrefs();
+      renderBestPages();
       renderParagraphImpact();
       renderWeakParagraphs();
       renderSemanticAblation();
@@ -2928,6 +2955,125 @@
         <td class="text-right font-mono text-gray-600">${Number(r.volume || 0).toLocaleString()}</td>
         <td class="text-right font-mono text-gray-600">${Number(r.position || 0) || '—'}</td>
       </tr>`).join('')}</tbody></table>` : '<div class="text-gray-500">No keywords.</div>';
+  }
+
+  function renderBestPages() {
+    const block = document.getElementById('best-pages-block');
+    const payload = state.bestPages || {};
+    const pages = payload.pages || [];
+    if (!block) return;
+    if (!pages.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = payload.summary || {};
+    document.getElementById('best-pages-meta').textContent =
+      summary.causation_note || 'These explainers combine observed audit correlations and should not be read as proof of direct ranking causation.';
+    document.getElementById('best-pages-summary').innerHTML =
+      card('Explained pages', Number(summary.pages || pages.length).toLocaleString(), 'top organic/crawl pages') +
+      card('Clusters covered', Number(summary.clusters || 0).toLocaleString(), 'semantic groups') +
+      card('Model', escapeHtml(summary.model || 'best_page_explainer_v1'), 'diagnostic payload') +
+      card('Top traffic page', Number((pages[0] || {}).traffic || 0).toLocaleString(), escapeHtml((pages[0] || {}).top_keyword || 'top keyword'));
+
+    if (!state.selectedBestPageUrl || !pages.some(p => p.url === state.selectedBestPageUrl)) {
+      state.selectedBestPageUrl = pages[0].url;
+    }
+    const cards = document.getElementById('best-page-cards');
+    cards.innerHTML = pages.slice(0, 30).map(page => {
+      const selected = page.url === state.selectedBestPageUrl;
+      return `
+        <button type="button" data-url="${escapeHtml(page.url || '')}" class="best-page-card block w-full text-left border ${selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'} rounded p-3 hover:bg-gray-50">
+          <div class="flex items-start justify-between gap-3">
+            <div class="font-medium">${escapeHtml(truncateMiddle(page.title || page.url || '', 64))}</div>
+            <div class="font-mono text-gray-700">${Number(page.traffic || 0).toLocaleString()}</div>
+          </div>
+          <div class="text-gray-500 mt-1">${escapeHtml(page.top_keyword || '')}${page.cluster_label ? ' · ' + escapeHtml(page.cluster_label) : ''}</div>
+          <div class="mt-2 h-1.5 bg-gray-100 rounded overflow-hidden">
+            <div class="h-1.5 bg-blue-600 rounded" style="width:${Math.max(4, Math.min(100, Number(page.performance_score || 0)))}%"></div>
+          </div>
+        </button>`;
+    }).join('');
+    cards.querySelectorAll('.best-page-card').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.selectedBestPageUrl = btn.dataset.url;
+        renderBestPages();
+      });
+    });
+    renderBestPageDetail(pages.find(p => p.url === state.selectedBestPageUrl) || pages[0], payload);
+  }
+
+  function bestPageSignalList(rows, emptyText) {
+    return (rows || []).length ? `
+      <div class="space-y-2">
+        ${(rows || []).slice(0, 6).map(row => `
+          <div class="bg-white border border-gray-200 rounded p-2">
+            <div class="font-medium">${escapeHtml(row.label || row.category || '')}</div>
+            <div class="text-gray-600">${escapeHtml(row.evidence || '')}</div>
+            <div class="text-gray-400 mt-0.5">${escapeHtml(row.category || '')}${row.source ? ' · ' + escapeHtml(row.source) : ''}</div>
+          </div>`).join('')}
+      </div>` : `<div class="text-gray-500">${escapeHtml(emptyText)}</div>`;
+  }
+
+  function renderBestPageDetail(page, payload) {
+    const root = document.getElementById('best-page-detail');
+    if (!root || !page) return;
+    const cluster = ((payload || {}).clusters || []).find(c => c.leader_url === page.url || c.cluster === (page.cluster_label || page.cluster || page.section));
+    const peers = ((cluster || {}).peer_pages || []).slice(0, 6);
+    root.innerHTML = `
+      <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <div class="text-[11px] uppercase tracking-wide text-gray-500">${escapeHtml(page.cluster_label || page.section || '')}</div>
+          <h4 class="text-base font-semibold">${escapeHtml(page.title || page.url || '')}</h4>
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(page.url || '#')}" target="_blank" rel="noopener">${escapeHtml(page.url || '')}</a>
+        </div>
+        <div class="text-right">
+          <div class="text-2xl font-semibold">${Number(page.performance_score || 0).toFixed(1)}</div>
+          <div class="text-[10px] text-gray-500">diagnostic score</div>
+        </div>
+      </div>
+      <div class="grid sm:grid-cols-4 gap-2 mb-4">
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="font-semibold">${Number(page.traffic || 0).toLocaleString()}</div><div class="text-gray-500">traffic</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="font-semibold">${Number(page.keywords || 0).toLocaleString()}</div><div class="text-gray-500">keywords</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="font-semibold">${Number((page.signals || {}).in_degree || 0).toLocaleString()}</div><div class="text-gray-500">inlinks</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="font-semibold">${escapeHtml((page.signals || {}).freshness_bucket || 'n/a')}</div><div class="text-gray-500">freshness</div></div>
+      </div>
+      <p class="text-sm text-gray-700 mb-3">${escapeHtml(page.explanation || '')}</p>
+      <p class="text-[11px] text-gray-500 bg-white border border-gray-200 rounded p-2 mb-4">${escapeHtml(page.causation_note || '')}</p>
+      <div class="grid lg:grid-cols-2 gap-4 mb-4">
+        <div>
+          <h5 class="font-semibold mb-2">Strengths</h5>
+          ${bestPageSignalList(page.strengths || [], 'No strengths listed.')}
+        </div>
+        <div>
+          <h5 class="font-semibold mb-2">Weak spots</h5>
+          ${bestPageSignalList(page.weak_spots || [], 'No weak spots listed.')}
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div>
+          <h5 class="font-semibold mb-2">Transferable patterns</h5>
+          <div class="bg-white border border-gray-200 rounded px-3">
+            ${(page.transferable_patterns || []).slice(0, 7).map(p => `
+              <div class="border-b border-gray-100 py-2">
+                <div class="font-medium">${escapeHtml(p.label || p.type || '')}</div>
+                <div class="text-gray-600">${escapeHtml(p.action || '')}</div>
+                <div class="text-gray-400">${escapeHtml(p.evidence || '')}</div>
+              </div>`).join('') || '<div class="text-gray-500 py-2">No transferable patterns listed.</div>'}
+          </div>
+        </div>
+        <div>
+          <h5 class="font-semibold mb-2">Same-cluster weaker pages</h5>
+          <div class="bg-white border border-gray-200 rounded px-3">
+            ${peers.map(peer => `
+              <div class="border-b border-gray-100 py-2">
+                <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(peer.url || '#')}" target="_blank" rel="noopener">${escapeHtml(peer.title || peer.url || '')}</a>
+                <div class="text-gray-500">traffic ${Number(peer.traffic || 0).toLocaleString()} · score ${Number(peer.performance_score || 0).toFixed(1)}</div>
+              </div>`).join('') || '<div class="text-gray-500 py-2">No weaker peers in this extracted top-page set.</div>'}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   function paragraphImpactKey(url, paragraphIndex) {
