@@ -3128,6 +3128,251 @@ def _keyword_content_matrix_payload(
     }
 
 
+def _paragraph_archetype_comparison(projects: list[_Project], strongest_clusters: dict) -> dict:
+    domains = [p.domain for p in projects]
+    archetype_defs = {
+        "intro": "Intro",
+        "definition": "Definition",
+        "features": "Feature block",
+        "use_case": "Use case",
+        "faq": "FAQ",
+        "comparison": "Comparison",
+        "pricing": "Pricing",
+        "proof": "Proof",
+        "process": "Process",
+        "integration": "Integration",
+        "security": "Security",
+        "conversion": "Conversion",
+        "explanation": "Explanation",
+    }
+    cluster_rows = strongest_clusters.get("clusters") or []
+    cluster_lookup = {row.get("cluster"): row for row in cluster_rows}
+    cluster_order = {row.get("cluster"): i for i, row in enumerate(cluster_rows)}
+    page_cluster_lookup: dict[str, dict[str, dict]] = defaultdict(dict)
+    id_maps: dict[str, dict[str, str]] = {}
+
+    for proj in projects:
+        id_to_key: dict[str, str] = {}
+        for row in ((proj.ahrefs or {}).get("clusters") or []):
+            key = _cluster_key(row.get("label") or row.get("key") or row.get("cluster"))
+            if key == "unknown":
+                continue
+            for ident in (row.get("cluster"), row.get("key")):
+                if ident is not None:
+                    id_to_key[str(ident)] = key
+        id_maps[proj.domain] = id_to_key
+
+    for cluster in cluster_rows:
+        key = cluster.get("cluster") or ""
+        for domain_row in cluster.get("domains") or []:
+            domain = domain_row.get("domain") or ""
+            for page in domain_row.get("top_pages") or []:
+                if page.get("url"):
+                    _store_url_lookup(page_cluster_lookup[domain], page.get("url"), {"cluster": key, "cluster_label": cluster.get("cluster_label") or key})
+
+    def paragraph_cluster(domain: str, row: dict) -> str:
+        ref = row.get("cluster")
+        if ref is not None and str(ref) in id_maps.get(domain, {}):
+            return id_maps[domain][str(ref)]
+        found = _lookup_url(page_cluster_lookup.get(domain, {}), row.get("url"))
+        if found.get("cluster"):
+            return str(found["cluster"])
+        key = _cluster_key(row.get("cluster_label") or "")
+        return key if key != "unknown" else ""
+
+    def classify_archetype(text: str, paragraph_index: int | None = None) -> str:
+        lower = re.sub(r"\s+", " ", str(text or "").lower())
+        if "?" in lower or re.search(r"\b(faq|frequently asked|common questions)\b", lower):
+            return "faq"
+        if re.search(r"\b(pricing|price|cost|plan|subscription|per month|\$|€)\b", lower):
+            return "pricing"
+        if re.search(r"\b(vs\.?|versus|alternative|compare|comparison|difference between)\b", lower):
+            return "comparison"
+        if re.search(r"\b(case study|customer|review|testimonial|trusted by|g2|capterra|certified|award)\b", lower):
+            return "proof"
+        if re.search(r"\b(use case|for teams|for businesses|when you need|scenario|example)\b", lower):
+            return "use_case"
+        if re.search(r"\b(feature|capability|includes|offers|built-in|dashboard|workflow|automation)\b", lower):
+            return "features"
+        if re.search(r"\b(how to|step|steps|process|guide|workflow|setup|configure)\b", lower):
+            return "process"
+        if re.search(r"\b(integration|integrates|api|webhook|zapier|slack|salesforce|hubspot|shopify|teams|zendesk)\b", lower):
+            return "integration"
+        if re.search(r"\b(security|gdpr|soc 2|hipaa|compliance|encryption|privacy|sla)\b", lower):
+            return "security"
+        if re.search(r"\b(book a demo|start trial|get started|contact sales|sign up|request demo)\b", lower):
+            return "conversion"
+        if re.search(r"\b(is a|is an|refers to|means|defined as|what is)\b", lower):
+            return "definition"
+        if paragraph_index == 0:
+            return "intro"
+        return "explanation"
+
+    by_key: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
+    timelines: list[dict] = []
+    page_timeline: dict[tuple[str, str], dict] = {}
+    page_type_filter = Counter()
+    intent_filter = Counter()
+
+    for proj in projects:
+        page_type_lookup = _url_lookup_from_rows(((proj.page_types or {}).get("per_page") or []), ("url",))
+        page_lookup = _url_lookup_from_rows(proj.pages or [], ("url",))
+        for row in proj.ahrefs_semantic_rows or []:
+            if row.get("type") != "paragraph":
+                continue
+            cluster_key = paragraph_cluster(proj.domain, row)
+            if not cluster_key:
+                continue
+            cluster = cluster_lookup.get(cluster_key) or {}
+            domain_cluster = next((d for d in (cluster.get("domains") or []) if d.get("domain") == proj.domain), {})
+            page = _lookup_url(page_lookup, row.get("url"))
+            page_type_row = _lookup_url(page_type_lookup, row.get("url"))
+            page_type = page_type_row.get("page_type") or domain_cluster.get("page_type") or page.get("section") or ""
+            intents = list(domain_cluster.get("intents") or cluster.get("intents") or [])
+            for intent in intents:
+                intent_filter[str(intent)] += 1
+            if page_type:
+                page_type_filter[page_type] += 1
+            archetype = classify_archetype(row.get("label") or "", _safe_int(row.get("paragraph_index"), -1))
+            key = (cluster_key, archetype)
+            stats = by_key[key].setdefault(proj.domain, {
+                "domain": proj.domain,
+                "cluster": cluster_key,
+                "cluster_label": cluster.get("cluster_label") or cluster_key,
+                "archetype": archetype,
+                "label": archetype_defs.get(archetype, archetype),
+                "count": 0,
+                "traffic": 0,
+                "page_types": Counter(),
+                "intents": Counter(),
+                "examples": [],
+            })
+            stats["count"] += 1
+            stats["traffic"] += _safe_int(row.get("traffic"))
+            if page_type:
+                stats["page_types"][page_type] += 1
+            for intent in intents:
+                stats["intents"][str(intent)] += 1
+            if len(stats["examples"]) < 6:
+                stats["examples"].append({
+                    "url": row.get("url") or "",
+                    "title": page.get("title") or row.get("url") or "",
+                    "paragraph_index": row.get("paragraph_index"),
+                    "excerpt": str(row.get("label") or "")[:260],
+                    "traffic": _safe_int(row.get("traffic")),
+                    "page_type": page_type,
+                })
+            timeline_key = (proj.domain, row.get("url") or "")
+            timeline = page_timeline.setdefault(timeline_key, {
+                "domain": proj.domain,
+                "cluster": cluster_key,
+                "cluster_label": cluster.get("cluster_label") or cluster_key,
+                "url": row.get("url") or "",
+                "title": page.get("title") or row.get("url") or "",
+                "page_type": page_type,
+                "intents": intents[:6],
+                "traffic": _safe_int(row.get("traffic")),
+                "segments": [],
+            })
+            timeline["traffic"] = max(_safe_int(timeline.get("traffic")), _safe_int(row.get("traffic")))
+            if len(timeline["segments"]) < 30:
+                timeline["segments"].append({
+                    "paragraph_index": row.get("paragraph_index"),
+                    "archetype": archetype,
+                    "label": archetype_defs.get(archetype, archetype),
+                    "excerpt": str(row.get("label") or "")[:220],
+                })
+
+    for timeline in page_timeline.values():
+        timeline["segments"].sort(key=lambda r: _safe_int(r.get("paragraph_index")))
+        timelines.append(timeline)
+    timelines.sort(key=lambda r: (_safe_int(r.get("traffic")), len(r.get("segments") or [])), reverse=True)
+
+    matrix = []
+    recommendations: list[dict] = []
+    for (cluster_key, archetype), values in by_key.items():
+        cluster = cluster_lookup.get(cluster_key) or {}
+        leader_domain = cluster.get("winner_domain") or max(values.values(), key=lambda r: (_safe_int(r.get("traffic")), _safe_int(r.get("count")))).get("domain")
+        source = values.get(leader_domain) or max(values.values(), key=lambda r: (_safe_int(r.get("traffic")), _safe_int(r.get("count"))))
+        row_domains = []
+        for domain in domains:
+            current = values.get(domain)
+            if current:
+                current = dict(current)
+                current["page_types"] = [key for key, _ in current["page_types"].most_common(6)]
+                current["intents"] = [key for key, _ in current["intents"].most_common(6)]
+                current["covered"] = True
+                row_domains.append(current)
+                continue
+            target_cluster = next((d for d in (cluster.get("domains") or []) if d.get("domain") == domain), {})
+            traffic_opp = max(0, _safe_int(source.get("traffic")) - _safe_int(target_cluster.get("traffic")))
+            missing = {
+                "domain": domain,
+                "cluster": cluster_key,
+                "cluster_label": cluster.get("cluster_label") or cluster_key,
+                "archetype": archetype,
+                "label": archetype_defs.get(archetype, archetype),
+                "count": 0,
+                "traffic": 0,
+                "page_types": [],
+                "intents": list(target_cluster.get("intents") or [])[:6],
+                "examples": [],
+                "covered": False,
+                "traffic_opportunity": traffic_opp,
+            }
+            row_domains.append(missing)
+            if traffic_opp > 0 or _safe_int(target_cluster.get("traffic")) > 0:
+                confidence = round(min(0.92, 0.42 + min(0.18, math.log1p(traffic_opp) / 45.0) + min(0.18, _safe_int(source.get("count")) * 0.05) + 0.14), 3)
+                priority = round(min(100.0, math.log1p(traffic_opp) * 9.0 + confidence * 34.0 + min(20.0, _safe_int(source.get("count")) * 5.0)), 2)
+                recommendations.append({
+                    "cluster": cluster_key,
+                    "cluster_label": cluster.get("cluster_label") or cluster_key,
+                    "archetype": archetype,
+                    "label": archetype_defs.get(archetype, archetype),
+                    "source_domain": source.get("domain"),
+                    "source_examples": (source.get("examples") or [])[:4],
+                    "target_domain": domain,
+                    "target_url": (target_cluster.get("top_pages") or [{}])[0].get("url") or "",
+                    "target_title": (target_cluster.get("top_pages") or [{}])[0].get("title") or "",
+                    "traffic_opportunity": traffic_opp,
+                    "priority_score": priority,
+                    "confidence": confidence,
+                    "action": f"Add a {archetype_defs.get(archetype, archetype).lower()} section that matches the intent of the stronger page without copying wording.",
+                })
+        total_count = sum(_safe_int(d.get("count")) for d in row_domains)
+        total_traffic = sum(_safe_int(d.get("traffic")) for d in row_domains)
+        matrix.append({
+            "cluster": cluster_key,
+            "cluster_label": cluster.get("cluster_label") or cluster_key,
+            "archetype": archetype,
+            "label": archetype_defs.get(archetype, archetype),
+            "winner_domain": leader_domain,
+            "total_count": total_count,
+            "total_traffic": total_traffic,
+            "page_types": sorted({pt for d in row_domains for pt in (d.get("page_types") or [])}),
+            "intents": sorted({intent for d in row_domains for intent in (d.get("intents") or [])}),
+            "domains": row_domains,
+        })
+
+    matrix.sort(key=lambda r: (cluster_order.get(r.get("cluster"), 9999), -_safe_int(r.get("total_traffic")), r.get("archetype") or ""))
+    recommendations.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("confidence"))), reverse=True)
+    return {
+        "summary": {
+            "matrix_rows": len(matrix),
+            "recommendations": len(recommendations),
+            "timelines": len(timelines),
+        },
+        "archetypes": [{"key": key, "label": label} for key, label in archetype_defs.items()],
+        "filters": {
+            "page_types": [key for key, _ in page_type_filter.most_common(30)],
+            "intents": [key for key, _ in intent_filter.most_common(30)],
+        },
+        "matrix": matrix[:220],
+        "recommendations": recommendations[:400],
+        "timelines": timelines[:220],
+    }
+
+
 def _serp_feature_payload(projects: list[_Project]) -> dict:
     by_feature: dict[str, dict[str, dict]] = {}
     for proj in projects:
@@ -4112,6 +4357,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         keyword_cluster_gaps,
         winning_patterns,
     )
+    paragraph_archetypes = _paragraph_archetype_comparison(projects, strongest_clusters)
 
     return {
         "domains": [p.domain for p in projects],
@@ -4138,6 +4384,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "strongest_clusters": strongest_clusters,
         "winning_patterns": winning_patterns,
         "keyword_content_matrix": keyword_content_matrix,
+        "paragraph_archetypes": paragraph_archetypes,
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

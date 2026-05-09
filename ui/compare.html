@@ -538,6 +538,37 @@
       </div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="paragraph-archetype-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Paragraph archetype comparison</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Section archetypes found in ranking pages, compared by keyword cluster and domain with missing-section recommendations.
+        </p>
+      </div>
+      <div class="flex flex-wrap items-end gap-3 mb-4 text-xs">
+        <label class="block">
+          <span class="block font-medium text-gray-600 mb-1">Page type</span>
+          <select id="archetype-page-type" class="w-48 rounded border border-gray-300 px-2 py-1"></select>
+        </label>
+        <label class="block">
+          <span class="block font-medium text-gray-600 mb-1">Intent</span>
+          <select id="archetype-intent" class="w-48 rounded border border-gray-300 px-2 py-1"></select>
+        </label>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Archetype coverage matrix</h3>
+          <p class="text-xs text-gray-500 mb-2">Rows combine keyword cluster and section type; darker cells have more matching paragraph examples.</p>
+          <div id="paragraph-archetype-matrix" class="w-full overflow-x-auto" style="min-height: 430px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Timeline and recommendations</h3>
+          <p class="text-xs text-gray-500 mb-2">Click a matrix cell to compare page section sequences and missing archetype examples.</p>
+          <div id="paragraph-archetype-detail" class="text-xs border border-gray-100 rounded p-3 bg-gray-50 min-h-[430px]"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Competitive opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="opportunity-section">
       <div class="mb-4">
@@ -2581,10 +2612,162 @@
     `;
   }
 
+  function renderParagraphArchetypes() {
+    const section = document.getElementById('paragraph-archetype-section');
+    if (!section) return;
+    const payload = data.paragraph_archetypes || {};
+    if (!((payload.matrix || []).length)) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const filters = payload.filters || {};
+    const pageTypeSelect = document.getElementById('archetype-page-type');
+    const intentSelect = document.getElementById('archetype-intent');
+    if (pageTypeSelect && !pageTypeSelect.dataset.ready) {
+      pageTypeSelect.dataset.ready = '1';
+      pageTypeSelect.innerHTML = '<option value="">All page types</option>' + (filters.page_types || []).map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+      pageTypeSelect.addEventListener('change', drawParagraphArchetypeMatrix);
+    }
+    if (intentSelect && !intentSelect.dataset.ready) {
+      intentSelect.dataset.ready = '1';
+      intentSelect.innerHTML = '<option value="">All intents</option>' + (filters.intents || []).map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+      intentSelect.addEventListener('change', drawParagraphArchetypeMatrix);
+    }
+    drawParagraphArchetypeMatrix();
+  }
+
+  function filteredParagraphArchetypeRows() {
+    const rows = ((data.paragraph_archetypes || {}).matrix || []);
+    const pageType = (document.getElementById('archetype-page-type') || {}).value || '';
+    const intent = (document.getElementById('archetype-intent') || {}).value || '';
+    return rows.filter(row => {
+      if (pageType && !(row.page_types || []).includes(pageType)) return false;
+      if (intent && !(row.intents || []).includes(intent)) return false;
+      return true;
+    }).slice(0, 75);
+  }
+
+  function drawParagraphArchetypeMatrix() {
+    const container = document.getElementById('paragraph-archetype-matrix');
+    if (!container) return;
+    const rows = filteredParagraphArchetypeRows();
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-14">No archetypes match the filters.</div>';
+      document.getElementById('paragraph-archetype-detail').innerHTML = '<div class="text-gray-500 text-center py-14">Adjust filters to inspect archetypes.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 124;
+    const cellH = 31;
+    const left = 240;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 44;
+    const maxCount = d3.max(rows.flatMap(row => (row.domains || []).map(d => Number(d.count || 0)))) || 1;
+    const color = d3.scaleSequential(d3.interpolatePuBuGn).domain([0, maxCount]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 14).style('font-size', '10px').style('fill', '#111827')
+        .text(String(row.label || row.archetype || '').slice(0, 26));
+      svg.append('text').attr('x', 0).attr('y', y + 27).style('font-size', '9px').style('fill', '#6b7280')
+        .text(String(row.cluster_label || row.cluster || '').slice(0, 38));
+      domains.forEach((domain, di) => {
+        const cell = (row.domains || []).find(d => d.domain === domain) || {};
+        const count = Number(cell.count || 0);
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', count ? color(count) : '#f3f4f6').attr('rx', 2)
+          .attr('stroke', cell.covered === false ? '#d97706' : 'none').attr('stroke-width', cell.covered === false ? 1 : 0)
+          .style('cursor', 'pointer')
+          .on('click', () => {
+            data._paragraphArchetypeSelected = { row, cell };
+            renderParagraphArchetypeDetail();
+          })
+          .append('title').text(`${domain} · ${row.cluster_label} · ${row.label}\ncount ${count.toLocaleString()}\ntraffic ${Number(cell.traffic || 0).toLocaleString()}`);
+        if (count) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', count > maxCount * 0.55 ? 'white' : '#111827')
+            .text(`${count} · ${Number(cell.traffic || 0).toLocaleString()}`);
+        }
+      });
+    });
+    if (!data._paragraphArchetypeSelected || !rows.includes(data._paragraphArchetypeSelected.row)) {
+      data._paragraphArchetypeSelected = { row: rows[0], cell: (rows[0].domains || [])[0] || {} };
+    }
+    renderParagraphArchetypeDetail();
+  }
+
+  function renderParagraphArchetypeDetail() {
+    const root = document.getElementById('paragraph-archetype-detail');
+    if (!root) return;
+    const selected = data._paragraphArchetypeSelected || {};
+    const row = selected.row || {};
+    const cell = selected.cell || {};
+    if (!row.cluster) {
+      root.innerHTML = '<div class="text-gray-500 text-center py-14">Select an archetype cell.</div>';
+      return;
+    }
+    const timelines = ((data.paragraph_archetypes || {}).timelines || [])
+      .filter(t => t.cluster === row.cluster)
+      .slice(0, 6);
+    const recs = ((data.paragraph_archetypes || {}).recommendations || [])
+      .filter(r => r.cluster === row.cluster && r.archetype === row.archetype)
+      .slice(0, 8);
+    const examples = (cell.examples || []).slice(0, 5).map(ex => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(ex.url || '#')}" target="_blank" rel="noopener">${escapeHtml(ex.title || ex.url || '')}</a>
+        <div class="text-gray-600">${escapeHtml(truncateMiddle(ex.excerpt || '', 120))}</div>
+      </div>
+    `).join('') || '<div class="text-gray-500 py-2">No examples on this domain.</div>';
+    const recHtml = recs.map(rec => `
+      <div class="border-b border-gray-100 py-2">
+        <div class="font-medium">${escapeHtml(rec.target_domain || '')} · priority ${Number(rec.priority_score || 0).toFixed(1)} · confidence ${Number(rec.confidence || 0).toFixed(2)}</div>
+        <div class="text-gray-600">${escapeHtml(rec.action || '')}</div>
+        ${(rec.source_examples || []).slice(0, 2).map(ex => `<a class="block text-blue-600 hover:underline break-all" href="${escapeHtml(ex.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(ex.excerpt || ex.title || ex.url || '', 96))}</a>`).join('')}
+      </div>
+    `).join('') || '<div class="text-gray-500 py-2">No missing-archetype recommendations.</div>';
+    const timelineHtml = timelines.map(t => `
+      <div class="bg-white border border-gray-200 rounded p-2 mb-2">
+        <div class="font-medium"><span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${domainColor(t.domain)}"></span>${escapeHtml(t.domain)}</div>
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(t.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(t.title || t.url || '', 70))}</a>
+        <div class="flex flex-wrap gap-1 mt-2">
+          ${(t.segments || []).slice(0, 16).map(seg => `<span class="inline-flex rounded bg-gray-100 px-2 py-1" title="${escapeHtml(seg.excerpt || '')}">${escapeHtml(seg.label || seg.archetype || '')}</span>`).join('')}
+        </div>
+      </div>
+    `).join('') || '<div class="text-gray-500 py-2">No timelines for this cluster.</div>';
+    root.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-wide text-gray-500">${escapeHtml(cell.domain || '')}</div>
+          <h4 class="text-sm font-semibold">${escapeHtml(row.label || row.archetype || '')}</h4>
+          <div class="text-gray-500">${escapeHtml(row.cluster_label || row.cluster || '')}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-semibold">${Number(cell.count || 0).toLocaleString()}</div>
+          <div class="text-[10px] text-gray-500">paragraphs</div>
+        </div>
+      </div>
+      <h5 class="font-semibold mb-1">Examples On Selected Domain</h5>
+      <div class="bg-white border border-gray-200 rounded px-3 mb-3">${examples}</div>
+      <h5 class="font-semibold mb-1">Page Section Timelines</h5>
+      ${timelineHtml}
+      <h5 class="font-semibold mb-1 mt-3">Missing Archetype Recommendations</h5>
+      <div class="bg-white border border-gray-200 rounded px-3">${recHtml}</div>
+    `;
+  }
+
   renderSearchDemand();
   renderStrongestClusters();
   renderWinningPatterns();
   renderKeywordContentMatrix();
+  renderParagraphArchetypes();
 
   // ============================================================
   // Competitive opportunity comparisons

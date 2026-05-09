@@ -33,10 +33,16 @@ def _write_report(
 def _write_semantic_cache(root: Path, domain: str) -> None:
     cache_dir = root / domain / "cache" / "ahrefs"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    paragraph = (
+        "What is support automation? It routes tickets, answers common questions, and gives teams a repeatable workflow."
+        if domain.startswith("strong")
+        else "Support automation software helps teams organize requests and improve customer service workflows."
+    )
     rows = [
         {"type": "link_title", "label": f"{domain} anchor", "count": 4, "size": 4},
         {"type": "header", "label": f"{domain} H1", "url": f"https://{domain}/a", "cluster": "support", "level": 1, "traffic": 20, "size": 10},
         {"type": "page_title", "label": f"{domain} title", "url": f"https://{domain}/a", "cluster": "support", "traffic": 20, "size": 20},
+        {"type": "paragraph", "label": paragraph, "url": f"https://{domain}/a", "cluster": "support", "paragraph_index": 0, "traffic": 20, "size": 20},
     ]
     (cache_dir / "semantic_entities_test_model.meta.json").write_text(
         json.dumps(rows),
@@ -44,7 +50,7 @@ def _write_semantic_cache(root: Path, domain: str) -> None:
     )
     np.savez_compressed(
         cache_dir / "semantic_entities_test_model.npz",
-        embeddings=np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]], dtype=np.float32),
+        embeddings=np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7], [0.3, 0.9]], dtype=np.float32),
     )
 
 
@@ -188,6 +194,9 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert matrix_cell["components"]["headings"] >= 0
     assert matrix_cell["missing"]
     assert any(cell["recommendations"] for cell in payload["keyword_content_matrix"]["cells"])
+    assert payload["paragraph_archetypes"]["matrix"]
+    assert payload["paragraph_archetypes"]["timelines"]
+    assert payload["paragraph_archetypes"]["recommendations"][0]["source_examples"]
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
