@@ -554,6 +554,16 @@
           </table>
         </div>
       </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">High-impact contextual links</h3>
+        <p class="text-xs text-gray-500 mb-2">Main-content links with strongest paragraph relevance, paragraph impact, authority, and anchor fit.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="contextual-link-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <div>
         <h3 class="text-sm font-semibold mb-1">High-traffic readiness gaps</h3>
         <p class="text-xs text-gray-500 mb-2">Traffic-weighted pages where GEO, schema, metadata, freshness, conversion, or internal-link readiness is weak.</p>
@@ -898,6 +908,8 @@
       { key: 'avg_link_addition_benefit', label: 'Addition benefit', better: 'high', fmt: '0.0' },
       { key: 'anchor_relevance_descriptive_rate', label: 'Anchor relevance', better: 'high', fmt: 'pct' },
       { key: 'anchor_relevance_weak_links', label: 'Weak anchors', better: 'low', fmt: 'int' },
+      { key: 'contextual_link_avg_impact', label: 'Context impact', better: 'high', fmt: '0.0' },
+      { key: 'contextual_template_links', label: 'Template links', better: 'low', fmt: 'int' },
     ],
     metadata: [
       { key: 'pages',                   label: 'Pages', better: 'na', fmt: 'int' },
@@ -1856,6 +1868,7 @@
     renderLinkRemovalCriticalTable();
     renderLinkAdditionTable();
     renderAnchorRelevanceTable();
+    renderContextualLinkTable();
     renderReadinessGapTable();
   }
 
@@ -2314,6 +2327,34 @@
         <td class="px-2 py-1.5 font-mono">${escapeHtml(r.anchor || '(empty)')}</td>
         <td class="px-2 py-1.5 font-mono">${escapeHtml(r.suggested_anchor || '')}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.score || 0).toFixed(1)}</td>
+      </tr>`).join('');
+  }
+
+  function renderContextualLinkTable() {
+    const tbl = document.getElementById('contextual-link-table');
+    if (!tbl) return;
+    const rows = ((data.contextual_link_impact || {}).top_contextual_links || []).slice(0, 90);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Source -> target</th>
+        <th class="px-2 py-2 text-left">Paragraph</th>
+        <th class="px-2 py-2 text-right">Impact</th>
+        <th class="px-2 py-2 text-right">Context</th>
+        <th class="px-2 py-2 text-right">Authority</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No contextual links.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100 align-top">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.source_title || r.source_url || '', 44))}</a><div><a class="text-blue-600 hover:underline" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.target_title || r.target_url || '', 44))}</a></div></td>
+        <td class="px-2 py-1.5"><span class="text-gray-500">para ${r.paragraph_index == null ? 'n/a' : Number(r.paragraph_index).toLocaleString()}</span><div class="text-[11px] text-gray-600">${escapeHtml(truncateMiddle(r.paragraph_excerpt || r.context || '', 90))}</div></td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.contextual_link_impact || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.contextual_similarity || 0).toFixed(2)}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.structural_authority_score || 0).toFixed(1)}</td>
       </tr>`).join('');
   }
 

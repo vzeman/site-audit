@@ -1205,6 +1205,7 @@ def link_flow_payload(
     page_types: dict | None = None,
     traffic_authority: dict | None = None,
     link_removal: dict | None = None,
+    contextual_links: dict | None = None,
     max_nodes: int = 360,
     max_edges: int = 1600,
 ) -> dict:
@@ -1227,6 +1228,14 @@ def link_flow_payload(
         for row in (link_removal or {}).get("links", [])
         if row.get("source_url") and row.get("target_url")
     }
+    contextual_by_edge: dict[tuple[str, str], dict] = {}
+    for row in (contextual_links or {}).get("links", []):
+        key = (row.get("source_url"), row.get("target_url"))
+        if not key[0] or not key[1]:
+            continue
+        current = contextual_by_edge.get(key)
+        if current is None or float(row.get("contextual_link_impact", 0.0) or 0.0) > float(current.get("contextual_link_impact", 0.0) or 0.0):
+            contextual_by_edge[key] = row
     traffic_by_url: dict[str, dict] = {}
     for row in top_pages or []:
         url = row.get("matched_url") or row.get("url") or ""
@@ -1317,6 +1326,7 @@ def link_flow_payload(
             source_pr = float(result.pagerank.get(src, 0.0))
             target_traffic = float(traffic.get(tgt, 0.0))
             removal_row = removal_by_edge.get((src, tgt)) or {}
+            contextual_row = contextual_by_edge.get((src, tgt)) or {}
             flow_score = (
                 source_pr * 2.5
                 + float(result.hub_score.get(src, 0.0))
@@ -1334,6 +1344,8 @@ def link_flow_payload(
                 "removal_loss_score": round(float(removal_row.get("removal_loss_score", 0.0) or 0.0), 2),
                 "removal_classification": removal_row.get("classification", ""),
                 "placement": removal_row.get("placement", ""),
+                "contextual_link_impact": round(float(contextual_row.get("contextual_link_impact", 0.0) or 0.0), 2),
+                "context_type": contextual_row.get("context_type", ""),
             })
     edge_rows.sort(key=lambda r: r["score"], reverse=True)
     edge_rows = edge_rows[:max_edges]

@@ -1234,6 +1234,7 @@
           <option value="pagerank">Color: PageRank</option>
           <option value="cluster">Color: cluster</option>
           <option value="removal">Color: removal impact</option>
+          <option value="contextual">Color: contextual impact</option>
         </select>
       </div>
       <div id="linkflow-bundle" class="w-full" style="min-height: 780px;"></div>
@@ -1566,6 +1567,26 @@
       <div id="anchor-relevance-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm my-4"></div>
       <h4 class="text-sm font-semibold mb-2">Weak contextual anchors</h4>
       <div id="anchor-relevance-weak" class="text-xs max-h-[34rem] overflow-y-auto"></div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="contextual-link-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Contextual link impact</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Scores internal links by paragraph relevance, paragraph impact, structural authority, and anchor quality. Main-content links are separated from template/navigation links.
+        </p>
+      </div>
+      <div id="contextual-link-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">High-impact contextual links</h4>
+          <div id="contextual-link-top" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Strongest outbound source pages</h4>
+          <div id="contextual-link-sources" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+      </div>
     </div>
 
     <!-- External links -->
@@ -1989,6 +2010,7 @@
       renderDeep();
       renderClusterAuth();
       renderAnchors();
+      renderContextualLinks();
       renderExternal();
       renderImprovement();
       renderTitleMismatch();
@@ -5120,6 +5142,8 @@
     const prColor = d3.scaleSequential(d3.interpolateViridis).domain([0, prMax]);
     const impactMax = d3.max(edges, d => Number(d.removal_loss_score || 0)) || 1;
     const impactColor = d3.scaleSequential(d3.interpolateReds).domain([0, impactMax]);
+    const contextualMax = d3.max(edges, d => Number(d.contextual_link_impact || 0)) || 1;
+    const contextualColor = d3.scaleSequential(d3.interpolatePuBuGn).domain([0, contextualMax]);
     const clusters = Array.from(new Set(nodes.map(d => d.cluster || d.section || 'root'))).sort();
     const clusterColor = d3.scaleOrdinal().domain(clusters).range(d3.schemeTableau10.concat(d3.schemeSet3 || []));
     const nodeColor = d => colorMode === 'pagerank' ? prColor(Number(d.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.cluster || d.section || 'root') : trafficColor(Number(d.traffic || 0));
@@ -5155,8 +5179,8 @@
     const edgeLayer = svg.append('g').attr('fill', 'none');
     const path = edgeLayer.selectAll('path').data(bundledEdges).join('path')
       .attr('d', d => line(d.sourceNode.path(d.targetNode)))
-      .attr('stroke', d => colorMode === 'removal' ? impactColor(Number(d.removal_loss_score || 0)) : colorMode === 'pagerank' ? prColor(Number(d.targetNode.data.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.targetNode.data.cluster || d.targetNode.data.section || 'root') : trafficColor(Number(d.targetNode.data.traffic || 0)))
-      .attr('stroke-width', d => colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)))
+      .attr('stroke', d => colorMode === 'contextual' ? contextualColor(Number(d.contextual_link_impact || 0)) : colorMode === 'removal' ? impactColor(Number(d.removal_loss_score || 0)) : colorMode === 'pagerank' ? prColor(Number(d.targetNode.data.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.targetNode.data.cluster || d.targetNode.data.section || 'root') : trafficColor(Number(d.targetNode.data.traffic || 0)))
+      .attr('stroke-width', d => colorMode === 'contextual' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.contextual_link_impact || 0) / Math.max(1, contextualMax) * 3.2) : colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)))
       .attr('stroke-opacity', d => edgeOpacity(Number(d.targetNode.data.traffic || 0)))
       .style('mix-blend-mode', 'multiply')
       .on('mouseover', function(event, d) {
@@ -5165,14 +5189,14 @@
           `<strong>${escapeHtml(d.sourceNode.data.title || d.source)}</strong><br>` +
           `<span style="color:#bfdbfe">PR ${(Number(d.sourceNode.data.pagerank || 0) * 100).toFixed(3)} · out ${Number(d.sourceNode.data.out_degree || 0).toLocaleString()}</span><br>` +
           `→ <strong>${escapeHtml(d.targetNode.data.title || d.target)}</strong><br>` +
-          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)} · removal ${Number(d.removal_loss_score || 0).toFixed(1)} ${escapeHtml(d.removal_classification || '')}</span>`
+          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)} · removal ${Number(d.removal_loss_score || 0).toFixed(1)} ${escapeHtml(d.removal_classification || '')} · context ${Number(d.contextual_link_impact || 0).toFixed(1)} ${escapeHtml(d.context_type || '')}</span>`
         );
       })
       .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
       .on('mouseout', function(event, d) {
         d3.select(this)
           .attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0)))
-          .attr('stroke-width', colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)));
+          .attr('stroke-width', colorMode === 'contextual' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.contextual_link_impact || 0) / Math.max(1, contextualMax) * 3.2) : colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)));
         tooltip.style('visibility', 'hidden');
       });
 
@@ -5351,6 +5375,47 @@
         </div>
       `).join('') || '<div class="text-gray-500">No weak anchors found.</div>';
     }
+  }
+
+  function renderContextualLinks() {
+    const block = document.getElementById('contextual-link-block');
+    const payload = ((state.linkgraph || {}).contextual_link_impact || {});
+    const summary = payload.summary || {};
+    if (!summary.total_links) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('contextual-link-summary').innerHTML =
+      card('Avg context impact', Number(summary.avg_contextual_impact || 0).toFixed(1), '0-100') +
+      card('Main-content', Number(summary.main_content_links || 0).toLocaleString(), 'paragraph-matched links') +
+      card('High-impact', Number(summary.high_impact_contextual_links || 0).toLocaleString(), 'main content >=65') +
+      card('Weak context', Number(summary.weak_context_links || 0).toLocaleString(), 'low paragraph fit') +
+      card('Template/nav', Number(summary.template_links || 0).toLocaleString(), 'not editorial context');
+    document.getElementById('contextual-link-top').innerHTML =
+      (payload.top_contextual_links || []).slice(0, 140).map(r => `
+        <div class="py-2 border-b border-gray-100">
+          <div class="flex items-center justify-between gap-2">
+            <span class="px-1.5 py-0.5 rounded bg-green-50 text-green-700">${escapeHtml(r.context_type || '')}</span>
+            <span class="font-mono text-gray-600">${Number(r.contextual_link_impact || 0).toFixed(1)}</span>
+          </div>
+          <div class="mt-1">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+            <span class="text-gray-400"> -> </span>
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a>
+          </div>
+          <div class="text-gray-500 mt-1">para ${r.paragraph_index == null ? 'n/a' : Number(r.paragraph_index).toLocaleString()} · context ${Number(r.contextual_similarity || 0).toFixed(2)} · paragraph impact ${Number(r.paragraph_impact_score || 0).toFixed(1)} · authority ${Number(r.structural_authority_score || 0).toFixed(1)}</div>
+          <div class="text-gray-700 mt-1">${escapeHtml(r.paragraph_excerpt || r.context || '')}</div>
+        </div>
+      `).join('') || '<div class="text-gray-500">No high-impact contextual links.</div>';
+    document.getElementById('contextual-link-sources').innerHTML =
+      (payload.source_pages || []).slice(0, 100).map(r => `
+        <div class="py-2 border-b border-gray-100">
+          <a class="text-blue-600 hover:underline break-all font-medium" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+          <div class="text-gray-500 mt-1">avg ${Number(r.avg_contextual_impact || 0).toFixed(1)} · main ${Number(r.main_content_links || 0).toLocaleString()} · template ${Number(r.template_links || 0).toLocaleString()}</div>
+          <div class="mt-1">${(r.strongest_outbound_links || []).slice(0, 3).map(link => `<div><span class="font-mono text-gray-500">${Number(link.contextual_link_impact || 0).toFixed(1)}</span> <a class="text-blue-600 hover:underline" href="${escapeHtml(link.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(link.target_title || link.target_url)}</a></div>`).join('')}</div>
+        </div>
+      `).join('') || '<div class="text-gray-500">No source-page detail.</div>';
   }
 
   function renderExternal() {

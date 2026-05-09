@@ -55,6 +55,7 @@ from .content_quality import (
     wrong_home_paragraphs,
     wrong_home_payload,
 )
+from .contextual_links import build_contextual_link_impact
 from .conversion import analyze as analyze_conversion
 from .conversion import to_payload as conversion_payload
 from .conversion_balance import build_conversion_balance
@@ -1261,6 +1262,21 @@ def run(config: PipelineConfig) -> dict:
                 anchor_summary.get("weak_links", 0),
                 anchor_summary.get("empty_links", 0) + anchor_summary.get("image_only_links", 0),
             )
+        link_payload["contextual_link_impact"] = build_contextual_link_impact(
+            extracted_pages,
+            paragraph_records,
+            embeddings,
+            linkgraph=link_payload,
+            paragraph_impact=paragraph_impact_data,
+        )
+        context_summary = (link_payload.get("contextual_link_impact") or {}).get("summary", {}) or {}
+        if context_summary.get("status") == "ok":
+            LOG.info(
+                "  contextual link impact: %.1f avg · %d high-impact main-content · %d template",
+                context_summary.get("avg_contextual_impact", 0.0),
+                context_summary.get("high_impact_contextual_links", 0),
+                context_summary.get("template_links", 0),
+            )
         link_payload["link_flow"] = link_flow_payload(
             link_result,
             pages,
@@ -1268,6 +1284,7 @@ def run(config: PipelineConfig) -> dict:
             page_types=page_types_data,
             traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
             link_removal=link_payload.get("link_removal_simulation") or {},
+            contextual_links=link_payload.get("contextual_link_impact") or {},
         )
 
     # 12) Action plan: synthesise prioritised recommendations from the

@@ -482,6 +482,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "avg_link_addition_benefit", "label": "Addition benefit", "better": "high", "fmt": "0.0"},
             {"key": "anchor_relevance_descriptive_rate", "label": "Anchor relevance", "better": "high", "fmt": "pct"},
             {"key": "anchor_relevance_weak_links", "label": "Weak anchors", "better": "low", "fmt": "int"},
+            {"key": "contextual_link_avg_impact", "label": "Context link impact", "better": "high", "fmt": "0.0"},
+            {"key": "contextual_template_links", "label": "Template links", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -662,6 +664,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     removal = ((proj.linkgraph or {}).get("link_removal_simulation") or {}).get("summary", {}) or {}
     addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {}).get("summary", {}) or {}
     anchor_rel = ((proj.linkgraph or {}).get("anchor_relevance") or {}).get("summary", {}) or {}
+    context_links = ((proj.linkgraph or {}).get("contextual_link_impact") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -715,6 +718,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "avg_link_addition_benefit": float(addition.get("avg_expected_benefit", 0.0)),
         "anchor_relevance_descriptive_rate": float(anchor_rel.get("descriptive_rate", 0.0)),
         "anchor_relevance_weak_links": int(anchor_rel.get("weak_links", 0)),
+        "contextual_link_avg_impact": float(context_links.get("avg_contextual_impact", 0.0)),
+        "contextual_template_links": int(context_links.get("template_links", 0)),
+        "contextual_high_impact_links": int(context_links.get("high_impact_contextual_links", 0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2466,6 +2472,24 @@ def _anchor_relevance_comparison(projects: list[_Project]) -> dict:
     return {"domains": domains, "weak_links": weak_links[:400], "directories": matrix[:120]}
 
 
+def _contextual_link_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    top_links: list[dict] = []
+    source_pages: list[dict] = []
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("contextual_link_impact") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("top_contextual_links") or []:
+            top_links.append({"domain": proj.domain, **row})
+        for row in payload.get("source_pages") or []:
+            source_pages.append({"domain": proj.domain, **row})
+    top_links.sort(key=lambda r: _safe_float(r.get("contextual_link_impact")), reverse=True)
+    source_pages.sort(key=lambda r: _safe_float(r.get("avg_contextual_impact")), reverse=True)
+    return {"domains": domains, "top_contextual_links": top_links[:400], "source_pages": source_pages[:250]}
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2656,6 +2680,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "link_removal_simulation": _link_removal_comparison(projects),
         "link_addition_simulation": _link_addition_comparison(projects),
         "anchor_relevance": _anchor_relevance_comparison(projects),
+        "contextual_link_impact": _contextual_link_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

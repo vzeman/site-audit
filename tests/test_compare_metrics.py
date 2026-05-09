@@ -205,6 +205,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "weak_links": [],
                     "by_target_directory": [{"target_directory": "/blog/", "links": 2, "avg_score": 82, "descriptive_rate": 1.0, "weak_links": 0}],
                 },
+                "contextual_link_impact": {
+                    "summary": {"total_links": 2, "avg_contextual_impact": 78, "main_content_links": 2, "high_impact_contextual_links": 1, "template_links": 0},
+                    "top_contextual_links": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "target_url": alpha_url, "target_title": "AI workflow", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "contextual_link_impact": 88, "contextual_similarity": 0.8, "structural_authority_score": 70}],
+                    "source_pages": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "avg_contextual_impact": 78, "main_content_links": 2, "template_links": 0}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -254,6 +259,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "weak_links": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "target_url": beta_url, "target_title": "Automation tool", "anchor": "click here", "suggested_anchor": "Automation tool", "score": 22, "label": "vague"}],
                     "by_target_directory": [{"target_directory": "/blog/", "links": 2, "avg_score": 35, "descriptive_rate": 0.5, "weak_links": 1}],
                 },
+                "contextual_link_impact": {
+                    "summary": {"total_links": 2, "avg_contextual_impact": 40, "main_content_links": 1, "high_impact_contextual_links": 0, "template_links": 1},
+                    "top_contextual_links": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "target_url": beta_url, "target_title": "Automation tool", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "contextual_link_impact": 45, "contextual_similarity": 0.5, "structural_authority_score": 35}],
+                    "source_pages": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "avg_contextual_impact": 40, "main_content_links": 1, "template_links": 1}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -285,6 +295,8 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["leaderboard"][0]["high_priority_link_additions"] == 1
     assert payload["leaderboard"][0]["anchor_relevance_descriptive_rate"] == 1.0
     assert payload["anchor_relevance"]["weak_links"][0]["domain"] == "beta.example"
+    assert payload["leaderboard"][0]["contextual_link_avg_impact"] == 78
+    assert payload["contextual_link_impact"]["top_contextual_links"][0]["domain"] == "alpha.example"
     assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35
     assert payload["leaderboard"][1]["authority_traffic_alignment"] == 0.9
     assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url
