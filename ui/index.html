@@ -576,6 +576,27 @@
       <div id="paragraph-impact-table" class="text-xs max-h-[520px] overflow-y-auto"></div>
     </div>
 
+    <!-- Semantic ablation -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="semantic-ablation-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Semantic ablation</h3>
+        <p class="text-xs text-gray-500 mt-1" id="semantic-ablation-meta">
+          Removes one paragraph at a time virtually and measures whether the page becomes more or less aligned to its ranking-keyword topic.
+        </p>
+      </div>
+      <div id="semantic-ablation-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Topic carriers</h4>
+          <div id="semantic-ablation-carriers" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Noise candidates</h4>
+          <div id="semantic-ablation-noise" class="text-xs max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Cluster overlap heatmap -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="heatmap-block">
       <div class="mb-3">
@@ -1180,6 +1201,7 @@
 <script type="application/json" id="data-paragraph-scatter">__PARAGRAPH_SCATTER_JSON__</script>
 <script type="application/json" id="data-paragraph-fanout">__PARAGRAPH_FANOUT_JSON__</script>
 <script type="application/json" id="data-paragraph-impact">__PARAGRAPH_IMPACT_JSON__</script>
+<script type="application/json" id="data-semantic-ablation">__SEMANTIC_ABLATION_JSON__</script>
 <script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
 <script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
@@ -1280,6 +1302,7 @@
       const inlinedParaScatter = readInlined('data-paragraph-scatter');
       const inlinedFanout = readInlined('data-paragraph-fanout');
       const inlinedParagraphImpact = readInlined('data-paragraph-impact');
+      const inlinedSemanticAblation = readInlined('data-semantic-ablation');
       const inlinedTitleMismatch = readInlined('data-title-mismatch');
       const inlinedWrongHome = readInlined('data-wrong-home');
       const inlinedImprovement = readInlined('data-page-improvement');
@@ -1300,7 +1323,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1318,6 +1341,7 @@
         paraScatter = inlinedParaScatter || {};
         fanout = inlinedFanout || [];
         paragraphImpact = inlinedParagraphImpact || {};
+        semanticAblation = inlinedSemanticAblation || {};
         titleMismatch = inlinedTitleMismatch || [];
         wrongHome = inlinedWrongHome || [];
         improvement = inlinedImprovement || [];
@@ -1338,7 +1362,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1355,6 +1379,7 @@
           loadJSON('paragraph_scatter.json').catch(() => ({})),
           loadJSON('paragraph_fanout.json').catch(() => []),
           loadJSON('paragraph_impact.json').catch(() => ({})),
+          loadJSON('semantic_ablation.json').catch(() => ({})),
           loadJSON('title_mismatch.json').catch(() => []),
           loadJSON('wrong_home_paragraphs.json').catch(() => []),
           loadJSON('page_improvement.json').catch(() => []),
@@ -1393,6 +1418,7 @@
       state.paraScatter = paraScatter;
       state.fanout = fanout;
       state.paragraphImpact = paragraphImpact || {};
+      state.semanticAblation = semanticAblation || {};
       state.titleMismatch = titleMismatch;
       state.wrongHome = wrongHome;
       state.improvement = improvement;
@@ -1433,6 +1459,7 @@
       renderTreemap();
       renderAhrefs();
       renderParagraphImpact();
+      renderSemanticAblation();
       renderHeatmap();
       renderCoverage('all');
       renderIndexability();
@@ -2300,6 +2327,44 @@
           }).join('')}
         </tbody>
       </table>`;
+  }
+
+  function renderSemanticAblation() {
+    const block = document.getElementById('semantic-ablation-block');
+    const data = state.semanticAblation || {};
+    const summary = data.summary || {};
+    const carriers = data.topic_carriers || [];
+    const noise = data.noise_candidates || [];
+    if (!carriers.length && !noise.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('semantic-ablation-meta').textContent =
+      `${Number(summary.scored_paragraphs || 0).toLocaleString()} paragraphs scored across ${Number(summary.scored_pages || 0).toLocaleString()} pages · positive delta = topic carrier, negative delta = possible noise.`;
+    document.getElementById('semantic-ablation-summary').innerHTML =
+      card('topic carriers', Number(summary.topic_carriers || 0).toLocaleString(), 'removing them hurts topic alignment') +
+      card('noise candidates', Number(summary.noise_candidates || 0).toLocaleString(), 'removing them improves alignment') +
+      card('scored pages', Number(summary.scored_pages || 0).toLocaleString(), 'with 2+ paragraphs') +
+      card('target', escapeHtml(summary.provider || 'page embedding'), 'keyword centroid when available');
+
+    const list = rows => rows.slice(0, 80).map(r => {
+      const delta = Number(r.alignment_delta || 0);
+      const deltaClass = delta >= 0 ? 'text-emerald-700' : 'text-red-700';
+      const kws = (r.top_keywords || []).slice(0, 3).map(k => escapeHtml(k.keyword)).join(' · ');
+      return `<div class="border border-gray-100 rounded p-2 mb-2">
+        <div class="flex items-center justify-between gap-3">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono ${deltaClass}">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</span>
+        </div>
+        <div class="text-gray-500">para ${Number(r.paragraph_index || 0)} · full ${Number(r.full_alignment || 0).toFixed(3)} → without ${Number(r.without_alignment || 0).toFixed(3)} · self ${Number(r.self_alignment || 0).toFixed(3)}</div>
+        ${kws ? `<div class="text-gray-500">${kws}</div>` : ''}
+        <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
+      </div>`;
+    }).join('');
+
+    document.getElementById('semantic-ablation-carriers').innerHTML = carriers.length ? list(carriers) : '<div class="text-gray-500">No topic carriers above threshold.</div>';
+    document.getElementById('semantic-ablation-noise').innerHTML = noise.length ? list(noise) : '<div class="text-gray-500">No noise candidates above threshold.</div>';
   }
 
   function renderSections() {

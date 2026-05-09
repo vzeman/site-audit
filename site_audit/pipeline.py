@@ -100,6 +100,7 @@ from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
 from .scatter import project
+from .semantic_ablation import build_semantic_ablation
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 
@@ -148,6 +149,7 @@ class PipelineConfig:
     enable_paragraph_links: bool = True
     enable_paragraph_clustering: bool = True
     enable_paragraph_impact: bool = True
+    enable_semantic_ablation: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -545,6 +547,7 @@ def run(config: PipelineConfig) -> dict:
         config.enable_paragraph_links
         or config.enable_paragraph_clustering
         or config.enable_paragraph_impact
+        or config.enable_semantic_ablation
         or config.enable_content_quality
         or config.enable_paragraph_fanout
     ):
@@ -880,6 +883,26 @@ def run(config: PipelineConfig) -> dict:
         elif pi_summary:
             LOG.info("  paragraph impact: %s", pi_summary.get("status", "unavailable"))
 
+    semantic_ablation_data: dict = {}
+    if config.enable_semantic_ablation and paragraph_records:
+        semantic_ablation_data = build_semantic_ablation(
+            pages,
+            embeddings,
+            extracted_pages,
+            paragraph_records,
+            ahrefs_data,
+            embedder=embedder,
+        )
+        ab_summary = semantic_ablation_data.get("summary", {}) or {}
+        if ab_summary.get("status") == "ok":
+            LOG.info(
+                "  semantic ablation: %d topic carriers · %d noise candidates",
+                ab_summary.get("topic_carriers", 0),
+                ab_summary.get("noise_candidates", 0),
+            )
+        elif ab_summary:
+            LOG.info("  semantic ablation: %s", ab_summary.get("status", "unavailable"))
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -930,6 +953,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_scatter=paragraph_scatter_data,
         paragraph_fanout=paragraph_fanout_payload,
         paragraph_impact=paragraph_impact_data,
+        semantic_ablation=semantic_ablation_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -973,6 +997,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_scatter=paragraph_scatter_data,
             paragraph_fanout=paragraph_fanout_payload,
             paragraph_impact=paragraph_impact_data,
+            semantic_ablation=semantic_ablation_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,
