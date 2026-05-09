@@ -48,6 +48,7 @@ class _Project:
     answerability: list[dict]
     answer_blocks: dict
     cannibalization: dict
+    duplicate_fragments: dict
     page_link_counts: list[dict]
     linkgraph: dict
     link_flow: dict
@@ -116,6 +117,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     answerability = _load_json(report / "answerability.json", [])
     answer_blocks = _load_json(report / "answer_blocks.json", {})
     cannibalization = _load_json(report / "cannibalization.json", {})
+    duplicate_fragments = _load_json(report / "duplicate_fragments.json", {})
     linkgraph = _load_json(report / "linkgraph.json", {})
     paragraph_density = _load_json(report / "paragraph_density.json", {})
     recommendations = _load_json(report / "recommendations.json", {})
@@ -160,6 +162,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         answerability=answerability,
         answer_blocks=answer_blocks,
         cannibalization=cannibalization,
+        duplicate_fragments=duplicate_fragments,
         page_link_counts=page_link_counts,
         linkgraph=linkgraph if isinstance(linkgraph, dict) else {},
         link_flow=link_flow,
@@ -474,6 +477,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "topical_authority_score", "label": "Authority score", "better": "high", "fmt": "0.0"},
             {"key": "cannibalization_page_conflicts", "label": "Intent conflicts", "better": "low", "fmt": "int"},
             {"key": "cannibalization_paragraph_conflicts", "label": "Paragraph overlaps", "better": "low", "fmt": "int"},
+            {"key": "duplicate_fragment_groups", "label": "Duplicate fragments", "better": "low", "fmt": "int"},
+            {"key": "duplicate_strong_patterns", "label": "Reusable patterns", "better": "high", "fmt": "int"},
             {"key": "zero_link_paragraph_share", "label": "Zero-link paragraphs", "better": "low", "fmt": "pct"},
             {"key": "spammy_paragraph_count", "label": "Spammy paragraphs", "better": "low", "fmt": "int"},
         ],
@@ -628,6 +633,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
+    dupfrag = (proj.duplicate_fragments or {}).get("summary", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -710,6 +716,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "cannibalization_page_conflicts": int(cannibal.get("page_conflicts", 0)),
         "cannibalization_paragraph_conflicts": int(cannibal.get("paragraph_conflicts", 0)),
         "cannibalization_traffic_at_risk": int(cannibal.get("traffic_at_risk", 0)),
+        "duplicate_fragment_groups": int(dupfrag.get("groups", 0)),
+        "duplicate_strong_patterns": int(dupfrag.get("strong_patterns", 0)),
+        "duplicate_harmful_boilerplate": int(dupfrag.get("harmful_boilerplate", 0)),
         "cta_coverage": float(cv.get("cta_coverage", 0.0)),
         "primary_cta_coverage": float(cv.get("primary_cta_coverage", 0.0)),
         "form_coverage": float(cv.get("form_coverage", 0.0)),
@@ -1068,6 +1077,44 @@ def _cannibalization_comparison(projects: list[_Project]) -> dict:
     matrix.sort(key=lambda r: sum(_safe_int(d.get("traffic_at_risk")) + _safe_int(d.get("count")) for d in r["domains"]), reverse=True)
     conflicts.sort(key=lambda r: (_safe_int(r.get("traffic_at_risk")), _safe_int(r.get("traffic"))), reverse=True)
     return {"domains": domains, "classes": matrix, "conflicts": conflicts[:200]}
+
+
+def _duplicate_fragments_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    classes: dict[str, dict[str, dict]] = defaultdict(dict)
+    examples: list[dict] = []
+    for proj in projects:
+        payload = proj.duplicate_fragments or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        counts: dict[str, dict] = defaultdict(lambda: {"count": 0, "traffic": 0})
+        for row in payload.get("groups") or []:
+            cls = row.get("classification") or "unknown"
+            counts[cls]["count"] += 1
+            counts[cls]["traffic"] += _safe_int(row.get("attributed_traffic")) + _safe_int(row.get("page_traffic_sum"))
+            if len(examples) < 200:
+                examples.append({"domain": proj.domain, **row})
+        for cls, values in counts.items():
+            classes[cls][proj.domain] = {
+                "domain": proj.domain,
+                "classification": cls,
+                "count": values["count"],
+                "traffic": values["traffic"],
+            }
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for cls, values in classes.items():
+        matrix.append({
+            "classification": cls,
+            "domains": [
+                values.get(domain, {"domain": domain, "classification": cls, "count": 0, "traffic": 0})
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("count")) + _safe_int(d.get("traffic")) for d in r["domains"]), reverse=True)
+    examples.sort(key=lambda r: (_safe_int(r.get("attributed_traffic")) + _safe_int(r.get("page_traffic_sum")), _safe_int(r.get("count"))), reverse=True)
+    return {"domains": domains, "classes": matrix, "examples": examples[:200]}
 
 
 # --- competitive search/content opportunities ----------------------------
@@ -1722,6 +1769,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "answer_blocks": _answer_blocks_comparison(projects),
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),
+        "duplicate_fragments": _duplicate_fragments_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

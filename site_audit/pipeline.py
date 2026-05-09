@@ -39,6 +39,7 @@ from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
 from .cannibalization import build_cannibalization
+from .duplicate_fragments import build_duplicate_fragments
 from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .competitive_analysis import (
     compare_one as compare_competitor,
@@ -156,6 +157,7 @@ class PipelineConfig:
     enable_answer_blocks: bool = True
     enable_freshness_impact: bool = True
     enable_cannibalization: bool = True
+    enable_duplicate_fragments: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -571,6 +573,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_answer_blocks
         or config.enable_freshness_impact
         or config.enable_cannibalization
+        or config.enable_duplicate_fragments
         or config.enable_information_gain
         or config.enable_content_quality
         or config.enable_paragraph_fanout
@@ -1048,6 +1051,26 @@ def run(config: PipelineConfig) -> dict:
         elif cannibal_summary:
             LOG.info("  cannibalization: %s", cannibal_summary.get("status", "unavailable"))
 
+    duplicate_fragments_data: dict = {}
+    if config.enable_duplicate_fragments:
+        duplicate_fragments_data = build_duplicate_fragments(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            search_payload=ahrefs_data,
+            keyword_attribution=keyword_attribution_data,
+        )
+        df_summary = duplicate_fragments_data.get("summary", {}) or {}
+        if df_summary.get("status") == "ok":
+            LOG.info(
+                "  duplicate fragments: %d groups · %d strong patterns · %d harmful boilerplate",
+                df_summary.get("groups", 0),
+                df_summary.get("strong_patterns", 0),
+                df_summary.get("harmful_boilerplate", 0),
+            )
+        elif df_summary:
+            LOG.info("  duplicate fragments: %s", df_summary.get("status", "unavailable"))
+
     winning_paragraphs_data: dict = {}
     if paragraph_impact_data:
         winning_paragraphs_data = build_winning_paragraphs(
@@ -1167,6 +1190,7 @@ def run(config: PipelineConfig) -> dict:
         answer_blocks=answer_blocks_data,
         freshness_impact=freshness_impact_data,
         cannibalization=cannibalization_data,
+        duplicate_fragments=duplicate_fragments_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
@@ -1220,6 +1244,7 @@ def run(config: PipelineConfig) -> dict:
             answer_blocks=answer_blocks_data,
             freshness_impact=freshness_impact_data,
             cannibalization=cannibalization_data,
+            duplicate_fragments=duplicate_fragments_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,

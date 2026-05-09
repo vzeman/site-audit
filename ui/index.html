@@ -1082,6 +1082,31 @@
       </div>
     </div>
 
+    <!-- Duplicate fragments -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="duplicate-fragments-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Duplicate strong fragments</h3>
+        <p class="text-xs text-gray-500 mt-1" id="duplicate-fragments-meta">
+          Repeated paragraph fragments grouped into reusable patterns, main-content duplicates, and low-value boilerplate.
+        </p>
+      </div>
+      <div id="duplicate-fragments-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Duplicate fragment groups</h4>
+          <div id="duplicate-fragments-groups" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Pattern library</h4>
+          <div id="duplicate-fragments-patterns" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Boilerplate noise</h4>
+          <div id="duplicate-fragments-noise" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Link graph -->
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="linkgraph-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
@@ -1446,6 +1471,7 @@
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-answer-blocks">__ANSWER_BLOCKS_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
+<script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
 <script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
 <script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
@@ -1556,6 +1582,7 @@
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedAnswerBlocks = readInlined('data-answer-blocks');
       const inlinedCannibalization = readInlined('data-cannibalization');
+      const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
       const inlinedLinkgraph = readInlined('data-linkgraph');
       const inlinedExternal = readInlined('data-external');
       const inlinedParaLinks = readInlined('data-paragraph-links');
@@ -1592,7 +1619,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1604,6 +1631,7 @@
         answerability = inlinedAnswerability || [];
         answerBlocks = inlinedAnswerBlocks || {};
         cannibalization = inlinedCannibalization || {};
+        duplicateFragments = inlinedDuplicateFragments || {};
         linkgraph = inlinedLinkgraph || {};
         external = inlinedExternal || {};
         paraLinks = inlinedParaLinks || [];
@@ -1640,7 +1668,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1651,6 +1679,7 @@
           loadJSON('answerability.json').catch(() => []),
           loadJSON('answer_blocks.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
+          loadJSON('duplicate_fragments.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
           loadJSON('external_links.json').catch(() => ({})),
           loadJSON('paragraph_link_recommendations.json').catch(() => []),
@@ -1699,6 +1728,7 @@
       state.answerability = answerability;
       state.answerBlocks = answerBlocks || {};
       state.cannibalization = cannibalization || {};
+      state.duplicateFragments = duplicateFragments || {};
       state.linkgraph = linkgraph;
       state.external = external;
       state.paraLinks = paraLinks;
@@ -1775,6 +1805,7 @@
       renderAnswerability();
       renderAnswerBlocks();
       renderCannibalization('all');
+      renderDuplicateFragments();
       renderLinkgraph();
       renderLinkFlow();
       renderLinkbuilding();
@@ -3716,6 +3747,48 @@
       b.dataset.bound = '1';
       b.addEventListener('click', () => renderCannibalization(b.dataset.cannibalFilter || 'all'));
     });
+  }
+
+  function renderDuplicateFragments() {
+    const block = document.getElementById('duplicate-fragments-block');
+    const data = state.duplicateFragments || {};
+    const summary = data.summary || {};
+    const groups = data.groups || [];
+    const patterns = data.pattern_library || [];
+    const noise = data.noise || [];
+    if (!groups.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('duplicate-fragments-meta').textContent =
+      `${Number(summary.groups || groups.length).toLocaleString()} repeated fragment groups across ${Number(summary.affected_urls || 0).toLocaleString()} affected URLs.`;
+    document.getElementById('duplicate-fragments-summary').innerHTML =
+      card('fragment groups', Number(summary.groups || 0).toLocaleString(), 'repeated paragraph/snippet clusters') +
+      card('strong patterns', Number(summary.strong_patterns || 0).toLocaleString(), 'reuse with page-specific context') +
+      card('harmful boilerplate', Number(summary.harmful_boilerplate || 0).toLocaleString(), 'prune, suppress, or rewrite') +
+      card('traffic fragments', Number(summary.traffic_in_repeated_fragments || 0).toLocaleString(), 'attributed keyword traffic');
+    const badge = cls => cls === 'strong_reusable_pattern' ? 'bg-green-100 text-green-800'
+      : cls === 'reusable_template' ? 'bg-emerald-100 text-emerald-800'
+      : cls === 'main_content_duplicate' ? 'bg-amber-100 text-amber-800'
+      : 'bg-red-100 text-red-800';
+    const renderGroup = row => {
+      const examples = (row.examples || []).slice(0, 4).map(ex =>
+        `<li><a class="text-blue-600 hover:underline" href="${escapeHtml(ex.url || '')}" target="_blank" rel="noopener">${escapeHtml(ex.title || ex.url || '')}</a> <span class="text-gray-400">traffic ${Number(ex.page_traffic || 0).toLocaleString()}</span></li>`
+      ).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <span class="px-1.5 py-0.5 rounded ${badge(row.classification)}">${escapeHtml(row.classification || '')}</span>
+          <span class="font-mono text-gray-600">${Number(row.count || 0)}x · ${Number(row.affected_urls || 0)} URLs</span>
+        </div>
+        <div class="text-gray-700 italic mt-1">"${escapeHtml(row.sample_text || '')}"</div>
+        <div class="text-gray-500 mt-1">specificity ${Number(row.specificity_score || 0).toFixed(2)} · cohesion ${Number(row.semantic_cohesion || 0).toFixed(2)} · ${escapeHtml(row.recommended_handling || '')}</div>
+        <ul class="list-disc list-inside text-gray-600 mt-1">${examples}</ul>
+      </div>`;
+    };
+    document.getElementById('duplicate-fragments-groups').innerHTML = groups.slice(0, 140).map(renderGroup).join('');
+    document.getElementById('duplicate-fragments-patterns').innerHTML = patterns.slice(0, 120).map(renderGroup).join('') || '<div class="text-gray-500">No reusable patterns found.</div>';
+    document.getElementById('duplicate-fragments-noise').innerHTML = noise.slice(0, 120).map(renderGroup).join('') || '<div class="text-gray-500">No boilerplate noise groups found.</div>';
   }
 
   function renderIndexability() {

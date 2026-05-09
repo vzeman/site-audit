@@ -39,6 +39,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--no-answer-blocks",
             "--no-freshness-impact",
             "--no-cannibalization",
+            "--no-duplicate-fragments",
         ]
     )
 
@@ -62,3 +63,4 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.no_answer_blocks is True
     assert args.no_freshness_impact is True
     assert args.no_cannibalization is True
+    assert args.no_duplicate_fragments is True

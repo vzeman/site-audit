@@ -529,6 +529,16 @@
       <div id="cannibalization-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="duplicate-fragments-compare-section">
+      <div class="mb-3">
+        <h2 class="text-xl font-semibold">Duplicate fragments by domain</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Repeated fragment classes across domains, split into reusable patterns and low-value boilerplate.
+        </p>
+      </div>
+      <div id="duplicate-fragments-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
+    </section>
+
     <!-- Distribution overlays -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -684,6 +694,7 @@
       { key: 'orphan_share',          label: 'Orphan share', better: 'low',  fmt: 'pct' },
       { key: 'descriptive_anchor_share', label: 'Descriptive anchors', better: 'high', fmt: 'pct' },
       { key: 'cannibalization_page_conflicts', label: 'Intent conflicts', better: 'low', fmt: 'int' },
+      { key: 'duplicate_fragment_groups', label: 'Dup fragments', better: 'low', fmt: 'int' },
       { key: 'pages_missing_h1_share',label: 'Missing H1',   better: 'low',  fmt: 'pct' },
       { key: 'spammy_paragraph_count',label: 'Spammy paras', better: 'low',  fmt: 'int' },
     ],
@@ -2117,6 +2128,51 @@
     });
   }
   renderCannibalizationCompare();
+
+  function renderDuplicateFragmentsCompare() {
+    const section = document.getElementById('duplicate-fragments-compare-section');
+    const container = document.getElementById('duplicate-fragments-compare');
+    const payload = data.duplicate_fragments || {};
+    const rows = payload.classes || [];
+    if (!rows.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    container.innerHTML = '';
+    const domains = data.domains || [];
+    const cellW = 130;
+    const cellH = 28;
+    const left = 190;
+    const top = 26;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 46;
+    const maxVal = d3.max(rows.flatMap(r => (r.domains || []).map(d => Number(d.count || 0)))) || 1;
+    const color = d3.scaleSequential(d3.interpolatePuBuGn).domain([0, maxVal]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 15)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 18).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.classification || '').replaceAll('_', ' ').slice(0, 34));
+      (row.domains || []).forEach((d, di) => {
+        const count = Number(d.count || 0);
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 4)
+          .attr('fill', count ? color(count) : '#f3f4f6').attr('rx', 2)
+          .append('title').text(`${d.domain} · ${row.classification}\ngroups ${count.toLocaleString()}\ntraffic ${Number(d.traffic || 0).toLocaleString()}`);
+        if (count) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 17)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', count > maxVal * 0.55 ? 'white' : '#111827')
+            .text(`${count} · ${Number(d.traffic || 0).toLocaleString()}`);
+        }
+      });
+    });
+  }
+  renderDuplicateFragmentsCompare();
 
   // ============================================================
   // Combined scatter
