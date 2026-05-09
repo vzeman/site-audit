@@ -79,6 +79,7 @@ from .freshness_impact import build_freshness_impact
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
+from .internal_link_patterns import build_internal_link_patterns
 from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
 from .indexability import analyze as analyze_indexability
@@ -1308,6 +1309,20 @@ def run(config: PipelineConfig) -> dict:
                 context_summary.get("avg_contextual_impact", 0.0),
                 context_summary.get("high_impact_contextual_links", 0),
                 context_summary.get("template_links", 0),
+            )
+        link_payload["internal_link_patterns"] = build_internal_link_patterns(
+            pages,
+            extracted_pages,
+            page_types=page_types_data,
+            linkgraph=link_payload,
+        )
+        pattern_summary = (link_payload.get("internal_link_patterns") or {}).get("summary", {}) or {}
+        if pattern_summary.get("status") == "ok":
+            LOG.info(
+                "  internal link patterns: %d patterns · %d weak-page recommendations · %.0f%% avg confidence",
+                pattern_summary.get("patterns", 0),
+                pattern_summary.get("recommendations", 0),
+                (pattern_summary.get("avg_confidence", 0.0) or 0.0) * 100,
             )
         link_payload["link_flow"] = link_flow_payload(
             link_result,

@@ -1636,6 +1636,29 @@
       </div>
     </div>
 
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="internal-link-patterns-block">
+      <div class="mb-3 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 class="text-lg font-semibold">Internal link pattern library</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            Source-type to target-type linking conventions mined from high-performing pages, with weak pages missing the same pattern.
+          </p>
+        </div>
+        <button id="internal-link-patterns-export" type="button" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Export CSV</button>
+      </div>
+      <div id="internal-link-patterns-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Highest-confidence patterns</h4>
+          <div id="internal-link-patterns-list" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Weak pages missing patterns</h4>
+          <div id="internal-link-patterns-recommendations" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- External links -->
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="external-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
@@ -2060,6 +2083,7 @@
       renderClusterAuth();
       renderAnchors();
       renderContextualLinks();
+      renderInternalLinkPatterns();
       renderExternal();
       renderImprovement();
       renderTitleMismatch();
@@ -5676,6 +5700,72 @@
           <div class="mt-1">${(r.strongest_outbound_links || []).slice(0, 3).map(link => `<div><span class="font-mono text-gray-500">${Number(link.contextual_link_impact || 0).toFixed(1)}</span> <a class="text-blue-600 hover:underline" href="${escapeHtml(link.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(link.target_title || link.target_url)}</a></div>`).join('')}</div>
         </div>
       `).join('') || '<div class="text-gray-500">No source-page detail.</div>';
+  }
+
+  function renderInternalLinkPatterns() {
+    const block = document.getElementById('internal-link-patterns-block');
+    const payload = ((state.linkgraph || {}).internal_link_patterns || {});
+    const summary = payload.summary || {};
+    const patterns = payload.patterns || [];
+    if (!patterns.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('internal-link-patterns-summary').innerHTML =
+      card('Patterns', Number(summary.patterns || patterns.length || 0).toLocaleString(), 'mined rules') +
+      card('Recommendations', Number(summary.recommendations || 0).toLocaleString(), 'weak pages missing rules') +
+      card('Avg confidence', `${((summary.avg_confidence || 0) * 100).toFixed(0)}%`, 'support + contrast') +
+      card('Internal links', Number(summary.total_links || 0).toLocaleString(), 'classified links') +
+      card('Source types', Number(summary.page_types_with_patterns || 0).toLocaleString(), 'with patterns');
+
+    document.getElementById('internal-link-patterns-list').innerHTML = patterns.slice(0, 120).map(p => {
+      const examples = (p.sample_links || []).slice(0, 3).map(link => `
+        <li><a class="text-blue-600 hover:underline" href="${escapeHtml(link.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(link.source_title || link.source_url || '', 42))}</a>
+        <span class="text-gray-400"> -> </span>
+        <a class="text-blue-600 hover:underline" href="${escapeHtml(link.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(link.target_title || link.target_url || '', 42))}</a>
+        <span class="font-mono text-gray-500"> "${escapeHtml(link.anchor || '')}"</span></li>
+      `).join('');
+      return `<div class="py-3 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-medium">${escapeHtml(p.inferred_rule || '')}</span>
+          <span class="font-mono text-gray-600">${((Number(p.confidence || 0)) * 100).toFixed(0)}%</span>
+        </div>
+        <div class="text-gray-500 mt-1">support ${Number(p.support_count || 0).toLocaleString()} · top ${(Number(p.top_rate || 0) * 100).toFixed(0)}% · weak ${(Number(p.weak_rate || 0) * 100).toFixed(0)}% · lift ${Number(p.lift_score_difference || 0).toFixed(1)}</div>
+        <div class="text-gray-500 mt-1">${escapeHtml(p.source_segment_mode || '')} · ${escapeHtml(p.source_cluster || '')} · ${escapeHtml(p.semantic_distance_bucket || '')}</div>
+        ${examples ? `<ul class="list-disc list-inside mt-1 text-gray-700 space-y-0.5">${examples}</ul>` : ''}
+      </div>`;
+    }).join('');
+
+    const recs = payload.recommendations || [];
+    document.getElementById('internal-link-patterns-recommendations').innerHTML = recs.slice(0, 140).map(r => {
+      const targets = (r.suggested_targets || []).slice(0, 3).map(t => `<a class="text-blue-600 hover:underline" href="${escapeHtml(t.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(t.title || t.url || '', 56))}</a>`).join(' · ');
+      return `<div class="py-3 border-b border-gray-100">
+        <a class="text-blue-600 hover:underline break-all font-medium" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+        <div class="text-gray-500 mt-1">${escapeHtml(r.source_page_type || '')} · ${escapeHtml(r.source_cluster || '')} · traffic ${Number(r.traffic || 0).toLocaleString()}</div>
+        <div class="font-medium mt-1">${escapeHtml(r.missing_pattern || '')}</div>
+        <div class="text-gray-700 mt-1">Anchor: <span class="font-mono bg-green-50 px-1 rounded">${escapeHtml(r.suggested_anchor || '')}</span></div>
+        <div class="text-gray-600 mt-1">${targets || 'No target candidates.'}</div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No weak pages missing mined patterns.</div>';
+
+    const btn = document.getElementById('internal-link-patterns-export');
+    if (btn && !btn.dataset.bound) {
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => exportInternalLinkPatternsCsv(patterns));
+    }
+  }
+
+  function exportInternalLinkPatternsCsv(rows) {
+    const fields = ['pattern_id','source_page_type','target_page_type','anchor_form','context_type','cluster_relation','directory_relation','depth_relation','semantic_distance_bucket','support_count','confidence','top_rate','weak_rate','lift_score_difference','inferred_rule'];
+    const csv = [fields.join(',')].concat((rows || []).map(r => fields.map(f => `"${String(r[f] == null ? '' : r[f]).replace(/"/g, '""')}"`).join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'internal_link_patterns.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function renderExternal() {

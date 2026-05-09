@@ -22,7 +22,7 @@ import logging
 import hashlib
 import re
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -487,6 +487,9 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "anchor_relevance_weak_links", "label": "Weak anchors", "better": "low", "fmt": "int"},
             {"key": "contextual_link_avg_impact", "label": "Context link impact", "better": "high", "fmt": "0.0"},
             {"key": "contextual_template_links", "label": "Template links", "better": "low", "fmt": "int"},
+            {"key": "internal_link_patterns", "label": "Link patterns", "better": "high", "fmt": "int"},
+            {"key": "internal_link_pattern_recommendations", "label": "Pattern gaps", "better": "low", "fmt": "int"},
+            {"key": "internal_link_pattern_confidence", "label": "Pattern confidence", "better": "high", "fmt": "pct"},
             {"key": "architecture_resilience", "label": "Architecture resilience", "better": "high", "fmt": "pct"},
             {"key": "bottleneck_pages", "label": "Bottlenecks", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
@@ -670,6 +673,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {}).get("summary", {}) or {}
     anchor_rel = ((proj.linkgraph or {}).get("anchor_relevance") or {}).get("summary", {}) or {}
     context_links = ((proj.linkgraph or {}).get("contextual_link_impact") or {}).get("summary", {}) or {}
+    link_patterns = ((proj.linkgraph or {}).get("internal_link_patterns") or {}).get("summary", {}) or {}
     hubs = ((proj.linkgraph or {}).get("hub_bottlenecks") or {}).get("summary", {}) or {}
     hdl = ((proj.linkgraph or {}).get("high_demand_low_link") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
@@ -731,6 +735,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "contextual_link_avg_impact": float(context_links.get("avg_contextual_impact", 0.0)),
         "contextual_template_links": int(context_links.get("template_links", 0)),
         "contextual_high_impact_links": int(context_links.get("high_impact_contextual_links", 0)),
+        "internal_link_patterns": int(link_patterns.get("patterns", 0)),
+        "internal_link_pattern_recommendations": int(link_patterns.get("recommendations", 0)),
+        "internal_link_pattern_confidence": float(link_patterns.get("avg_confidence", 0.0)),
         "architecture_resilience": float(hubs.get("architecture_resilience", 0.0)),
         "bottleneck_pages": int(hubs.get("bottleneck_pages", 0)),
         "bridge_pages": int(hubs.get("bridge_pages", 0)),
@@ -2583,6 +2590,87 @@ def _high_demand_low_link_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _internal_link_patterns_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    rules: dict[str, dict[str, dict]] = defaultdict(dict)
+    examples: list[dict] = []
+    recommendations: list[dict] = []
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("internal_link_patterns") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        buckets: dict[str, dict] = defaultdict(lambda: {
+            "label": "",
+            "count": 0,
+            "confidence_sum": 0.0,
+            "support_sum": 0,
+            "recommendations": 0,
+        })
+        rec_count_by_pattern = Counter(
+            row.get("pattern_id") for row in payload.get("recommendations") or [] if row.get("pattern_id")
+        )
+        for row in payload.get("patterns") or []:
+            key = row.get("rule_key") or row.get("inferred_rule") or "unknown"
+            bucket = buckets[key]
+            bucket["label"] = row.get("inferred_rule") or key
+            bucket["count"] += 1
+            bucket["confidence_sum"] += _safe_float(row.get("confidence"))
+            bucket["support_sum"] += _safe_int(row.get("support_count"))
+            bucket["recommendations"] += rec_count_by_pattern.get(row.get("pattern_id"), 0)
+            examples.append({"domain": proj.domain, **row})
+        for row in payload.get("recommendations") or []:
+            recommendations.append({"domain": proj.domain, **row})
+        for key, values in buckets.items():
+            count = max(1, values["count"])
+            rules[key][proj.domain] = {
+                "domain": proj.domain,
+                "rule_key": key,
+                "label": values["label"],
+                "count": values["count"],
+                "avg_confidence": values["confidence_sum"] / count,
+                "support_count": values["support_sum"],
+                "recommendations": values["recommendations"],
+            }
+
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for rule_key, values in rules.items():
+        label = next((v.get("label") for v in values.values() if v.get("label")), rule_key)
+        matrix.append({
+            "rule_key": rule_key,
+            "label": label,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "rule_key": rule_key,
+                    "label": label,
+                    "count": 0,
+                    "avg_confidence": 0.0,
+                    "support_count": 0,
+                    "recommendations": 0,
+                })
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(
+        key=lambda r: (
+            sum(_safe_int(d.get("count")) for d in r["domains"]),
+            sum(_safe_int(d.get("support_count")) for d in r["domains"]),
+            sum(_safe_float(d.get("avg_confidence")) for d in r["domains"]),
+        ),
+        reverse=True,
+    )
+    examples.sort(key=lambda r: (_safe_float(r.get("confidence")), _safe_int(r.get("support_count"))), reverse=True)
+    recommendations.sort(key=lambda r: (_safe_float(r.get("confidence")), _safe_float(r.get("lift_score_difference"))), reverse=True)
+    return {
+        "domains": domains,
+        "rules": matrix[:140],
+        "examples": examples[:250],
+        "recommendations": recommendations[:300],
+    }
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2775,6 +2863,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "anchor_relevance": _anchor_relevance_comparison(projects),
         "contextual_link_impact": _contextual_link_comparison(projects),
         "high_demand_low_link": _high_demand_low_link_comparison(projects),
+        "internal_link_patterns": _internal_link_patterns_comparison(projects),
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
