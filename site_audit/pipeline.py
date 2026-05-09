@@ -89,6 +89,7 @@ from .keyword_coverage import (
 )
 from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
+from .linkgraph import link_removal_simulation_payload
 from .linkgraph import link_flow_payload
 from .linkgraph import to_payload as linkgraph_payload
 from .linkgraph import traffic_weighted_pagerank_payload
@@ -1214,12 +1215,28 @@ def run(config: PipelineConfig) -> dict:
                 twpr_summary.get("high_traffic_low_authority_pages", 0),
                 twpr_summary.get("high_authority_low_value_pages", 0),
             )
+        link_payload["link_removal_simulation"] = link_removal_simulation_payload(
+            link_result,
+            pages,
+            embeddings,
+            paragraph_records,
+            traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
+        )
+        removal_summary = (link_payload.get("link_removal_simulation") or {}).get("summary", {}) or {}
+        if removal_summary.get("status") == "ok":
+            LOG.info(
+                "  link removal simulation: %d critical · %d weak/harmful · %d template/nav",
+                removal_summary.get("critical_links", 0),
+                removal_summary.get("irrelevant_links", 0) + removal_summary.get("potentially_harmful_links", 0),
+                removal_summary.get("template_navigation_links", 0),
+            )
         link_payload["link_flow"] = link_flow_payload(
             link_result,
             pages,
             (ahrefs_data.get("top_pages") or []) if ahrefs_data else [],
             page_types=page_types_data,
             traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
+            link_removal=link_payload.get("link_removal_simulation") or {},
         )
 
     # 12) Action plan: synthesise prioritised recommendations from the

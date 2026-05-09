@@ -476,6 +476,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "authority_traffic_alignment", "label": "Authority-demand alignment", "better": "high", "fmt": "pct"},
             {"key": "high_traffic_low_authority_pages", "label": "Underserved search pages", "better": "low", "fmt": "int"},
             {"key": "authority_without_demand_pages", "label": "Authority without demand", "better": "low", "fmt": "int"},
+            {"key": "critical_internal_links", "label": "Critical links", "better": "na", "fmt": "int"},
+            {"key": "weak_internal_links", "label": "Weak/harmful links", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -653,6 +655,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ah_summary = ah.get("summary", {}) or {}
     ah_metrics = ah.get("metrics", {}) or {}
     twpr = ((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("summary", {}) or {}
+    removal = ((proj.linkgraph or {}).get("link_removal_simulation") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -699,6 +702,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "high_traffic_low_authority_pages": int(twpr.get("high_traffic_low_authority_pages", 0)),
         "authority_without_demand_pages": int(twpr.get("high_authority_low_value_pages", 0)),
         "orphan_traffic_share": float(twpr.get("orphan_traffic_share", 0.0)),
+        "critical_internal_links": int(removal.get("critical_links", 0)),
+        "weak_internal_links": int(removal.get("irrelevant_links", 0)) + int(removal.get("potentially_harmful_links", 0)),
+        "template_navigation_links": int(removal.get("template_navigation_links", 0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2366,6 +2372,33 @@ def _traffic_weighted_pagerank_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _link_removal_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    critical: list[dict] = []
+    weak: list[dict] = []
+    warnings: list[dict] = []
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("link_removal_simulation") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("critical_links") or []:
+            critical.append({"domain": proj.domain, **row})
+        for row in payload.get("weak_or_harmful_links") or []:
+            weak.append({"domain": proj.domain, **row})
+        for row in payload.get("edit_warnings") or []:
+            warnings.append({"domain": proj.domain, **row})
+    critical.sort(key=lambda r: _safe_float(r.get("removal_loss_score")), reverse=True)
+    weak.sort(key=lambda r: _safe_float(r.get("removal_loss_score")), reverse=True)
+    warnings.sort(key=lambda r: (_safe_float(r.get("max_loss_score")), _safe_int(r.get("critical_links"))), reverse=True)
+    return {
+        "domains": domains,
+        "critical_links": critical[:300],
+        "weak_or_harmful_links": weak[:300],
+        "edit_warnings": warnings[:200],
+    }
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2553,6 +2586,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),
         "traffic_weighted_pagerank": _traffic_weighted_pagerank_comparison(projects),
+        "link_removal_simulation": _link_removal_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

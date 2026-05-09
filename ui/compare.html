@@ -524,6 +524,16 @@
           </table>
         </div>
       </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">Critical internal links</h3>
+        <p class="text-xs text-gray-500 mb-2">Links whose removal has the highest estimated authority and demand loss.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="link-removal-critical-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
       <div>
         <h3 class="text-sm font-semibold mb-1">High-traffic readiness gaps</h3>
         <p class="text-xs text-gray-500 mb-2">Traffic-weighted pages where GEO, schema, metadata, freshness, conversion, or internal-link readiness is weak.</p>
@@ -862,6 +872,8 @@
       { key: 'authority_traffic_alignment', label: 'Authority-demand', better: 'high', fmt: 'pct' },
       { key: 'high_traffic_low_authority_pages', label: 'Underserved search', better: 'low', fmt: 'int' },
       { key: 'authority_without_demand_pages', label: 'Unused authority', better: 'low', fmt: 'int' },
+      { key: 'critical_internal_links', label: 'Critical links', better: 'na', fmt: 'int' },
+      { key: 'weak_internal_links', label: 'Weak/harmful links', better: 'low', fmt: 'int' },
     ],
     metadata: [
       { key: 'pages',                   label: 'Pages', better: 'na', fmt: 'int' },
@@ -1817,6 +1829,7 @@
     drawAuthorityDemandScatter();
     renderAuthorityGapTable();
     renderUnusedAuthorityTable();
+    renderLinkRemovalCriticalTable();
     renderReadinessGapTable();
   }
 
@@ -2188,6 +2201,34 @@
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.in_degree || 0).toLocaleString()}</td>
         <td class="px-2 py-1.5 text-right font-mono">${r.click_depth == null ? '—' : r.click_depth}</td>
         <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+      </tr>`).join('');
+  }
+
+  function renderLinkRemovalCriticalTable() {
+    const tbl = document.getElementById('link-removal-critical-table');
+    if (!tbl) return;
+    const rows = ((data.link_removal_simulation || {}).critical_links || []).slice(0, 70);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Source</th>
+        <th class="px-2 py-2 text-left">Target</th>
+        <th class="px-2 py-2 text-left">Anchor</th>
+        <th class="px-2 py-2 text-right">Loss</th>
+        <th class="px-2 py-2 text-left">Placement</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No critical links.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.source_title || r.source_url || '', 48))}</a></td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(r.target_title || r.target_url || '', 48))}</a><div class="text-[11px] text-gray-500">traffic ${Number(r.target_traffic || 0).toLocaleString()}</div></td>
+        <td class="px-2 py-1.5 text-gray-600">${(r.anchor_samples || []).slice(0, 2).map(escapeHtml).join(' · ')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.removal_loss_score || 0).toFixed(1)}</td>
+        <td class="px-2 py-1.5">${escapeHtml(r.placement || '')}</td>
       </tr>`).join('');
   }
 

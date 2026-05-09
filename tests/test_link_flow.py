@@ -1,7 +1,7 @@
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, link_flow_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import analyze, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -23,12 +23,14 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
         search_payload={"top_pages": [{"matched_url": pages[1].url, "traffic": 1000, "keywords": 20, "top_keyword": "guide a", "cluster_label": "guides"}]},
         page_types={"per_page": [{"url": pages[1].url, "page_type": "article"}]},
     )
+    removal = link_removal_simulation_payload(result, pages, np.eye(3, dtype=np.float32), [], traffic_authority=authority)
     payload = link_flow_payload(
         result,
         pages,
         [{"matched_url": pages[1].url, "traffic": 1000, "keywords": 20, "top_keyword": "guide a", "cluster_label": "guides"}],
         page_types={"per_page": [{"url": pages[1].url, "page_type": "article"}]},
         traffic_authority=authority,
+        link_removal=removal,
         max_nodes=3,
         max_edges=10,
     )
@@ -40,7 +42,48 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
     assert traffic_node["cluster"] == "guides"
     assert traffic_node["page_type"] == "article"
     assert traffic_node["traffic_weighted_pagerank"] > 0
-    assert any(edge["source"] == pages[0].url and edge["target"] == pages[1].url and edge["weight"] == 2 for edge in payload["edges"])
+    target_edge = next(edge for edge in payload["edges"] if edge["source"] == pages[0].url and edge["target"] == pages[1].url)
+    assert target_edge["weight"] == 2
+    assert target_edge["removal_loss_score"] >= 0
+
+
+def test_link_removal_simulation_ranks_contextual_and_template_links() -> None:
+    pages = [
+        PageInfo(url="https://example.com/", title="Home", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/blog/demand", title="Demand guide", description="", section="blog", word_count=100, language="en"),
+        PageInfo(url="https://example.com/privacy", title="Privacy", description="", section="legal", word_count=100, language="en"),
+    ]
+    embeddings = np.array([
+        [1.0, 0.0, 0.0],
+        [0.95, 0.05, 0.0],
+        [0.0, 1.0, 0.0],
+    ], dtype=np.float32)
+    outlinks = [
+        (pages[0].url, [(pages[1].url, "demand guide"), (pages[2].url, "Privacy")]),
+        (pages[1].url, [(pages[0].url, "home")]),
+        (pages[2].url, [(pages[0].url, "home")]),
+    ]
+    result = analyze(pages, embeddings, outlinks, home_url=pages[0].url)
+    authority = traffic_weighted_pagerank_payload(
+        result,
+        pages,
+        embeddings,
+        search_payload={"top_pages": [{"matched_url": pages[1].url, "traffic": 1000, "keywords": 15, "top_keyword": "demand guide"}]},
+    )
+    paragraph_records = [
+        (0, 0, "This paragraph explains the demand guide and links to the important demand topic.", embeddings[1]),
+        (0, 1, "Footer legal navigation with privacy links.", embeddings[2]),
+    ]
+
+    payload = link_removal_simulation_payload(result, pages, embeddings, paragraph_records, traffic_authority=authority)
+
+    critical = payload["critical_links"][0]
+    assert critical["target_url"] == pages[1].url
+    assert critical["classification"] == "critical"
+    assert critical["placement"] == "contextual"
+    assert critical["paragraph_excerpt"]
+    assert any(row["placement"] == "template_navigation" for row in payload["links"])
+    assert payload["edit_warnings"][0]["source_url"] == pages[0].url
 
 
 def test_traffic_weighted_pagerank_flags_mismatches_and_nonindexable_search_pages() -> None:

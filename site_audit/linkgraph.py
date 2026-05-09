@@ -46,6 +46,7 @@ _GENERIC_ANCHORS = {
 @dataclass
 class LinkGraphResult:
     graph: dict[str, list[str]]
+    edge_anchor_texts: dict[tuple[str, str], list[str]]
     edge_anchor_count: dict[tuple[str, str], int]
     in_degree: dict[str, int]
     out_degree: dict[str, int]
@@ -524,6 +525,7 @@ def analyze(
 
     return LinkGraphResult(
         graph=graph,
+        edge_anchor_texts=anchors,
         edge_anchor_count={edge: len(labels) for edge, labels in anchors.items()},
         in_degree=dict(in_deg),
         out_degree=out_deg,
@@ -974,6 +976,227 @@ def traffic_weighted_pagerank_payload(
     }
 
 
+_NAV_LINK_RE = re.compile(r"\b(home|menu|login|sign in|account|cart|privacy|terms|contact|pricing|demo|about)\b", re.I)
+_NAV_TARGET_RE = re.compile(r"^/(login|sign-in|signin|account|cart|checkout|privacy|terms|legal|contact|about|pricing|demo)/?$", re.I)
+
+
+def _edge_placement(src: str, tgt: str, anchors: list[str], anchor_quality: float, relevance: float, target_in_degree: int) -> str:
+    try:
+        target_path = urlparse(tgt).path or "/"
+    except Exception:
+        target_path = "/"
+    anchor_blob = " ".join(anchors or [])
+    generic_or_nav = any(_is_generic_anchor(a) for a in anchors or []) or bool(_NAV_LINK_RE.search(anchor_blob))
+    if bool(_NAV_TARGET_RE.match(target_path)) or (generic_or_nav and target_in_degree >= 5 and relevance < 0.72):
+        return "template_navigation"
+    if anchor_quality >= 0.58 and relevance >= 0.62:
+        return "contextual"
+    if relevance < 0.45 or anchor_quality < 0.42:
+        return "weak_context"
+    return "mixed"
+
+
+def _classify_removal_link(score: float, placement: str, relevance: float, anchor_quality: float, target_traffic: int, target_in_degree: int) -> str:
+    if relevance < 0.38 and anchor_quality < 0.45:
+        return "potentially_harmful"
+    if score >= 70 and target_traffic > 0:
+        return "critical"
+    if score >= 35:
+        return "useful"
+    if placement == "template_navigation" or target_in_degree >= 8:
+        return "redundant"
+    if relevance < 0.5:
+        return "irrelevant"
+    return "useful" if score >= 18 else "redundant"
+
+
+def _best_paragraph_context(
+    source_idx: int,
+    target_idx: int,
+    paragraph_records: list[tuple[int, int, str, np.ndarray]] | None,
+    embeddings: np.ndarray | None,
+) -> dict:
+    if not paragraph_records or embeddings is None or target_idx < 0 or target_idx >= len(embeddings):
+        return {}
+    target_vec = embeddings[target_idx]
+    best: tuple[float, int, str] | None = None
+    for page_i, para_i, text, vec in paragraph_records:
+        if int(page_i) != source_idx:
+            continue
+        try:
+            score = float(np.clip(vec @ target_vec, -1.0, 1.0))
+        except Exception:
+            continue
+        if best is None or score > best[0]:
+            best = (score, int(para_i), str(text or ""))
+    if best is None:
+        return {}
+    excerpt = re.sub(r"\s+", " ", best[2]).strip()
+    return {
+        "paragraph_index": best[1],
+        "paragraph_fit": round(best[0], 4),
+        "paragraph_excerpt": excerpt[:260],
+    }
+
+
+def link_removal_simulation_payload(
+    result: LinkGraphResult,
+    pages,
+    embeddings: np.ndarray | None = None,
+    paragraph_records: list[tuple[int, int, str, np.ndarray]] | None = None,
+    *,
+    traffic_authority: dict | None = None,
+    max_candidates: int = 2500,
+    max_context_rows: int = 250,
+) -> dict:
+    if not result.graph:
+        return {"summary": {"status": "no_graph", "total_edges": 0}, "links": [], "critical_links": [], "edit_warnings": []}
+
+    page_by_url = {p.url: p for p in pages}
+    page_idx = {p.url: i for i, p in enumerate(pages)}
+    authority_by_url = {
+        row.get("url"): row
+        for row in (traffic_authority or {}).get("pages", [])
+        if row.get("url")
+    }
+    weights = _edge_weights(result)
+    out_weight_sum: dict[str, float] = {}
+    for src, targets in result.graph.items():
+        out_weight_sum[src] = sum(max(0.05, weights.get((src, tgt), 1.0)) for tgt in targets)
+
+    raw_rows: list[dict] = []
+    for src, targets in result.graph.items():
+        src_row = authority_by_url.get(src) or {}
+        src_pr = _safe_float(src_row.get("traffic_weighted_pagerank")) or _safe_float(result.pagerank.get(src))
+        src_standard_pr = _safe_float(result.pagerank.get(src))
+        src_traffic = _safe_int(src_row.get("traffic"))
+        for tgt in targets:
+            tgt_row = authority_by_url.get(tgt) or {}
+            edge = (src, tgt)
+            edge_weight = max(0.05, _safe_float(weights.get(edge, 1.0)))
+            share = edge_weight / max(0.05, out_weight_sum.get(src, 1.0))
+            anchor_quality = _safe_float(result.edge_anchor_quality.get(edge, 0.5))
+            relevance = _safe_float(result.edge_contextual_relevance.get(edge, 0.5))
+            target_traffic = _safe_int(tgt_row.get("traffic"))
+            target_keywords = _safe_int(tgt_row.get("keywords"))
+            target_gap = max(0.0, _safe_float(tgt_row.get("authority_traffic_gap")))
+            target_in_degree = _safe_int(result.in_degree.get(tgt))
+            direct_pr_loss = 0.85 * src_standard_pr * share
+            weighted_pr_loss = 0.85 * src_pr * share
+            demand_boost = 1.0 + math.log1p(target_traffic) + math.sqrt(target_keywords) * 0.2 + target_gap
+            quality_boost = 0.35 + anchor_quality * 0.35 + relevance * 0.3
+            source_boost = 1.0 + math.log1p(src_traffic) * 0.25
+            raw_loss = weighted_pr_loss * demand_boost * quality_boost * source_boost
+            anchors = result.edge_anchor_texts.get(edge, [])
+            placement = _edge_placement(src, tgt, anchors, anchor_quality, relevance, target_in_degree)
+            raw_rows.append({
+                "source_url": src,
+                "source_title": getattr(page_by_url.get(src), "title", src),
+                "target_url": tgt,
+                "target_title": getattr(page_by_url.get(tgt), "title", tgt),
+                "source_section": getattr(page_by_url.get(src), "section", ""),
+                "target_section": getattr(page_by_url.get(tgt), "section", ""),
+                "anchor_samples": anchors[:5],
+                "anchor_count": int(result.edge_anchor_count.get(edge, 0)),
+                "placement": placement,
+                "edge_weight": round(edge_weight, 6),
+                "edge_share": round(share, 6),
+                "pagerank_loss": round(direct_pr_loss, 10),
+                "weighted_pagerank_loss": round(weighted_pr_loss, 10),
+                "raw_loss": raw_loss,
+                "anchor_quality": round(anchor_quality, 4),
+                "contextual_relevance": round(relevance, 4),
+                "source_traffic": src_traffic,
+                "target_traffic": target_traffic,
+                "target_keywords": target_keywords,
+                "target_authority_gap": round(target_gap, 4),
+                "target_in_degree": target_in_degree,
+                "target_click_depth": tgt_row.get("click_depth"),
+            })
+
+    raw_rows.sort(key=lambda r: _safe_float(r.get("raw_loss")), reverse=True)
+    sampled = raw_rows[:max_candidates]
+    max_loss = max((_safe_float(r.get("raw_loss")) for r in sampled), default=0.0) or 1.0
+    for rank, row in enumerate(sampled, 1):
+        score = min(100.0, _safe_float(row.get("raw_loss")) / max_loss * 100.0)
+        row["rank"] = rank
+        row["removal_loss_score"] = round(score, 2)
+        row["classification"] = _classify_removal_link(
+            score,
+            str(row.get("placement") or ""),
+            _safe_float(row.get("contextual_relevance")),
+            _safe_float(row.get("anchor_quality")),
+            _safe_int(row.get("target_traffic")),
+            _safe_int(row.get("target_in_degree")),
+        )
+        row["recommended_action"] = (
+            "Protect this link during edits; changing or removing it likely weakens authority flow to a demand page."
+            if row["classification"] == "critical"
+            else "Keep if editorially natural; it contributes useful discovery or semantic reinforcement."
+            if row["classification"] == "useful"
+            else "Review before expanding similar links; this edge looks low-impact or template-driven."
+            if row["classification"] == "redundant"
+            else "Consider replacing with a more relevant contextual link and clearer anchor text."
+        )
+
+    context_limit = min(max_context_rows, len(sampled))
+    for row in sampled[:context_limit]:
+        src_i = page_idx.get(row["source_url"], -1)
+        tgt_i = page_idx.get(row["target_url"], -1)
+        row.update(_best_paragraph_context(src_i, tgt_i, paragraph_records, embeddings))
+
+    counts = collections.Counter(row.get("classification") for row in sampled)
+    placement_counts = collections.Counter(row.get("placement") for row in sampled)
+    critical = [r for r in sampled if r.get("classification") == "critical"]
+    edit_warnings: dict[str, dict] = {}
+    for row in critical:
+        src = row["source_url"]
+        warning = edit_warnings.setdefault(src, {
+            "source_url": src,
+            "source_title": row.get("source_title") or src,
+            "critical_links": 0,
+            "protected_targets": [],
+            "max_loss_score": 0.0,
+            "warning": "This page contains critical internal links. Review protected targets before deleting sections, changing anchors, or simplifying navigation.",
+        })
+        warning["critical_links"] += 1
+        warning["max_loss_score"] = max(_safe_float(warning.get("max_loss_score")), _safe_float(row.get("removal_loss_score")))
+        if len(warning["protected_targets"]) < 8:
+            warning["protected_targets"].append({
+                "target_url": row["target_url"],
+                "target_title": row.get("target_title") or row["target_url"],
+                "loss_score": row.get("removal_loss_score"),
+                "anchor_samples": row.get("anchor_samples") or [],
+            })
+    warnings = sorted(edit_warnings.values(), key=lambda r: (_safe_float(r.get("max_loss_score")), _safe_int(r.get("critical_links"))), reverse=True)
+
+    return {
+        "summary": {
+            "status": "ok",
+            "model": "internal_link_removal_simulation_v1",
+            "total_edges": sum(len(v) for v in result.graph.values()),
+            "simulated_edges": len(sampled),
+            "critical_links": counts.get("critical", 0),
+            "useful_links": counts.get("useful", 0),
+            "redundant_links": counts.get("redundant", 0),
+            "irrelevant_links": counts.get("irrelevant", 0),
+            "potentially_harmful_links": counts.get("potentially_harmful", 0),
+            "contextual_links": placement_counts.get("contextual", 0),
+            "template_navigation_links": placement_counts.get("template_navigation", 0),
+            "weak_context_links": placement_counts.get("weak_context", 0),
+        },
+        "links": sampled[:700],
+        "critical_links": critical[:200],
+        "template_links": [r for r in sampled if r.get("placement") == "template_navigation"][:200],
+        "weak_or_harmful_links": [r for r in sampled if r.get("classification") in {"irrelevant", "potentially_harmful"}][:200],
+        "edit_warnings": warnings[:200],
+        "interpretation": {
+            "removal_loss_score": "Approximate first-order loss from removing the edge, weighted by source authority, target traffic/keyword demand, anchor quality, and semantic relevance.",
+            "placement": "Contextual links have descriptive anchors and source-target semantic fit. Template/navigation links are separated so editors do not confuse repeated global links with body-copy recommendations.",
+        },
+    }
+
+
 def link_flow_payload(
     result: LinkGraphResult,
     pages,
@@ -981,6 +1204,7 @@ def link_flow_payload(
     *,
     page_types: dict | None = None,
     traffic_authority: dict | None = None,
+    link_removal: dict | None = None,
     max_nodes: int = 360,
     max_edges: int = 1600,
 ) -> dict:
@@ -997,6 +1221,11 @@ def link_flow_payload(
         row.get("url"): row
         for row in (traffic_authority or {}).get("pages", [])
         if row.get("url")
+    }
+    removal_by_edge = {
+        (row.get("source_url"), row.get("target_url")): row
+        for row in (link_removal or {}).get("links", [])
+        if row.get("source_url") and row.get("target_url")
     }
     traffic_by_url: dict[str, dict] = {}
     for row in top_pages or []:
@@ -1087,6 +1316,7 @@ def link_flow_payload(
             weight = max(1, int(result.edge_anchor_count.get((src, tgt), 0) or 1))
             source_pr = float(result.pagerank.get(src, 0.0))
             target_traffic = float(traffic.get(tgt, 0.0))
+            removal_row = removal_by_edge.get((src, tgt)) or {}
             flow_score = (
                 source_pr * 2.5
                 + float(result.hub_score.get(src, 0.0))
@@ -1101,6 +1331,9 @@ def link_flow_payload(
                 "source_pagerank": round(source_pr, 8),
                 "target_traffic": int(target_traffic),
                 "score": round(float(flow_score), 8),
+                "removal_loss_score": round(float(removal_row.get("removal_loss_score", 0.0) or 0.0), 2),
+                "removal_classification": removal_row.get("classification", ""),
+                "placement": removal_row.get("placement", ""),
             })
     edge_rows.sort(key=lambda r: r["score"], reverse=True)
     edge_rows = edge_rows[:max_edges]

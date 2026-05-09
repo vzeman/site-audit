@@ -1233,6 +1233,7 @@
           <option value="traffic">Color: traffic</option>
           <option value="pagerank">Color: PageRank</option>
           <option value="cluster">Color: cluster</option>
+          <option value="removal">Color: removal impact</option>
         </select>
       </div>
       <div id="linkflow-bundle" class="w-full" style="min-height: 780px;"></div>
@@ -1265,6 +1266,30 @@
         <div>
           <h4 class="font-semibold mb-2">Non-indexable search pages</h4>
           <div id="traffic-pagerank-nonindexable" class="max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-removal-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Internal link removal simulation</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Approximate loss if an existing internal link is removed. Scores combine source authority, target traffic, anchor quality, semantic fit, and link placement.
+        </p>
+      </div>
+      <div id="link-removal-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Critical links to protect</h4>
+          <div id="link-removal-critical" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Edit warnings by source page</h4>
+          <div id="link-removal-warnings" class="max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Weak or harmful links</h4>
+          <div id="link-removal-weak" class="max-h-[520px] overflow-y-auto"></div>
         </div>
       </div>
     </div>
@@ -1948,6 +1973,7 @@
       renderDuplicateFragments();
       renderLinkgraph();
       renderTrafficPagerank();
+      renderLinkRemovalSimulation();
       renderLinkFlow();
       renderLinkbuilding();
       renderLinkCounts();
@@ -4989,6 +5015,60 @@
     `).join('') || '<div class="text-gray-500">No non-indexable search-demand pages.</div>';
   }
 
+  function renderLinkRemovalSimulation() {
+    const block = document.getElementById('link-removal-block');
+    const payload = ((state.linkgraph || {}).link_removal_simulation || {});
+    const summary = payload.summary || {};
+    if (!summary.simulated_edges) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('link-removal-summary').innerHTML =
+      card('Critical', Number(summary.critical_links || 0).toLocaleString(), 'protect before editing') +
+      card('Useful', Number(summary.useful_links || 0).toLocaleString(), 'keep if editorially natural') +
+      card('Redundant', Number(summary.redundant_links || 0).toLocaleString(), 'low removal impact') +
+      card('Weak/harmful', Number((summary.irrelevant_links || 0) + (summary.potentially_harmful_links || 0)).toLocaleString(), 'review anchor and relevance') +
+      card('Template/nav', Number(summary.template_navigation_links || 0).toLocaleString(), 'separated from contextual links');
+    renderRemovalLinkList('link-removal-critical', payload.critical_links || [], 'No critical links detected.');
+    renderRemovalWarnings(payload.edit_warnings || []);
+    renderRemovalLinkList('link-removal-weak', payload.weak_or_harmful_links || [], 'No weak or harmful links detected.');
+  }
+
+  function renderRemovalLinkList(id, rows, empty) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = (rows || []).slice(0, 140).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">${escapeHtml(r.classification || '')}</span>
+          <span class="font-mono text-gray-600">${Number(r.removal_loss_score || 0).toFixed(1)}</span>
+        </div>
+        <div class="mt-1">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+          <span class="text-gray-400"> -> </span>
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a>
+        </div>
+        <div class="text-gray-500 mt-1">${escapeHtml(r.placement || '')} · target traffic ${Number(r.target_traffic || 0).toLocaleString()} · anchor quality ${Number(r.anchor_quality || 0).toFixed(2)} · relevance ${Number(r.contextual_relevance || 0).toFixed(2)}</div>
+        <div class="text-gray-600 mt-1">${(r.anchor_samples || []).slice(0, 3).map(a => `"${escapeHtml(a)}"`).join(' · ')}</div>
+        ${r.paragraph_excerpt ? `<div class="text-gray-700 mt-1 line-clamp-3">${escapeHtml(r.paragraph_excerpt)}</div>` : ''}
+      </div>
+    `).join('') || `<div class="text-gray-500">${escapeHtml(empty)}</div>`;
+  }
+
+  function renderRemovalWarnings(rows) {
+    const el = document.getElementById('link-removal-warnings');
+    if (!el) return;
+    el.innerHTML = (rows || []).slice(0, 120).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all font-medium" href="${escapeHtml(r.source_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.source_title || r.source_url)}</a>
+        <div class="text-gray-500 mt-1">${Number(r.critical_links || 0).toLocaleString()} critical links · max loss ${Number(r.max_loss_score || 0).toFixed(1)}</div>
+        <div class="text-gray-700 mt-1">${escapeHtml(r.warning || '')}</div>
+        <div class="mt-1">${(r.protected_targets || []).slice(0, 4).map(t => `<div><a class="text-blue-600 hover:underline" href="${escapeHtml(t.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(t.target_title || t.target_url)}</a> <span class="text-gray-500">${Number(t.loss_score || 0).toFixed(1)}</span></div>`).join('')}</div>
+      </div>
+    `).join('') || '<div class="text-gray-500">No edit warnings.</div>';
+  }
+
   function renderLinkFlow() {
     const block = document.getElementById('linkflow-block');
     const container = document.getElementById('linkflow-bundle');
@@ -5033,6 +5113,8 @@
     const edgeWeightMax = d3.max(edges, d => Number(d.weight || 1)) || 1;
     const trafficColor = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, trafficMax]);
     const prColor = d3.scaleSequential(d3.interpolateViridis).domain([0, prMax]);
+    const impactMax = d3.max(edges, d => Number(d.removal_loss_score || 0)) || 1;
+    const impactColor = d3.scaleSequential(d3.interpolateReds).domain([0, impactMax]);
     const clusters = Array.from(new Set(nodes.map(d => d.cluster || d.section || 'root'))).sort();
     const clusterColor = d3.scaleOrdinal().domain(clusters).range(d3.schemeTableau10.concat(d3.schemeSet3 || []));
     const nodeColor = d => colorMode === 'pagerank' ? prColor(Number(d.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.cluster || d.section || 'root') : trafficColor(Number(d.traffic || 0));
@@ -5068,8 +5150,8 @@
     const edgeLayer = svg.append('g').attr('fill', 'none');
     const path = edgeLayer.selectAll('path').data(bundledEdges).join('path')
       .attr('d', d => line(d.sourceNode.path(d.targetNode)))
-      .attr('stroke', d => colorMode === 'pagerank' ? prColor(Number(d.targetNode.data.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.targetNode.data.cluster || d.targetNode.data.section || 'root') : trafficColor(Number(d.targetNode.data.traffic || 0)))
-      .attr('stroke-width', d => edgeWidth(Number(d.weight || 1)))
+      .attr('stroke', d => colorMode === 'removal' ? impactColor(Number(d.removal_loss_score || 0)) : colorMode === 'pagerank' ? prColor(Number(d.targetNode.data.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.targetNode.data.cluster || d.targetNode.data.section || 'root') : trafficColor(Number(d.targetNode.data.traffic || 0)))
+      .attr('stroke-width', d => colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)))
       .attr('stroke-opacity', d => edgeOpacity(Number(d.targetNode.data.traffic || 0)))
       .style('mix-blend-mode', 'multiply')
       .on('mouseover', function(event, d) {
@@ -5078,12 +5160,14 @@
           `<strong>${escapeHtml(d.sourceNode.data.title || d.source)}</strong><br>` +
           `<span style="color:#bfdbfe">PR ${(Number(d.sourceNode.data.pagerank || 0) * 100).toFixed(3)} · out ${Number(d.sourceNode.data.out_degree || 0).toLocaleString()}</span><br>` +
           `→ <strong>${escapeHtml(d.targetNode.data.title || d.target)}</strong><br>` +
-          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)}</span>`
+          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)} · removal ${Number(d.removal_loss_score || 0).toFixed(1)} ${escapeHtml(d.removal_classification || '')}</span>`
         );
       })
       .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
       .on('mouseout', function(event, d) {
-        d3.select(this).attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0))).attr('stroke-width', edgeWidth(Number(d.weight || 1)));
+        d3.select(this)
+          .attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0)))
+          .attr('stroke-width', colorMode === 'removal' ? Math.max(edgeWidth(Number(d.weight || 1)), 0.6 + Number(d.removal_loss_score || 0) / Math.max(1, impactMax) * 3.2) : edgeWidth(Number(d.weight || 1)));
         tooltip.style('visibility', 'hidden');
       });
 
