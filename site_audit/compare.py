@@ -63,6 +63,7 @@ class _Project:
     entity_coverage: dict
     information_gain: dict
     freshness: dict
+    freshness_impact: dict
     conversion: dict
     indexability: dict
     performance: dict
@@ -127,6 +128,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     entity_coverage = _load_json(report / "entity_coverage.json", {})
     information_gain = _load_json(report / "information_gain.json", {})
     freshness = _load_json(report / "freshness.json", {})
+    freshness_impact = _load_json(report / "freshness_impact.json", {})
     conversion = _load_json(report / "conversion.json", {})
     indexability = _load_json(report / "indexability.json", {})
     performance = _load_json(report / "performance.json", {})
@@ -171,6 +173,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         entity_coverage=entity_coverage,
         information_gain=information_gain,
         freshness=freshness,
+        freshness_impact=freshness_impact,
         conversion=conversion,
         indexability=indexability,
         performance=performance,
@@ -462,6 +465,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "metadata_issue_share", "label": "Metadata issue share", "better": "low", "fmt": "pct"},
             {"key": "freshness_date_coverage", "label": "Date coverage", "better": "high", "fmt": "pct"},
             {"key": "freshness_stale_share", "label": "Stale share", "better": "low", "fmt": "pct"},
+            {"key": "freshness_impact_traffic_at_risk", "label": "Fresh traffic at risk", "better": "low", "fmt": "int"},
+            {"key": "freshness_high_impact_sections", "label": "High-impact stale sections", "better": "low", "fmt": "int"},
             {"key": "entity_coverage", "label": "Entity coverage", "better": "high", "fmt": "pct"},
             {"key": "topical_authority_score", "label": "Authority score", "better": "high", "fmt": "0.0"},
             {"key": "zero_link_paragraph_share", "label": "Zero-link paragraphs", "better": "low", "fmt": "pct"},
@@ -608,6 +613,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     pt = (proj.page_types or {}).get("summary", {}) or {}
     ent = (proj.entities or {}).get("summary", {}) or {}
     fr = (proj.freshness or {}).get("summary", {}) or {}
+    fi = (proj.freshness_impact or {}).get("summary", {}) or {}
     cv = (proj.conversion or {}).get("summary", {}) or {}
     ix = (proj.indexability or {}).get("summary", {}) or {}
     pf = (proj.performance or {}).get("summary", {}) or {}
@@ -684,6 +690,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "freshness_missing_dates": int(fr.get("missing_dates", 0)),
         "freshness_very_stale_pages": int(fr.get("pages_very_stale", 0)),
         "freshness_median_age_days": int(fr.get("median_age_days") or 0),
+        "freshness_impact_traffic_at_risk": int(fi.get("traffic_at_risk", 0)),
+        "freshness_high_impact_sections": int(fi.get("high_impact_sections", 0)),
+        "freshness_avg_impact_risk": float(fi.get("avg_freshness_risk", 0.0)),
         "entity_coverage": float(ent.get("entity_coverage", 0.0)),
         "unique_entities": int(ent.get("unique_entities", 0)),
         "avg_entities_per_page": float(ent.get("avg_entities_per_page", 0.0)),
@@ -961,6 +970,58 @@ def _answer_blocks_comparison(projects: list[_Project]) -> dict:
     )
     opportunities.sort(key=lambda r: (_safe_int(r.get("keyword_traffic")), -_safe_float(r.get("best_score"))), reverse=True)
     return {"domains": domains, "clusters": matrix[:80], "opportunities": opportunities[:200]}
+
+
+def _freshness_impact_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    sections: list[dict] = []
+    for proj in projects:
+        payload = proj.freshness_impact or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for cluster in payload.get("clusters") or []:
+            key = str(cluster.get("label") or cluster.get("cluster") or "cluster")
+            clusters[key][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": key,
+                "avg_freshness_risk": _safe_float(cluster.get("avg_freshness_risk")),
+                "max_priority_score": _safe_float(cluster.get("max_priority_score")),
+                "traffic_at_risk": _safe_int(cluster.get("traffic_at_risk")),
+                "sections": _safe_int(cluster.get("sections")),
+                "stale_sections": _safe_int(cluster.get("stale_sections")),
+            }
+        for row in (payload.get("sections") or [])[:80]:
+            if _safe_float(row.get("freshness_risk")) >= 50 or _safe_int(row.get("traffic")) > 0:
+                sections.append({"domain": proj.domain, **row})
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "cluster": cluster,
+                    "avg_freshness_risk": 0.0,
+                    "max_priority_score": 0.0,
+                    "traffic_at_risk": 0,
+                    "sections": 0,
+                    "stale_sections": 0,
+                })
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(
+        key=lambda r: (
+            sum(_safe_float(d.get("avg_freshness_risk")) for d in r["domains"]) / max(len(r["domains"]), 1),
+            sum(_safe_int(d.get("traffic_at_risk")) for d in r["domains"]),
+        ),
+        reverse=True,
+    )
+    sections.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_int(r.get("traffic"))), reverse=True)
+    return {"domains": domains, "clusters": matrix[:80], "sections": sections[:200]}
 
 
 # --- competitive search/content opportunities ----------------------------
@@ -1613,6 +1674,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "entity_coverage": _entity_coverage_comparison(projects),
         "information_gain": _information_gain_comparison(projects),
         "answer_blocks": _answer_blocks_comparison(projects),
+        "freshness_impact": _freshness_impact_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

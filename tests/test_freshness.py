@@ -160,6 +160,12 @@ def test_compare_leaderboard_includes_freshness_metrics(tmp_path: Path) -> None:
             ) % (date_coverage, stale_share),
             encoding="utf-8",
         )
+        (report_dir / "freshness_impact.json").write_text(
+            '{"summary":{"traffic_at_risk":25,"high_impact_sections":2,"avg_freshness_risk":55},'
+            '"clusters":[{"label":"support","avg_freshness_risk":55,"max_priority_score":140,'
+            '"traffic_at_risk":25,"sections":3,"stale_sections":2}]}',
+            encoding="utf-8",
+        )
 
     payload = build_payload(["a.example", "b.example"], tmp_path)
 
@@ -169,6 +175,9 @@ def test_compare_leaderboard_includes_freshness_metrics(tmp_path: Path) -> None:
     assert rows["a.example"]["freshness_missing_dates"] == 2
     assert rows["b.example"]["freshness_date_coverage"] == 0.4
     assert rows["b.example"]["freshness_stale_share"] == 0.5
+    assert rows["a.example"]["freshness_impact_traffic_at_risk"] == 25
+    assert rows["a.example"]["freshness_high_impact_sections"] == 2
     dist = {row["domain"]: row for row in payload["distributions"]}
     assert dist["a.example"]["freshness_buckets"]["fresh"] == 2
     assert dist["a.example"]["freshness_summary"]["total_pages"] == 5
+    assert payload["freshness_impact"]["clusters"][0]["cluster"] == "support"

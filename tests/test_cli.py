@@ -37,6 +37,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "500",
             "--ahrefs-refresh",
             "--no-answer-blocks",
+            "--no-freshness-impact",
         ]
     )
 
@@ -58,3 +59,4 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.ahrefs_keywords_limit == 500
     assert args.ahrefs_refresh is True
     assert args.no_answer_blocks is True
+    assert args.no_freshness_impact is True

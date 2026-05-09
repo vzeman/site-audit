@@ -509,6 +509,16 @@
       <div id="freshness-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-impact-compare-section">
+      <div class="mb-3">
+        <h2 class="text-xl font-semibold">Freshness impact by cluster</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Traffic-weighted section freshness risk by semantic cluster and domain. Darker cells mean stale or missing-update evidence on important content sections.
+        </p>
+      </div>
+      <div id="freshness-impact-compare" class="w-full overflow-x-auto" style="min-height: 360px;"></div>
+    </section>
+
     <!-- Distribution overlays -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -742,6 +752,8 @@
       { key: 'freshness_missing_dates',    label: 'Missing dates', better: 'low', fmt: 'int' },
       { key: 'freshness_very_stale_pages', label: 'Very stale', better: 'low', fmt: 'int' },
       { key: 'freshness_median_age_days',  label: 'Median age days', better: 'low', fmt: 'int' },
+      { key: 'freshness_impact_traffic_at_risk', label: 'Fresh traffic at risk', better: 'low', fmt: 'int' },
+      { key: 'freshness_high_impact_sections', label: 'High-impact stale sections', better: 'low', fmt: 'int' },
     ],
     conversion: [
       { key: 'pages',                      label: 'Pages', better: 'na', fmt: 'int' },
@@ -2002,6 +2014,51 @@
   }
 
   renderFreshnessCompare();
+
+  function renderFreshnessImpactCompare() {
+    const section = document.getElementById('freshness-impact-compare-section');
+    const container = document.getElementById('freshness-impact-compare');
+    const payload = data.freshness_impact || {};
+    const rows = (payload.clusters || []).slice(0, 60);
+    if (!rows.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    container.innerHTML = '';
+    const domains = data.domains || [];
+    const cellW = 120;
+    const cellH = 24;
+    const left = 190;
+    const top = 24;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 42;
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    const color = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, 85]);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 14)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 16).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.cluster || '').slice(0, 34));
+      (row.domains || []).forEach((d, di) => {
+        const risk = Number(d.avg_freshness_risk || 0);
+        const sections = Number(d.sections || 0);
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 3)
+          .attr('fill', sections ? color(risk) : '#f3f4f6').attr('rx', 2)
+          .append('title').text(`${d.domain} · ${row.cluster}\navg risk ${risk.toFixed(1)}\ntraffic at risk ${Number(d.traffic_at_risk || 0).toLocaleString()}\nstale sections ${Number(d.stale_sections || 0).toLocaleString()}`);
+        if (sections) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 15)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', risk >= 55 ? 'white' : '#111827')
+            .text(`${risk.toFixed(0)} · ${Number(d.traffic_at_risk || 0).toLocaleString()}`);
+        }
+      });
+    });
+  }
+  renderFreshnessImpactCompare();
 
   // ============================================================
   // Combined scatter

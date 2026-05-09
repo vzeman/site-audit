@@ -70,6 +70,7 @@ from .external_links import to_payload as external_payload
 from .extractor import extract
 from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
+from .freshness_impact import build_freshness_impact
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
@@ -152,6 +153,7 @@ class PipelineConfig:
     enable_keyword_coverage: bool = True
     enable_answerability: bool = True
     enable_answer_blocks: bool = True
+    enable_freshness_impact: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -565,6 +567,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_weak_paragraphs
         or config.enable_heading_impact
         or config.enable_answer_blocks
+        or config.enable_freshness_impact
         or config.enable_information_gain
         or config.enable_content_quality
         or config.enable_paragraph_fanout
@@ -940,6 +943,26 @@ def run(config: PipelineConfig) -> dict:
                 ablocks_summary.get("top_query_clusters", 0),
             )
 
+    freshness_impact_data: dict = {}
+    if config.enable_freshness_impact:
+        freshness_impact_data = build_freshness_impact(
+            pages,
+            extracted_pages,
+            freshness_data,
+            search_payload=ahrefs_data,
+            paragraph_records=paragraph_records,
+            cluster_labels=labels,
+            cluster_summaries=cluster_summaries,
+            coords=coords,
+        )
+        fi_summary = freshness_impact_data.get("summary", {}) or {}
+        if fi_summary.get("status") == "ok":
+            LOG.info(
+                "  freshness impact: %d high-impact sections · %d traffic at risk",
+                fi_summary.get("high_impact_sections", 0),
+                fi_summary.get("traffic_at_risk", 0),
+            )
+
     paragraph_impact_data: dict = {}
     if config.enable_paragraph_impact and paragraph_records and ahrefs_data:
         paragraph_impact_data = build_paragraph_impact(
@@ -1115,6 +1138,7 @@ def run(config: PipelineConfig) -> dict:
         semantic_ablation=semantic_ablation_data,
         keyword_attribution=keyword_attribution_data,
         answer_blocks=answer_blocks_data,
+        freshness_impact=freshness_impact_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
@@ -1166,6 +1190,7 @@ def run(config: PipelineConfig) -> dict:
             semantic_ablation=semantic_ablation_data,
             keyword_attribution=keyword_attribution_data,
             answer_blocks=answer_blocks_data,
+            freshness_impact=freshness_impact_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,

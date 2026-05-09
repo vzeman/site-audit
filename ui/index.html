@@ -946,6 +946,30 @@
       <div id="audit-freshness-pages" class="text-xs max-h-96 overflow-y-auto"></div>
     </div>
 
+    <!-- Freshness impact -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-impact-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Freshness impact by page section</h3>
+        <p class="text-xs text-gray-500 mt-1" id="freshness-impact-meta">
+          Traffic-weighted stale section analysis using dates, outdated text evidence, volatile topics, and ranking keywords.
+        </p>
+      </div>
+      <div id="freshness-impact-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="mb-5">
+        <h4 class="font-semibold mb-2">Freshness semantic scatter</h4>
+        <div id="freshness-impact-scatter" class="w-full" style="min-height: 420px;"></div>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <label for="freshness-impact-search" class="text-xs font-medium text-gray-600">Find dots</label>
+          <input id="freshness-impact-search" type="search" autocomplete="off" placeholder="Type page, keyword, section, freshness..."
+                 class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <span id="freshness-impact-search-count" class="text-xs text-gray-500"></span>
+        </div>
+        <div id="freshness-impact-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
+      <div id="freshness-impact-warning" class="text-xs bg-amber-50 text-amber-900 border border-amber-200 rounded p-3 mb-4"></div>
+      <div id="freshness-impact-sections" class="text-xs max-h-[560px] overflow-y-auto"></div>
+    </div>
+
     <!-- Performance -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-block">
       <div class="mb-3">
@@ -1423,6 +1447,7 @@
 <script type="application/json" id="data-page-types">__PAGE_TYPES_JSON__</script>
 <script type="application/json" id="data-entities">__ENTITIES_JSON__</script>
 <script type="application/json" id="data-freshness">__FRESHNESS_JSON__</script>
+<script type="application/json" id="data-freshness-impact">__FRESHNESS_IMPACT_JSON__</script>
 <script type="application/json" id="data-conversion">__CONVERSION_JSON__</script>
 <script type="application/json" id="data-indexability">__INDEXABILITY_JSON__</script>
 <script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
@@ -1531,12 +1556,13 @@
       const inlinedPageTypes = readInlined('data-page-types');
       const inlinedEntities = readInlined('data-entities');
       const inlinedFreshness = readInlined('data-freshness');
+      const inlinedFreshnessImpact = readInlined('data-freshness-impact');
       const inlinedConversion = readInlined('data-conversion');
       const inlinedIndexability = readInlined('data-indexability');
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1577,12 +1603,13 @@
         pageTypes = inlinedPageTypes || {};
         entities = inlinedEntities || {};
         freshness = inlinedFreshness || {};
+        freshnessImpact = inlinedFreshnessImpact || {};
         conversion = inlinedConversion || {};
         indexability = inlinedIndexability || {};
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1622,6 +1649,7 @@
           loadJSON('page_types.json').catch(() => ({})),
           loadJSON('entities.json').catch(() => ({})),
           loadJSON('freshness.json').catch(() => ({})),
+          loadJSON('freshness_impact.json').catch(() => ({})),
           loadJSON('conversion.json').catch(() => ({})),
           loadJSON('indexability.json').catch(() => ({})),
           loadJSON('performance.json').catch(() => ({})),
@@ -1670,6 +1698,7 @@
       state.pageTypes = pageTypes || {};
       state.entities = entities || {};
       state.freshness = freshness || {};
+      state.freshnessImpact = freshnessImpact || {};
       state.conversion = conversion || {};
       state.indexability = indexability || {};
       state.performance = performance || {};
@@ -1707,6 +1736,7 @@
       renderEntityCoverage();
       renderInformationGain();
       renderFreshness();
+      renderFreshnessImpact();
       renderPerformance();
       renderConversion();
       renderAnswerability();
@@ -4012,6 +4042,144 @@
         `<span class="inline-flex items-center"><span class="w-3 h-3 rounded mr-1.5" style="background:${r.color}"></span>${escapeHtml(r.label)}</span>`
       ).join('');
     }
+  }
+
+  function renderFreshnessImpact() {
+    const block = document.getElementById('freshness-impact-block');
+    const data = state.freshnessImpact || {};
+    const summary = data.summary || {};
+    const sections = data.sections || [];
+    if (!sections.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('freshness-impact-meta').textContent =
+      `${Number(summary.sections || sections.length).toLocaleString()} sections scored · ${Number(summary.high_impact_sections || 0).toLocaleString()} high-impact stale sections.`;
+    document.getElementById('freshness-impact-summary').innerHTML =
+      card('traffic at risk', Number(summary.traffic_at_risk || 0).toLocaleString(), 'traffic on high-risk pages') +
+      card('high risk sections', Number(summary.high_risk_sections || 0).toLocaleString(), 'risk score 60+') +
+      card('high impact sections', Number(summary.high_impact_sections || 0).toLocaleString(), 'traffic-weighted priority') +
+      card('avg risk', Number(summary.avg_freshness_risk || 0).toFixed(1), '0-100 section freshness risk');
+    document.getElementById('freshness-impact-warning').textContent = summary.superficial_update_warning || '';
+    renderFreshnessImpactScatter(data);
+    document.getElementById('freshness-impact-sections').innerHTML = sections.slice(0, 180).map(r => {
+      const riskColor = Number(r.freshness_risk || 0) >= 70 ? 'text-red-700' : (Number(r.freshness_risk || 0) >= 50 ? 'text-amber-700' : 'text-gray-700');
+      const date = (r.date_evidence || []).slice(0, 2).map(x => `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(x)}</span>`).join('');
+      const years = (r.stale_year_evidence || []).slice(0, 2).map(x => `<li>${escapeHtml(x.match)}: ${escapeHtml(x.snippet)}</li>`).join('');
+      const products = (r.product_evidence || []).slice(0, 2).map(x => `<li>${escapeHtml(x.match)}: ${escapeHtml(x.snippet)}</li>`).join('');
+      const keywords = (r.keyword_evidence || []).slice(0, 3).map(x => `<span class="inline-block bg-blue-50 text-blue-800 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(x)}</span>`).join('');
+      return `<div class="py-3 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono ${riskColor}">${Number(r.freshness_risk || 0).toFixed(0)}</span>
+        </div>
+        <div class="text-gray-500">${escapeHtml(r.heading || '')} · ${escapeHtml(r.topic_class || '')} · traffic ${Number(r.traffic || 0).toLocaleString()} · priority ${Number(r.priority_score || 0).toFixed(0)}</div>
+        <div class="mt-1">${date}${keywords}</div>
+        ${(years || products) ? `<ul class="list-disc list-inside text-gray-700 mt-1">${years}${products}</ul>` : ''}
+        <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_update_type || '')}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderFreshnessImpactScatter(data) {
+    const container = document.getElementById('freshness-impact-scatter');
+    const legend = document.getElementById('freshness-impact-legend');
+    const searchEl = document.getElementById('freshness-impact-search');
+    const countEl = document.getElementById('freshness-impact-search-count');
+    const points = ((data.scatter || {}).points || []);
+    container.innerHTML = '';
+    if (legend) legend.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No freshness scatter points. Run with scatterplot enabled to show semantic positions.</div>';
+      return;
+    }
+    const colors = { fresh:'#16a34a', aging:'#84cc16', stale:'#f59e0b', very_stale:'#dc2626', unknown:'#6b7280', future:'#8b5cf6' };
+    const labels = { fresh:'Fresh', aging:'Aging', stale:'Stale', very_stale:'Very stale', unknown:'Missing date', future:'Future date' };
+    if (legend) {
+      legend.innerHTML = Object.keys(colors).map(k =>
+        `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${colors[k]}"></span>${escapeHtml(labels[k] || k)}</span>`
+      ).join('');
+    }
+    const margin = { top: 16, right: 20, bottom: 36, left: 42 };
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = 420 - margin.top - margin.bottom;
+    const svgOuter = d3.select(container).append('svg').attr('width', container.offsetWidth).attr('height', 420);
+    const svg = svgOuter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const xExt = d3.extent(points, d => d.x);
+    const yExt = d3.extent(points, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.04 || 1;
+    const yPad = (yExt[1] - yExt[0]) * 0.04 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
+    const maxTraffic = d3.max(points, d => Number(d.traffic || 0)) || 0;
+    const radius = maxTraffic > 0 ? d3.scaleSqrt().domain([0, maxTraffic]).range([2.4, 13]) : () => 3;
+    const tooltip = d3.select('body').append('div')
+      .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
+      .style('color','white').style('padding','7px 10px').style('border-radius','6px')
+      .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
+    const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
+    const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
+    const dots = svg.append('g').selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => colors[d.freshness_bucket || 'unknown'] || colors.unknown)
+      .attr('fill-opacity', d => Number(d.traffic || 0) > 0 ? 0.82 : 0.46)
+      .attr('stroke', d => Number(d.freshness_risk || 0) >= 60 ? '#111827' : 'white')
+      .attr('stroke-width', d => Number(d.freshness_risk || 0) >= 60 ? 1.4 : 0.4)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => { event.stopPropagation(); window.open(d.url, '_blank', 'noopener'); })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('r', Math.max(5, radius(Number(d.traffic || 0)) + 3)).attr('stroke-width', 2.4);
+        const bucket = d.freshness_bucket || 'unknown';
+        const age = d.freshness_age_days == null ? 'unknown age' : `${Number(d.freshness_age_days).toLocaleString()} days old`;
+        tooltip.style('visibility', 'visible').html(
+          `<strong style="color:${colors[bucket] || colors.unknown}">${escapeHtml(labels[bucket] || bucket)}</strong> · risk ${Number(d.freshness_risk || 0).toFixed(0)}<br>` +
+          `<strong>${escapeHtml(d.title || '(untitled)')}</strong><br>` +
+          `<span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url)}</span><br>` +
+          `<span style="color:#e5e7eb;font-size:11px">${escapeHtml(d.freshness_date || 'no date')} · ${escapeHtml(age)} · ${escapeHtml(d.top_heading || '')}</span><br>` +
+          `<span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.top_keyword ? ' · ' + escapeHtml(d.top_keyword) : ''}</span>`
+        );
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(event, d) {
+        d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke-width', Number(d.freshness_risk || 0) >= 60 ? 1.4 : 0.4);
+        tooltip.style('visibility','hidden');
+        applySearch();
+      });
+    function applySearch() {
+      const q = (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase();
+      if (!q) {
+        dots.attr('fill-opacity', d => Number(d.traffic || 0) > 0 ? 0.82 : 0.46)
+          .attr('stroke', d => Number(d.freshness_risk || 0) >= 60 ? '#111827' : 'white')
+          .attr('stroke-width', d => Number(d.freshness_risk || 0) >= 60 ? 1.4 : 0.4);
+        if (countEl) countEl.textContent = '';
+        return;
+      }
+      let matches = 0;
+      dots.attr('fill-opacity', d => {
+        const hit = semanticSearchText(d).includes(q);
+        if (hit) matches += 1;
+        return hit ? 0.96 : 0.08;
+      }).attr('stroke', d => semanticSearchText(d).includes(q) ? '#111827' : 'white')
+        .attr('stroke-width', d => semanticSearchText(d).includes(q) ? 2.6 : 0.4);
+      if (countEl) countEl.textContent = `${matches.toLocaleString()} match${matches === 1 ? '' : 'es'}`;
+    }
+    if (searchEl && !searchEl.dataset.bound) {
+      searchEl.dataset.bound = '1';
+      searchEl.addEventListener('input', applySearch);
+    }
+    applySearch();
+    const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
+      .on('zoom', e => {
+        const nx = e.transform.rescaleX(x);
+        const ny = e.transform.rescaleY(y);
+        xAxis.call(d3.axisBottom(nx).ticks(8));
+        yAxis.call(d3.axisLeft(ny).ticks(8));
+        dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+      });
+    svgOuter.call(zoom);
+    svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
   }
 
   function renderPerformance() {
