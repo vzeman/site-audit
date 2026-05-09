@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import re
 import zipfile
 from collections import defaultdict
@@ -1472,6 +1473,414 @@ def _keyword_gap_payload(projects: list[_Project]) -> dict:
     }
 
 
+def _cluster_key(value: object) -> str:
+    text = _normalize_keyword(value)
+    return text or "unknown"
+
+
+def _cluster_lookup_rows(rows: list[dict], label_fields: tuple[str, ...] = ("label", "cluster")) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in rows or []:
+        for field in label_fields:
+            key = _cluster_key(row.get(field))
+            if key and key != "unknown":
+                out.setdefault(key, row)
+    return out
+
+
+def _semantic_cluster_samples(proj: _Project, cluster_id: object, top_url: str, entity_type: str, limit: int) -> list[str]:
+    samples: list[str] = []
+    top_keys = _url_keys(top_url)
+    cluster_text = str(cluster_id if cluster_id is not None else "")
+    for row in proj.ahrefs_semantic_rows or []:
+        if row.get("type") != entity_type:
+            continue
+        same_cluster = cluster_text and str(row.get("cluster")) == cluster_text
+        same_url = bool(top_keys and (_url_keys(row.get("url")) & top_keys))
+        if not same_cluster and not same_url:
+            continue
+        label = str(row.get("label") or "").strip()
+        if label and label not in samples:
+            samples.append(label)
+        if len(samples) >= limit:
+            break
+    return samples
+
+
+def _entry_has_element(entry: dict, kind: str, label: str) -> bool:
+    label_key = _normalize_keyword(label)
+    if not label_key:
+        return False
+    if kind == "schema":
+        return label in set(entry.get("schema_types") or [])
+    if kind == "entity":
+        return any(_normalize_keyword(v) == label_key for v in (entry.get("entities") or []))
+    if kind == "heading":
+        return any(_normalize_keyword(v) == label_key for v in (entry.get("headings") or []))
+    if kind == "answer_block":
+        return _safe_float(entry.get("answer_block_share")) >= 0.6
+    if kind == "freshness":
+        return entry.get("freshness_bucket") in {"fresh", "aging"}
+    if kind == "link_support":
+        return _safe_int(entry.get("in_degree")) >= 3
+    if kind == "paragraph_archetype":
+        return bool(entry.get("paragraph_examples"))
+    return False
+
+
+def _cluster_reasons(entry: dict) -> list[str]:
+    reasons = []
+    if _safe_int(entry.get("traffic")):
+        reasons.append(f"{_safe_int(entry.get('traffic'))} estimated traffic")
+    if _safe_int(entry.get("top3_keywords")):
+        reasons.append(f"{_safe_int(entry.get('top3_keywords'))} top-3 keywords")
+    if _safe_float(entry.get("answer_block_share")) >= 0.6:
+        reasons.append("strong answer-block coverage")
+    if entry.get("schema_types"):
+        reasons.append("schema coverage")
+    if _safe_int(entry.get("in_degree")) >= 3:
+        reasons.append("internal link support")
+    if entry.get("freshness_bucket") in {"fresh", "aging"}:
+        reasons.append(f"{entry.get('freshness_bucket')} content")
+    return reasons[:6]
+
+
+def _project_cluster_entries(proj: _Project) -> dict[str, dict]:
+    link_lookup = _page_link_lookup(proj)
+    structured_lookup = _url_lookup_from_rows(((proj.structured_data or {}).get("per_page") or []), ("url",))
+    freshness_lookup = _url_lookup_from_rows(((proj.freshness or {}).get("per_page") or []), ("url",))
+    page_type_lookup = _url_lookup_from_rows(((proj.page_types or {}).get("per_page") or []), ("url",))
+    answer_lookup = _cluster_lookup_rows(((proj.answer_blocks or {}).get("clusters") or []), ("label", "cluster"))
+    info_lookup = _cluster_lookup_rows(((proj.information_gain or {}).get("clusters") or []), ("label", "cluster"))
+    entity_lookup = _cluster_lookup_rows(((proj.entity_coverage or {}).get("clusters") or []), ("label", "cluster"))
+
+    cluster_id_to_key: dict[str, str] = {}
+    groups: dict[str, dict] = {}
+    for row in ((proj.ahrefs or {}).get("clusters") or []):
+        label = row.get("label") or row.get("key") or row.get("cluster")
+        key = _cluster_key(label)
+        if key == "unknown":
+            continue
+        cluster_id = row.get("cluster") if row.get("cluster") is not None else row.get("key")
+        if cluster_id is not None:
+            cluster_id_to_key[str(cluster_id)] = key
+        top_pages = list(row.get("top_pages") or [])
+        top_page = top_pages[0] if top_pages else {}
+        groups[key] = {
+            "domain": proj.domain,
+            "cluster": key,
+            "cluster_label": str(label or key),
+            "cluster_id": cluster_id,
+            "traffic": _safe_int(row.get("traffic")),
+            "keyword_traffic": _safe_int(row.get("keyword_traffic")),
+            "keywords_total": _safe_int(row.get("keywords_total") or row.get("keyword_rows")),
+            "keyword_rows": _safe_int(row.get("keyword_rows")),
+            "top3_keywords": _safe_int(row.get("top3_keywords")),
+            "top10_keywords": _safe_int(row.get("top10_keywords")),
+            "top20_keywords": _safe_int(row.get("top20_keywords")),
+            "top_keywords": list(row.get("top_keywords") or [])[:10],
+            "serp_features": _string_list(row.get("serp_features"), "feature")[:10],
+            "intents": _string_list(row.get("intents"), "intent")[:8],
+            "top_url": top_page.get("matched_url") or top_page.get("url") or "",
+            "top_title": top_page.get("title") or top_page.get("page_title") or "",
+            "owned_urls": [
+                page.get("matched_url") or page.get("url") or ""
+                for page in top_pages[:8]
+                if page.get("matched_url") or page.get("url")
+            ],
+            "keyword_samples": [kw.get("keyword") for kw in (row.get("top_keywords") or [])[:8] if kw.get("keyword")],
+        }
+
+    keyword_rows_by_key: dict[str, list[dict]] = defaultdict(list)
+    for row in ((proj.ahrefs or {}).get("organic_keywords") or []):
+        cluster_ref = row.get("cluster")
+        key = cluster_id_to_key.get(str(cluster_ref)) if cluster_ref is not None else ""
+        key = key or _cluster_key(row.get("cluster_label") or row.get("keyword"))
+        if key == "unknown":
+            continue
+        keyword_rows_by_key[key].append(row)
+        group = groups.setdefault(key, {
+            "domain": proj.domain,
+            "cluster": key,
+            "cluster_label": str(row.get("cluster_label") or key),
+            "cluster_id": cluster_ref,
+            "traffic": 0,
+            "keyword_traffic": 0,
+            "keywords_total": 0,
+            "keyword_rows": 0,
+            "top3_keywords": 0,
+            "top10_keywords": 0,
+            "top20_keywords": 0,
+            "top_keywords": [],
+            "serp_features": [],
+            "intents": [],
+            "top_url": "",
+            "top_title": "",
+            "owned_urls": [],
+            "keyword_samples": [],
+        })
+        traffic = _safe_int(row.get("traffic"))
+        if not group.get("top_url") or traffic > _safe_int(group.get("_top_url_traffic")):
+            group["top_url"] = row.get("matched_url") or row.get("url") or ""
+            group["top_title"] = row.get("page_title") or row.get("title") or ""
+            group["_top_url_traffic"] = traffic
+        if not group.get("traffic"):
+            group["traffic"] += traffic
+        group["keyword_traffic"] += traffic
+        group["keyword_rows"] += 1
+        group["keywords_total"] = max(_safe_int(group.get("keywords_total")), group["keyword_rows"])
+        position = _safe_float(row.get("position"), 999.0)
+        if position <= 3:
+            group["top3_keywords"] += 1
+        if position <= 10:
+            group["top10_keywords"] += 1
+        if position <= 20:
+            group["top20_keywords"] += 1
+        keyword = row.get("keyword")
+        if keyword and keyword not in group["keyword_samples"] and len(group["keyword_samples"]) < 10:
+            group["keyword_samples"].append(keyword)
+        for feature in _string_list(row.get("serp_features"), "feature"):
+            if feature not in group["serp_features"]:
+                group["serp_features"].append(feature)
+        for intent in _string_list(row.get("intents"), "intent"):
+            if intent not in group["intents"]:
+                group["intents"].append(intent)
+        url = row.get("matched_url") or row.get("url") or ""
+        if url and url not in group["owned_urls"] and len(group["owned_urls"]) < 8:
+            group["owned_urls"].append(url)
+
+    for key, group in groups.items():
+        top_url = group.get("top_url") or (group.get("owned_urls") or [""])[0]
+        structured = _lookup_url(structured_lookup, top_url)
+        freshness = _lookup_url(freshness_lookup, top_url)
+        page_type = _lookup_url(page_type_lookup, top_url)
+        link = _lookup_url(link_lookup, top_url)
+        answer = answer_lookup.get(key, {})
+        info = info_lookup.get(key, {})
+        entity = entity_lookup.get(key, {})
+        cluster_id = group.get("cluster_id")
+        group["top_url"] = top_url
+        group["schema_types"] = _string_list(structured.get("types"), "type")
+        group["page_type"] = page_type.get("page_type") or ""
+        group["template_family"] = page_type.get("template_family") or ""
+        group["freshness_bucket"] = freshness.get("bucket") or ""
+        group["freshness_age_days"] = _safe_int(freshness.get("age_days"))
+        group["in_degree"] = _safe_int(link.get("in_degree"))
+        group["out_degree"] = _safe_int(link.get("out_degree"))
+        group["click_depth"] = link.get("click_depth")
+        group["answer_block_share"] = _safe_float(answer.get("strong_query_share"))
+        group["answer_block_score"] = _safe_float(answer.get("avg_best_score"))
+        group["answer_recommended_format"] = answer.get("recommended_format") or ""
+        group["information_gain_score"] = _safe_float(info.get("avg_score"))
+        group["entities"] = [
+            e.get("entity")
+            for e in (entity.get("expected_entities") or [])[:20]
+            if e.get("entity")
+        ]
+        group["headings"] = _semantic_cluster_samples(proj, cluster_id, top_url, "header", 12)
+        group["page_titles"] = _semantic_cluster_samples(proj, cluster_id, top_url, "page_title", 5)
+        group["paragraph_examples"] = _semantic_cluster_samples(proj, cluster_id, top_url, "paragraph", 5)
+        score = (
+            _safe_int(group.get("traffic"))
+            + _safe_int(group.get("keyword_rows")) * 5
+            + _safe_int(group.get("top3_keywords")) * 20
+            + _safe_float(group.get("answer_block_share")) * 90
+            + len(group.get("schema_types") or []) * 8
+            + min(12, _safe_int(group.get("in_degree"))) * 4
+            + min(100.0, _safe_float(group.get("information_gain_score"))) * 0.35
+        )
+        group["coverage_score"] = round(float(score), 2)
+        group["coverage_reasons"] = _cluster_reasons(group)
+        group.pop("_top_url_traffic", None)
+    return groups
+
+
+def _keyword_cluster_gap_payload(projects: list[_Project]) -> dict:
+    domains = [p.domain for p in projects]
+    per_project = {proj.domain: _project_cluster_entries(proj) for proj in projects}
+    cluster_keys = sorted({key for entries in per_project.values() for key in entries})
+    clusters: list[dict] = []
+    recommendations: list[dict] = []
+    section_diffs: list[dict] = []
+    cache_samples: list[dict] = []
+    cache_entry_count = 0
+
+    for proj in projects:
+        meta = (proj.ahrefs or {}).get("meta", {}) or {}
+        provider = meta.get("provider") or "search"
+        cache_status = meta.get("cache_status") or ""
+        for row in ((proj.ahrefs or {}).get("organic_keywords") or [])[:2000]:
+            keyword = row.get("keyword")
+            if not keyword:
+                continue
+            cache_entry_count += 1
+            if len(cache_samples) < 25:
+                raw_key = f"{proj.domain}|{provider}|{keyword}"
+                cache_samples.append({
+                    "domain": proj.domain,
+                    "provider": provider,
+                    "keyword": keyword,
+                    "cache_status": cache_status,
+                    "cache_key": hashlib.sha1(raw_key.encode("utf-8")).hexdigest()[:16],
+                })
+
+    for key in cluster_keys:
+        entries = []
+        for domain in domains:
+            entry = per_project.get(domain, {}).get(key)
+            if entry:
+                entries.append(entry)
+            else:
+                entries.append({
+                    "domain": domain,
+                    "cluster": key,
+                    "cluster_label": key,
+                    "coverage_status": "missing",
+                    "traffic": 0,
+                    "keyword_rows": 0,
+                    "keywords_total": 0,
+                    "top3_keywords": 0,
+                    "top10_keywords": 0,
+                    "coverage_score": 0.0,
+                    "top_url": "",
+                    "top_title": "",
+                    "section": "new page",
+                    "schema_types": [],
+                    "entities": [],
+                    "headings": [],
+                    "paragraph_examples": [],
+                    "serp_features": [],
+                    "intents": [],
+                    "coverage_reasons": [],
+                })
+        leader = max(entries, key=lambda r: (_safe_float(r.get("coverage_score")), _safe_int(r.get("traffic"))))
+        if _safe_float(leader.get("coverage_score")) <= 0:
+            continue
+
+        leader_headings = list(dict.fromkeys(leader.get("headings") or []))[:8]
+        leader_entities = list(dict.fromkeys(leader.get("entities") or []))[:10]
+        leader_schema = list(dict.fromkeys(leader.get("schema_types") or []))[:8]
+        leader_paragraphs = list(dict.fromkeys(leader.get("paragraph_examples") or []))[:4]
+
+        missing_elements: list[dict] = []
+
+        def register_gap(kind: str, label: str, domain_entry: dict, action: str, section: str) -> None:
+            if not label:
+                return
+            competitor_domains = [e["domain"] for e in entries if _entry_has_element(e, kind, label)]
+            missing_domains = [e["domain"] for e in entries if not _entry_has_element(e, kind, label)]
+            prevalence = len(competitor_domains) / max(len(entries), 1)
+            opportunity = max(0, _safe_int(leader.get("traffic")) - _safe_int(domain_entry.get("traffic")))
+            missing_elements.append({
+                "type": kind,
+                "label": label,
+                "competitor_domains": competitor_domains,
+                "missing_domains": missing_domains,
+                "prevalence": round(prevalence, 3),
+                "traffic_opportunity": opportunity,
+            })
+            recommendations.append({
+                "domain": domain_entry.get("domain"),
+                "cluster": key,
+                "cluster_label": leader.get("cluster_label") or key,
+                "target_url": domain_entry.get("top_url") or "",
+                "target_title": domain_entry.get("top_title") or f"Create page for {leader.get('cluster_label') or key}",
+                "section": section,
+                "missing_type": kind,
+                "missing_element": label,
+                "action": action,
+                "competitor_domain": leader.get("domain"),
+                "competitor_url": leader.get("top_url") or "",
+                "competitor_title": leader.get("top_title") or "",
+                "competitor_prevalence": round(prevalence, 3),
+                "traffic_opportunity": opportunity,
+                "leader_traffic": _safe_int(leader.get("traffic")),
+                "own_traffic": _safe_int(domain_entry.get("traffic")),
+            })
+
+        for entry in entries:
+            if entry.get("domain") == leader.get("domain"):
+                continue
+            missing_headings = [h for h in leader_headings if not _entry_has_element(entry, "heading", h)][:5]
+            missing_entities = [e for e in leader_entities if not _entry_has_element(entry, "entity", e)][:5]
+            missing_schema = [s for s in leader_schema if not _entry_has_element(entry, "schema", s)][:4]
+            answer_gap = _safe_float(leader.get("answer_block_share")) >= 0.6 and _safe_float(entry.get("answer_block_share")) < 0.4
+            freshness_gap = _entry_has_element(leader, "freshness", "fresh") and not _entry_has_element(entry, "freshness", "fresh")
+            link_gap = _entry_has_element(leader, "link_support", "internal links") and not _entry_has_element(entry, "link_support", "internal links")
+            paragraph_gap = bool(leader_paragraphs) and not entry.get("paragraph_examples")
+
+            for heading in missing_headings[:3]:
+                register_gap("heading", heading, entry, "Add or rename an H2/H3 section matching the competitor outline.", "Headings")
+            for entity in missing_entities[:3]:
+                register_gap("entity", entity, entry, "Add a paragraph or subsection that naturally covers this missing entity.", "Entities")
+            for schema in missing_schema:
+                register_gap("schema", schema, entry, "Add the schema type when the page content supports it.", "Schema")
+            if answer_gap:
+                register_gap("answer_block", "snippet-ready answer block", entry, "Add a concise answer block for the cluster's highest-demand questions.", "Answer block")
+            if freshness_gap:
+                register_gap("freshness", "fresh or recently updated evidence", entry, "Refresh the page and expose a visible updated/published date where appropriate.", "Freshness")
+            if link_gap:
+                register_gap("link_support", "strong internal inlinks", entry, "Promote the page from relevant hubs using descriptive anchors.", "Internal links")
+            if paragraph_gap:
+                register_gap("paragraph_archetype", leader_paragraphs[0][:160], entry, "Add a section with the same explanatory role, rewritten for this domain.", "Paragraphs")
+
+            if missing_headings or missing_entities or missing_schema or answer_gap or freshness_gap or link_gap or paragraph_gap:
+                section_diffs.append({
+                    "domain": entry.get("domain"),
+                    "cluster": key,
+                    "cluster_label": leader.get("cluster_label") or key,
+                    "target_url": entry.get("top_url") or "",
+                    "target_title": entry.get("top_title") or f"Create page for {leader.get('cluster_label') or key}",
+                    "competitor_domain": leader.get("domain"),
+                    "competitor_url": leader.get("top_url") or "",
+                    "competitor_title": leader.get("top_title") or "",
+                    "missing_headings": missing_headings,
+                    "missing_entities": missing_entities,
+                    "missing_schema": missing_schema,
+                    "answer_block_gap": answer_gap,
+                    "freshness_gap": freshness_gap,
+                    "link_gap": link_gap,
+                    "paragraph_examples": leader_paragraphs,
+                    "traffic_opportunity": max(0, _safe_int(leader.get("traffic")) - _safe_int(entry.get("traffic"))),
+                })
+
+        traffic_opportunity = sum(max(0, _safe_int(leader.get("traffic")) - _safe_int(e.get("traffic"))) for e in entries if e.get("domain") != leader.get("domain"))
+        clusters.append({
+            "cluster": key,
+            "cluster_label": leader.get("cluster_label") or key,
+            "leader_domain": leader.get("domain"),
+            "leader_url": leader.get("top_url") or "",
+            "leader_title": leader.get("top_title") or "",
+            "leader_score": _safe_float(leader.get("coverage_score")),
+            "leader_reasons": leader.get("coverage_reasons") or [],
+            "traffic_opportunity": traffic_opportunity,
+            "missing_elements": sorted(missing_elements, key=lambda r: (_safe_int(r.get("traffic_opportunity")), _safe_float(r.get("prevalence"))), reverse=True)[:30],
+            "domains": entries,
+        })
+
+    clusters.sort(key=lambda r: (_safe_int(r.get("traffic_opportunity")), _safe_float(r.get("leader_score"))), reverse=True)
+    recommendations.sort(key=lambda r: (_safe_int(r.get("traffic_opportunity")), _safe_float(r.get("competitor_prevalence"))), reverse=True)
+    section_diffs.sort(key=lambda r: _safe_int(r.get("traffic_opportunity")), reverse=True)
+    return {
+        "summary": {
+            "clusters": len(clusters),
+            "recommendations": len(recommendations),
+            "section_diffs": len(section_diffs),
+            "cache_entries": cache_entry_count,
+            "cache_status": "derived_from_cached_provider_snapshots",
+        },
+        "clusters": clusters[:160],
+        "recommendations": recommendations[:400],
+        "section_diffs": section_diffs[:250],
+        "cache": {
+            "status": "derived_from_cached_provider_snapshots",
+            "description": "No per-keyword provider calls are made here; rows are derived from cached Ahrefs/DataForSEO domain snapshots and keyed by domain, keyword, and provider.",
+            "entries": cache_entry_count,
+            "samples": cache_samples,
+        },
+    }
+
+
 def _serp_feature_payload(projects: list[_Project]) -> dict:
     by_feature: dict[str, dict[str, dict]] = {}
     for proj in projects:
@@ -1869,6 +2278,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "duplicate_fragments": _duplicate_fragments_comparison(projects),
         "template_patterns": _template_patterns_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
+        "keyword_cluster_gaps": _keyword_cluster_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),

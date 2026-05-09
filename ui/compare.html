@@ -375,6 +375,33 @@
       <div id="opportunity-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
+          <h3 class="text-sm font-semibold mb-1">Keyword-cluster gap matrix</h3>
+          <p class="text-xs text-gray-500 mb-2">Coverage score by cluster and domain. Darker cells identify who owns a cluster; cell labels show score and traffic.</p>
+          <div id="keyword-cluster-gap-chart" class="w-full overflow-x-auto" style="min-height: 390px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Competitor section diff</h3>
+          <p class="text-xs text-gray-500 mb-2">Headings, entities, schema, answer blocks, freshness, and link support missing from target pages.</p>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="cluster-section-diff-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold mb-1">Prioritized cluster recommendations</h3>
+        <p class="text-xs text-gray-500 mb-2">Missing elements ranked by competitor prevalence and traffic opportunity.</p>
+        <div class="overflow-x-auto border border-gray-100 rounded">
+          <table class="min-w-full text-xs" id="cluster-gap-rec-table">
+            <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6 mb-6">
+        <div>
           <h3 class="text-sm font-semibold mb-1">Keyword gaps</h3>
           <p class="text-xs text-gray-500 mb-2">Keywords where one domain owns traffic and another domain is missing or materially behind.</p>
           <div class="overflow-x-auto border border-gray-100 rounded">
@@ -1555,6 +1582,7 @@
     const section = document.getElementById('opportunity-section');
     if (!section) return;
     const hasData =
+      ((data.keyword_cluster_gaps || {}).clusters || []).length ||
       ((data.keyword_gaps || {}).opportunities || []).length ||
       ((data.serp_features || {}).matrix || []).length ||
       ((data.content_efficiency || {}).clusters || []).length ||
@@ -1566,6 +1594,9 @@
     }
     section.style.display = '';
     renderOpportunitySummary();
+    renderKeywordClusterGapMatrix();
+    renderClusterSectionDiffTable();
+    renderClusterGapRecommendationTable();
     renderKeywordGapTable();
     renderSerpFeatureChart();
     drawEfficiencyScatter(document.getElementById('cluster-efficiency-chart'), ((data.content_efficiency || {}).clusters || []), 'cluster');
@@ -1580,11 +1611,13 @@
     const root = document.getElementById('opportunity-summary');
     if (!root) return;
     const keywordGaps = data.keyword_gaps || {};
+    const clusterGaps = data.keyword_cluster_gaps || {};
     const serp = data.serp_features || {};
     const authority = data.authority_demand || {};
     const readiness = data.traffic_readiness || {};
     const cards = [
       ['Keyword opportunities', (keywordGaps.opportunities || []).length, 'missing or underperforming keyword gaps'],
+      ['Cluster recommendations', ((clusterGaps.recommendations || []).length), 'section-level competitor gaps'],
       ['Exclusive keywords', (keywordGaps.exclusive || []).length, 'keywords currently owned by one compared domain'],
       ['SERP features', (serp.matrix || []).length, 'feature types found in cached keyword rows'],
       ['Weak traffic pages', (readiness.weak_high_traffic || []).length, 'organic pages below readiness score 70'],
@@ -1598,6 +1631,114 @@
         <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
         <div class="text-xs text-gray-500 mt-1">${escapeHtml(card[2])}</div>
       </article>
+    `).join('');
+  }
+
+  function renderKeywordClusterGapMatrix() {
+    const container = document.getElementById('keyword-cluster-gap-chart');
+    if (!container) return;
+    const rows = ((data.keyword_cluster_gaps || {}).clusters || []).slice(0, 60);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No keyword-cluster gap data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 128;
+    const cellH = 30;
+    const left = 190;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 44;
+    const maxScore = d3.max(rows.flatMap(r => (r.domains || []).map(d => Number(d.coverage_score || 0)))) || 1;
+    const color = d3.scaleSequential(d3.interpolateGnBu).domain([0, maxScore]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 19).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.cluster_label || row.cluster || '').slice(0, 34));
+      (row.domains || []).forEach((d, di) => {
+        const score = Number(d.coverage_score || 0);
+        const isLeader = d.domain === row.leader_domain;
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', score ? color(score) : '#f3f4f6').attr('rx', 2)
+          .attr('stroke', isLeader ? '#111827' : 'none').attr('stroke-width', isLeader ? 1.5 : 0)
+          .append('title').text(`${d.domain} · ${row.cluster_label}\nscore ${score.toFixed(1)}\ntraffic ${Number(d.traffic || 0).toLocaleString()}\nkeywords ${Number(d.keyword_rows || d.keywords_total || 0).toLocaleString()}\n${(d.coverage_reasons || []).join(' · ')}`);
+        if (score) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', score > maxScore * 0.55 ? 'white' : '#111827')
+            .text(`${score.toFixed(0)} · ${Number(d.traffic || 0).toLocaleString()}`);
+        }
+      });
+    });
+  }
+
+  function renderClusterSectionDiffTable() {
+    const tbl = document.getElementById('cluster-section-diff-table');
+    if (!tbl) return;
+    const rows = ((data.keyword_cluster_gaps || {}).section_diffs || []).slice(0, 80);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Cluster</th>
+        <th class="px-2 py-2 text-left">Target</th>
+        <th class="px-2 py-2 text-left">Missing</th>
+        <th class="px-2 py-2 text-right">Opp.</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="5">No section diffs.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => {
+      const parts = [];
+      if ((r.missing_headings || []).length) parts.push(`H: ${(r.missing_headings || []).slice(0, 2).join(' / ')}`);
+      if ((r.missing_entities || []).length) parts.push(`E: ${(r.missing_entities || []).slice(0, 2).join(' / ')}`);
+      if ((r.missing_schema || []).length) parts.push(`Schema: ${(r.missing_schema || []).join(', ')}`);
+      if (r.answer_block_gap) parts.push('answer block');
+      if (r.freshness_gap) parts.push('freshness');
+      if (r.link_gap) parts.push('internal links');
+      return `
+        <tr class="border-b border-gray-100">
+          <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+          <td class="px-2 py-1.5 font-medium">${escapeHtml(r.cluster_label || r.cluster)}</td>
+          <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.target_title || 'Create page')}</a><div class="text-gray-500">vs ${escapeHtml(r.competitor_domain || '')}</div></td>
+          <td class="px-2 py-1.5 text-gray-600">${escapeHtml(parts.join(' · '))}</td>
+          <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic_opportunity || 0).toLocaleString()}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  function renderClusterGapRecommendationTable() {
+    const tbl = document.getElementById('cluster-gap-rec-table');
+    if (!tbl) return;
+    const rows = ((data.keyword_cluster_gaps || {}).recommendations || []).slice(0, 100);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Cluster</th>
+        <th class="px-2 py-2 text-left">Section</th>
+        <th class="px-2 py-2 text-left">Missing element</th>
+        <th class="px-2 py-2 text-left">Action</th>
+        <th class="px-2 py-2 text-right">Opp.</th>
+      </tr>`;
+    if (!rows.length) {
+      tbl.querySelector('tbody').innerHTML = '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="6">No cluster recommendations.</td></tr>';
+      return;
+    }
+    tbl.querySelector('tbody').innerHTML = rows.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5">${escapeHtml(r.cluster_label || r.cluster)}</td>
+        <td class="px-2 py-1.5">${escapeHtml(r.section || '')}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.missing_element || '')}</a><div class="text-gray-500">${escapeHtml(r.missing_type || '')} · seen on ${escapeHtml(r.competitor_domain || '')}</div></td>
+        <td class="px-2 py-1.5 text-gray-600">${escapeHtml(r.action || '')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.traffic_opportunity || 0).toLocaleString()}</td>
+      </tr>
     `).join('');
   }
 
