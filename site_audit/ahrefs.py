@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 from collections import Counter, defaultdict
@@ -506,6 +507,8 @@ def build_analysis(
     meta.setdefault("provider", "ahrefs")
     meta.setdefault("provider_label", "Ahrefs")
 
+    entity_alignment = _entity_alignment(semantic_rows, semantic_embeddings)
+
     payload = {
         "meta": meta,
         "summary": summary,
@@ -520,6 +523,7 @@ def build_analysis(
             "shown": len(semantic_points),
             "entity_types": ["page", "page_title", "keyword", "header", "paragraph", "link_title"],
         },
+        "entity_alignment": entity_alignment,
     }
     return AhrefsAnalysis(payload=payload, semantic_rows=semantic_rows, semantic_embeddings=semantic_embeddings)
 
@@ -1019,6 +1023,213 @@ def _semantic_map(
     for row, xy in zip(rows, coords):
         points.append({**row, "x": float(xy[0]), "y": float(xy[1])})
     return points, rows, matrix
+
+
+def _entity_alignment(rows: list[dict], embeddings: Optional[np.ndarray]) -> dict:
+    """Compare keyword vectors to visible page entities on the same URL."""
+    if embeddings is None or not rows or len(rows) != len(embeddings):
+        return {"summary": {"status": "no_semantic_vectors"}, "by_url": [], "by_cluster": [], "entity_types": [], "recommendations": []}
+
+    vectors = embeddings.astype(np.float32)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    vectors = vectors / norms
+    by_url_type: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    link_title_indices: list[int] = []
+    keyword_indices: list[int] = []
+    for i, row in enumerate(rows):
+        typ = row.get("type")
+        if typ == "keyword" and row.get("url"):
+            keyword_indices.append(i)
+        if typ == "link_title":
+            link_title_indices.append(i)
+        url = _normalize_url(row.get("url") or "")
+        if url and typ:
+            by_url_type[url][str(typ)].append(i)
+
+    thresholds = {
+        "page": 0.55,
+        "page_title": 0.55,
+        "header": 0.55,
+        "paragraph": 0.50,
+        "link_title": 0.50,
+    }
+    type_totals: dict[str, dict] = {
+        typ: {"weighted_score": 0.0, "weight": 0.0, "below": 0, "missing": 0, "rows": 0}
+        for typ in thresholds
+    }
+    url_groups: dict[str, dict] = {}
+    cluster_groups: dict[str, dict] = {}
+    recommendations: list[dict] = []
+
+    def best_score(vec: np.ndarray, indices: list[int]) -> tuple[float, dict]:
+        if not indices:
+            return 0.0, {}
+        sims = vectors[np.array(indices, dtype=np.int64)] @ vec
+        best_local = int(np.argmax(sims))
+        idx = indices[best_local]
+        return float(np.clip(sims[best_local], -1.0, 1.0)), rows[idx]
+
+    for k_i in keyword_indices:
+        keyword_row = rows[k_i]
+        url = _normalize_url(keyword_row.get("url") or "")
+        if not url:
+            continue
+        keyword = str(keyword_row.get("label") or "")
+        vec = vectors[k_i]
+        traffic = max(1.0, float(_to_int(keyword_row.get("traffic"))), math.sqrt(max(_to_int(keyword_row.get("volume")), 0)))
+        cluster = str(keyword_row.get("cluster") if keyword_row.get("cluster") is not None else keyword_row.get("section") or "unknown")
+        scores: dict[str, float] = {}
+        best_labels: dict[str, str] = {}
+        exact_mentions = 0
+        entity_sets = by_url_type.get(url, {})
+        for typ, threshold in thresholds.items():
+            indices = link_title_indices if typ == "link_title" else entity_sets.get(typ, [])
+            score, best = best_score(vec, indices)
+            scores[typ] = round(score, 4)
+            best_labels[typ] = best.get("label") or ""
+            stats = type_totals[typ]
+            stats["rows"] += 1
+            stats["weighted_score"] += score * traffic
+            stats["weight"] += traffic
+            if not indices:
+                stats["missing"] += 1
+            elif score < threshold:
+                stats["below"] += 1
+        for typ in ("page_title", "header", "paragraph"):
+            for idx in entity_sets.get(typ, []):
+                label = str(rows[idx].get("label") or "").lower()
+                if keyword and keyword.lower() in label:
+                    exact_mentions += 1
+
+        url_group = url_groups.setdefault(url, {
+            "url": keyword_row.get("url") or url,
+            "title": "",
+            "section": keyword_row.get("section") or "",
+            "cluster": keyword_row.get("cluster"),
+            "traffic": 0.0,
+            "keyword_count": 0,
+            "keywords": [],
+            "type_scores": {typ: {"weighted_score": 0.0, "weight": 0.0} for typ in thresholds},
+            "issues": Counter(),
+        })
+        url_group["traffic"] += _to_int(keyword_row.get("traffic"))
+        url_group["keyword_count"] += 1
+        if len(url_group["keywords"]) < 8:
+            url_group["keywords"].append({"keyword": keyword, "traffic": _to_int(keyword_row.get("traffic")), "position": _to_int(keyword_row.get("position"))})
+        for typ, score in scores.items():
+            url_group["type_scores"][typ]["weighted_score"] += score * traffic
+            url_group["type_scores"][typ]["weight"] += traffic
+
+        cluster_group = cluster_groups.setdefault(cluster, {
+            "cluster": cluster,
+            "traffic": 0.0,
+            "keyword_count": 0,
+            "type_scores": {typ: {"weighted_score": 0.0, "weight": 0.0} for typ in thresholds},
+            "sample_keywords": [],
+        })
+        cluster_group["traffic"] += _to_int(keyword_row.get("traffic"))
+        cluster_group["keyword_count"] += 1
+        if keyword and len(cluster_group["sample_keywords"]) < 8:
+            cluster_group["sample_keywords"].append(keyword)
+        for typ, score in scores.items():
+            cluster_group["type_scores"][typ]["weighted_score"] += score * traffic
+            cluster_group["type_scores"][typ]["weight"] += traffic
+
+        recs: list[tuple[str, str]] = []
+        if scores["page_title"] < thresholds["page_title"]:
+            recs.append(("title_mismatch", "Rewrite the title to include the ranking intent vocabulary."))
+        if scores["header"] < thresholds["header"]:
+            recs.append(("heading_mismatch", "Rename or add an H1/H2/H3 that explicitly supports the query."))
+        if scores["paragraph"] < thresholds["paragraph"]:
+            recs.append(("paragraph_mismatch", "Add or rewrite a paragraph that directly answers the ranking query."))
+        if scores["link_title"] < thresholds["link_title"]:
+            recs.append(("anchor_gap", "Add descriptive internal anchors that use the same concept vocabulary."))
+        if exact_mentions >= 3:
+            recs.append(("exact_match_repetition", "Reduce exact-match repetition and add synonyms/related entities."))
+        for issue, action in recs[:4]:
+            url_group["issues"][issue] += 1
+            recommendations.append({
+                "issue": issue,
+                "action": action,
+                "keyword": keyword,
+                "url": keyword_row.get("url") or url,
+                "section": keyword_row.get("section") or "",
+                "cluster": keyword_row.get("cluster"),
+                "traffic": _to_int(keyword_row.get("traffic")),
+                "volume": _to_int(keyword_row.get("volume")),
+                "position": _to_int(keyword_row.get("position")),
+                "scores": scores,
+                "best_labels": best_labels,
+                "exact_match_mentions": exact_mentions,
+            })
+
+    def finalize_scores(type_scores: dict[str, dict]) -> dict[str, float]:
+        return {
+            typ: round(float(stats.get("weighted_score", 0.0)) / max(float(stats.get("weight", 0.0)), 1.0), 4)
+            for typ, stats in type_scores.items()
+        }
+
+    by_url = []
+    for group in url_groups.values():
+        scores = finalize_scores(group["type_scores"])
+        group["type_scores"] = scores
+        group["alignment_score"] = round(sum(scores.values()) / max(len(scores), 1), 4)
+        group["traffic"] = int(group["traffic"])
+        group["issues"] = dict(group["issues"].most_common())
+        by_url.append(group)
+    by_url.sort(key=lambda r: (int(r.get("traffic", 0)), -float(r.get("alignment_score", 0.0))), reverse=True)
+
+    by_cluster = []
+    for group in cluster_groups.values():
+        scores = finalize_scores(group["type_scores"])
+        group["type_scores"] = scores
+        group["alignment_score"] = round(sum(scores.values()) / max(len(scores), 1), 4)
+        group["traffic"] = int(group["traffic"])
+        by_cluster.append(group)
+    by_cluster.sort(key=lambda r: (int(r.get("traffic", 0)), -float(r.get("alignment_score", 0.0))), reverse=True)
+
+    entity_types = []
+    for typ, stats in type_totals.items():
+        avg = float(stats["weighted_score"]) / max(float(stats["weight"]), 1.0)
+        entity_types.append({
+            "type": typ,
+            "label": {
+                "page": "Page",
+                "page_title": "Page title",
+                "header": "Header",
+                "paragraph": "Paragraph",
+                "link_title": "Link title",
+            }.get(typ, typ),
+            "average_score": round(avg, 4),
+            "below_threshold": int(stats["below"]),
+            "missing": int(stats["missing"]),
+            "rows": int(stats["rows"]),
+            "threshold": thresholds[typ],
+        })
+    recommendations.sort(key=lambda r: (int(r.get("traffic", 0)), int(r.get("volume", 0))), reverse=True)
+    issue_counts = Counter(r["issue"] for r in recommendations)
+    summary = {
+        "status": "ok" if keyword_indices else "no_keywords",
+        "model": "entity_alignment_v1",
+        "keyword_rows": len(keyword_indices),
+        "url_rows": len(by_url),
+        "cluster_rows": len(by_cluster),
+        "recommendations": len(recommendations),
+        "issue_counts": dict(issue_counts.most_common()),
+        "average_alignment": round(sum(r["average_score"] for r in entity_types) / max(len(entity_types), 1), 4),
+    }
+    return {
+        "summary": summary,
+        "entity_types": entity_types,
+        "by_url": by_url[:500],
+        "by_cluster": by_cluster[:200],
+        "recommendations": recommendations[:500],
+        "interpretation": {
+            "scores": "Cosine similarity between each ranking keyword and the best same-URL visible entity of each type. Link-title scores use the domain anchor vocabulary.",
+            "recommendations": "Low alignment means the page ranks for a concept that visible titles, headings, paragraphs, or anchors do not reinforce strongly enough.",
+        },
+    }
 
 
 def _encode_and_add(texts: list[str], rows: list[dict], embedder, add_vector: Callable[[dict, np.ndarray], None]) -> None:

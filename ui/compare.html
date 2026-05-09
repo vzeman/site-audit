@@ -330,9 +330,15 @@
           <input id="ahrefs-semantic-compare-search" type="search" autocomplete="off" placeholder="Type keyword, title, header, URL..."
                  class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
           <span id="ahrefs-semantic-compare-search-count" class="text-xs text-gray-500"></span>
+          <span id="ahrefs-semantic-compare-type-toggles" class="text-xs text-gray-600 flex flex-wrap gap-2"></span>
         </div>
         <div id="ahrefs-semantic-compare" class="w-full" style="min-height: 620px;"></div>
         <div id="ahrefs-semantic-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
+      <div class="mt-6">
+        <h3 class="text-sm font-semibold mb-1">Entity-type alignment comparison</h3>
+        <p class="text-xs text-gray-500 mb-2">Average keyword alignment by visible entity type. Higher means titles, headings, paragraphs, and anchors reinforce ranking demand with similar vocabulary.</p>
+        <div id="entity-alignment-compare" class="w-full" style="min-height:360px;"></div>
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-specific semantic comparisons</h3>
@@ -1042,6 +1048,7 @@
     renderSearchDirectoryChart();
     renderSearchClusterChart();
     renderAhrefsSemanticCompare();
+    renderEntityAlignmentCompare();
     renderSemanticEntityComparisons();
   }
 
@@ -1115,11 +1122,34 @@
   function renderAhrefsSemanticCompare() {
     const container = document.getElementById('ahrefs-semantic-compare');
     const legend = document.getElementById('ahrefs-semantic-compare-legend');
-    const points = data.ahrefs_semantic_scatter || [];
+    const toggles = document.getElementById('ahrefs-semantic-compare-type-toggles');
+    const allPoints = data.ahrefs_semantic_scatter || [];
+    if (!data._semanticEntityTypes) {
+      data._semanticEntityTypes = Object.fromEntries(Object.keys(ENTITY_COLORS).map(t => [t, true]));
+    }
+    if (toggles && !toggles.dataset.ready) {
+      toggles.dataset.ready = '1';
+      toggles.innerHTML = Object.keys(ENTITY_COLORS).map(type => `
+        <label class="inline-flex items-center gap-1">
+          <input type="checkbox" data-type="${escapeHtml(type)}" checked class="rounded border-gray-300">
+          <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1" style="background:${ENTITY_COLORS[type]}"></span>${escapeHtml(ENTITY_LABELS[type])}</span>
+        </label>`).join('');
+      toggles.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.addEventListener('change', () => {
+          data._semanticEntityTypes[input.dataset.type] = input.checked;
+          renderAhrefsSemanticCompare();
+        });
+      });
+    }
+    const points = allPoints.filter(p => data._semanticEntityTypes[p.type] !== false);
     container.innerHTML = '';
     legend.innerHTML = '';
-    if (!points.length) {
+    if (!allPoints.length) {
       container.innerHTML = '<div class="text-gray-500 text-center py-12">No Ahrefs semantic entity projection yet.</div>';
+      return;
+    }
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">All entity types are hidden.</div>';
       return;
     }
     legend.innerHTML = Object.keys(ENTITY_COLORS).map(t =>
@@ -1174,6 +1204,47 @@
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
       });
     svgOuter.call(zoom);
+  }
+
+  function renderEntityAlignmentCompare() {
+    const container = document.getElementById('entity-alignment-compare');
+    const payload = data.entity_alignment || {};
+    const rows = payload.entity_types || [];
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No entity-alignment comparison data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const flat = [];
+    rows.forEach(typeRow => (typeRow.domains || []).forEach(domainRow => {
+      flat.push({ type: typeRow.type, label: typeRow.label || typeRow.type, ...domainRow });
+    }));
+    const margin = { top: 18, right: 20, bottom: 78, left: 74 };
+    const width = Math.max(360, container.offsetWidth || 760) - margin.left - margin.right;
+    const height = 360 - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', width + margin.left + margin.right).attr('height', 360)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x0 = d3.scaleBand().domain(rows.map(r => r.label || r.type)).range([0, width]).padding(0.18);
+    const x1 = d3.scaleBand().domain(domains).range([0, x0.bandwidth()]).padding(0.08);
+    const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x0)).selectAll('text')
+      .attr('transform', 'rotate(-28)').style('text-anchor', 'end').style('font-size', '10px');
+    svg.append('g').call(d3.axisLeft(y).ticks(5));
+    svg.selectAll('rect').data(flat).join('rect')
+      .attr('x', d => (x0(d.label) || 0) + (x1(d.domain) || 0))
+      .attr('y', d => y(Number(d.average_score || 0)))
+      .attr('width', x1.bandwidth())
+      .attr('height', d => height - y(Number(d.average_score || 0)))
+      .attr('fill', d => domainColor(d.domain))
+      .attr('fill-opacity', 0.75)
+      .attr('rx', 2)
+      .append('title')
+      .text(d => `${d.domain} · ${d.label}\nscore ${Number(d.average_score || 0).toFixed(2)}\nbelow ${Number(d.below_threshold || 0).toLocaleString()} · missing ${Number(d.missing || 0).toLocaleString()}`);
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(0.55)).attr('y2', y(0.55))
+      .attr('stroke', '#dc2626').attr('stroke-dasharray', '4 3');
+    svg.append('text').attr('x', width - 4).attr('y', y(0.55) - 4).attr('text-anchor', 'end')
+      .style('font-size', '10px').style('fill', '#dc2626').text('mismatch threshold');
   }
 
   function renderSemanticEntityComparisons() {

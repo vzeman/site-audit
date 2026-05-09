@@ -588,9 +588,16 @@
           <input id="ahrefs-semantic-map-search" type="search" autocomplete="off" placeholder="Type keyword, title, header, URL..."
                  class="w-full sm:w-80 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
           <span id="ahrefs-semantic-map-search-count" class="text-xs text-gray-500"></span>
+          <span id="ahrefs-semantic-type-toggles" class="text-xs text-gray-600 flex flex-wrap gap-2"></span>
         </div>
         <div id="ahrefs-semantic-map" class="w-full" style="min-height: 560px;"></div>
         <div id="ahrefs-semantic-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+      </div>
+      <div class="mb-6">
+        <h4 class="text-sm font-semibold mb-1">Keyword-to-entity alignment</h4>
+        <p class="text-xs text-gray-500 mb-2">How ranking keywords align with page titles, page content, headings, paragraphs, and anchor text. Low scores produce concrete rewrite/linking recommendations.</p>
+        <div id="entity-alignment-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs mb-3"></div>
+        <div id="entity-alignment-recommendations" class="text-xs max-h-80 overflow-y-auto"></div>
       </div>
       <div class="grid lg:grid-cols-2 gap-6">
         <div>
@@ -2172,6 +2179,7 @@
     renderAhrefsFeatureBars();
     renderAhrefsIntentBars();
     renderAhrefsSemanticMap();
+    renderEntityAlignment();
     renderAhrefsTables();
   }
 
@@ -2322,11 +2330,34 @@
   function renderAhrefsSemanticMap() {
     const container = document.getElementById('ahrefs-semantic-map');
     const legend = document.getElementById('ahrefs-semantic-legend');
-    const points = (((state.ahrefs || {}).semantic_map || {}).points || []);
+    const toggles = document.getElementById('ahrefs-semantic-type-toggles');
+    const allPoints = (((state.ahrefs || {}).semantic_map || {}).points || []);
+    if (!state.ahrefsEntityTypes) {
+      state.ahrefsEntityTypes = Object.fromEntries(Object.keys(AHREFS_ENTITY_COLORS).map(t => [t, true]));
+    }
+    if (toggles && !toggles.dataset.ready) {
+      toggles.dataset.ready = '1';
+      toggles.innerHTML = Object.keys(AHREFS_ENTITY_COLORS).map(type => `
+        <label class="inline-flex items-center gap-1">
+          <input type="checkbox" data-type="${escapeHtml(type)}" checked class="rounded border-gray-300">
+          <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1" style="background:${AHREFS_ENTITY_COLORS[type]}"></span>${escapeHtml(AHREFS_ENTITY_LABELS[type])}</span>
+        </label>`).join('');
+      toggles.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.addEventListener('change', () => {
+          state.ahrefsEntityTypes[input.dataset.type] = input.checked;
+          renderAhrefsSemanticMap();
+        });
+      });
+    }
+    const points = allPoints.filter(p => state.ahrefsEntityTypes[p.type] !== false);
     container.innerHTML = '';
     legend.innerHTML = '';
-    if (!points.length) {
+    if (!allPoints.length) {
       container.innerHTML = '<div class="text-gray-500 text-center py-12">No search semantic map. It appears after provider data and entity embeddings are available.</div>';
+      return;
+    }
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">All entity types are hidden.</div>';
       return;
     }
     legend.innerHTML = Object.keys(AHREFS_ENTITY_COLORS).map(type =>
@@ -2379,6 +2410,48 @@
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
       });
     svgOuter.call(zoom);
+  }
+
+  function renderEntityAlignment() {
+    const alignment = (state.ahrefs || {}).entity_alignment || {};
+    const summary = alignment.summary || {};
+    const types = alignment.entity_types || [];
+    const recs = alignment.recommendations || [];
+    const summaryEl = document.getElementById('entity-alignment-summary');
+    const recEl = document.getElementById('entity-alignment-recommendations');
+    if (!summaryEl || !recEl) return;
+    if (!types.length) {
+      summaryEl.innerHTML = '';
+      recEl.innerHTML = '<div class="text-gray-500">No entity-alignment data. It appears after search semantic embeddings are available.</div>';
+      return;
+    }
+    summaryEl.innerHTML = types.map(t => {
+      const score = Number(t.average_score || 0);
+      const color = score >= 0.65 ? 'text-green-700' : (score >= 0.5 ? 'text-amber-700' : 'text-red-700');
+      return `<div class="border border-gray-200 rounded p-3">
+        <div class="text-xl font-semibold ${color}">${score.toFixed(2)}</div>
+        <div class="text-gray-500">${escapeHtml(t.label || t.type)}</div>
+        <div class="text-gray-400 mt-0.5">${Number(t.below_threshold || 0).toLocaleString()} below · ${Number(t.missing || 0).toLocaleString()} missing</div>
+      </div>`;
+    }).join('');
+    recEl.innerHTML = recs.length ? `
+      <table class="w-full">
+        <thead class="text-gray-500 sticky top-0 bg-white">
+          <tr><th class="text-left py-1 pr-2">Keyword / URL</th><th class="text-left py-1 pr-2">Issue</th><th class="text-left py-1 pr-2">Action</th><th class="text-right py-1 pl-2">Traffic</th></tr>
+        </thead>
+        <tbody>
+          ${recs.slice(0, 120).map(r => `<tr class="border-b border-gray-100 align-top">
+            <td class="py-1.5 pr-2">
+              <div class="font-medium">${escapeHtml(r.keyword || '')}</div>
+              <a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.url || '')}</a>
+              <div class="text-gray-400">title ${Number((r.scores || {}).page_title || 0).toFixed(2)} · header ${Number((r.scores || {}).header || 0).toFixed(2)} · paragraph ${Number((r.scores || {}).paragraph || 0).toFixed(2)} · anchor ${Number((r.scores || {}).link_title || 0).toFixed(2)}</div>
+            </td>
+            <td class="py-1.5 pr-2">${escapeHtml(String(r.issue || '').replace(/_/g, ' '))}</td>
+            <td class="py-1.5 pr-2">${escapeHtml(r.action || '')}</td>
+            <td class="py-1.5 pl-2 text-right font-mono">${Number(r.traffic || 0).toLocaleString()}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<div class="text-gray-500">No alignment recommendations.</div>';
   }
 
   function renderAhrefsTables() {

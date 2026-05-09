@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from site_audit.ahrefs import AhrefsClient, AhrefsConfig, build_analysis
+from site_audit.ahrefs import AhrefsClient, AhrefsConfig, _entity_alignment, build_analysis
 from site_audit.analyzer import PageInfo
 
 
@@ -113,3 +113,33 @@ def test_ahrefs_analysis_aggregates_pages_keywords_directories_and_clusters() ->
     assert payload["directories"][0]["traffic"] == 100
     assert payload["clusters"][0]["traffic"] == 100
     assert payload["organic_keywords"][0]["keyword"] == "ai agent"
+
+
+def test_entity_alignment_scores_keyword_against_visible_entities() -> None:
+    rows = [
+        {"type": "keyword", "label": "support ticket", "url": "https://example.com/a", "traffic": 20, "volume": 100, "position": 4, "cluster": 1},
+        {"type": "page_title", "label": "Pricing", "url": "https://example.com/a"},
+        {"type": "header", "label": "Overview", "url": "https://example.com/a"},
+        {"type": "paragraph", "label": "Support ticket software helps route cases.", "url": "https://example.com/a"},
+        {"type": "page", "label": "Support ticket software", "url": "https://example.com/a"},
+        {"type": "link_title", "label": "support ticket software"},
+    ]
+    embeddings = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    payload = _entity_alignment(rows, embeddings)
+
+    assert payload["summary"]["status"] == "ok"
+    assert payload["by_url"][0]["type_scores"]["paragraph"] == 1.0
+    assert payload["by_url"][0]["type_scores"]["page_title"] == 0.0
+    issues = {row["issue"] for row in payload["recommendations"]}
+    assert {"title_mismatch", "heading_mismatch"}.issubset(issues)

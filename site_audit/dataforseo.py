@@ -32,6 +32,7 @@ from .ahrefs import (
     _page_lookup,
     _params_without_date,
     _position_bucket,
+    _entity_alignment,
     _semantic_map,
     _slug,
     _to_float,
@@ -388,6 +389,8 @@ def build_analysis(
         "api_cost_usd": meta.get("api_cost_usd", 0.0),
     }
 
+    entity_alignment = _entity_alignment(semantic_rows, semantic_embeddings)
+
     payload = {
         "meta": meta,
         "summary": summary,
@@ -406,6 +409,7 @@ def build_analysis(
             "shown": len(semantic_points),
             "entity_types": ["page", "page_title", "keyword", "header", "paragraph", "link_title"],
         },
+        "entity_alignment": entity_alignment,
     }
     return AhrefsAnalysis(payload=payload, semantic_rows=semantic_rows, semantic_embeddings=semantic_embeddings)
 

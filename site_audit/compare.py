@@ -782,6 +782,41 @@ def _search_payload(projects: list[_Project]) -> dict:
     }
 
 
+def _entity_alignment_comparison(projects: list[_Project]) -> dict:
+    entity_types: dict[str, dict] = {}
+    summaries: list[dict] = []
+    recommendations: list[dict] = []
+    for proj in projects:
+        alignment = (proj.ahrefs or {}).get("entity_alignment") or {}
+        summary = alignment.get("summary", {}) or {}
+        if summary:
+            summaries.append({"domain": proj.domain, **summary})
+        for row in alignment.get("entity_types") or []:
+            typ = row.get("type") or ""
+            if not typ:
+                continue
+            group = entity_types.setdefault(typ, {
+                "type": typ,
+                "label": row.get("label") or typ,
+                "domains": [],
+            })
+            group["domains"].append({
+                "domain": proj.domain,
+                "average_score": _safe_float(row.get("average_score")),
+                "below_threshold": _safe_int(row.get("below_threshold")),
+                "missing": _safe_int(row.get("missing")),
+                "rows": _safe_int(row.get("rows")),
+            })
+        for rec in (alignment.get("recommendations") or [])[:80]:
+            recommendations.append({"domain": proj.domain, **rec})
+    recommendations.sort(key=lambda r: _safe_int(r.get("traffic")), reverse=True)
+    return {
+        "summaries": summaries,
+        "entity_types": list(entity_types.values()),
+        "recommendations": recommendations[:300],
+    }
+
+
 # --- competitive search/content opportunities ----------------------------
 
 
@@ -1428,6 +1463,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "ahrefs_semantic_total": ahrefs_semantic_total,
         "semantic_entity_maps": semantic_entity_maps,
         "search": _search_payload(projects),
+        "entity_alignment": _entity_alignment_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
