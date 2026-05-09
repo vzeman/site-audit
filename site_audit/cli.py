@@ -80,6 +80,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_cannibalization=not args.no_cannibalization,
         enable_duplicate_fragments=not args.no_duplicate_fragments,
         enable_template_patterns=not args.no_template_patterns,
+        enable_trust_signals=not args.no_trust_signals,
         enable_linkgraph=not args.no_linkgraph,
         enable_external_links=not args.no_external_links,
         enable_paragraph_links=not args.no_paragraph_links,
@@ -271,6 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-cannibalization", action="store_true")
     run_p.add_argument("--no-duplicate-fragments", action="store_true")
     run_p.add_argument("--no-template-patterns", action="store_true")
+    run_p.add_argument("--no-trust-signals", action="store_true")
     run_p.add_argument("--no-linkgraph", action="store_true")
     run_p.add_argument("--no-external-links", action="store_true")
     run_p.add_argument("--no-paragraph-links", action="store_true",

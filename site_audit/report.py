@@ -305,6 +305,7 @@ def write_all(
     header_scatter: Optional[dict] = None,
     linkbuilding: Optional[dict] = None,
     structured_data: Optional[dict] = None,
+    trust_signals: Optional[dict] = None,
     metadata_quality: Optional[dict] = None,
     media_accessibility: Optional[dict] = None,
     page_types: Optional[dict] = None,
@@ -389,6 +390,8 @@ def write_all(
         _write_json(output_dir / "linkbuilding.json", linkbuilding)
     if structured_data is not None:
         _write_json(output_dir / "structured_data.json", structured_data)
+    if trust_signals is not None:
+        _write_json(output_dir / "trust_signals.json", trust_signals)
     if metadata_quality is not None:
         _write_json(output_dir / "metadata_quality.json", metadata_quality)
     if media_accessibility is not None:

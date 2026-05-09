@@ -112,6 +112,7 @@ from .semantic_ablation import build_semantic_ablation
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 from .template_patterns import build_template_patterns
+from .trust_signals import build_trust_signals
 from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
@@ -160,6 +161,7 @@ class PipelineConfig:
     enable_cannibalization: bool = True
     enable_duplicate_fragments: bool = True
     enable_template_patterns: bool = True
+    enable_trust_signals: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -896,6 +898,22 @@ def run(config: PipelineConfig) -> dict:
         sd_summary.get("schema_opportunities", 0),
     )
 
+    trust_signals_data: dict = {}
+    if config.enable_trust_signals:
+        trust_signals_data = build_trust_signals(
+            pages,
+            extracted_pages,
+            search_payload=ahrefs_data,
+        )
+        ts_summary = trust_signals_data.get("summary", {}) or {}
+        if ts_summary.get("status") == "ok":
+            LOG.info(
+                "  trust signals: avg %.1f · %d high-priority pages · %d missing evidence items",
+                ts_summary.get("avg_trust_score", 0.0),
+                ts_summary.get("high_priority_pages", 0),
+                ts_summary.get("missing_evidence_items", 0),
+            )
+
     entity_coverage_data: dict = {}
     if config.enable_entity_coverage:
         entity_coverage_data = build_entity_coverage(
@@ -1232,6 +1250,7 @@ def run(config: PipelineConfig) -> dict:
         header_scatter=header_scatter_data,
         linkbuilding=linkbuilding_data,
         structured_data=structured_data_data,
+        trust_signals=trust_signals_data,
         metadata_quality=metadata_quality_data,
         media_accessibility=media_accessibility_data,
         page_types=page_types_data,
@@ -1287,6 +1306,7 @@ def run(config: PipelineConfig) -> dict:
             header_scatter=header_scatter_data,
             linkbuilding=linkbuilding_data,
             structured_data=structured_data_data,
+            trust_signals=trust_signals_data,
             metadata_quality=metadata_quality_data,
             media_accessibility=media_accessibility_data,
             page_types=page_types_data,

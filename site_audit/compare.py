@@ -60,6 +60,7 @@ class _Project:
     linkbuilding: dict
     header_analysis: dict
     structured_data: dict
+    trust_signals: dict
     metadata_quality: dict
     media_accessibility: dict
     page_types: dict
@@ -128,6 +129,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     linkbuilding = _load_json(report / "linkbuilding.json", {})
     header_analysis = _load_json(report / "header_analysis.json", {})
     structured_data = _load_json(report / "structured_data.json", {})
+    trust_signals = _load_json(report / "trust_signals.json", {})
     metadata_quality = _load_json(report / "metadata_quality.json", {})
     media_accessibility = _load_json(report / "media_accessibility.json", {})
     page_types = _load_json(report / "page_types.json", {})
@@ -176,6 +178,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         linkbuilding=linkbuilding,
         header_analysis=header_analysis,
         structured_data=structured_data,
+        trust_signals=trust_signals,
         metadata_quality=metadata_quality,
         media_accessibility=media_accessibility,
         page_types=page_types,
@@ -455,6 +458,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "invalid_jsonld_blocks", "label": "Invalid JSON-LD", "better": "low", "fmt": "int"},
             {"key": "schema_type_count", "label": "Schema types", "better": "high", "fmt": "int"},
             {"key": "schema_opportunities", "label": "Schema opportunities", "better": "low", "fmt": "int"},
+            {"key": "trust_avg_score", "label": "Trust score", "better": "high", "fmt": "0.0"},
+            {"key": "trust_high_priority_pages", "label": "Trust gaps", "better": "low", "fmt": "int"},
         ],
     },
     {
@@ -625,6 +630,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     lb = (proj.linkbuilding or {}).get("summary", {}) or {}
     ha = (proj.header_analysis or {}).get("summary", {}) or {}
     sd = (proj.structured_data or {}).get("summary", {}) or {}
+    ts = (proj.trust_signals or {}).get("summary", {}) or {}
     mq = (proj.metadata_quality or {}).get("summary", {}) or {}
     ma = (proj.media_accessibility or {}).get("summary", {}) or {}
     pt = (proj.page_types or {}).get("summary", {}) or {}
@@ -693,6 +699,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "schema_opportunities": int(sd.get("schema_opportunities", 0)),
         "high_priority_schema_opportunities": int(sd.get("high_priority_schema_opportunities", 0)),
         "schema_opportunity_clusters": int(sd.get("schema_opportunity_clusters", 0)),
+        "trust_avg_score": float(ts.get("avg_trust_score", 0.0)),
+        "trust_high_priority_pages": int(ts.get("high_priority_pages", 0)),
+        "trust_missing_evidence_items": int(ts.get("missing_evidence_items", 0)),
         "metadata_issue_share": float(mq.get("issue_share", 0.0)),
         "missing_description": int(mq.get("missing_description", 0)),
         "duplicate_title_pages": int(mq.get("duplicate_title_pages", 0)),
@@ -1033,6 +1042,47 @@ def _structured_data_opportunity_comparison(projects: list[_Project]) -> dict:
         "recommendations": recommendations[:300],
         "invalid": invalid[:200],
     }
+
+
+def _trust_signal_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    missing: list[dict] = []
+    pages: list[dict] = []
+    for proj in projects:
+        payload = proj.trust_signals or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("clusters") or []:
+            cluster = str(row.get("cluster") or "unclustered")
+            clusters[cluster][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": cluster,
+                "avg_trust_score": _safe_float(row.get("avg_trust_score")),
+                "leader_score": _safe_float(row.get("leader_score")),
+                "pages": _safe_int(row.get("pages")),
+                "traffic": _safe_int(row.get("traffic")),
+                "leader_examples": row.get("leader_examples") or [],
+            }
+        for row in payload.get("missing_evidence") or []:
+            missing.append({"domain": proj.domain, **row})
+        for row in (payload.get("pages") or [])[:80]:
+            pages.append({"domain": proj.domain, **row})
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {"domain": domain, "cluster": cluster, "avg_trust_score": 0.0, "leader_score": 0.0, "pages": 0, "traffic": 0})
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("traffic")) for d in r["domains"]), reverse=True)
+    missing.sort(key=lambda r: (1 if r.get("priority") == "high" else 0, _safe_int(r.get("traffic"))), reverse=True)
+    pages.sort(key=lambda r: ({"high": 2, "medium": 1, "low": 0}.get(r.get("priority"), 0), _safe_int(r.get("traffic"))), reverse=True)
+    return {"domains": domains, "clusters": matrix[:100], "missing_evidence": missing[:300], "pages": pages[:240]}
 
 
 def _answer_blocks_comparison(projects: list[_Project]) -> dict:
@@ -2360,6 +2410,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "entity_coverage": _entity_coverage_comparison(projects),
         "information_gain": _information_gain_comparison(projects),
         "structured_data_opportunities": _structured_data_opportunity_comparison(projects),
+        "trust_signals": _trust_signal_comparison(projects),
         "answer_blocks": _answer_blocks_comparison(projects),
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),

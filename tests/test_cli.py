@@ -41,6 +41,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--no-cannibalization",
             "--no-duplicate-fragments",
             "--no-template-patterns",
+            "--no-trust-signals",
         ]
     )
 
@@ -66,3 +67,4 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.no_cannibalization is True
     assert args.no_duplicate_fragments is True
     assert args.no_template_patterns is True
+    assert args.no_trust_signals is True

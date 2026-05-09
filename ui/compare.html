@@ -325,6 +325,31 @@
       </div>
     </section>
 
+    <!-- Trust signal comparison -->
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="trust-signals-compare-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">E-E-A-T and trust signals</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Visible trust, expertise, evidence, and proof signals compared by cluster and domain.
+        </p>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Cluster trust score</h3>
+          <div id="trust-cluster-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Missing evidence</h3>
+          <div class="overflow-x-auto border border-gray-100 rounded">
+            <table class="min-w-full text-xs" id="trust-missing-table">
+              <thead class="bg-gray-100 text-gray-600 uppercase"></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Ahrefs search demand -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="search-demand-section">
       <div class="mb-4">
@@ -790,6 +815,8 @@
       { key: 'invalid_jsonld_blocks', label: 'Invalid JSON-LD', better: 'low', fmt: 'int' },
       { key: 'schema_type_count',     label: 'Schema types', better: 'high', fmt: 'int' },
       { key: 'schema_opportunities',  label: 'Schema opps', better: 'low', fmt: 'int' },
+      { key: 'trust_avg_score',       label: 'Trust score', better: 'high', fmt: '0.0' },
+      { key: 'trust_high_priority_pages', label: 'Trust gaps', better: 'low', fmt: 'int' },
     ],
     entities: [
       { key: 'pages',                    label: 'Pages', better: 'na', fmt: 'int' },
@@ -1111,6 +1138,7 @@
   renderMatrixButtons();
   renderMetricMatrix();
   renderStructuredDataCompare();
+  renderTrustSignalsCompare();
 
   function renderStructuredHeatmap(container, rows, labelKey, valueKey, formatValue) {
     if (!container) return;
@@ -1182,6 +1210,37 @@
         <td class="px-2 py-1.5 text-gray-600">${escapeHtml(r.reason || '')}</td>
         <td class="px-2 py-1.5">${escapeHtml([...(r.missing_evidence || []), ...(r.missing_recommended_properties || [])].slice(0, 5).join(' · '))}</td>
       </tr>`).join('') : '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="5">No structured-data recommendations.</td></tr>';
+  }
+
+  function renderTrustSignalsCompare() {
+    const section = document.getElementById('trust-signals-compare-section');
+    const payload = data.trust_signals || {};
+    const rows = payload.clusters || [];
+    if (!rows.length && !((payload.missing_evidence || []).length)) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const container = document.getElementById('trust-cluster-compare');
+    renderStructuredHeatmap(container, rows, 'cluster', 'avg_trust_score', v => Number(v || 0).toFixed(0));
+    const tbl = document.getElementById('trust-missing-table');
+    const missing = (payload.missing_evidence || []).slice(0, 120);
+    tbl.querySelector('thead').innerHTML = `
+      <tr>
+        <th class="px-2 py-2 text-left">Domain</th>
+        <th class="px-2 py-2 text-left">Page</th>
+        <th class="px-2 py-2 text-left">Cluster</th>
+        <th class="px-2 py-2 text-left">Missing signal</th>
+        <th class="px-2 py-2 text-right">Score</th>
+      </tr>`;
+    tbl.querySelector('tbody').innerHTML = missing.length ? missing.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="px-2 py-1.5 whitespace-nowrap"><span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${domainColor(r.domain)}"></span>${escapeHtml(r.domain)}</td>
+        <td class="px-2 py-1.5"><a class="text-blue-600 hover:underline" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url || '')}</a><div class="text-gray-500">${escapeHtml(r.priority || '')}</div></td>
+        <td class="px-2 py-1.5">${escapeHtml(r.cluster || '')}</td>
+        <td class="px-2 py-1.5 text-gray-600">${escapeHtml(r.missing_signal || '')}</td>
+        <td class="px-2 py-1.5 text-right font-mono">${Number(r.trust_score || 0).toFixed(1)}</td>
+      </tr>`).join('') : '<tr><td class="px-2 py-8 text-center text-gray-500" colspan="5">No missing evidence rows.</td></tr>';
   }
 
   // ============================================================
