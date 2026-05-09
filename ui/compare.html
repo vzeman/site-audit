@@ -481,6 +481,28 @@
       </div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="winning-patterns-section">
+      <div class="mb-4">
+        <h2 class="text-xl font-semibold">Winning patterns to copy</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Patterns from the strongest domain or cluster that are missing on weaker domains, grouped by content, links, schema, freshness, and conversion.
+        </p>
+      </div>
+      <div id="winning-pattern-summary" class="grid md:grid-cols-2 xl:grid-cols-5 gap-4 mb-6 text-xs"></div>
+      <div class="grid xl:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Pattern cards</h3>
+          <p class="text-xs text-gray-500 mb-2">Each card names the source evidence and target changes with confidence.</p>
+          <div id="winning-pattern-cards" class="space-y-3"></div>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold mb-1">Coverage by domain</h3>
+          <p class="text-xs text-gray-500 mb-2">Source domains are covered; gap cells show where recommendations exist.</p>
+          <div id="winning-pattern-coverage" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Competitive opportunities -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="opportunity-section">
       <div class="mb-4">
@@ -2237,8 +2259,138 @@
     `;
   }
 
+  function renderWinningPatterns() {
+    const section = document.getElementById('winning-patterns-section');
+    if (!section) return;
+    const payload = data.winning_patterns || {};
+    const patterns = payload.patterns || [];
+    if (!patterns.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    const categories = (payload.summary || {}).categories || {};
+    const categoryLabels = {
+      content: 'Content',
+      link: 'Links',
+      schema: 'Schema',
+      freshness: 'Freshness',
+      conversion: 'Conversion',
+    };
+    const categoryColors = {
+      content: '#2563eb',
+      link: '#16a34a',
+      schema: '#7c3aed',
+      freshness: '#f59e0b',
+      conversion: '#dc2626',
+    };
+    const summaryRoot = document.getElementById('winning-pattern-summary');
+    const summaryCards = Object.keys(categoryLabels).map(key => [categoryLabels[key], categories[key] || 0, key]);
+    summaryCards.unshift(['All patterns', (payload.summary || {}).patterns || patterns.length, 'all']);
+    summaryRoot.innerHTML = summaryCards.map(card => `
+      <article class="border border-gray-200 rounded-lg p-4 bg-white">
+        <div class="text-xl font-semibold">${Number(card[1] || 0).toLocaleString()}</div>
+        <div class="font-medium text-sm">${escapeHtml(card[0])}</div>
+        <div class="text-xs text-gray-500 mt-1">${card[2] === 'all' ? `${Number((payload.summary || {}).recommendations || 0).toLocaleString()} recommendations` : 'copyable gaps'}</div>
+      </article>
+    `).join('');
+
+    const cardsRoot = document.getElementById('winning-pattern-cards');
+    cardsRoot.innerHTML = patterns.slice(0, 32).map(pattern => {
+      const category = pattern.category || 'content';
+      const evidence = pattern.source_evidence || {};
+      const recs = (pattern.target_recommendations || []).slice(0, 4);
+      return `
+        <article class="border border-gray-200 rounded-md bg-white p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${categoryColors[category] || '#64748b'}"></span>${escapeHtml(categoryLabels[category] || category)} · ${escapeHtml(pattern.cluster_label || pattern.cluster || 'cross-domain')}
+              </div>
+              <h4 class="font-semibold text-gray-900 mt-1">${escapeHtml(pattern.title || '')}</h4>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-sm font-semibold">${Number(pattern.priority_score || 0).toFixed(0)}</div>
+              <div class="text-[10px] text-gray-500">priority</div>
+            </div>
+          </div>
+          <div class="mt-3 grid md:grid-cols-2 gap-3 text-xs">
+            <div class="bg-gray-50 rounded-md p-3">
+              <div class="font-semibold text-gray-700 mb-1">Source evidence</div>
+              <div>${escapeHtml(pattern.source_domain || '')}</div>
+              ${evidence.source_url ? `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(evidence.source_url)}" target="_blank" rel="noopener">${escapeHtml(evidence.source_title || evidence.source_url)}</a>` : ''}
+              <div class="text-gray-500 mt-1">
+                strength ${Number(evidence.source_strength || pattern.confidence || 0).toFixed(2)}
+                ${evidence.leader_traffic ? ` · traffic ${Number(evidence.leader_traffic || 0).toLocaleString()}` : ''}
+                ${evidence.evidence_type ? ` · ${escapeHtml(evidence.evidence_type)}` : ''}
+              </div>
+            </div>
+            <div class="bg-blue-50 rounded-md p-3">
+              <div class="font-semibold text-gray-700 mb-1">Targets</div>
+              ${recs.map(rec => `
+                <div class="border-b border-blue-100 last:border-0 py-1.5">
+                  <div><span class="font-medium">${escapeHtml(rec.target_domain || '')}</span> · confidence ${Number(rec.confidence || 0).toFixed(2)} · ${escapeHtml(rec.implementation_effort || '')}</div>
+                  <a class="text-blue-700 hover:underline break-all" href="${escapeHtml(rec.target_url || '#')}" target="_blank" rel="noopener">${escapeHtml(rec.target_title || rec.target_url || 'target')}</a>
+                  <div class="text-gray-600">${escapeHtml(rec.concrete_change || '')}</div>
+                </div>
+              `).join('') || '<div class="text-gray-500">No target recommendations.</div>'}
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    renderWinningPatternCoverage(categoryColors);
+  }
+
+  function renderWinningPatternCoverage(categoryColors) {
+    const container = document.getElementById('winning-pattern-coverage');
+    const rows = ((data.winning_patterns || {}).coverage || []).slice(0, 70);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No winning-pattern coverage rows.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 126;
+    const cellH = 31;
+    const left = 230;
+    const top = 28;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 44;
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 20).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.title || '').slice(0, 42));
+      svg.append('circle').attr('cx', 214).attr('cy', y + 12).attr('r', 4).attr('fill', categoryColors[row.category] || '#64748b');
+      domains.forEach((domain, di) => {
+        const cell = (row.domains || []).find(d => d.domain === domain) || {};
+        const status = cell.status || 'unknown';
+        const fill = status === 'source' ? '#dcfce7' : status === 'gap' ? '#fef3c7' : '#f3f4f6';
+        const stroke = status === 'source' ? '#16a34a' : status === 'gap' ? '#d97706' : 'none';
+        const label = status === 'source' ? 'Source' : status === 'gap' ? `Gap ${Number(cell.recommendations || 0).toLocaleString()}` : '';
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', fill).attr('rx', 2).attr('stroke', stroke).attr('stroke-width', stroke === 'none' ? 0 : 1)
+          .append('title').text(`${domain} · ${row.title}\n${status}\nrecommendations ${Number(cell.recommendations || 0).toLocaleString()}`);
+        if (label) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', status === 'source' ? '#166534' : '#92400e')
+            .text(label);
+        }
+      });
+    });
+  }
+
   renderSearchDemand();
   renderStrongestClusters();
+  renderWinningPatterns();
 
   // ============================================================
   // Competitive opportunity comparisons

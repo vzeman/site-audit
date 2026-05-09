@@ -177,6 +177,12 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["strongest_clusters"]["matrix"]
     assert payload["strongest_clusters"]["semantic_points"]
     assert payload["strongest_clusters"]["clusters"][0]["domains"][0]["keywords"]
+    assert payload["winning_patterns"]["patterns"]
+    first_pattern = payload["winning_patterns"]["patterns"][0]
+    assert first_pattern["source_evidence"]
+    assert first_pattern["target_recommendations"][0]["priority_score"] > 0
+    assert first_pattern["target_recommendations"][0]["confidence"] > 0
+    assert payload["winning_patterns"]["coverage"]
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:
@@ -361,6 +367,7 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
         for domain_row in cluster["domains"]
         if domain_row["domain"] == "alpha.example"
     )
+    assert any(pattern["category"] == "link" for pattern in payload["winning_patterns"]["patterns"])
 
 
 def test_compare_scatter_includes_freshness_for_pages(tmp_path: Path) -> None:

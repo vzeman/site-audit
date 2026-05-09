@@ -2593,6 +2593,353 @@ def _strongest_cluster_payload(
     }
 
 
+def _winning_pattern_transfer_payload(
+    projects: list[_Project],
+    strongest_clusters: dict,
+    keyword_cluster_gaps: dict,
+    pattern_transplants: dict,
+) -> dict:
+    domains = [p.domain for p in projects]
+    patterns: dict[str, dict] = {}
+    coverage: dict[str, dict[str, dict]] = defaultdict(dict)
+    recommendations: list[dict] = []
+    clusters = strongest_clusters.get("clusters") or []
+    cluster_lookup = {row.get("cluster"): row for row in clusters}
+    url_cluster: dict[str, dict[str, dict]] = defaultdict(dict)
+
+    for cluster in clusters:
+        key = cluster.get("cluster") or ""
+        for domain_row in cluster.get("domains") or []:
+            domain = domain_row.get("domain") or ""
+            for page in domain_row.get("top_pages") or []:
+                if page.get("url"):
+                    _store_url_lookup(url_cluster[domain], page.get("url"), {"cluster": key, "cluster_label": cluster.get("cluster_label") or key})
+
+    def lookup_url_cluster(domain: str, url: object) -> dict:
+        if not url:
+            return {}
+        return _lookup_url(url_cluster.get(domain, {}), url)
+
+    def normalize(value: object) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")[:70] or "pattern"
+
+    def category_for(kind: str, label: str = "") -> str:
+        text = f"{kind} {label}".lower()
+        if any(token in text for token in ("link", "anchor", "inlink", "pagerank")):
+            return "link"
+        if "schema" in text or "structured" in text:
+            return "schema"
+        if "fresh" in text or "date" in text or "updated" in text:
+            return "freshness"
+        if any(token in text for token in ("cta", "form", "conversion", "lead", "demo", "trial", "contact")):
+            return "conversion"
+        return "content"
+
+    def effort_for(category: str, kind: str) -> str:
+        if category == "freshness":
+            return "low"
+        if category in {"schema", "link", "conversion"}:
+            return "medium"
+        if kind in {"paragraph_archetype", "content_depth"}:
+            return "high"
+        return "medium"
+
+    def confidence_score(intent_match: float, opportunity: int, prevalence: float, source_strength: float, effort: str) -> float:
+        effort_penalty = {"low": 0.0, "medium": 0.06, "high": 0.12}.get(effort, 0.08)
+        raw = 0.34 + intent_match * 0.22 + min(0.18, math.log1p(max(0, opportunity)) / 40.0) + prevalence * 0.16 + min(0.16, source_strength / 100.0 * 0.16) - effort_penalty
+        return round(max(0.25, min(0.95, raw)), 3)
+
+    def priority_score(opportunity: int, confidence: float, source_strength: float, effort: str) -> float:
+        effort_boost = {"low": 8.0, "medium": 4.0, "high": 0.0}.get(effort, 2.0)
+        return round(min(100.0, math.log1p(max(0, opportunity)) * 9.0 + confidence * 36.0 + min(22.0, source_strength / 100.0 * 22.0) + effort_boost), 2)
+
+    def ensure_pattern(
+        pattern_key: str,
+        *,
+        category: str,
+        cluster_key: str,
+        cluster_label: str,
+        title: str,
+        source_domain: str,
+        source_evidence: dict,
+    ) -> dict:
+        pattern = patterns.setdefault(pattern_key, {
+            "pattern_key": pattern_key,
+            "category": category,
+            "cluster": cluster_key,
+            "cluster_label": cluster_label,
+            "title": title,
+            "source_domain": source_domain,
+            "source_evidence": source_evidence,
+            "target_recommendations": [],
+            "priority_score": 0.0,
+            "confidence": 0.0,
+        })
+        coverage[pattern_key][source_domain] = {
+            "domain": source_domain,
+            "status": "source",
+            "covered": True,
+            "recommendations": 0,
+        }
+        return pattern
+
+    def add_recommendation(pattern: dict, rec: dict) -> None:
+        pattern["target_recommendations"].append(rec)
+        pattern["priority_score"] = max(_safe_float(pattern.get("priority_score")), _safe_float(rec.get("priority_score")))
+        pattern["confidence"] = max(_safe_float(pattern.get("confidence")), _safe_float(rec.get("confidence")))
+        recommendations.append({"pattern_key": pattern["pattern_key"], **rec})
+        target_domain = rec.get("target_domain") or rec.get("domain") or ""
+        if target_domain:
+            coverage[pattern["pattern_key"]][target_domain] = {
+                "domain": target_domain,
+                "status": "gap",
+                "covered": False,
+                "recommendations": coverage[pattern["pattern_key"]].get(target_domain, {}).get("recommendations", 0) + 1,
+            }
+
+    # Section-level competitor gaps already encode content, schema, freshness,
+    # and internal-link features that the winning cluster has and the target lacks.
+    for rec in keyword_cluster_gaps.get("recommendations") or []:
+        source_domain = rec.get("competitor_domain") or ""
+        target_domain = rec.get("domain") or ""
+        cluster_key = rec.get("cluster") or ""
+        if not source_domain or not target_domain or source_domain == target_domain:
+            continue
+        kind = rec.get("missing_type") or "content"
+        label = rec.get("missing_element") or kind
+        category = category_for(kind, label)
+        effort = effort_for(category, kind)
+        cluster = cluster_lookup.get(cluster_key) or {}
+        leader = next((d for d in (cluster.get("domains") or []) if d.get("domain") == source_domain), {})
+        target = next((d for d in (cluster.get("domains") or []) if d.get("domain") == target_domain), {})
+        opportunity = _safe_int(rec.get("traffic_opportunity"))
+        prevalence = _safe_float(rec.get("competitor_prevalence"), 0.5)
+        source_strength = _safe_float(leader.get("strength_score"), _safe_float(rec.get("leader_traffic")))
+        confidence = confidence_score(1.0, opportunity, prevalence, source_strength, effort)
+        priority = priority_score(opportunity, confidence, source_strength, effort)
+        pattern_key = f"winning::{cluster_key}::{category}::{normalize(kind)}::{normalize(label)}"
+        pattern = ensure_pattern(
+            pattern_key,
+            category=category,
+            cluster_key=cluster_key,
+            cluster_label=rec.get("cluster_label") or cluster_key,
+            title=f"{category.title()} pattern: {label}",
+            source_domain=source_domain,
+            source_evidence={
+                "source_url": rec.get("competitor_url") or "",
+                "source_title": rec.get("competitor_title") or "",
+                "leader_traffic": _safe_int(rec.get("leader_traffic")),
+                "source_strength": round(source_strength, 2),
+                "competitor_prevalence": round(prevalence, 3),
+                "evidence_type": kind,
+            },
+        )
+        add_recommendation(pattern, {
+            "category": category,
+            "cluster": cluster_key,
+            "cluster_label": rec.get("cluster_label") or cluster_key,
+            "source_domain": source_domain,
+            "target_domain": target_domain,
+            "target_url": rec.get("target_url") or target.get("top_url") or "",
+            "target_title": rec.get("target_title") or target.get("top_title") or "",
+            "concrete_change": rec.get("action") or "Copy the winning pattern in a domain-specific way.",
+            "missing_element": label,
+            "implementation_effort": effort,
+            "opportunity": opportunity,
+            "priority_score": priority,
+            "confidence": confidence,
+            "intent_match": 1.0,
+            "page_type_match": 0.75,
+        })
+
+    # Metric-led patterns from the strongest-cluster payload catch cases where
+    # the gap is structural rather than a single missing heading/entity/schema row.
+    metric_specs = [
+        {
+            "category": "content",
+            "kind": "content_depth",
+            "label": "paragraph depth and topical examples",
+            "metric": "paragraph_count",
+            "condition": lambda leader, target: _safe_int(leader.get("paragraph_count")) >= 2 and _safe_int(target.get("paragraph_count")) < max(1, _safe_int(leader.get("paragraph_count")) * 0.6),
+            "action": "Add explanatory paragraphs that cover the same user questions and examples as the winning cluster, rewritten for this domain.",
+        },
+        {
+            "category": "link",
+            "kind": "internal_link_support",
+            "label": "strong internal inlink support",
+            "metric": "avg_in_degree",
+            "condition": lambda leader, target: _safe_float(leader.get("avg_in_degree")) >= 3 and _safe_float(target.get("avg_in_degree")) < max(2.0, _safe_float(leader.get("avg_in_degree")) * 0.6),
+            "action": "Add descriptive internal links from relevant hubs and cluster-neighbor pages to the target page.",
+        },
+        {
+            "category": "freshness",
+            "kind": "freshness",
+            "label": "visible freshness maintenance",
+            "metric": "freshness_score",
+            "condition": lambda leader, target: _safe_float(leader.get("freshness_score")) >= 0.7 and _safe_float(target.get("freshness_score")) < 0.45,
+            "action": "Refresh the target page and expose a visible published or updated date where the content supports it.",
+        },
+        {
+            "category": "conversion",
+            "kind": "conversion_surface",
+            "label": "clear conversion surface",
+            "metric": "conversion_score",
+            "condition": lambda leader, target: _safe_float(leader.get("conversion_score")) >= 0.65 and _safe_float(target.get("conversion_score")) < 0.4,
+            "action": "Add a clear primary CTA or lead path comparable to the winning page type.",
+        },
+    ]
+
+    for cluster in clusters:
+        leader = next((d for d in cluster.get("domains") or [] if d.get("domain") == cluster.get("winner_domain")), {})
+        if not leader:
+            continue
+        source_domain = leader.get("domain") or ""
+        cluster_key = cluster.get("cluster") or ""
+        cluster_label = cluster.get("cluster_label") or cluster_key
+        for target in cluster.get("domains") or []:
+            target_domain = target.get("domain") or ""
+            if not target_domain or target_domain == source_domain:
+                continue
+            opportunity = max(0, _safe_int(leader.get("traffic")) - _safe_int(target.get("traffic")))
+            if opportunity <= 0 and _safe_float(cluster.get("score_gap")) < 8:
+                continue
+            for spec in metric_specs:
+                if not spec["condition"](leader, target):
+                    continue
+                category = spec["category"]
+                effort = effort_for(category, spec["kind"])
+                metric = spec["metric"]
+                source_strength = _safe_float(leader.get("strength_score"))
+                confidence = confidence_score(1.0, opportunity, 1.0, source_strength, effort)
+                priority = priority_score(opportunity, confidence, source_strength, effort)
+                pattern_key = f"winning::{cluster_key}::{category}::{normalize(spec['kind'])}"
+                pattern = ensure_pattern(
+                    pattern_key,
+                    category=category,
+                    cluster_key=cluster_key,
+                    cluster_label=cluster_label,
+                    title=f"{category.title()} pattern: {spec['label']}",
+                    source_domain=source_domain,
+                    source_evidence={
+                        "source_url": (leader.get("top_pages") or [{}])[0].get("url") or "",
+                        "source_title": (leader.get("top_pages") or [{}])[0].get("title") or "",
+                        "source_strength": round(source_strength, 2),
+                        "source_metric": metric,
+                        "source_metric_value": leader.get(metric),
+                        "target_metric_value": target.get(metric),
+                        "evidence_type": spec["kind"],
+                    },
+                )
+                add_recommendation(pattern, {
+                    "category": category,
+                    "cluster": cluster_key,
+                    "cluster_label": cluster_label,
+                    "source_domain": source_domain,
+                    "target_domain": target_domain,
+                    "target_url": (target.get("top_pages") or [{}])[0].get("url") or target.get("top_url") or "",
+                    "target_title": (target.get("top_pages") or [{}])[0].get("title") or target.get("top_title") or "",
+                    "concrete_change": spec["action"],
+                    "missing_element": spec["label"],
+                    "implementation_effort": effort,
+                    "opportunity": opportunity,
+                    "priority_score": priority,
+                    "confidence": confidence,
+                    "intent_match": 1.0,
+                    "page_type_match": 0.7,
+                })
+
+    # Reuse high-confidence template/internal-link transplants when their source
+    # domain is the cluster winner or when the target URL can be mapped into a
+    # winning-cluster gap.
+    for rec in pattern_transplants.get("recommendations") or []:
+        source_domain = rec.get("source_domain") or ""
+        target_domain = rec.get("target_domain") or ""
+        if not source_domain or not target_domain or source_domain == target_domain:
+            continue
+        cluster_info = lookup_url_cluster(target_domain, rec.get("target_url")) or lookup_url_cluster(source_domain, rec.get("suggested_target_url"))
+        cluster_key = cluster_info.get("cluster") or ""
+        cluster_label = cluster_info.get("cluster_label") or cluster_key or "cross-domain"
+        category = category_for(rec.get("pattern_type") or "", f"{rec.get('source_pattern') or ''} {rec.get('suggested_heading') or ''} {rec.get('suggested_anchor') or ''}")
+        effort = effort_for(category, rec.get("pattern_type") or "")
+        opportunity = _safe_int(rec.get("target_traffic"))
+        source_strength = _safe_float(rec.get("priority_score"))
+        confidence = max(_safe_float(rec.get("confidence")), confidence_score(0.75 if cluster_key else 0.55, opportunity, 0.75, source_strength, effort))
+        priority = max(_safe_float(rec.get("priority_score")), priority_score(opportunity, confidence, source_strength, effort))
+        pattern_key = f"winning::{cluster_key or 'cross-domain'}::{category}::{normalize(rec.get('source_pattern') or rec.get('pattern_key'))}"
+        pattern = ensure_pattern(
+            pattern_key,
+            category=category,
+            cluster_key=cluster_key,
+            cluster_label=cluster_label,
+            title=f"{category.title()} pattern: {rec.get('source_pattern') or rec.get('pattern_key')}",
+            source_domain=source_domain,
+            source_evidence={
+                **(rec.get("source_evidence") or {}),
+                "source_pattern": rec.get("source_pattern") or "",
+                "evidence_type": rec.get("pattern_type") or "",
+            },
+        )
+        add_recommendation(pattern, {
+            "category": category,
+            "cluster": cluster_key,
+            "cluster_label": cluster_label,
+            "source_domain": source_domain,
+            "target_domain": target_domain,
+            "target_url": rec.get("target_url") or "",
+            "target_title": rec.get("target_title") or "",
+            "concrete_change": rec.get("concrete_change") or "Copy the winning pattern in a domain-specific way.",
+            "missing_element": rec.get("source_pattern") or rec.get("suggested_heading") or rec.get("suggested_anchor") or "",
+            "implementation_effort": effort,
+            "opportunity": opportunity,
+            "priority_score": round(priority, 2),
+            "confidence": round(confidence, 3),
+            "intent_match": 0.75 if cluster_key else 0.55,
+            "page_type_match": 0.75,
+        })
+
+    pattern_rows = list(patterns.values())
+    for pattern in pattern_rows:
+        pattern_key = pattern["pattern_key"]
+        domain_rows = []
+        for domain in domains:
+            domain_rows.append(coverage.get(pattern_key, {}).get(domain, {
+                "domain": domain,
+                "status": "unknown",
+                "covered": False,
+                "recommendations": 0,
+            }))
+        pattern["domains"] = domain_rows
+        pattern["target_recommendations"].sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("confidence"))), reverse=True)
+        pattern["recommendation_count"] = len(pattern["target_recommendations"])
+
+    pattern_rows.sort(key=lambda r: (_safe_float(r.get("priority_score")), len(r.get("target_recommendations") or [])), reverse=True)
+    recommendations.sort(key=lambda r: (_safe_float(r.get("priority_score")), _safe_float(r.get("confidence"))), reverse=True)
+    type_counts = Counter(row.get("category") or "content" for row in pattern_rows)
+    coverage_rows = [
+        {
+            "pattern_key": row["pattern_key"],
+            "title": row.get("title") or "",
+            "category": row.get("category") or "",
+            "cluster": row.get("cluster") or "",
+            "cluster_label": row.get("cluster_label") or "",
+            "source_domain": row.get("source_domain") or "",
+            "domains": row.get("domains") or [],
+            "recommendations": row.get("recommendation_count", 0),
+        }
+        for row in pattern_rows[:160]
+    ]
+    return {
+        "summary": {
+            "patterns": len(pattern_rows),
+            "recommendations": len(recommendations),
+            "categories": dict(type_counts),
+        },
+        "patterns": pattern_rows[:220],
+        "recommendations": recommendations[:500],
+        "coverage": coverage_rows,
+    }
+
+
 def _serp_feature_payload(projects: list[_Project]) -> dict:
     by_feature: dict[str, dict[str, dict]] = {}
     for proj in projects:
@@ -3562,6 +3909,15 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
     for key, entity_map in semantic_entity_maps.items():
         if entity_map.get("total"):
             LOG.info("  semantic %s UMAP: %d points projected", key, entity_map["total"])
+    keyword_cluster_gaps = _keyword_cluster_gap_payload(projects)
+    strongest_clusters = _strongest_cluster_payload(projects, scatter_rows, ahrefs_semantic_rows)
+    pattern_transplants = _pattern_transplant_payload(projects)
+    winning_patterns = _winning_pattern_transfer_payload(
+        projects,
+        strongest_clusters,
+        keyword_cluster_gaps,
+        pattern_transplants,
+    )
 
     return {
         "domains": [p.domain for p in projects],
@@ -3584,8 +3940,9 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "duplicate_fragments": _duplicate_fragments_comparison(projects),
         "template_patterns": _template_patterns_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
-        "keyword_cluster_gaps": _keyword_cluster_gap_payload(projects),
-        "strongest_clusters": _strongest_cluster_payload(projects, scatter_rows, ahrefs_semantic_rows),
+        "keyword_cluster_gaps": keyword_cluster_gaps,
+        "strongest_clusters": strongest_clusters,
+        "winning_patterns": winning_patterns,
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),
@@ -3596,7 +3953,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "contextual_link_impact": _contextual_link_comparison(projects),
         "high_demand_low_link": _high_demand_low_link_comparison(projects),
         "internal_link_patterns": _internal_link_patterns_comparison(projects),
-        "pattern_transplants": _pattern_transplant_payload(projects),
+        "pattern_transplants": pattern_transplants,
         "hub_bottlenecks": _hub_bottleneck_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
