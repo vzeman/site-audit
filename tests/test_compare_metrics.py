@@ -39,10 +39,12 @@ def _write_semantic_cache(root: Path, domain: str) -> None:
         else "Support automation software helps teams organize requests and improve customer service workflows."
     )
     rows = [
+        {"type": "page", "label": f"{domain} page", "url": f"https://{domain}/a", "cluster": "support", "traffic": 20, "size": 20},
         {"type": "link_title", "label": f"{domain} anchor", "count": 4, "size": 4},
         {"type": "header", "label": f"{domain} H1", "url": f"https://{domain}/a", "cluster": "support", "level": 1, "traffic": 20, "size": 10},
         {"type": "page_title", "label": f"{domain} title", "url": f"https://{domain}/a", "cluster": "support", "traffic": 20, "size": 20},
         {"type": "paragraph", "label": paragraph, "url": f"https://{domain}/a", "cluster": "support", "paragraph_index": 0, "traffic": 20, "size": 20},
+        {"type": "keyword", "label": f"{domain} support automation", "url": f"https://{domain}/a", "cluster": "support", "traffic": 12, "volume": 200, "position": 4, "size": 200},
     ]
     (cache_dir / "semantic_entities_test_model.meta.json").write_text(
         json.dumps(rows),
@@ -50,7 +52,7 @@ def _write_semantic_cache(root: Path, domain: str) -> None:
     )
     np.savez_compressed(
         cache_dir / "semantic_entities_test_model.npz",
-        embeddings=np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7], [0.3, 0.9]], dtype=np.float32),
+        embeddings=np.array([[0.9, 0.1], [1.0, 0.0], [0.0, 1.0], [0.7, 0.7], [0.3, 0.9], [0.8, 0.2]], dtype=np.float32),
     )
 
 
@@ -145,6 +147,11 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["semantic_entity_maps"]["link_titles"]["total"] == 2
     assert payload["semantic_entity_maps"]["headers"]["total"] == 2
     assert payload["semantic_entity_maps"]["page_titles"]["total"] == 2
+    assert payload["semantic_entity_maps"]["pages"]["total"] == 2
+    assert payload["semantic_entity_maps"]["paragraphs"]["total"] == 2
+    assert payload["semantic_entity_maps"]["keywords"]["total"] == 2
+    assert "pagerank" in payload["ahrefs_semantic_scatter"][0]
+    assert "freshness_bucket" in payload["ahrefs_semantic_scatter"][0]
     assert "keyword_gaps" in payload
     assert "serp_features" in payload
     assert "content_efficiency" in payload

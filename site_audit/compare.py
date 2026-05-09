@@ -345,12 +345,30 @@ def _combined_ahrefs_semantic_umap(
     out: list[dict] = []
     cursor = 0
     for proj, sub_embs, sub_rows in chunks:
+        authority_lookup = _authority_lookup(proj)
+        link_lookup = _page_link_lookup(proj)
+        freshness_lookup = _freshness_lookup(proj)
+        page_type_lookup = _url_lookup_from_rows(((proj.page_types or {}).get("per_page") or []), ("url",))
         for i, row in enumerate(sub_rows):
+            authority = _lookup_url(authority_lookup, row.get("url"))
+            link = _lookup_url(link_lookup, row.get("url"))
+            freshness = _lookup_url(freshness_lookup, row.get("url"))
+            page_type = _lookup_url(page_type_lookup, row.get("url"))
             out.append({
                 **row,
                 "domain": proj.domain,
                 "x": float(coords[cursor + i, 0]),
                 "y": float(coords[cursor + i, 1]),
+                "pagerank": _safe_float(authority.get("pagerank")),
+                "weighted_pagerank_percentile": _safe_float(authority.get("weighted_pagerank_percentile")),
+                "authority_traffic_gap": _safe_float(authority.get("authority_traffic_gap")),
+                "in_degree": _safe_int(link.get("in_degree")),
+                "out_degree": _safe_int(link.get("out_degree")),
+                "click_depth": link.get("click_depth"),
+                "freshness_bucket": freshness.get("bucket") or "unknown",
+                "freshness_age_days": freshness.get("age_days"),
+                "freshness_date": freshness.get("date") or "",
+                "page_type": page_type.get("page_type") or "",
             })
         cursor += len(sub_embs)
     return out, len(big)
@@ -358,6 +376,11 @@ def _combined_ahrefs_semantic_umap(
 
 def _semantic_entity_maps(projects: list[_Project]) -> dict:
     specs = {
+        "pages": {
+            "types": {"page"},
+            "label": "Pages",
+            "description": "Ranking pages projected by full-page embeddings with traffic and authority context.",
+        },
         "link_titles": {
             "types": {"link_title"},
             "label": "Link titles",
@@ -372,6 +395,16 @@ def _semantic_entity_maps(projects: list[_Project]) -> dict:
             "types": {"page_title"},
             "label": "Page titles",
             "description": "HTML page titles projected across domains.",
+        },
+        "paragraphs": {
+            "types": {"paragraph"},
+            "label": "Paragraphs",
+            "description": "Paragraph snippets from ranking pages projected across domains.",
+        },
+        "keywords": {
+            "types": {"keyword"},
+            "label": "Keywords",
+            "description": "Ranking keywords projected against visible content entities.",
         },
     }
     maps: dict[str, dict] = {}

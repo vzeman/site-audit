@@ -402,6 +402,7 @@
         </div>
         <div id="ahrefs-semantic-compare" class="w-full" style="min-height: 620px;"></div>
         <div id="ahrefs-semantic-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+        <div id="ahrefs-semantic-detail" class="mt-3 text-xs border border-gray-100 rounded p-3 bg-gray-50"></div>
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-type alignment comparison</h3>
@@ -426,7 +427,7 @@
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-specific semantic comparisons</h3>
         <p class="text-xs text-gray-500 mb-3">
-          Separate projections for link titles, header names, and page titles. Color = domain, dot size = traffic or usage, so vocabulary overlap and naming gaps are visible without mixing entity types.
+          Separate projections for pages, link titles, header names, page titles, paragraphs, and keywords. Color = domain, dot size = traffic or usage, so vocabulary overlap and naming gaps are visible without mixing entity types.
         </p>
         <div id="semantic-entity-comparisons" class="grid xl:grid-cols-3 gap-6"></div>
       </div>
@@ -1749,6 +1750,10 @@
     ).join('') + data.domains.map(d =>
       `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5 border-2" style="border-color:${domainColor(d)}"></span>${escapeHtml(d)}</span>`
     ).join('');
+    if (!data._ahrefsSemanticSelected || !points.includes(data._ahrefsSemanticSelected)) {
+      data._ahrefsSemanticSelected = points[0];
+    }
+    renderAhrefsSemanticDetail(data._ahrefsSemanticSelected);
     const margin = { top: 20, right: 20, bottom: 36, left: 40 };
     const width = container.offsetWidth - margin.left - margin.right;
     const height = 620 - margin.top - margin.bottom;
@@ -1773,10 +1778,14 @@
       .attr('fill-opacity', d => d.type === 'paragraph' ? 0.38 : 0.7)
       .attr('stroke', d => domainColor(d.domain)).attr('stroke-width', 1.6)
       .style('cursor', d => d.url ? 'pointer' : 'default')
-      .on('click', (event, d) => { if (d.url) window.open(d.url, '_blank', 'noopener'); })
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        data._ahrefsSemanticSelected = d;
+        renderAhrefsSemanticDetail(d);
+      })
       .on('mouseover', function(event, d) {
         d3.select(this).attr('stroke-width', 3);
-        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · <strong style="color:${ENTITY_COLORS[d.type]}">${ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · <strong style="color:${ENTITY_COLORS[d.type]}">${ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span><br><span style="color:#e5e7eb;font-size:11px">PR ${Number(d.pagerank || 0).toFixed(4)} · in ${Number(d.in_degree || 0).toLocaleString()} · freshness ${escapeHtml(FRESHNESS_LABELS[d.freshness_bucket] || d.freshness_bucket || 'unknown')}</span>`);
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
       .on('mouseout', function(){
@@ -1796,6 +1805,52 @@
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
       });
     svgOuter.call(zoom);
+  }
+
+  function renderAhrefsSemanticDetail(point) {
+    const root = document.getElementById('ahrefs-semantic-detail');
+    if (!root) return;
+    if (!point) {
+      root.innerHTML = '<div class="text-gray-500">Select a semantic dot to inspect its entity, URL, authority, freshness, and ranking context.</div>';
+      return;
+    }
+    const typeLabel = ENTITY_LABELS[point.type] || point.type || 'Entity';
+    const freshness = point.freshness_bucket || 'unknown';
+    const urlHtml = point.url
+      ? `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(point.url)}" target="_blank" rel="noopener">${escapeHtml(point.url)}</a>`
+      : '<span class="text-gray-500">No URL attached to this entity.</span>';
+    const authorityBits = [
+      `traffic ${Number(point.traffic || 0).toLocaleString()}`,
+      point.volume ? `volume ${Number(point.volume || 0).toLocaleString()}` : '',
+      point.position ? `position ${Number(point.position || 0).toLocaleString()}` : '',
+      `PageRank ${Number(point.pagerank || 0).toFixed(4)}`,
+      `weighted PR pct ${(Number(point.weighted_pagerank_percentile || 0) * 100).toFixed(0)}%`,
+      `in ${Number(point.in_degree || 0).toLocaleString()} / out ${Number(point.out_degree || 0).toLocaleString()}`,
+      point.click_depth == null ? '' : `depth ${Number(point.click_depth).toLocaleString()}`,
+    ].filter(Boolean).join(' · ');
+    root.innerHTML = `
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-[11px] uppercase tracking-wide text-gray-500">
+            <span class="inline-block w-2.5 h-2.5 rounded-full mr-1" style="background:${ENTITY_COLORS[point.type] || '#64748b'}"></span>${escapeHtml(typeLabel)}
+            <span class="mx-1">·</span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full mr-1" style="background:${domainColor(point.domain)}"></span>${escapeHtml(point.domain || '')}
+          </div>
+          <h4 class="text-sm font-semibold mt-1 break-words">${escapeHtml(point.label || '')}</h4>
+          <div class="mt-1">${urlHtml}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-semibold">${Number(point.size || point.traffic || point.count || 0).toLocaleString()}</div>
+          <div class="text-[10px] text-gray-500">dot size</div>
+        </div>
+      </div>
+      <div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-2 mt-3">
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="text-gray-500">Authority</div><div class="font-mono">${escapeHtml(authorityBits)}</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="text-gray-500">Freshness</div><div><span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${FRESHNESS_COLORS[freshness] || FRESHNESS_COLORS.unknown}"></span>${escapeHtml(FRESHNESS_LABELS[freshness] || freshness)}${point.freshness_age_days == null ? '' : ' · ' + Number(point.freshness_age_days).toLocaleString() + 'd'}</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="text-gray-500">Cluster / page type</div><div>${escapeHtml(String(point.cluster_label || point.cluster || point.section || ''))}${point.page_type ? ' · ' + escapeHtml(point.page_type) : ''}</div></div>
+        <div class="bg-white border border-gray-200 rounded p-2"><div class="text-gray-500">Entity position</div><div>x ${Number(point.x || 0).toFixed(2)} · y ${Number(point.y || 0).toFixed(2)}${point.paragraph_index == null ? '' : ' · para ' + Number(point.paragraph_index).toLocaleString()}${point.level ? ' · H' + Number(point.level).toLocaleString() : ''}</div></div>
+      </div>
+    `;
   }
 
   function renderEntityAlignmentCompare() {
@@ -1968,9 +2023,12 @@
     const root = document.getElementById('semantic-entity-comparisons');
     const maps = data.semantic_entity_maps || {};
     const specs = [
+      ['pages', 'Semantic comparison of pages'],
       ['link_titles', 'Semantic comparison of link titles'],
       ['headers', 'Semantic comparison of header names'],
       ['page_titles', 'Semantic comparison of titles'],
+      ['paragraphs', 'Semantic comparison of paragraphs'],
+      ['keywords', 'Semantic comparison of keywords'],
     ];
     const available = specs.filter(([key]) => ((maps[key] || {}).points || []).length);
     if (!available.length) {
