@@ -45,6 +45,10 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
     target_edge = next(edge for edge in payload["edges"] if edge["source"] == pages[0].url and edge["target"] == pages[1].url)
     assert target_edge["weight"] == 2
     assert target_edge["removal_loss_score"] >= 0
+    assert target_edge["target_title"] == "Guide A"
+    assert target_edge["target_cluster"] == "guides"
+    assert target_edge["target_page_type"] == "article"
+    assert "guide" in target_edge["anchor_samples"]
 
 
 def test_link_removal_simulation_ranks_contextual_and_template_links() -> None:

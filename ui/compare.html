@@ -799,6 +799,17 @@
           target dot size/color = organic traffic, so you can see whether link authority is flowing into pages with search demand.
         </p>
       </div>
+      <div class="flex flex-wrap gap-2 mb-4 text-xs">
+        <select id="compare-linkflow-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-linkflow-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-linkflow-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="compare-linkflow-edge-mode" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="raw">Edges: raw selected</option>
+          <option value="contextual">Edges: contextual</option>
+          <option value="traffic">Edges: traffic-weighted</option>
+          <option value="demand">Edges: high-demand gaps</option>
+        </select>
+      </div>
       <div id="link-flow-compare" class="grid xl:grid-cols-2 gap-6"></div>
     </section>
 
@@ -3793,6 +3804,42 @@
   // ============================================================
   // Internal link flow comparison
   // ============================================================
+  function setCompareSelectOptions(id, label, values, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return '';
+    const previous = el.value || '';
+    const unique = Array.from(new Set((values || []).filter(Boolean).map(String))).sort((a, b) => a.localeCompare(b));
+    el.innerHTML = `<option value="">All ${escapeHtml(label)}</option>` + unique.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    el.value = unique.includes(previous) ? previous : '';
+    el.onchange = onChange;
+    return el.value;
+  }
+
+  function isCompareDemandGapLink(edge, nodesByUrl) {
+    const target = nodesByUrl.get(edge.target) || {};
+    const label = String(edge.target_mismatch_label || target.mismatch_label || '');
+    return ['high_traffic_low_authority', 'ranked_orphan', 'buried_demand'].includes(label)
+      || Number(edge.target_authority_traffic_gap || target.authority_traffic_gap || 0) >= 0.35
+      || (Number(target.traffic || edge.target_traffic || 0) > 0 && Number(target.in_degree || 0) <= 1);
+  }
+
+  function filterCompareLinkFlowEdges(edges, nodesByUrl, mode, limit) {
+    let rows = (edges || []).slice();
+    if (mode === 'contextual') {
+      rows = rows.filter(e => Number(e.contextual_link_impact || 0) > 0 || e.context_type === 'main_content')
+        .sort((a, b) => Number(b.contextual_link_impact || 0) - Number(a.contextual_link_impact || 0));
+    } else if (mode === 'traffic') {
+      rows = rows.filter(e => Number(e.target_traffic || 0) > 0)
+        .sort((a, b) => (Number(b.target_traffic || 0) + Number(b.score || 0) * 100) - (Number(a.target_traffic || 0) + Number(a.score || 0) * 100));
+    } else if (mode === 'demand') {
+      rows = rows.filter(e => isCompareDemandGapLink(e, nodesByUrl))
+        .sort((a, b) => Number(b.target_authority_traffic_gap || 0) - Number(a.target_authority_traffic_gap || 0) || Number(b.target_traffic || 0) - Number(a.target_traffic || 0));
+    } else {
+      rows.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    }
+    return rows.slice(0, limit || 700);
+  }
+
   function renderLinkFlowCompare() {
     const section = document.getElementById('link-flow-compare-section');
     const root = document.getElementById('link-flow-compare');
@@ -3802,25 +3849,45 @@
       return;
     }
     section.style.display = '';
+    const allNodes = flows.flatMap(flow => flow.nodes || []);
+    const rerender = () => renderLinkFlowCompare();
+    setCompareSelectOptions('compare-linkflow-directory-filter', 'directories', allNodes.map(r => r.directory), rerender);
+    setCompareSelectOptions('compare-linkflow-cluster-filter', 'clusters', allNodes.map(r => r.cluster), rerender);
+    setCompareSelectOptions('compare-linkflow-type-filter', 'page types', allNodes.map(r => r.page_type), rerender);
+    const edgeModeEl = document.getElementById('compare-linkflow-edge-mode');
+    if (edgeModeEl) edgeModeEl.onchange = rerender;
+    const edgeMode = edgeModeEl?.value || 'raw';
     root.innerHTML = flows.map(flow => `
       <div class="border border-gray-200 rounded-lg p-3 bg-white">
         <div class="flex items-center justify-between gap-3 mb-2">
           <div>
             <h3 class="text-sm font-semibold"><span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(flow.domain)}"></span>${escapeHtml(flow.domain)}</h3>
-            <p class="text-xs text-gray-500">${Number(flow.shown_nodes || 0).toLocaleString()} pages · ${Number(flow.shown_edges || 0).toLocaleString()} selected links</p>
+            <p class="text-xs text-gray-500" data-linkflow-meta="${escapeHtml(flow.domain)}">${Number(flow.shown_nodes || 0).toLocaleString()} pages · ${Number(flow.shown_edges || 0).toLocaleString()} selected links</p>
           </div>
           <a class="text-xs text-blue-600 hover:underline" href="../../${escapeHtml(flow.domain)}/report/index.html" target="_blank" rel="noopener">open report</a>
         </div>
         <div class="link-flow-mini" data-domain="${escapeHtml(flow.domain)}" style="min-height:560px;"></div>
       </div>
     `).join('');
-    flows.forEach(flow => drawLinkFlowMini(root.querySelector(`.link-flow-mini[data-domain="${cssEscape(flow.domain)}"]`), flow));
+    flows.forEach(flow => drawLinkFlowMini(root.querySelector(`.link-flow-mini[data-domain="${cssEscape(flow.domain)}"]`), flow, edgeMode));
   }
 
-  function drawLinkFlowMini(container, flow) {
+  function drawLinkFlowMini(container, flow, edgeMode) {
     if (!container) return;
-    const nodes = flow.nodes || [];
-    const edges = flow.edges || [];
+    const directory = document.getElementById('compare-linkflow-directory-filter')?.value || '';
+    const cluster = document.getElementById('compare-linkflow-cluster-filter')?.value || '';
+    const pageType = document.getElementById('compare-linkflow-type-filter')?.value || '';
+    const nodes = (flow.nodes || []).filter(r =>
+      (!directory || r.directory === directory) &&
+      (!cluster || r.cluster === cluster) &&
+      (!pageType || r.page_type === pageType)
+    );
+    const selectedUrls = new Set(nodes.map(n => n.url));
+    const nodesByUrl = new Map(nodes.map(n => [n.url, n]));
+    const rawEdges = (flow.edges || []).filter(e => selectedUrls.has(e.source) && selectedUrls.has(e.target));
+    const edges = filterCompareLinkFlowEdges(rawEdges, nodesByUrl, edgeMode || 'raw', 700);
+    const meta = document.querySelector(`[data-linkflow-meta="${cssEscape(flow.domain)}"]`);
+    if (meta) meta.textContent = `${Number(nodes.length || 0).toLocaleString()} pages · ${Number(edges.length || 0).toLocaleString()} rendered / ${Number(rawEdges.length || 0).toLocaleString()} selected links · ${edgeMode || 'raw'}`;
     if (!nodes.length || !edges.length) {
       container.innerHTML = '<div class="text-gray-500 text-center py-12">No bundled links.</div>';
       return;
@@ -3852,7 +3919,11 @@
       .style('mix-blend-mode', 'multiply')
       .on('mouseover', function(event, d) {
         d3.select(this).attr('stroke-opacity', 0.95).attr('stroke-width', edgeWidth(Number(d.weight || 1)) + 1);
-        tooltip.style('visibility','visible').html(`<strong>${escapeHtml(flow.domain)}</strong><br>${escapeHtml(d.sourceNode.data.title || d.source)} → ${escapeHtml(d.targetNode.data.title || d.target)}<br><span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()}</span>`);
+        tooltip.style('visibility','visible').html(
+          `<strong>${escapeHtml(flow.domain)}</strong><br>${escapeHtml(d.source_title || d.sourceNode.data.title || d.source)} → ${escapeHtml(d.target_title || d.targetNode.data.title || d.target)}<br>` +
+          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · source PR ${(Number(d.source_pagerank || 0) * 100).toFixed(3)} · target PR ${(Number(d.target_pagerank || d.targetNode.data.pagerank || 0) * 100).toFixed(3)}</span><br>` +
+          `<span style="color:#e5e7eb">context ${Number(d.contextual_link_impact || 0).toFixed(1)} · anchors ${(d.anchor_samples || []).slice(0, 4).map(escapeHtml).join(' · ') || 'n/a'} · target ${escapeHtml(d.target_cluster || d.target_directory || '')} ${escapeHtml(d.target_page_type || '')}</span>`
+        );
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
       .on('mouseout', function(event, d) { d3.select(this).attr('stroke-opacity', edgeOpacity(Number(d.targetNode.data.traffic || 0))).attr('stroke-width', edgeWidth(Number(d.weight || 1))); tooltip.style('visibility','hidden'); });

@@ -1881,6 +1881,7 @@ def link_flow_payload(
             "flow_score": round(float(score.get(url, 0.0)), 6),
         })
 
+    page_meta = {row["url"]: row for row in page_rows}
     edge_rows = []
     for src in selected:
         for tgt in result.graph.get(src, []):
@@ -1891,6 +1892,13 @@ def link_flow_payload(
             target_traffic = float(traffic.get(tgt, 0.0))
             removal_row = removal_by_edge.get((src, tgt)) or {}
             contextual_row = contextual_by_edge.get((src, tgt)) or {}
+            source_node = page_meta.get(src, {})
+            target_node = page_meta.get(tgt, {})
+            anchor_samples = [
+                anchor
+                for anchor, _ in Counter(result.edge_anchor_texts.get((src, tgt), [])).most_common(5)
+                if anchor
+            ]
             flow_score = (
                 source_pr * 2.5
                 + float(result.hub_score.get(src, 0.0))
@@ -1901,9 +1909,22 @@ def link_flow_payload(
             edge_rows.append({
                 "source": src,
                 "target": tgt,
+                "source_title": source_node.get("title") or src,
+                "target_title": target_node.get("title") or tgt,
+                "source_directory": source_node.get("directory") or _directory(src),
+                "target_directory": target_node.get("directory") or _directory(tgt),
+                "source_cluster": source_node.get("cluster") or source_node.get("section") or "",
+                "target_cluster": target_node.get("cluster") or target_node.get("section") or "",
+                "source_page_type": source_node.get("page_type") or "",
+                "target_page_type": target_node.get("page_type") or "",
                 "weight": weight,
                 "source_pagerank": round(source_pr, 8),
+                "target_pagerank": round(float(result.pagerank.get(tgt, 0.0)), 8),
                 "target_traffic": int(target_traffic),
+                "target_keywords": int(target_node.get("keywords", 0) or 0),
+                "target_mismatch_label": target_node.get("mismatch_label", ""),
+                "target_authority_traffic_gap": round(float(target_node.get("authority_traffic_gap", 0.0) or 0.0), 4),
+                "anchor_samples": anchor_samples,
                 "score": round(float(flow_score), 8),
                 "removal_loss_score": round(float(removal_row.get("removal_loss_score", 0.0) or 0.0), 2),
                 "removal_classification": removal_row.get("classification", ""),

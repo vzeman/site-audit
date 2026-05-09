@@ -1229,6 +1229,12 @@
         <select id="linkflow-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
         <select id="linkflow-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
         <select id="linkflow-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="linkflow-edge-mode" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="raw">Edges: raw selected</option>
+          <option value="contextual">Edges: contextual</option>
+          <option value="traffic">Edges: traffic-weighted</option>
+          <option value="demand">Edges: high-demand gaps</option>
+        </select>
         <select id="linkflow-color-mode" class="border border-gray-300 rounded px-2 py-1 bg-white">
           <option value="traffic">Color: traffic</option>
           <option value="pagerank">Color: PageRank</option>
@@ -5019,6 +5025,31 @@
     );
   }
 
+  function isDemandGapLink(edge, nodesByUrl) {
+    const target = nodesByUrl.get(edge.target) || {};
+    const label = String(edge.target_mismatch_label || target.mismatch_label || '');
+    return ['high_traffic_low_authority', 'ranked_orphan', 'buried_demand'].includes(label)
+      || Number(edge.target_authority_traffic_gap || target.authority_traffic_gap || 0) >= 0.35
+      || (Number(target.traffic || edge.target_traffic || 0) > 0 && Number(target.in_degree || 0) <= 1);
+  }
+
+  function filterLinkFlowEdges(edges, nodesByUrl, mode, limit) {
+    let rows = (edges || []).slice();
+    if (mode === 'contextual') {
+      rows = rows.filter(e => Number(e.contextual_link_impact || 0) > 0 || e.context_type === 'main_content')
+        .sort((a, b) => Number(b.contextual_link_impact || 0) - Number(a.contextual_link_impact || 0));
+    } else if (mode === 'traffic') {
+      rows = rows.filter(e => Number(e.target_traffic || 0) > 0)
+        .sort((a, b) => (Number(b.target_traffic || 0) + Number(b.score || 0) * 100) - (Number(a.target_traffic || 0) + Number(a.score || 0) * 100));
+    } else if (mode === 'demand') {
+      rows = rows.filter(e => isDemandGapLink(e, nodesByUrl))
+        .sort((a, b) => Number(b.target_authority_traffic_gap || 0) - Number(a.target_authority_traffic_gap || 0) || Number(b.target_traffic || 0) - Number(a.target_traffic || 0));
+    } else {
+      rows.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+    }
+    return rows.slice(0, limit || 1200);
+  }
+
   function renderTrafficPagerank() {
     const block = document.getElementById('traffic-pagerank-block');
     const payload = ((state.linkgraph || {}).traffic_weighted_pagerank || {});
@@ -5398,10 +5429,15 @@
     setSelectOptions('linkflow-type-filter', 'page types', allNodes.map(r => r.page_type), rerender);
     const colorModeEl = document.getElementById('linkflow-color-mode');
     if (colorModeEl) colorModeEl.onchange = rerender;
+    const edgeModeEl = document.getElementById('linkflow-edge-mode');
+    if (edgeModeEl) edgeModeEl.onchange = rerender;
     const colorMode = colorModeEl?.value || 'traffic';
+    const edgeMode = edgeModeEl?.value || 'raw';
     const nodes = filterByAuthorityControls(allNodes, 'linkflow');
+    const nodesByUrl = new Map(nodes.map(n => [n.url, n]));
     const selectedUrls = new Set(nodes.map(n => n.url));
-    const edges = allEdges.filter(e => selectedUrls.has(e.source) && selectedUrls.has(e.target));
+    const rawEdges = allEdges.filter(e => selectedUrls.has(e.source) && selectedUrls.has(e.target));
+    const edges = filterLinkFlowEdges(rawEdges, nodesByUrl, edgeMode, 1200);
     container.innerHTML = '';
     if (!nodes.length || !edges.length) {
       container.innerHTML = '<div class="text-gray-500 text-center py-12">No bundled links for this filter.</div>';
@@ -5410,9 +5446,10 @@
     }
     legend.innerHTML = `
       <span><strong>${Number(nodes.length).toLocaleString()}</strong> pages in current filter</span>
-      <span><strong>${Number(edges.length).toLocaleString()}</strong> links in current filter from ${Number(flow.total_edges || 0).toLocaleString()} total</span>
+      <span><strong>${Number(edges.length).toLocaleString()}</strong> rendered links from ${Number(rawEdges.length).toLocaleString()} selected / ${Number(flow.total_edges || 0).toLocaleString()} total</span>
       <span>node size = traffic</span>
       <span>color = ${escapeHtml(colorMode)}</span>
+      <span>edge mode = ${escapeHtml(edgeMode)}</span>
       <span>edge width = repeated links</span>
     `;
 
@@ -5473,7 +5510,8 @@
           `<strong>${escapeHtml(d.sourceNode.data.title || d.source)}</strong><br>` +
           `<span style="color:#bfdbfe">PR ${(Number(d.sourceNode.data.pagerank || 0) * 100).toFixed(3)} · out ${Number(d.sourceNode.data.out_degree || 0).toLocaleString()}</span><br>` +
           `→ <strong>${escapeHtml(d.targetNode.data.title || d.target)}</strong><br>` +
-          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)} · removal ${Number(d.removal_loss_score || 0).toFixed(1)} ${escapeHtml(d.removal_classification || '')} · context ${Number(d.contextual_link_impact || 0).toFixed(1)} ${escapeHtml(d.context_type || '')}</span>`
+          `<span style="color:#fbbf24">links ${Number(d.weight || 1).toLocaleString()} · target traffic ${Number(d.targetNode.data.traffic || 0).toLocaleString()} · target PR ${(Number(d.targetNode.data.pagerank || 0) * 100).toFixed(3)} · removal ${Number(d.removal_loss_score || 0).toFixed(1)} ${escapeHtml(d.removal_classification || '')} · context ${Number(d.contextual_link_impact || 0).toFixed(1)} ${escapeHtml(d.context_type || '')}</span>` +
+          `<br><span style="color:#e5e7eb">anchors ${(d.anchor_samples || []).slice(0, 4).map(escapeHtml).join(' · ') || 'n/a'} · target ${escapeHtml(d.target_cluster || d.target_directory || '')} · ${escapeHtml(d.target_page_type || '')}</span>`
         );
       })
       .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
