@@ -500,7 +500,7 @@
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Authority vs search demand</h3>
-          <p class="text-xs text-gray-500 mb-2">High-traffic pages plotted against internal inlinks. Orphans, deep pages, and unmatched search pages are highlighted in the table.</p>
+          <p class="text-xs text-gray-500 mb-2">Traffic percentile vs weighted PageRank percentile. Dot size is traffic; high upper-left dots need stronger internal authority.</p>
           <div id="authority-demand-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
         <div>
@@ -859,6 +859,9 @@
       { key: 'p90_in_degree',     label: 'In-degree p90',    better: 'high', fmt: '0' },
       { key: 'median_out_degree', label: 'Out-degree median',better: 'high', fmt: '0' },
       { key: 'orphan_share',      label: 'Orphan share', better: 'low',  fmt: 'pct' },
+      { key: 'authority_traffic_alignment', label: 'Authority-demand', better: 'high', fmt: 'pct' },
+      { key: 'high_traffic_low_authority_pages', label: 'Underserved search', better: 'low', fmt: 'int' },
+      { key: 'authority_without_demand_pages', label: 'Unused authority', better: 'low', fmt: 'int' },
     ],
     metadata: [
       { key: 'pages',                   label: 'Pages', better: 'na', fmt: 'int' },
@@ -2085,23 +2088,26 @@
     const height = outerHeight - margin.top - margin.bottom;
     const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
       .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
-    const x = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.in_degree || 0)) || 1]).range([0, width]);
-    const y = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([height, 0]);
+    const hasPercentiles = points.some(d => Number(d.weighted_pagerank_percentile || 0) > 0 || Number(d.traffic_percentile || 0) > 0);
+    const xValue = d => hasPercentiles ? Number(d.weighted_pagerank_percentile || 0) : Number(d.in_degree || 0);
+    const yValue = d => hasPercentiles ? Number(d.traffic_percentile || 0) : Number(d.traffic || 0);
+    const x = (hasPercentiles ? d3.scaleLinear().domain([0, 1]) : d3.scaleSqrt().domain([0, d3.max(points, xValue) || 1])).range([0, width]);
+    const y = (hasPercentiles ? d3.scaleLinear().domain([0, 1]) : d3.scaleSqrt().domain([0, d3.max(points, yValue) || 1])).range([height, 0]);
     const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([3.5, 18]);
     svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(6));
     svg.append('g').call(d3.axisLeft(y).ticks(6));
-    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('internal inlinks');
-    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -46).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('organic traffic');
+    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text(hasPercentiles ? 'weighted PageRank percentile' : 'internal inlinks');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -46).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text(hasPercentiles ? 'traffic percentile' : 'organic traffic');
     const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','410px');
     svg.selectAll('circle').data(points).join('circle')
-      .attr('cx', d => x(Number(d.in_degree || 0))).attr('cy', d => y(Number(d.traffic || 0)))
+      .attr('cx', d => x(xValue(d))).attr('cy', d => y(yValue(d)))
       .attr('r', d => radius(Number(d.traffic || 0)))
       .attr('fill', d => domainColor(d.domain)).attr('fill-opacity', 0.64)
       .attr('stroke', d => !d.linkgraph_found ? '#64748b' : Number(d.in_degree || 0) <= 0 ? '#dc2626' : Number(d.click_depth || 0) >= 4 ? '#f59e0b' : '#111827')
       .attr('stroke-width', d => (!d.linkgraph_found || Number(d.in_degree || 0) <= 0 || Number(d.click_depth || 0) >= 4) ? 2 : 0.5)
       .on('mouseover', function(event, d) {
         d3.select(this).attr('fill-opacity', 0.9);
-        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>traffic ${Number(d.traffic || 0).toLocaleString()} · inlinks ${Number(d.in_degree || 0).toLocaleString()} · depth ${d.click_depth == null ? '—' : d.click_depth}<br><span style="color:#fbbf24">${escapeHtml(d.top_keyword || '')}</span>`);
+        tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong><br><strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>traffic ${Number(d.traffic || 0).toLocaleString()} · inlinks ${Number(d.in_degree || 0).toLocaleString()} · depth ${d.click_depth == null ? '—' : d.click_depth}<br>weighted PR pct ${(Number(d.weighted_pagerank_percentile || 0) * 100).toFixed(0)} · traffic pct ${(Number(d.traffic_percentile || 0) * 100).toFixed(0)} · gap ${Number(d.authority_traffic_gap || 0).toFixed(2)}<br><span style="color:#fbbf24">${escapeHtml(d.top_keyword || '')}</span>`);
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
       .on('mouseout', function(){ d3.select(this).attr('fill-opacity',0.64); tooltip.style('visibility','hidden'); });

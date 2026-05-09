@@ -91,6 +91,7 @@ from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
 from .linkgraph import link_flow_payload
 from .linkgraph import to_payload as linkgraph_payload
+from .linkgraph import traffic_weighted_pagerank_payload
 from .media_accessibility import analyze as analyze_media_accessibility
 from .media_accessibility import to_payload as media_accessibility_payload
 from .metadata_quality import analyze as analyze_metadata_quality
@@ -1197,10 +1198,28 @@ def run(config: PipelineConfig) -> dict:
             LOG.info("  heading impact: %s", hi_summary.get("status", "unavailable"))
 
     if link_result is not None:
+        link_payload["traffic_weighted_pagerank"] = traffic_weighted_pagerank_payload(
+            link_result,
+            pages,
+            embeddings,
+            search_payload=ahrefs_data,
+            page_types=page_types_data,
+            indexability=indexability_data,
+        )
+        twpr_summary = (link_payload.get("traffic_weighted_pagerank") or {}).get("summary", {}) or {}
+        if twpr_summary.get("status") == "ok":
+            LOG.info(
+                "  traffic-weighted PageRank: %.0f%% alignment · %d underserved search pages · %d authority-heavy pages",
+                (twpr_summary.get("authority_traffic_alignment", 0.0) or 0.0) * 100,
+                twpr_summary.get("high_traffic_low_authority_pages", 0),
+                twpr_summary.get("high_authority_low_value_pages", 0),
+            )
         link_payload["link_flow"] = link_flow_payload(
             link_result,
             pages,
             (ahrefs_data.get("top_pages") or []) if ahrefs_data else [],
+            page_types=page_types_data,
+            traffic_authority=link_payload.get("traffic_weighted_pagerank") or {},
         )
 
     # 12) Action plan: synthesise prioritised recommendations from the

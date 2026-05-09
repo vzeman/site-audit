@@ -22,11 +22,14 @@ We compute:
 from __future__ import annotations
 
 import collections
+import bisect
 import logging
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Iterable
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -50,6 +53,8 @@ class LinkGraphResult:
     hub_score: dict[str, float]
     authority_score: dict[str, float]
     click_depth: dict[str, int]
+    edge_anchor_quality: dict[tuple[str, str], float]
+    edge_contextual_relevance: dict[tuple[str, str], float]
     orphans: list[str]
     dead_ends: list[str]
     edge_count: int
@@ -111,6 +116,96 @@ def pagerank(graph: dict[str, list[str]], damping: float = 0.85, iterations: int
         pr = new
     total = sum(pr.values()) or 1.0
     return {u: v / total for u, v in pr.items()}
+
+
+def weighted_pagerank(
+    graph: dict[str, list[str]],
+    edge_weights: dict[tuple[str, str], float] | None = None,
+    *,
+    personalization: dict[str, float] | None = None,
+    damping: float = 0.85,
+    iterations: int = 50,
+) -> dict[str, float]:
+    nodes = list(graph.keys())
+    n = len(nodes)
+    if n == 0:
+        return {}
+
+    if personalization:
+        raw = {u: max(0.0, float(personalization.get(u, 0.0))) for u in nodes}
+        total_raw = sum(raw.values())
+        base_dist = {u: (raw[u] / total_raw if total_raw else 1.0 / n) for u in nodes}
+    else:
+        base_dist = {u: 1.0 / n for u in nodes}
+
+    weights = edge_weights or {}
+    out_weight_sum: dict[str, float] = {}
+    for src, outs in graph.items():
+        out_weight_sum[src] = sum(max(0.0, float(weights.get((src, tgt), 1.0))) for tgt in outs)
+
+    pr = dict(base_dist)
+    for _ in range(iterations):
+        new = {u: (1.0 - damping) * base_dist[u] for u in nodes}
+        leak = 0.0
+        for src, outs in graph.items():
+            if not outs or out_weight_sum.get(src, 0.0) <= 0:
+                leak += pr[src]
+                continue
+            for tgt in outs:
+                weight = max(0.0, float(weights.get((src, tgt), 1.0)))
+                if weight <= 0:
+                    continue
+                new[tgt] += damping * pr[src] * (weight / out_weight_sum[src])
+        if leak:
+            for u in nodes:
+                new[u] += damping * leak * base_dist[u]
+        pr = new
+
+    total = sum(pr.values()) or 1.0
+    return {u: v / total for u, v in pr.items()}
+
+
+def edge_anchor_quality(anchors_by_edge: dict[tuple[str, str], list[str]]) -> dict[tuple[str, str], float]:
+    out: dict[tuple[str, str], float] = {}
+    for edge, anchors in anchors_by_edge.items():
+        if not anchors:
+            out[edge] = 0.45
+            continue
+        scores = []
+        for anchor in anchors:
+            cleaned = re.sub(r"\s+", " ", str(anchor or "").strip())
+            if not cleaned:
+                scores.append(0.2)
+            elif _is_generic_anchor(cleaned):
+                scores.append(0.35)
+            else:
+                words = len(re.findall(r"[a-z0-9]+", cleaned.lower()))
+                scores.append(min(1.0, 0.58 + min(5, words) * 0.075))
+        repeat_boost = min(0.1, math.log1p(len(anchors)) * 0.035)
+        out[edge] = round(max(0.05, min(1.0, sum(scores) / len(scores) + repeat_boost)), 4)
+    return out
+
+
+def edge_contextual_relevance(
+    pages,
+    embeddings: np.ndarray | None,
+    graph: dict[str, list[str]],
+) -> dict[tuple[str, str], float]:
+    if embeddings is None or len(pages) == 0 or getattr(embeddings, "shape", (0,))[0] < len(pages):
+        return {}
+    page_idx = {p.url: i for i, p in enumerate(pages)}
+    out: dict[tuple[str, str], float] = {}
+    for src, targets in graph.items():
+        i = page_idx.get(src)
+        if i is None:
+            continue
+        for tgt in targets:
+            j = page_idx.get(tgt)
+            if j is None:
+                continue
+            sim = float(np.clip(embeddings[i] @ embeddings[j], -1.0, 1.0))
+            out[(src, tgt)] = round(max(0.05, min(1.0, (sim + 1.0) / 2.0)), 4)
+    return out
 
 
 # --- HITS hubs / authorities ---------------------------------------------
@@ -412,6 +507,8 @@ def analyze(
     pr = pagerank(graph)
     hub, auth = hits(graph)
     depth = click_depth(graph, home_url)
+    anchor_quality = edge_anchor_quality(anchors)
+    contextual_relevance = edge_contextual_relevance(pages, embeddings, graph)
 
     orphans = sorted([u for u in graph if in_deg.get(u, 0) == 0])
     dead_ends = sorted([u for u, n in out_deg.items() if n == 0])
@@ -434,6 +531,8 @@ def analyze(
         hub_score=hub,
         authority_score=auth,
         click_depth=depth,
+        edge_anchor_quality=anchor_quality,
+        edge_contextual_relevance=contextual_relevance,
         orphans=orphans,
         dead_ends=dead_ends,
         edge_count=edge_count,
@@ -481,6 +580,9 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
             "url": p.url,
             "title": p.title,
             "section": p.section,
+            "pagerank": round(float(result.pagerank.get(p.url, 0.0)), 8),
+            "authority_score": round(float(result.authority_score.get(p.url, 0.0)), 8),
+            "hub_score": round(float(result.hub_score.get(p.url, 0.0)), 8),
             "in_degree": int(result.in_degree.get(p.url, 0)),
             "out_degree": int(result.out_degree.get(p.url, 0)),
             "click_depth": int(result.click_depth.get(p.url, -1)) if p.url in result.click_depth else None,
@@ -506,11 +608,379 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
     }
 
 
+def _canonical_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return str(url or "").rstrip("/")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    netloc = parsed.netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return f"{parsed.scheme.lower() or 'https'}://{netloc}{path}".rstrip("/") or str(url or "").rstrip("/")
+
+
+def _directory(url: str) -> str:
+    try:
+        parts = [p for p in (urlparse(url).path or "/").split("/") if p]
+    except Exception:
+        parts = []
+    return f"/{parts[0]}/" if parts else "/"
+
+
+def _safe_int(value) -> int:
+    try:
+        if value is None or value == "":
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _percentile_lookup(values: dict[str, float]) -> dict[str, float]:
+    positive = sorted(float(v) for v in values.values() if float(v) > 0)
+    if not positive:
+        return {k: 0.0 for k in values}
+    n = len(positive)
+    out = {}
+    for key, value in values.items():
+        value = float(value)
+        if value <= 0:
+            out[key] = 0.0
+        else:
+            out[key] = round(bisect.bisect_right(positive, value) / n, 4)
+    return out
+
+
+def _page_type_lookup(page_types: dict | None) -> dict[str, str]:
+    lookup = {}
+    for row in (page_types or {}).get("per_page") or []:
+        url = row.get("url") or ""
+        if url:
+            lookup[_canonical_url(url)] = row.get("page_type") or ""
+    return lookup
+
+
+def _search_lookup(pages, search_payload: dict | None) -> dict[str, dict]:
+    by_url = {_canonical_url(p.url): p.url for p in pages}
+    out: dict[str, dict] = defaultdict(lambda: {
+        "traffic": 0,
+        "keyword_traffic": 0,
+        "keywords": 0,
+        "top_keyword": "",
+        "top_keyword_position": None,
+        "cluster": "",
+        "_kw_max_traffic": -1,
+    })
+
+    def match(row: dict) -> str | None:
+        for key in ("matched_url", "url"):
+            raw = row.get(key) or ""
+            canonical = _canonical_url(raw)
+            if canonical in by_url:
+                return by_url[canonical]
+        return None
+
+    for row in (search_payload or {}).get("top_pages") or []:
+        url = match(row)
+        if not url:
+            continue
+        ctx = out[url]
+        ctx["traffic"] = max(_safe_int(ctx.get("traffic")), _safe_int(row.get("traffic")))
+        ctx["keywords"] = max(_safe_int(ctx.get("keywords")), _safe_int(row.get("keywords")))
+        if row.get("top_keyword"):
+            ctx["top_keyword"] = row.get("top_keyword")
+        if row.get("top_keyword_position") is not None or row.get("position") is not None:
+            ctx["top_keyword_position"] = _safe_int(row.get("top_keyword_position") or row.get("position"))
+        if row.get("cluster_label") or row.get("cluster"):
+            ctx["cluster"] = row.get("cluster_label") or row.get("cluster")
+
+    for row in (search_payload or {}).get("organic_keywords") or []:
+        url = match(row)
+        if not url:
+            continue
+        ctx = out[url]
+        kw_traffic = _safe_int(row.get("traffic"))
+        ctx["keyword_traffic"] += kw_traffic
+        ctx["keywords"] = _safe_int(ctx.get("keywords")) + 1
+        if kw_traffic > _safe_int(ctx.get("_kw_max_traffic")):
+            ctx["top_keyword"] = row.get("keyword") or ctx.get("top_keyword") or ""
+            ctx["top_keyword_position"] = _safe_int(row.get("position"))
+            ctx["_kw_max_traffic"] = kw_traffic
+        if row.get("cluster_label") or row.get("cluster"):
+            ctx["cluster"] = row.get("cluster_label") or row.get("cluster")
+
+    for ctx in out.values():
+        if not _safe_int(ctx.get("traffic")):
+            ctx["traffic"] = _safe_int(ctx.get("keyword_traffic"))
+        ctx.pop("_kw_max_traffic", None)
+        ctx.pop("keyword_traffic", None)
+    return out
+
+
+def _raw_search_lookup(search_payload: dict | None) -> dict[str, dict]:
+    out: dict[str, dict] = defaultdict(lambda: {"traffic": 0, "keywords": 0, "top_keyword": "", "top_keyword_position": None})
+    for row in (search_payload or {}).get("top_pages") or []:
+        raw = row.get("matched_url") or row.get("url") or ""
+        if not raw:
+            continue
+        ctx = out[_canonical_url(raw)]
+        ctx["traffic"] = max(_safe_int(ctx.get("traffic")), _safe_int(row.get("traffic")))
+        ctx["keywords"] = max(_safe_int(ctx.get("keywords")), _safe_int(row.get("keywords")))
+        if row.get("top_keyword"):
+            ctx["top_keyword"] = row.get("top_keyword")
+        if row.get("top_keyword_position") is not None or row.get("position") is not None:
+            ctx["top_keyword_position"] = _safe_int(row.get("top_keyword_position") or row.get("position"))
+    for row in (search_payload or {}).get("organic_keywords") or []:
+        raw = row.get("matched_url") or row.get("url") or ""
+        if not raw:
+            continue
+        ctx = out[_canonical_url(raw)]
+        ctx["traffic"] += _safe_int(row.get("traffic"))
+        ctx["keywords"] += 1
+        if not ctx.get("top_keyword"):
+            ctx["top_keyword"] = row.get("keyword") or ""
+            ctx["top_keyword_position"] = _safe_int(row.get("position"))
+    return out
+
+
+def _edge_weights(result: LinkGraphResult) -> dict[tuple[str, str], float]:
+    weights: dict[tuple[str, str], float] = {}
+    for src, targets in result.graph.items():
+        for tgt in targets:
+            edge = (src, tgt)
+            anchor = float(result.edge_anchor_quality.get(edge, 0.5))
+            relevance = float(result.edge_contextual_relevance.get(edge, 0.5))
+            repeated = math.log1p(max(1, result.edge_anchor_count.get(edge, 1))) * 0.04
+            weights[edge] = round(max(0.05, 0.48 + anchor * 0.24 + relevance * 0.28 + repeated), 6)
+    return weights
+
+
+def _label_authority_gap(row: dict) -> tuple[str, str]:
+    traffic_pct = _safe_float(row.get("traffic_percentile"))
+    authority_pct = _safe_float(row.get("weighted_pagerank_percentile"))
+    traffic = _safe_int(row.get("traffic"))
+    in_degree = _safe_int(row.get("in_degree"))
+    depth = row.get("click_depth")
+    if traffic > 0 and in_degree == 0:
+        return "ranked_orphan", "Add contextual links from the homepage, section hub, or a semantically close authority page."
+    if traffic_pct >= 0.7 and authority_pct <= 0.45:
+        return "high_traffic_low_authority", "Promote this search-demand page from relevant hubs with descriptive anchors."
+    if traffic_pct >= 0.6 and depth is not None and _safe_int(depth) >= 4:
+        return "buried_demand", "Move the page closer to the homepage or a section hub; keep the existing ranking intent intact."
+    if authority_pct >= 0.75 and traffic_pct <= 0.25:
+        return "high_authority_low_value", "Reuse this authority as a source link hub, refresh its search target, or consolidate if it has no strategic role."
+    if traffic_pct >= 0.55 and authority_pct >= 0.55:
+        return "aligned", "Maintain the internal-link pattern and monitor ranking movement."
+    return "neutral", "No urgent PageRank/search-demand mismatch."
+
+
+def traffic_weighted_pagerank_payload(
+    result: LinkGraphResult,
+    pages,
+    embeddings: np.ndarray | None = None,
+    *,
+    search_payload: dict | None = None,
+    page_types: dict | None = None,
+    indexability: dict | None = None,
+) -> dict:
+    if not result.graph:
+        return {"summary": {"status": "no_graph", "total_pages": 0}, "pages": [], "mismatches": {}, "clusters": [], "directories": [], "page_types": []}
+
+    search = _search_lookup(pages, search_payload)
+    page_types_by_url = _page_type_lookup(page_types)
+    weights = _edge_weights(result)
+    weighted_pr = weighted_pagerank(result.graph, weights)
+    personalization = {
+        url: 1.0 + math.log1p(_safe_int((search.get(url) or {}).get("traffic"))) * 3.0 + math.sqrt(_safe_int((search.get(url) or {}).get("keywords")))
+        for url in result.graph
+    }
+    traffic_weighted_pr = weighted_pagerank(result.graph, weights, personalization=personalization)
+
+    out_weight_sum: dict[str, float] = {}
+    for src, targets in result.graph.items():
+        out_weight_sum[src] = sum(max(0.05, weights.get((src, tgt), 1.0)) for tgt in targets)
+    inbound_flow: dict[str, float] = defaultdict(float)
+    edge_rows: list[dict] = []
+    for src, targets in result.graph.items():
+        src_ctx = search.get(src) or {}
+        src_traffic = _safe_int(src_ctx.get("traffic"))
+        src_strength = float(traffic_weighted_pr.get(src, 0.0)) * (1.0 + math.log1p(src_traffic)) * (1.0 + float(result.hub_score.get(src, 0.0)))
+        for tgt in targets:
+            edge = (src, tgt)
+            if out_weight_sum.get(src, 0.0) <= 0:
+                continue
+            share = max(0.05, weights.get(edge, 1.0)) / out_weight_sum[src]
+            flow = src_strength * share
+            inbound_flow[tgt] += flow
+            tgt_ctx = search.get(tgt) or {}
+            edge_rows.append({
+                "source": src,
+                "target": tgt,
+                "weight": round(float(weights.get(edge, 1.0)), 6),
+                "anchor_quality": round(float(result.edge_anchor_quality.get(edge, 0.5)), 4),
+                "contextual_relevance": round(float(result.edge_contextual_relevance.get(edge, 0.5)), 4),
+                "source_traffic": src_traffic,
+                "target_traffic": _safe_int(tgt_ctx.get("traffic")),
+                "source_pagerank": round(float(result.pagerank.get(src, 0.0)), 8),
+                "source_traffic_weighted_pagerank": round(float(traffic_weighted_pr.get(src, 0.0)), 8),
+                "flow_score": round(float(flow), 10),
+            })
+
+    traffic_values = {p.url: float(_safe_int((search.get(p.url) or {}).get("traffic"))) for p in pages}
+    pr_pct = _percentile_lookup({p.url: float(result.pagerank.get(p.url, 0.0)) for p in pages})
+    weighted_pct = _percentile_lookup({p.url: float(weighted_pr.get(p.url, 0.0)) for p in pages})
+    traffic_weighted_pct = _percentile_lookup({p.url: float(traffic_weighted_pr.get(p.url, 0.0)) for p in pages})
+    traffic_pct = _percentile_lookup(traffic_values)
+    flow_pct = _percentile_lookup({p.url: float(inbound_flow.get(p.url, 0.0)) for p in pages})
+
+    rows: list[dict] = []
+    for page in pages:
+        ctx = search.get(page.url) or {}
+        cluster = ctx.get("cluster") or page.section or _directory(page.url)
+        row = {
+            "url": page.url,
+            "title": page.title,
+            "section": page.section,
+            "directory": _directory(page.url),
+            "cluster": cluster,
+            "page_type": page_types_by_url.get(_canonical_url(page.url), ""),
+            "indexability": "analyzed",
+            "traffic": _safe_int(ctx.get("traffic")),
+            "keywords": _safe_int(ctx.get("keywords")),
+            "top_keyword": ctx.get("top_keyword") or "",
+            "top_keyword_position": ctx.get("top_keyword_position"),
+            "pagerank": round(float(result.pagerank.get(page.url, 0.0)), 8),
+            "weighted_pagerank": round(float(weighted_pr.get(page.url, 0.0)), 8),
+            "traffic_weighted_pagerank": round(float(traffic_weighted_pr.get(page.url, 0.0)), 8),
+            "link_flow_score": round(float(inbound_flow.get(page.url, 0.0)), 10),
+            "in_degree": int(result.in_degree.get(page.url, 0)),
+            "out_degree": int(result.out_degree.get(page.url, 0)),
+            "click_depth": int(result.click_depth.get(page.url, -1)) if page.url in result.click_depth else None,
+            "traffic_percentile": traffic_pct.get(page.url, 0.0),
+            "pagerank_percentile": pr_pct.get(page.url, 0.0),
+            "weighted_pagerank_percentile": weighted_pct.get(page.url, 0.0),
+            "traffic_weighted_pagerank_percentile": traffic_weighted_pct.get(page.url, 0.0),
+            "link_flow_percentile": flow_pct.get(page.url, 0.0),
+        }
+        row["authority_traffic_gap"] = round(float(row["traffic_percentile"]) - float(row["weighted_pagerank_percentile"]), 4)
+        row["keyword_opportunity"] = round(float(row["traffic"]) * max(0.0, float(row["authority_traffic_gap"])), 2)
+        label, action = _label_authority_gap(row)
+        row["mismatch_label"] = label
+        row["recommended_action"] = action
+        rows.append(row)
+
+    rows.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_float(r.get("authority_traffic_gap"))), reverse=True)
+    edge_rows.sort(key=lambda r: _safe_float(r.get("flow_score")), reverse=True)
+
+    def aggregate(key: str) -> list[dict]:
+        buckets: dict[str, list[dict]] = defaultdict(list)
+        for row in rows:
+            buckets[str(row.get(key) or "unknown")].append(row)
+        out = []
+        for name, bucket in buckets.items():
+            traffic = sum(_safe_int(r.get("traffic")) for r in bucket)
+            demand = [r for r in bucket if _safe_int(r.get("traffic")) > 0]
+            out.append({
+                key: name,
+                "label": name,
+                "pages": len(bucket),
+                "traffic": traffic,
+                "avg_pagerank_percentile": round(sum(_safe_float(r.get("pagerank_percentile")) for r in bucket) / max(1, len(bucket)), 4),
+                "avg_weighted_pagerank_percentile": round(sum(_safe_float(r.get("weighted_pagerank_percentile")) for r in bucket) / max(1, len(bucket)), 4),
+                "avg_authority_traffic_gap": round(sum(_safe_float(r.get("authority_traffic_gap")) for r in demand) / max(1, len(demand)), 4),
+                "underserved_pages": sum(1 for r in bucket if r.get("mismatch_label") in {"high_traffic_low_authority", "ranked_orphan", "buried_demand"}),
+                "authority_without_demand": sum(1 for r in bucket if r.get("mismatch_label") == "high_authority_low_value"),
+            })
+        out.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_int(r.get("underserved_pages"))), reverse=True)
+        return out
+
+    raw_search = _raw_search_lookup(search_payload)
+    skipped: list[dict] = []
+    seen_skipped: set[str] = set()
+    for skipped_row in ((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []):
+        url = skipped_row.get("url") or ""
+        if not url:
+            continue
+        canonical = _canonical_url(url)
+        if canonical in seen_skipped:
+            continue
+        seen_skipped.add(canonical)
+        ctx = raw_search.get(canonical) or {}
+        if _safe_int(ctx.get("traffic")) <= 0 and skipped_row.get("reason") != "noindex":
+            continue
+        skipped.append({
+            "url": url,
+            "title": skipped_row.get("title") or url,
+            "status": skipped_row.get("status") or "skipped",
+            "reason": skipped_row.get("reason") or "",
+            "traffic": _safe_int(ctx.get("traffic")),
+            "keywords": _safe_int(ctx.get("keywords")),
+            "top_keyword": ctx.get("top_keyword") or "",
+            "top_keyword_position": ctx.get("top_keyword_position"),
+            "recommended_action": "Resolve indexability before sending more internal authority to this URL.",
+        })
+    skipped.sort(key=lambda r: _safe_int(r.get("traffic")), reverse=True)
+
+    demand_rows = [r for r in rows if _safe_int(r.get("traffic")) > 0]
+    total_traffic = sum(_safe_int(r.get("traffic")) for r in rows)
+    weighted_abs_gap = sum(abs(_safe_float(r.get("authority_traffic_gap"))) * max(1, _safe_int(r.get("traffic"))) for r in demand_rows)
+    weight_denom = sum(max(1, _safe_int(r.get("traffic"))) for r in demand_rows) or 1
+    alignment = max(0.0, min(1.0, 1.0 - weighted_abs_gap / weight_denom))
+    orphan_traffic = sum(_safe_int(r.get("traffic")) for r in rows if _safe_int(r.get("traffic")) > 0 and _safe_int(r.get("in_degree")) == 0)
+
+    high_traffic_low_authority = [r for r in rows if r.get("mismatch_label") in {"high_traffic_low_authority", "ranked_orphan", "buried_demand"}]
+    high_authority_low_value = [r for r in rows if r.get("mismatch_label") == "high_authority_low_value"]
+
+    return {
+        "summary": {
+            "status": "ok",
+            "model": "traffic_weighted_pagerank_v1",
+            "total_pages": len(rows),
+            "traffic_pages": len(demand_rows),
+            "total_traffic": total_traffic,
+            "authority_traffic_alignment": round(alignment, 4),
+            "high_traffic_low_authority_pages": len(high_traffic_low_authority),
+            "high_authority_low_value_pages": len(high_authority_low_value),
+            "orphan_traffic": orphan_traffic,
+            "orphan_traffic_share": round(orphan_traffic / max(1, total_traffic), 4),
+            "non_indexable_search_pages": len(skipped),
+        },
+        "pages": rows,
+        "mismatches": {
+            "high_traffic_low_authority": high_traffic_low_authority[:200],
+            "high_authority_low_value": high_authority_low_value[:200],
+            "non_indexable_search_pages": skipped[:200],
+        },
+        "clusters": aggregate("cluster")[:120],
+        "directories": aggregate("directory")[:120],
+        "page_types": aggregate("page_type")[:120],
+        "edges": edge_rows[:800],
+        "interpretation": {
+            "authority_traffic_gap": "Positive values mean traffic demand is stronger than internal authority support; negative values mean authority is concentrated on lower-demand pages.",
+            "weighted_pagerank": "Weighted PageRank favors descriptive anchors and semantically related source-target links. Traffic-weighted PageRank also personalizes the random walk toward pages with organic demand.",
+        },
+    }
+
+
 def link_flow_payload(
     result: LinkGraphResult,
     pages,
     top_pages: list[dict] | None = None,
     *,
+    page_types: dict | None = None,
+    traffic_authority: dict | None = None,
     max_nodes: int = 360,
     max_edges: int = 1600,
 ) -> dict:
@@ -522,6 +992,12 @@ def link_flow_payload(
     into the node set so the chart can show whether link equity reaches them.
     """
     by_url = {p.url: p for p in pages}
+    page_type_by_url = _page_type_lookup(page_types)
+    authority_by_url = {
+        row.get("url"): row
+        for row in (traffic_authority or {}).get("pages", [])
+        if row.get("url")
+    }
     traffic_by_url: dict[str, dict] = {}
     for row in top_pages or []:
         url = row.get("matched_url") or row.get("url") or ""
@@ -579,14 +1055,22 @@ def link_flow_payload(
     for url in sorted(selected, key=lambda u: score.get(u, 0.0), reverse=True):
         page = by_url.get(url)
         traffic_row = traffic_by_url.get(url) or {}
+        authority_row = authority_by_url.get(url) or {}
         page_rows.append({
             "url": url,
             "title": page.title if page else url,
             "section": page.section if page else "",
+            "directory": authority_row.get("directory") or _directory(url),
+            "cluster": authority_row.get("cluster") or traffic_row.get("cluster_label") or (page.section if page else ""),
+            "page_type": authority_row.get("page_type") or page_type_by_url.get(_canonical_url(url), ""),
             "traffic": int(traffic_row.get("traffic", 0) or 0),
             "keywords": int(traffic_row.get("keywords", 0) or 0),
             "top_keyword": traffic_row.get("top_keyword", ""),
             "pagerank": round(float(result.pagerank.get(url, 0.0)), 8),
+            "weighted_pagerank": round(float(authority_row.get("weighted_pagerank", 0.0) or 0.0), 8),
+            "traffic_weighted_pagerank": round(float(authority_row.get("traffic_weighted_pagerank", 0.0) or 0.0), 8),
+            "authority_traffic_gap": round(float(authority_row.get("authority_traffic_gap", 0.0) or 0.0), 4),
+            "mismatch_label": authority_row.get("mismatch_label", ""),
             "hub_score": round(float(result.hub_score.get(url, 0.0)), 8),
             "authority_score": round(float(result.authority_score.get(url, 0.0)), 8),
             "in_degree": int(result.in_degree.get(url, 0)),

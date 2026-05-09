@@ -473,6 +473,9 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "p90_in_degree", "label": "P90 inbound links", "better": "high", "fmt": "0"},
             {"key": "median_out_degree", "label": "Median outbound links", "better": "high", "fmt": "0"},
             {"key": "orphan_share", "label": "Orphan share", "better": "low", "fmt": "pct"},
+            {"key": "authority_traffic_alignment", "label": "Authority-demand alignment", "better": "high", "fmt": "pct"},
+            {"key": "high_traffic_low_authority_pages", "label": "Underserved search pages", "better": "low", "fmt": "int"},
+            {"key": "authority_without_demand_pages", "label": "Authority without demand", "better": "low", "fmt": "int"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -649,6 +652,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ah = proj.ahrefs or {}
     ah_summary = ah.get("summary", {}) or {}
     ah_metrics = ah.get("metrics", {}) or {}
+    twpr = ((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -691,6 +695,10 @@ def _leaderboard_row(proj: _Project) -> dict:
         "p90_in_degree": _percentile([float(v) for v in in_degrees], 0.9),
         "median_out_degree": _percentile([float(v) for v in out_degrees], 0.5),
         "orphan_share": orphan_share,
+        "authority_traffic_alignment": float(twpr.get("authority_traffic_alignment", 0.0)),
+        "high_traffic_low_authority_pages": int(twpr.get("high_traffic_low_authority_pages", 0)),
+        "authority_without_demand_pages": int(twpr.get("high_authority_low_value_pages", 0)),
+        "orphan_traffic_share": float(twpr.get("orphan_traffic_share", 0.0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2171,7 +2179,9 @@ def _page_link_lookup(proj: _Project) -> dict[str, dict]:
 
 
 def _authority_lookup(proj: _Project) -> dict[str, dict]:
-    rows = (proj.linkgraph or {}).get("top_authority_pages") or []
+    rows = (((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("pages") or [])
+    if not rows:
+        rows = (proj.linkgraph or {}).get("top_authority_pages") or []
     return _url_lookup_from_rows(rows, ("url",), score_key="pagerank")
 
 
@@ -2224,6 +2234,12 @@ def _authority_demand_payload(projects: list[_Project]) -> dict:
                 "click_depth": click_depth,
                 "linkgraph_found": linkgraph_found,
                 "pagerank": _safe_float(authority.get("pagerank")),
+                "weighted_pagerank": _safe_float(authority.get("weighted_pagerank")),
+                "traffic_weighted_pagerank": _safe_float(authority.get("traffic_weighted_pagerank")),
+                "traffic_percentile": _safe_float(authority.get("traffic_percentile")),
+                "weighted_pagerank_percentile": _safe_float(authority.get("weighted_pagerank_percentile")),
+                "authority_traffic_gap": _safe_float(authority.get("authority_traffic_gap")),
+                "mismatch_label": authority.get("mismatch_label") or "",
                 "authority_score": _safe_float(authority.get("authority_score")),
                 "hub_score": _safe_float(authority.get("hub_score")),
             }
@@ -2251,9 +2267,12 @@ def _authority_demand_payload(projects: list[_Project]) -> dict:
             [float(_safe_int(r.get("traffic"))) for r in positive_search],
             0.25,
         ) if positive_search else 0.0
-        for row in ((proj.linkgraph or {}).get("top_authority_pages") or []):
+        authority_rows = (((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("pages") or [])
+        if not authority_rows:
+            authority_rows = (proj.linkgraph or {}).get("top_authority_pages") or []
+        for row in authority_rows:
             search_row = _lookup_url(top_page_lookup, row.get("url"))
-            traffic = _safe_int(search_row.get("traffic"))
+            traffic = _safe_int(row.get("traffic") if row.get("traffic") is not None else search_row.get("traffic"))
             if traffic > low_search_threshold:
                 continue
             authority_without_demand.append({
@@ -2262,12 +2281,16 @@ def _authority_demand_payload(projects: list[_Project]) -> dict:
                 "title": row.get("title") or search_row.get("title") or "",
                 "section": row.get("section") or search_row.get("section") or "",
                 "traffic": traffic,
-                "keywords": _safe_int(search_row.get("keywords")),
-                "top_keyword": search_row.get("top_keyword") or "",
+                "keywords": _safe_int(row.get("keywords") if row.get("keywords") is not None else search_row.get("keywords")),
+                "top_keyword": row.get("top_keyword") or search_row.get("top_keyword") or "",
                 "in_degree": _safe_int(row.get("in_degree")),
                 "out_degree": _safe_int(row.get("out_degree")),
                 "click_depth": row.get("click_depth"),
                 "pagerank": _safe_float(row.get("pagerank")),
+                "weighted_pagerank": _safe_float(row.get("weighted_pagerank")),
+                "traffic_weighted_pagerank": _safe_float(row.get("traffic_weighted_pagerank")),
+                "authority_traffic_gap": _safe_float(row.get("authority_traffic_gap")),
+                "mismatch_label": row.get("mismatch_label") or "",
                 "authority_score": _safe_float(row.get("authority_score")),
                 "hub_score": _safe_float(row.get("hub_score")),
             })
@@ -2286,6 +2309,60 @@ def _authority_demand_payload(projects: list[_Project]) -> dict:
         "thin_internal_support": thin_internal_support[:150],
         "unmatched_pages": unmatched_pages[:150],
         "authority_without_demand": authority_without_demand[:150],
+    }
+
+
+def _traffic_weighted_pagerank_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    pages: list[dict] = []
+    underserved: list[dict] = []
+    authority_waste: list[dict] = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("pages") or []:
+            item = {"domain": proj.domain, **row}
+            pages.append(item)
+            if row.get("mismatch_label") in {"high_traffic_low_authority", "ranked_orphan", "buried_demand"}:
+                underserved.append(item)
+            if row.get("mismatch_label") == "high_authority_low_value":
+                authority_waste.append(item)
+        for row in payload.get("clusters") or []:
+            cluster = str(row.get("cluster") or row.get("label") or "unknown")
+            clusters[cluster][proj.domain] = {"domain": proj.domain, **row}
+
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "cluster": cluster,
+                    "label": cluster,
+                    "pages": 0,
+                    "traffic": 0,
+                    "avg_authority_traffic_gap": 0.0,
+                    "underserved_pages": 0,
+                    "authority_without_demand": 0,
+                })
+                for domain in project_domains
+            ],
+        })
+    pages.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_float(r.get("authority_traffic_gap"))), reverse=True)
+    underserved.sort(key=lambda r: (_safe_int(r.get("traffic")), _safe_float(r.get("authority_traffic_gap"))), reverse=True)
+    authority_waste.sort(key=lambda r: (_safe_float(r.get("weighted_pagerank_percentile")), -_safe_int(r.get("traffic"))), reverse=True)
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("traffic")) for d in r["domains"]), reverse=True)
+    return {
+        "domains": domains,
+        "pages": pages[:900],
+        "underserved": underserved[:250],
+        "authority_without_demand": authority_waste[:250],
+        "clusters": matrix[:120],
     }
 
 
@@ -2475,6 +2552,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),
         "authority_demand": _authority_demand_payload(projects),
+        "traffic_weighted_pagerank": _traffic_weighted_pagerank_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

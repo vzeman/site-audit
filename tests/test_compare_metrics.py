@@ -184,6 +184,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
             "linkgraph.json": json.dumps({
                 "page_link_counts": [{"url": alpha_url, "title": "AI workflow", "in_degree": 0, "out_degree": 3, "click_depth": 4}],
                 "top_authority_pages": [{"url": "https://alpha.example/", "title": "Alpha", "pagerank": 0.9, "authority_score": 0.8, "in_degree": 8, "out_degree": 10}],
+                "traffic_weighted_pagerank": {
+                    "summary": {"authority_traffic_alignment": 0.35, "high_traffic_low_authority_pages": 1, "high_authority_low_value_pages": 0, "orphan_traffic_share": 1.0},
+                    "pages": [{"url": alpha_url, "title": "AI workflow", "section": "blog", "cluster": "workflow", "directory": "/blog/", "page_type": "article", "traffic": 100, "keywords": 8, "top_keyword": "ai workflow", "in_degree": 0, "out_degree": 3, "click_depth": 4, "pagerank": 0.01, "weighted_pagerank": 0.01, "traffic_weighted_pagerank": 0.02, "traffic_percentile": 1.0, "weighted_pagerank_percentile": 0.2, "authority_traffic_gap": 0.8, "mismatch_label": "ranked_orphan"}],
+                    "clusters": [{"cluster": "workflow", "label": "workflow", "pages": 1, "traffic": 100, "avg_authority_traffic_gap": 0.8, "underserved_pages": 1, "authority_without_demand": 0}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -212,6 +217,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
             "linkgraph.json": json.dumps({
                 "page_link_counts": [{"url": beta_url, "title": "Automation tool", "in_degree": 5, "out_degree": 2, "click_depth": 2}],
                 "top_authority_pages": [{"url": beta_url, "title": "Automation tool", "pagerank": 0.5, "authority_score": 0.6, "in_degree": 5, "out_degree": 2}],
+                "traffic_weighted_pagerank": {
+                    "summary": {"authority_traffic_alignment": 0.9, "high_traffic_low_authority_pages": 0, "high_authority_low_value_pages": 0, "orphan_traffic_share": 0.0},
+                    "pages": [{"url": beta_url, "title": "Automation tool", "section": "blog", "cluster": "automation", "directory": "/blog/", "page_type": "article", "traffic": 15, "keywords": 2, "top_keyword": "automation tool", "in_degree": 5, "out_degree": 2, "click_depth": 2, "pagerank": 0.5, "weighted_pagerank": 0.5, "traffic_weighted_pagerank": 0.6, "traffic_percentile": 1.0, "weighted_pagerank_percentile": 1.0, "authority_traffic_gap": 0.0, "mismatch_label": "aligned"}],
+                    "clusters": [{"cluster": "automation", "label": "automation", "pages": 1, "traffic": 15, "avg_authority_traffic_gap": 0.0, "underserved_pages": 0, "authority_without_demand": 0}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -236,6 +246,9 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["serp_features"]["matrix"][0]["feature"] in {"ai_overview", "question"}
     assert payload["content_efficiency"]["clusters"]
     assert payload["authority_demand"]["ranked_orphans"][0]["url"] == alpha_url
+    assert payload["traffic_weighted_pagerank"]["underserved"][0]["url"] == alpha_url
+    assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35
+    assert payload["leaderboard"][1]["authority_traffic_alignment"] == 0.9
     assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url
 
 

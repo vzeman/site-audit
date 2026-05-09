@@ -1221,12 +1221,52 @@
         <h3 class="text-lg font-semibold">Internal link equity flow</h3>
         <p class="text-xs text-gray-500 mt-1">
           Hierarchical edge bundling of the strongest internal links. Edge thickness = number of links between the two pages,
-          edge color and page dot size = estimated organic traffic of the target page. Dense bundles into small, pale targets
-          indicate link equity going to low-demand pages; thick bundles into large, warm targets show authority reaching search-demand pages.
+          page dot size = estimated organic traffic. Use the filters to isolate one directory, cluster, or page type, and switch color
+          between traffic, PageRank, and cluster.
         </p>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-3 text-xs">
+        <select id="linkflow-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="linkflow-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="linkflow-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="linkflow-color-mode" class="border border-gray-300 rounded px-2 py-1 bg-white">
+          <option value="traffic">Color: traffic</option>
+          <option value="pagerank">Color: PageRank</option>
+          <option value="cluster">Color: cluster</option>
+        </select>
       </div>
       <div id="linkflow-bundle" class="w-full" style="min-height: 780px;"></div>
       <div id="linkflow-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="traffic-pagerank-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Traffic-weighted PageRank</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Compares organic demand with internal authority. Dot size is traffic; high upper-left dots have demand but weak weighted PageRank.
+        </p>
+      </div>
+      <div id="traffic-pagerank-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-4"></div>
+      <div class="flex flex-wrap gap-2 mb-3 text-xs">
+        <select id="traffic-pr-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="traffic-pr-cluster-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+        <select id="traffic-pr-type-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
+      </div>
+      <div id="traffic-pagerank-scatter" class="w-full mb-5" style="min-height: 420px;"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Underserved search pages</h4>
+          <div id="traffic-pagerank-gaps" class="max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Authority without demand</h4>
+          <div id="traffic-pagerank-unused" class="max-h-96 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Non-indexable search pages</h4>
+          <div id="traffic-pagerank-nonindexable" class="max-h-96 overflow-y-auto"></div>
+        </div>
+      </div>
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
@@ -1907,6 +1947,7 @@
       renderCannibalization('all');
       renderDuplicateFragments();
       renderLinkgraph();
+      renderTrafficPagerank();
       renderLinkFlow();
       renderLinkbuilding();
       renderLinkCounts();
@@ -4830,23 +4871,157 @@
     }
   }
 
+  function setSelectOptions(id, label, values, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return '';
+    const previous = el.value || '';
+    const unique = Array.from(new Set((values || []).filter(Boolean).map(String))).sort((a, b) => a.localeCompare(b));
+    el.innerHTML = `<option value="">All ${escapeHtml(label)}</option>` + unique.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    el.value = unique.includes(previous) ? previous : '';
+    el.onchange = onChange;
+    return el.value;
+  }
+
+  function filterByAuthorityControls(rows, prefix) {
+    const directory = document.getElementById(`${prefix}-directory-filter`)?.value || '';
+    const cluster = document.getElementById(`${prefix}-cluster-filter`)?.value || '';
+    const pageType = document.getElementById(`${prefix}-type-filter`)?.value || '';
+    return (rows || []).filter(r =>
+      (!directory || r.directory === directory) &&
+      (!cluster || r.cluster === cluster) &&
+      (!pageType || r.page_type === pageType)
+    );
+  }
+
+  function renderTrafficPagerank() {
+    const block = document.getElementById('traffic-pagerank-block');
+    const payload = ((state.linkgraph || {}).traffic_weighted_pagerank || {});
+    const rowsAll = payload.pages || [];
+    if (!rowsAll.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const rerender = () => renderTrafficPagerank();
+    setSelectOptions('traffic-pr-directory-filter', 'directories', rowsAll.map(r => r.directory), rerender);
+    setSelectOptions('traffic-pr-cluster-filter', 'clusters', rowsAll.map(r => r.cluster), rerender);
+    setSelectOptions('traffic-pr-type-filter', 'page types', rowsAll.map(r => r.page_type), rerender);
+    const rows = filterByAuthorityControls(rowsAll, 'traffic-pr');
+    const summary = payload.summary || {};
+    document.getElementById('traffic-pagerank-summary').innerHTML =
+      card('Alignment', `${((summary.authority_traffic_alignment || 0) * 100).toFixed(0)}%`, 'traffic vs weighted PR') +
+      card('Underserved', Number(summary.high_traffic_low_authority_pages || 0).toLocaleString(), 'search pages need authority') +
+      card('Unused authority', Number(summary.high_authority_low_value_pages || 0).toLocaleString(), 'authority with low demand') +
+      card('Orphan traffic', Number(summary.orphan_traffic || 0).toLocaleString(), `${((summary.orphan_traffic_share || 0) * 100).toFixed(0)}% of traffic`) +
+      card('Non-indexable', Number(summary.non_indexable_search_pages || 0).toLocaleString(), 'search pages blocked/skipped');
+
+    drawTrafficPagerankScatter(document.getElementById('traffic-pagerank-scatter'), rows);
+    const keep = r =>
+      (!document.getElementById('traffic-pr-directory-filter')?.value || r.directory === document.getElementById('traffic-pr-directory-filter').value) &&
+      (!document.getElementById('traffic-pr-cluster-filter')?.value || r.cluster === document.getElementById('traffic-pr-cluster-filter').value) &&
+      (!document.getElementById('traffic-pr-type-filter')?.value || r.page_type === document.getElementById('traffic-pr-type-filter').value);
+    renderTrafficPagerankList('traffic-pagerank-gaps', ((payload.mismatches || {}).high_traffic_low_authority || []).filter(keep), 'No underserved search pages in this view.');
+    renderTrafficPagerankList('traffic-pagerank-unused', ((payload.mismatches || {}).high_authority_low_value || []).filter(keep), 'No unused authority pages in this view.');
+    renderNonIndexableSearchList((payload.mismatches || {}).non_indexable_search_pages || []);
+  }
+
+  function drawTrafficPagerankScatter(container, rows) {
+    if (!container) return;
+    container.innerHTML = '';
+    const points = (rows || []).filter(r => Number(r.traffic || 0) > 0 || Number(r.weighted_pagerank_percentile || 0) > 0);
+    if (!points.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No traffic-weighted PageRank rows for this filter.</div>';
+      return;
+    }
+    const margin = {top: 18, right: 24, bottom: 44, left: 58};
+    const outerWidth = Math.max(560, container.offsetWidth || 760);
+    const outerHeight = 420;
+    const width = outerWidth - margin.left - margin.right;
+    const height = outerHeight - margin.top - margin.bottom;
+    const svg = d3.select(container).append('svg').attr('width', outerWidth).attr('height', outerHeight)
+      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const x = d3.scaleLinear().domain([0, 1]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 1]).range([height, 0]);
+    const radius = d3.scaleSqrt().domain([0, d3.max(points, d => Number(d.traffic || 0)) || 1]).range([3.5, 18]);
+    const color = d => d.mismatch_label === 'aligned' ? '#16a34a' : d.mismatch_label === 'high_authority_low_value' ? '#2563eb' : d.mismatch_label === 'neutral' ? '#6b7280' : '#dc2626';
+    svg.append('line').attr('x1', x(0.5)).attr('x2', x(0.5)).attr('y1', 0).attr('y2', height).attr('stroke', '#e5e7eb');
+    svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(0.5)).attr('y2', y(0.5)).attr('stroke', '#e5e7eb');
+    svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(5).tickFormat(d => `${Math.round(d * 100)}%`));
+    svg.append('g').call(d3.axisLeft(y).ticks(5).tickFormat(d => `${Math.round(d * 100)}%`));
+    svg.append('text').attr('x', width / 2).attr('y', height + 36).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('weighted PageRank percentile');
+    svg.append('text').attr('transform', 'rotate(-90)').attr('x', -height / 2).attr('y', -42).attr('text-anchor', 'middle').style('font-size', '11px').style('fill', '#6b7280').text('traffic percentile');
+    const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
+    svg.selectAll('circle').data(points).join('circle')
+      .attr('cx', d => x(Number(d.weighted_pagerank_percentile || 0)))
+      .attr('cy', d => y(Number(d.traffic_percentile || 0)))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', color).attr('fill-opacity', 0.72)
+      .attr('stroke', '#111827').attr('stroke-opacity', 0.22)
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.9).attr('stroke-width', 2);
+        tooltip.style('visibility','visible').html(`<strong>${escapeHtml(d.title || d.url)}</strong><br><span style="color:#93c5fd">${escapeHtml(d.url || '')}</span><br>traffic ${Number(d.traffic || 0).toLocaleString()} · keywords ${Number(d.keywords || 0).toLocaleString()} · inlinks ${Number(d.in_degree || 0).toLocaleString()}<br>weighted PR pct ${(Number(d.weighted_pagerank_percentile || 0) * 100).toFixed(0)} · traffic pct ${(Number(d.traffic_percentile || 0) * 100).toFixed(0)} · gap ${Number(d.authority_traffic_gap || 0).toFixed(2)}<br><span style="color:#fbbf24">${escapeHtml(d.recommended_action || '')}</span>`);
+      })
+      .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
+      .on('mouseout', function(){ d3.select(this).attr('stroke-opacity',0.22).attr('stroke-width',1); tooltip.style('visibility','hidden'); });
+  }
+
+  function renderTrafficPagerankList(id, rows, empty) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = (rows || []).slice(0, 120).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+        <div class="text-gray-500 mt-1">${escapeHtml(r.mismatch_label || '')} · traffic ${Number(r.traffic || 0).toLocaleString()} · PR pct ${(Number(r.weighted_pagerank_percentile || 0) * 100).toFixed(0)} · gap ${Number(r.authority_traffic_gap || 0).toFixed(2)}</div>
+        <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
+      </div>
+    `).join('') || `<div class="text-gray-500">${escapeHtml(empty)}</div>`;
+  }
+
+  function renderNonIndexableSearchList(rows) {
+    const el = document.getElementById('traffic-pagerank-nonindexable');
+    if (!el) return;
+    el.innerHTML = (rows || []).slice(0, 120).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+        <div class="text-gray-500 mt-1">${escapeHtml(r.reason || r.status || '')} · traffic ${Number(r.traffic || 0).toLocaleString()} · keywords ${Number(r.keywords || 0).toLocaleString()}</div>
+        <div class="text-gray-700 mt-1">${escapeHtml(r.recommended_action || '')}</div>
+      </div>
+    `).join('') || '<div class="text-gray-500">No non-indexable search-demand pages.</div>';
+  }
+
   function renderLinkFlow() {
     const block = document.getElementById('linkflow-block');
     const container = document.getElementById('linkflow-bundle');
     const legend = document.getElementById('linkflow-legend');
     const flow = ((state.linkgraph || {}).link_flow || {});
-    const nodes = flow.nodes || [];
-    const edges = flow.edges || [];
-    if (!nodes.length || !edges.length) {
+    const allNodes = flow.nodes || [];
+    const allEdges = flow.edges || [];
+    if (!allNodes.length || !allEdges.length) {
       block.style.display = 'none';
       return;
     }
     block.style.display = '';
+    const rerender = () => renderLinkFlow();
+    setSelectOptions('linkflow-directory-filter', 'directories', allNodes.map(r => r.directory), rerender);
+    setSelectOptions('linkflow-cluster-filter', 'clusters', allNodes.map(r => r.cluster), rerender);
+    setSelectOptions('linkflow-type-filter', 'page types', allNodes.map(r => r.page_type), rerender);
+    const colorModeEl = document.getElementById('linkflow-color-mode');
+    if (colorModeEl) colorModeEl.onchange = rerender;
+    const colorMode = colorModeEl?.value || 'traffic';
+    const nodes = filterByAuthorityControls(allNodes, 'linkflow');
+    const selectedUrls = new Set(nodes.map(n => n.url));
+    const edges = allEdges.filter(e => selectedUrls.has(e.source) && selectedUrls.has(e.target));
     container.innerHTML = '';
+    if (!nodes.length || !edges.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No bundled links for this filter.</div>';
+      legend.innerHTML = '';
+      return;
+    }
     legend.innerHTML = `
-      <span><strong>${Number(flow.shown_nodes || nodes.length).toLocaleString()}</strong> pages shown</span>
-      <span><strong>${Number(flow.shown_edges || edges.length).toLocaleString()}</strong> links shown from ${Number(flow.total_edges || 0).toLocaleString()} total</span>
+      <span><strong>${Number(nodes.length).toLocaleString()}</strong> pages in current filter</span>
+      <span><strong>${Number(edges.length).toLocaleString()}</strong> links in current filter from ${Number(flow.total_edges || 0).toLocaleString()} total</span>
       <span>node size = traffic</span>
+      <span>color = ${escapeHtml(colorMode)}</span>
       <span>edge width = repeated links</span>
     `;
 
@@ -4857,6 +5032,10 @@
     const prMax = d3.max(nodes, d => Number(d.pagerank || 0)) || 1;
     const edgeWeightMax = d3.max(edges, d => Number(d.weight || 1)) || 1;
     const trafficColor = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, trafficMax]);
+    const prColor = d3.scaleSequential(d3.interpolateViridis).domain([0, prMax]);
+    const clusters = Array.from(new Set(nodes.map(d => d.cluster || d.section || 'root'))).sort();
+    const clusterColor = d3.scaleOrdinal().domain(clusters).range(d3.schemeTableau10.concat(d3.schemeSet3 || []));
+    const nodeColor = d => colorMode === 'pagerank' ? prColor(Number(d.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.cluster || d.section || 'root') : trafficColor(Number(d.traffic || 0));
     const nodeRadius = d3.scaleSqrt().domain([0, trafficMax]).range([2.2, 8.5]);
     const edgeWidth = d3.scaleSqrt().domain([1, edgeWeightMax]).range([0.45, 3.2]);
     const edgeOpacity = d3.scaleSqrt().domain([0, trafficMax]).range([0.08, 0.72]);
@@ -4889,7 +5068,7 @@
     const edgeLayer = svg.append('g').attr('fill', 'none');
     const path = edgeLayer.selectAll('path').data(bundledEdges).join('path')
       .attr('d', d => line(d.sourceNode.path(d.targetNode)))
-      .attr('stroke', d => trafficColor(Number(d.targetNode.data.traffic || 0)))
+      .attr('stroke', d => colorMode === 'pagerank' ? prColor(Number(d.targetNode.data.pagerank || 0)) : colorMode === 'cluster' ? clusterColor(d.targetNode.data.cluster || d.targetNode.data.section || 'root') : trafficColor(Number(d.targetNode.data.traffic || 0)))
       .attr('stroke-width', d => edgeWidth(Number(d.weight || 1)))
       .attr('stroke-opacity', d => edgeOpacity(Number(d.targetNode.data.traffic || 0)))
       .style('mix-blend-mode', 'multiply')
@@ -4912,7 +5091,7 @@
       .attr('transform', d => `rotate(${d.x - 90}) translate(${d.y},0)`);
     node.append('circle')
       .attr('r', d => nodeRadius(Number(d.data.traffic || 0)))
-      .attr('fill', d => trafficColor(Number(d.data.traffic || 0)))
+      .attr('fill', d => nodeColor(d.data))
       .attr('stroke', d => d.data.traffic ? '#7f1d1d' : '#94a3b8')
       .attr('stroke-width', d => 0.5 + Math.min(2, Number(d.data.pagerank || 0) / prMax * 2))
       .attr('fill-opacity', d => d.data.traffic ? 0.88 : 0.38);
