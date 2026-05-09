@@ -411,6 +411,12 @@
           </div>
         </div>
       </div>
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <label for="audit-scatter-search" class="text-xs font-medium text-gray-600">Find dots</label>
+        <input id="audit-scatter-search" type="search" autocomplete="off" placeholder="Type title, URL, header, paragraph, keyword..."
+               class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <span id="audit-scatter-search-count" class="text-xs text-gray-500"></span>
+      </div>
       <div id="audit-scatter-container" class="w-full" style="min-height: 640px;">
         <div class="flex items-center justify-center h-96">
           <div class="text-center">
@@ -537,6 +543,12 @@
         <p class="text-xs text-gray-500 mb-2">
           Keywords, page titles, pages, headers, paragraphs, and link titles projected together. Good alignment means ranking terms, headings, anchors, and content are using the same vocabulary.
         </p>
+        <div class="mb-2 flex flex-wrap items-center gap-3">
+          <label for="ahrefs-semantic-map-search" class="text-xs font-medium text-gray-600">Find dots</label>
+          <input id="ahrefs-semantic-map-search" type="search" autocomplete="off" placeholder="Type keyword, title, header, URL..."
+                 class="w-full sm:w-80 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <span id="ahrefs-semantic-map-search-count" class="text-xs text-gray-500"></span>
+        </div>
         <div id="ahrefs-semantic-map" class="w-full" style="min-height: 560px;"></div>
         <div id="ahrefs-semantic-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
       </div>
@@ -1436,6 +1448,7 @@
       renderCompetitive();
       wireModeButtons();
       wireDatasetButtons();
+      wireSemanticSearchInputs();
       wireCoverageButtons();
       wireFanoutButtons();
     } catch (e) {
@@ -2158,7 +2171,14 @@
         tooltip.style('visibility', 'visible').html(`<strong style="color:${AHREFS_ENTITY_COLORS[d.type]}">${AHREFS_ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
       })
       .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
-      .on('mouseout', function() { d3.select(this).attr('stroke', 'white').attr('stroke-width', 0.5); tooltip.style('visibility', 'hidden'); });
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke', 'white').attr('stroke-width', 0.5);
+        tooltip.style('visibility', 'hidden');
+        applyAhrefsSemanticSearchOverlay();
+      });
+    state.ahrefsSemanticDots = dots;
+    state.ahrefsSemanticPoints = points;
+    applyAhrefsSemanticSearchOverlay();
     const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
         const nx = e.transform.rescaleX(x);
@@ -2444,6 +2464,7 @@
       .attr('stroke', d => strokeFor(d, mode))
       .attr('stroke-width', d => strokeWidthFor(d, mode))
       .attr('fill-opacity', d => opacityFor(d, mode));
+    applyAuditScatterSearchOverlay();
     renderLegend(mode);
   }
 
@@ -2556,6 +2577,100 @@
       });
       drawScatter();
     }));
+  }
+
+  function wireSemanticSearchInputs() {
+    const auditSearch = document.getElementById('audit-scatter-search');
+    if (auditSearch && !auditSearch.dataset.bound) {
+      auditSearch.dataset.bound = '1';
+      auditSearch.addEventListener('input', () => applyMode(state.mode || 'section'));
+    }
+    const ahrefsSearch = document.getElementById('ahrefs-semantic-map-search');
+    if (ahrefsSearch && !ahrefsSearch.dataset.bound) {
+      ahrefsSearch.dataset.bound = '1';
+      ahrefsSearch.addEventListener('input', applyAhrefsSemanticSearchOverlay);
+    }
+  }
+
+  function normalizedNeedle(inputId) {
+    const el = document.getElementById(inputId);
+    return (el && el.value ? el.value : '').trim().toLowerCase();
+  }
+
+  function semanticSearchText(row) {
+    if (!row || typeof row !== 'object') return String(row || '').toLowerCase();
+    if (row.__searchText) return row.__searchText;
+    const values = [];
+    collectSearchValues(row, values, 0);
+    const text = values.join(' ').toLowerCase();
+    try {
+      Object.defineProperty(row, '__searchText', { value: text, configurable: true });
+    } catch (e) {
+      row.__searchText = text;
+    }
+    return text;
+  }
+
+  function collectSearchValues(value, out, depth) {
+    if (value == null || depth > 3) return;
+    if (typeof value === 'string' || typeof value === 'number') {
+      out.push(String(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.slice(0, 20).forEach(v => collectSearchValues(v, out, depth + 1));
+      return;
+    }
+    if (typeof value === 'object') {
+      Object.keys(value).forEach(key => {
+        if (key.startsWith('__')) return;
+        collectSearchValues(value[key], out, depth + 1);
+      });
+    }
+  }
+
+  function applyAuditScatterSearchOverlay() {
+    if (!state.dots) return;
+    const q = normalizedNeedle('audit-scatter-search');
+    const countEl = document.getElementById('audit-scatter-search-count');
+    if (!q) {
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    let matches = 0;
+    state.dots
+      .attr('fill-opacity', d => {
+        const hit = semanticSearchText(d).includes(q);
+        if (hit) matches += 1;
+        return hit ? 0.98 : 0.08;
+      })
+      .attr('stroke', d => semanticSearchText(d).includes(q) ? '#111827' : strokeFor(d, state.mode || 'section'))
+      .attr('stroke-width', d => semanticSearchText(d).includes(q) ? 2.4 : strokeWidthFor(d, state.mode || 'section'));
+    if (countEl) countEl.textContent = `${matches.toLocaleString()} match${matches === 1 ? '' : 'es'}`;
+  }
+
+  function applyAhrefsSemanticSearchOverlay() {
+    if (!state.ahrefsSemanticDots) return;
+    const q = normalizedNeedle('ahrefs-semantic-map-search');
+    const countEl = document.getElementById('ahrefs-semantic-map-search-count');
+    if (!q) {
+      state.ahrefsSemanticDots
+        .attr('fill-opacity', d => d.type === 'paragraph' ? 0.42 : 0.72)
+        .attr('stroke', 'white')
+        .attr('stroke-width', 0.5);
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    let matches = 0;
+    state.ahrefsSemanticDots
+      .attr('fill-opacity', d => {
+        const hit = semanticSearchText(d).includes(q);
+        if (hit) matches += 1;
+        return hit ? 0.96 : 0.08;
+      })
+      .attr('stroke', d => semanticSearchText(d).includes(q) ? '#111827' : 'white')
+      .attr('stroke-width', d => semanticSearchText(d).includes(q) ? 2.4 : 0.5);
+    if (countEl) countEl.textContent = `${matches.toLocaleString()} match${matches === 1 ? '' : 'es'}`;
   }
 
   function escapeHtml(s) {

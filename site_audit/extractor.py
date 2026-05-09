@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -31,6 +32,17 @@ try:  # trafilatura is the preferred extractor
     _HAS_TRAFILATURA = True
 except Exception:  # pragma: no cover - optional dep
     _HAS_TRAFILATURA = False
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+_DISABLE_TRAFILATURA = os.getenv("SITE_AUDIT_DISABLE_TRAFILATURA", "").lower() in {"1", "true", "yes"}
+_TRAFILATURA_MAX_CHARS = _env_int("SITE_AUDIT_TRAFILATURA_MAX_CHARS", 400_000)
 
 
 @dataclass
@@ -785,7 +797,11 @@ def extract(
     language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
 
     body_text: str = ""
-    if _HAS_TRAFILATURA:
+    if (
+        _HAS_TRAFILATURA
+        and not _DISABLE_TRAFILATURA
+        and (_TRAFILATURA_MAX_CHARS <= 0 or len(html_body) <= _TRAFILATURA_MAX_CHARS)
+    ):
         try:
             extracted = trafilatura.extract(
                 html_body,

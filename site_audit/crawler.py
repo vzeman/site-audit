@@ -597,6 +597,9 @@ class Crawler:
         if self.config.use_cache:
             cached = self.cache.get(url)
             if cached and 200 <= cached.status < 400:
+                cached_content_type = (cached.content_type or "").lower()
+                if "html" not in cached_content_type:
+                    return None
                 cached_headers = cached.headers or {}
                 # case-insensitive lookup for X-Robots-Tag (cache may
                 # preserve original casing — be defensive).
@@ -609,7 +612,7 @@ class Crawler:
                     url=url,
                     status=cached.status,
                     body=self._prepare_html_body(cached.text),
-                    content_type=(cached.content_type or "").lower(),
+                    content_type=cached_content_type,
                     from_cache=True,
                     content_length_bytes=len(cached.body or b""),
                     x_robots_tag=xrt,

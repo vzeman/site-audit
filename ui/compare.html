@@ -325,6 +325,12 @@
         <p class="text-xs text-gray-500 mb-2">
           Keywords, page titles, pages, headers, paragraphs, and link titles from every domain projected in one vector space. Color = entity type, outline = domain, dot size = traffic or usage.
         </p>
+        <div class="mb-2 flex flex-wrap items-center gap-3">
+          <label for="ahrefs-semantic-compare-search" class="text-xs font-medium text-gray-600">Find dots</label>
+          <input id="ahrefs-semantic-compare-search" type="search" autocomplete="off" placeholder="Type keyword, title, header, URL..."
+                 class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <span id="ahrefs-semantic-compare-search-count" class="text-xs text-gray-500"></span>
+        </div>
         <div id="ahrefs-semantic-compare" class="w-full" style="min-height: 620px;"></div>
         <div id="ahrefs-semantic-compare-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
       </div>
@@ -441,6 +447,12 @@
         <div class="flex gap-2 text-xs" id="sc-domain-toggles" role="group"></div>
       </div>
       <div id="combined-scatter" class="w-full" style="min-height: 600px;"></div>
+      <div class="mt-2 flex flex-wrap items-center gap-3">
+        <label for="combined-scatter-search" class="text-xs font-medium text-gray-600">Find dots</label>
+        <input id="combined-scatter-search" type="search" autocomplete="off" placeholder="Type page title, URL, keyword, section..."
+               class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <span id="combined-scatter-search-count" class="text-xs text-gray-500"></span>
+      </div>
     </section>
 
     <!-- Freshness semantic scatter -->
@@ -453,6 +465,12 @@
         </p>
       </div>
       <div id="freshness-scatter" class="w-full" style="min-height: 620px;"></div>
+      <div class="mt-2 flex flex-wrap items-center gap-3">
+        <label for="freshness-scatter-search" class="text-xs font-medium text-gray-600">Find dots</label>
+        <input id="freshness-scatter-search" type="search" autocomplete="off" placeholder="Type page title, URL, keyword, freshness..."
+               class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <span id="freshness-scatter-search-count" class="text-xs text-gray-500"></span>
+      </div>
       <div id="freshness-scatter-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
     </section>
 
@@ -534,6 +552,77 @@
     unknown: 'Missing date',
     future: 'Future date',
   };
+
+  function normalizedNeedle(inputRef) {
+    const el = typeof inputRef === 'string' ? document.getElementById(inputRef) : inputRef;
+    return (el && el.value ? el.value : '').trim().toLowerCase();
+  }
+
+  function semanticSearchText(row) {
+    if (!row || typeof row !== 'object') return String(row || '').toLowerCase();
+    if (row.__searchText) return row.__searchText;
+    const values = [];
+    collectSearchValues(row, values, 0);
+    const text = values.join(' ').toLowerCase();
+    try {
+      Object.defineProperty(row, '__searchText', { value: text, configurable: true });
+    } catch (e) {
+      row.__searchText = text;
+    }
+    return text;
+  }
+
+  function collectSearchValues(value, out, depth) {
+    if (value == null || depth > 3) return;
+    if (typeof value === 'string' || typeof value === 'number') {
+      out.push(String(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.slice(0, 20).forEach(v => collectSearchValues(v, out, depth + 1));
+      return;
+    }
+    if (typeof value === 'object') {
+      Object.keys(value).forEach(key => {
+        if (key.startsWith('__')) return;
+        collectSearchValues(value[key], out, depth + 1);
+      });
+    }
+  }
+
+  function valueFor(configValue, d) {
+    return typeof configValue === 'function' ? configValue(d) : configValue;
+  }
+
+  function wireSearchableDots(inputRef, countRef, dots, config) {
+    const input = typeof inputRef === 'string' ? document.getElementById(inputRef) : inputRef;
+    const countEl = typeof countRef === 'string' ? document.getElementById(countRef) : countRef;
+    if (!input || !dots) return;
+    const apply = () => {
+      const q = normalizedNeedle(input);
+      if (!q) {
+        dots
+          .attr('fill-opacity', d => valueFor(config.baseOpacity, d))
+          .attr('stroke', d => valueFor(config.baseStroke, d))
+          .attr('stroke-width', d => valueFor(config.baseStrokeWidth, d));
+        if (countEl) countEl.textContent = '';
+        return;
+      }
+      let matches = 0;
+      dots
+        .attr('fill-opacity', d => {
+          const hit = semanticSearchText(d).includes(q);
+          if (hit) matches += 1;
+          return hit ? (config.matchOpacity || 0.96) : (config.dimOpacity || 0.08);
+        })
+        .attr('stroke', d => semanticSearchText(d).includes(q) ? (config.matchStroke || '#111827') : valueFor(config.baseStroke, d))
+        .attr('stroke-width', d => semanticSearchText(d).includes(q) ? (config.matchStrokeWidth || 2.6) : valueFor(config.baseStrokeWidth, d));
+      if (countEl) countEl.textContent = `${matches.toLocaleString()} match${matches === 1 ? '' : 'es'}`;
+    };
+    input.oninput = apply;
+    apply();
+    return apply;
+  }
 
   document.getElementById('hdr-meta').textContent =
     `${data.domains.length} domains · ${data.scatter_total || 0} pages projected · ` +
@@ -1054,6 +1143,7 @@
     svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
     svg.append('g').call(d3.axisLeft(y).ticks(8));
     const tooltip = d3.select('body').append('div').style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)').style('color','white').style('padding','7px 10px').style('border-radius','6px').style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
+    let applySearch = null;
     const dots = svg.append('g').selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
       .attr('r', d => radius(Number(d.size || d.traffic || d.count || 0)))
@@ -1067,7 +1157,16 @@
         tooltip.style('visibility','visible').html(`<strong style="color:${domainColor(d.domain)}">${escapeHtml(d.domain)}</strong> · <strong style="color:${ENTITY_COLORS[d.type]}">${ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
-      .on('mouseout', function(){ d3.select(this).attr('stroke-width',1.6); tooltip.style('visibility','hidden'); });
+      .on('mouseout', function(){
+        d3.select(this).attr('stroke-width',1.6);
+        tooltip.style('visibility','hidden');
+        if (applySearch) applySearch();
+      });
+    applySearch = wireSearchableDots('ahrefs-semantic-compare-search', 'ahrefs-semantic-compare-search-count', dots, {
+      baseOpacity: d => d.type === 'paragraph' ? 0.38 : 0.7,
+      baseStroke: d => domainColor(d.domain),
+      baseStrokeWidth: 1.6,
+    });
     const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
         const nx = e.transform.rescaleX(x);
@@ -1098,6 +1197,11 @@
             <h4 class="text-sm font-semibold">${escapeHtml(title)}</h4>
             <p class="text-xs text-gray-500">${escapeHtml(map.description || '')}</p>
             <p class="text-[11px] text-gray-400">${Number(map.total || 0).toLocaleString()} entities projected</p>
+          </div>
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <input data-search-key="${escapeHtml(key)}" type="search" autocomplete="off" placeholder="Find dots..."
+                   class="semantic-entity-search w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <span data-search-count="${escapeHtml(key)}" class="text-[11px] text-gray-500"></span>
           </div>
           <div class="semantic-entity-chart" data-key="${escapeHtml(key)}" style="min-height:420px;"></div>
         </div>`;
@@ -1134,6 +1238,7 @@
       .style('position','absolute').style('visibility','hidden').style('background','rgba(0,0,0,.92)')
       .style('color','white').style('padding','7px 10px').style('border-radius','6px')
       .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','380px');
+    let applySearch = null;
     const dots = svg.append('g').selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(Number(d.x))).attr('cy', d => y(Number(d.y)))
       .attr('r', d => radius(Number(d.size || d.traffic || d.count || 0)))
@@ -1153,7 +1258,22 @@
         );
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
-      .on('mouseout', function(){ d3.select(this).attr('stroke-width',0.8); tooltip.style('visibility','hidden'); });
+      .on('mouseout', function(){
+        d3.select(this).attr('stroke-width',0.8);
+        tooltip.style('visibility','hidden');
+        if (applySearch) applySearch();
+      });
+    const card = container.closest('.border');
+    applySearch = wireSearchableDots(
+      card ? card.querySelector('.semantic-entity-search') : null,
+      card ? card.querySelector('[data-search-count]') : null,
+      dots,
+      {
+        baseOpacity: 0.7,
+        baseStroke: d => ENTITY_COLORS[d.type] || '#111827',
+        baseStrokeWidth: 0.8,
+      },
+    );
     const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
         const nx = e.transform.rescaleX(x);
@@ -1730,6 +1850,7 @@
     const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
 
     const dotsG = svg.append('g');
+    let applySearch = null;
     const dots = dotsG.selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(d.x))
       .attr('cy', d => y(d.y))
@@ -1749,7 +1870,16 @@
            <br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.top_keyword ? ' · ' + escapeHtml(d.top_keyword) : ''}</span>`);
       })
       .on('mousemove', e => tooltip.style('top',(e.pageY-10)+'px').style('left',(e.pageX+10)+'px'))
-      .on('mouseout', function(e,d){ d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke','white').attr('stroke-width',0.3); tooltip.style('visibility','hidden'); });
+      .on('mouseout', function(e,d){
+        d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke','white').attr('stroke-width',0.3);
+        tooltip.style('visibility','hidden');
+        if (applySearch) applySearch();
+      });
+    applySearch = wireSearchableDots('combined-scatter-search', 'combined-scatter-search-count', dots, {
+      baseOpacity: d => Number(d.traffic || 0) > 0 ? 0.82 : 0.38,
+      baseStroke: 'white',
+      baseStrokeWidth: 0.3,
+    });
 
     const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
@@ -1802,6 +1932,7 @@
       .style('font-size','12px').style('pointer-events','none').style('z-index','1000').style('max-width','420px');
     const xAxis = svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(8));
     const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(8));
+    let applySearch = null;
     const dots = svg.append('g').selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
       .attr('r', d => radius(Number(d.traffic || 0)))
@@ -1827,7 +1958,13 @@
       .on('mouseout', function(event, d) {
         d3.select(this).attr('r', radius(Number(d.traffic || 0))).attr('stroke-width', 1.1);
         tooltip.style('visibility','hidden');
+        if (applySearch) applySearch();
       });
+    applySearch = wireSearchableDots('freshness-scatter-search', 'freshness-scatter-search-count', dots, {
+      baseOpacity: d => Number(d.traffic || 0) > 0 ? 0.82 : 0.48,
+      baseStroke: d => domainColor(d.domain),
+      baseStrokeWidth: 1.1,
+    });
     const zoom = d3.zoom().scaleExtent([0.5, 25]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
         const nx = e.transform.rescaleX(x);

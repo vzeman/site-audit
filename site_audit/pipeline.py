@@ -263,7 +263,8 @@ def run(config: PipelineConfig) -> dict:
     extraction_rows: list[dict] = []
 
     noindex_dropped = 0
-    for r in fetched:
+    fetched_total = len(fetched)
+    for idx, r in enumerate(fetched, 1):
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
         if ext is None or not ext.title:
             extraction_rows.append({
@@ -320,6 +321,8 @@ def run(config: PipelineConfig) -> dict:
             "reason": "",
             "http_status": getattr(r, "status", 0),
         })
+        if idx % 500 == 0 or idx == fetched_total:
+            LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
 
