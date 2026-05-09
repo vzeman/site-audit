@@ -63,6 +63,7 @@ from .crawler import Crawler, CrawlConfig, DEFAULT_EXCLUDE_PATTERNS
 from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
 from .entities import analyze as analyze_entities
 from .entities import to_payload as entities_payload
+from .entity_coverage import build_entity_coverage
 from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
 from .extractor import extract
@@ -157,6 +158,7 @@ class PipelineConfig:
     enable_keyword_attribution: bool = True
     enable_weak_paragraphs: bool = True
     enable_heading_impact: bool = True
+    enable_entity_coverage: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -874,6 +876,24 @@ def run(config: PipelineConfig) -> dict:
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
 
+    entity_coverage_data: dict = {}
+    if config.enable_entity_coverage:
+        entity_coverage_data = build_entity_coverage(
+            pages,
+            extracted_pages,
+            search_payload=ahrefs_data,
+            cluster_labels=labels,
+            cluster_summaries=cluster_summaries,
+        )
+        ec_summary = entity_coverage_data.get("summary", {}) or {}
+        if ec_summary.get("status") == "ok":
+            LOG.info(
+                "  entity coverage: %.0f%% avg · %d low-coverage pages · %d pages with core gaps",
+                (ec_summary.get("avg_coverage", 0.0) or 0.0) * 100,
+                ec_summary.get("low_coverage_pages", 0),
+                ec_summary.get("pages_with_core_gaps", 0),
+            )
+
     paragraph_impact_data: dict = {}
     if config.enable_paragraph_impact and paragraph_records and ahrefs_data:
         paragraph_impact_data = build_paragraph_impact(
@@ -1051,6 +1071,7 @@ def run(config: PipelineConfig) -> dict:
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
+        entity_coverage=entity_coverage_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -1099,6 +1120,7 @@ def run(config: PipelineConfig) -> dict:
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,
+            entity_coverage=entity_coverage_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,

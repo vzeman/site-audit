@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import zipfile
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -58,6 +59,7 @@ class _Project:
     media_accessibility: dict
     page_types: dict
     entities: dict
+    entity_coverage: dict
     freshness: dict
     conversion: dict
     indexability: dict
@@ -119,6 +121,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     media_accessibility = _load_json(report / "media_accessibility.json", {})
     page_types = _load_json(report / "page_types.json", {})
     entities = _load_json(report / "entities.json", {})
+    entity_coverage = _load_json(report / "entity_coverage.json", {})
     freshness = _load_json(report / "freshness.json", {})
     conversion = _load_json(report / "conversion.json", {})
     indexability = _load_json(report / "indexability.json", {})
@@ -160,6 +163,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         media_accessibility=media_accessibility,
         page_types=page_types,
         entities=entities,
+        entity_coverage=entity_coverage,
         freshness=freshness,
         conversion=conversion,
         indexability=indexability,
@@ -817,6 +821,48 @@ def _entity_alignment_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _entity_coverage_comparison(projects: list[_Project]) -> dict:
+    entity_domains: dict[str, dict[str, dict]] = defaultdict(dict)
+    cluster_rows: list[dict] = []
+    page_rows: list[dict] = []
+    for proj in projects:
+        coverage = proj.entity_coverage or {}
+        for cluster in coverage.get("clusters") or []:
+            cluster_rows.append({"domain": proj.domain, **cluster})
+            for entity in (cluster.get("expected_entities") or [])[:40]:
+                name = entity.get("entity") or ""
+                if not name:
+                    continue
+                entity_domains[name][proj.domain] = {
+                    "domain": proj.domain,
+                    "entity": name,
+                    "weight": _safe_float(entity.get("weight")),
+                    "class": entity.get("class") or "",
+                    "cluster": cluster.get("cluster"),
+                    "cluster_label": cluster.get("label") or "",
+                    "pages": _safe_int(entity.get("pages")),
+                }
+        for page in (coverage.get("pages") or [])[:120]:
+            page_rows.append({"domain": proj.domain, **page})
+    matrix = []
+    for entity, domains in entity_domains.items():
+        total_weight = sum(_safe_float(row.get("weight")) for row in domains.values())
+        matrix.append({
+            "entity": entity,
+            "domain_count": len(domains),
+            "total_weight": round(total_weight, 4),
+            "class": next((row.get("class") for row in domains.values() if row.get("class")), ""),
+            "domains": [domains.get(domain, {"domain": domain, "entity": entity, "weight": 0.0}) for domain in [p.domain for p in projects]],
+        })
+    matrix.sort(key=lambda r: (_safe_int(r.get("domain_count")), _safe_float(r.get("total_weight"))), reverse=True)
+    page_rows.sort(key=lambda r: (_safe_int(r.get("traffic")), -_safe_float(r.get("coverage"))), reverse=True)
+    return {
+        "matrix": matrix[:120],
+        "clusters": cluster_rows[:300],
+        "low_coverage_pages": [r for r in page_rows if _safe_float(r.get("coverage")) < 0.5][:200],
+    }
+
+
 # --- competitive search/content opportunities ----------------------------
 
 
@@ -1464,6 +1510,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "semantic_entity_maps": semantic_entity_maps,
         "search": _search_payload(projects),
         "entity_alignment": _entity_alignment_comparison(projects),
+        "entity_coverage": _entity_coverage_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

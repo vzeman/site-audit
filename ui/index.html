@@ -887,6 +887,27 @@
       </div>
     </div>
 
+    <!-- Entity coverage -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="entity-coverage-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Entity coverage score</h3>
+        <p class="text-xs text-gray-500 mt-1" id="entity-coverage-meta">
+          Page coverage against expected entities mined from same-cluster pages, weighted by mentions, traffic, headings, and uniqueness.
+        </p>
+      </div>
+      <div id="entity-coverage-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-5 gap-6">
+        <div class="lg:col-span-3">
+          <h4 class="text-sm font-semibold mb-2">Coverage by page</h4>
+          <div id="entity-coverage-pages" class="text-xs max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div class="lg:col-span-2">
+          <h4 class="text-sm font-semibold mb-2">Expected entities by cluster</h4>
+          <div id="entity-coverage-clusters" class="text-xs max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Content freshness -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-block">
       <div class="mb-3">
@@ -1346,6 +1367,7 @@
 <script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
 <script type="application/json" id="data-heading-impact">__HEADING_IMPACT_JSON__</script>
+<script type="application/json" id="data-entity-coverage">__ENTITY_COVERAGE_JSON__</script>
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
@@ -1451,6 +1473,7 @@
       const inlinedHeaderAnalysis = readInlined('data-header-analysis');
       const inlinedHeaderScatter = readInlined('data-header-scatter');
       const inlinedHeadingImpact = readInlined('data-heading-impact');
+      const inlinedEntityCoverage = readInlined('data-entity-coverage');
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
@@ -1463,7 +1486,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1494,6 +1517,7 @@
         headerAnalysis = inlinedHeaderAnalysis || {};
         headerScatter = inlinedHeaderScatter || {};
         headingImpact = inlinedHeadingImpact || {};
+        entityCoverage = inlinedEntityCoverage || {};
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
         metadataQuality = inlinedMetadataQuality || {};
@@ -1506,7 +1530,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1536,6 +1560,7 @@
           loadJSON('header_analysis.json').catch(() => ({})),
           loadJSON('header_scatter.json').catch(() => ({})),
           loadJSON('heading_impact.json').catch(() => ({})),
+          loadJSON('entity_coverage.json').catch(() => ({})),
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
           loadJSON('metadata_quality.json').catch(() => ({})),
@@ -1581,6 +1606,7 @@
       state.headerAnalysis = headerAnalysis || {};
       state.headerScatter = headerScatter || {};
       state.headingImpact = headingImpact || {};
+      state.entityCoverage = entityCoverage || {};
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
       state.metadataQuality = metadataQuality || {};
@@ -1622,6 +1648,7 @@
       renderMediaAccessibility();
       renderPageTypes();
       renderEntities();
+      renderEntityCoverage();
       renderFreshness();
       renderPerformance();
       renderConversion();
@@ -3656,6 +3683,54 @@
           <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
           <div class="text-gray-500 mt-1">${Number(r.entity_count || 0).toLocaleString()} entities · ${Number(r.entity_mentions || 0).toLocaleString()} mentions</div>
         </div>`).join('') || '<div class="text-gray-500">No thin entity pages found.</div>';
+  }
+
+  function renderEntityCoverage() {
+    const block = document.getElementById('entity-coverage-block');
+    const data = state.entityCoverage || {};
+    const summary = data.summary || {};
+    const pages = data.pages || [];
+    if (!pages.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('entity-coverage-meta').textContent =
+      `${Number(summary.pages || pages.length).toLocaleString()} pages scored across ${Number(summary.clusters || 0).toLocaleString()} clusters. Low coverage means the page is missing entities commonly present in same-cluster pages.`;
+    document.getElementById('entity-coverage-summary').innerHTML =
+      card('avg coverage', `${((summary.avg_coverage || 0) * 100).toFixed(0)}%`, 'weighted expected entities present') +
+      card('low coverage', Number(summary.low_coverage_pages || 0).toLocaleString(), 'below 50%') +
+      card('core gaps', Number(summary.pages_with_core_gaps || 0).toLocaleString(), 'pages missing core entities') +
+      card('traffic at risk', Number(summary.traffic_at_risk || 0).toLocaleString(), 'traffic on low-coverage pages');
+
+    document.getElementById('entity-coverage-pages').innerHTML = pages.slice(0, 220).map(r => {
+      const missing = (r.missing_core_entities || []).slice(0, 6).map(e => `<span class="inline-block bg-red-50 text-red-800 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(e.entity)} · ${escapeHtml(e.class || 'core')}</span>`).join('');
+      const noisy = (r.overrepresented_entities || []).slice(0, 4).map(e => `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(e.entity)}</span>`).join('');
+      const recs = (r.recommendations || []).slice(0, 3).map(rec => `<li>${escapeHtml(rec.action || '')}</li>`).join('');
+      const color = Number(r.coverage || 0) >= 0.7 ? 'text-green-700' : (Number(r.coverage || 0) >= 0.5 ? 'text-amber-700' : 'text-red-700');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono ${color}">${Number(r.coverage_pct || 0).toFixed(0)}%</span>
+        </div>
+        <div class="text-gray-500">cluster ${escapeHtml(r.cluster_label || r.cluster)} · ${Number(r.present_expected_entities || 0)}/${Number(r.expected_entities || 0)} expected · traffic ${Number(r.traffic || 0).toLocaleString()}</div>
+        ${missing ? `<div class="mt-1"><span class="text-gray-500">missing:</span> ${missing}</div>` : ''}
+        ${noisy ? `<div class="mt-1"><span class="text-gray-500">overused/noisy:</span> ${noisy}</div>` : ''}
+        ${recs ? `<ul class="list-disc list-inside text-gray-600 mt-1">${recs}</ul>` : ''}
+      </div>`;
+    }).join('');
+
+    document.getElementById('entity-coverage-clusters').innerHTML = (data.clusters || []).slice(0, 80).map(c => {
+      const chips = (c.expected_entities || []).slice(0, 12).map(e => `<span class="inline-block bg-blue-50 text-blue-800 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(e.entity)} · ${escapeHtml(e.class || '')}</span>`).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(c.label || ('cluster ' + c.cluster))}</div>
+          <span class="font-mono text-gray-700">${((c.avg_coverage || 0) * 100).toFixed(0)}%</span>
+        </div>
+        <div class="text-gray-500">${Number(c.pages || 0).toLocaleString()} pages · traffic ${Number(c.traffic || 0).toLocaleString()}</div>
+        <div class="mt-1">${chips}</div>
+      </div>`;
+    }).join('');
   }
 
   function renderFreshness() {

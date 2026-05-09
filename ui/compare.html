@@ -341,6 +341,11 @@
         <div id="entity-alignment-compare" class="w-full" style="min-height:360px;"></div>
       </div>
       <div class="mt-6">
+        <h3 class="text-sm font-semibold mb-1">Entity coverage heatmap</h3>
+        <p class="text-xs text-gray-500 mb-2">Expected topic entities by domain. Darker cells mean a domain uses that entity more strongly in its same-cluster pages.</p>
+        <div id="entity-coverage-compare" class="w-full overflow-x-auto" style="min-height:360px;"></div>
+      </div>
+      <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-specific semantic comparisons</h3>
         <p class="text-xs text-gray-500 mb-3">
           Separate projections for link titles, header names, and page titles. Color = domain, dot size = traffic or usage, so vocabulary overlap and naming gaps are visible without mixing entity types.
@@ -1049,6 +1054,7 @@
     renderSearchClusterChart();
     renderAhrefsSemanticCompare();
     renderEntityAlignmentCompare();
+    renderEntityCoverageCompare();
     renderSemanticEntityComparisons();
   }
 
@@ -1245,6 +1251,48 @@
       .attr('stroke', '#dc2626').attr('stroke-dasharray', '4 3');
     svg.append('text').attr('x', width - 4).attr('y', y(0.55) - 4).attr('text-anchor', 'end')
       .style('font-size', '10px').style('fill', '#dc2626').text('mismatch threshold');
+  }
+
+  function renderEntityCoverageCompare() {
+    const container = document.getElementById('entity-coverage-compare');
+    const payload = data.entity_coverage || {};
+    const rows = (payload.matrix || []).slice(0, 60);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No entity coverage comparison data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const maxWeight = d3.max(rows.flatMap(r => (r.domains || []).map(d => Number(d.weight || 0)))) || 1;
+    const cellW = 112;
+    const cellH = 22;
+    const left = 190;
+    const top = 24;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 40;
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 14)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 15).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.entity || '').slice(0, 34));
+      (row.domains || []).forEach((d, di) => {
+        const weight = Number(d.weight || 0);
+        const opacity = weight > 0 ? 0.18 + 0.78 * (weight / maxWeight) : 0.04;
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 3)
+          .attr('fill', domainColor(d.domain)).attr('fill-opacity', opacity).attr('rx', 2)
+          .append('title').text(`${d.domain} · ${row.entity}\nweight ${weight.toFixed(2)}\nclass ${d.class || row.class || ''}`);
+        if (weight > 0) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 13)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', '#111827')
+            .text(weight.toFixed(1));
+        }
+      });
+    });
   }
 
   function renderSemanticEntityComparisons() {

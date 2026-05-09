@@ -288,6 +288,7 @@ def write_all(
     winning_paragraphs: Optional[dict] = None,
     weak_paragraphs: Optional[dict] = None,
     heading_impact: Optional[dict] = None,
+    entity_coverage: Optional[dict] = None,
     title_mismatch: Optional[list] = None,
     wrong_home: Optional[list] = None,
     page_improvement: Optional[list] = None,
@@ -348,6 +349,8 @@ def write_all(
         _write_json(output_dir / "weak_paragraphs.json", weak_paragraphs)
     if heading_impact is not None:
         _write_json(output_dir / "heading_impact.json", heading_impact)
+    if entity_coverage is not None:
+        _write_json(output_dir / "entity_coverage.json", entity_coverage)
     if title_mismatch is not None:
         _write_json(output_dir / "title_mismatch.json", title_mismatch)
     if wrong_home is not None:
