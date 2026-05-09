@@ -104,6 +104,7 @@ from .scatter import project
 from .semantic_ablation import build_semantic_ablation
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
+from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
 
@@ -925,6 +926,21 @@ def run(config: PipelineConfig) -> dict:
         elif ka_summary:
             LOG.info("  keyword attribution: %s", ka_summary.get("status", "unavailable"))
 
+    winning_paragraphs_data: dict = {}
+    if paragraph_impact_data:
+        winning_paragraphs_data = build_winning_paragraphs(
+            paragraph_impact_data,
+            semantic_ablation_data,
+            keyword_attribution_data,
+        )
+        wp_summary = winning_paragraphs_data.get("summary", {}) or {}
+        if wp_summary.get("status") == "ok":
+            LOG.info(
+                "  winning paragraphs: %d rows · %d topic carriers",
+                wp_summary.get("rows", 0),
+                wp_summary.get("topic_carriers", 0),
+            )
+
     if link_result is not None:
         link_payload["link_flow"] = link_flow_payload(
             link_result,
@@ -977,6 +993,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_impact=paragraph_impact_data,
         semantic_ablation=semantic_ablation_data,
         keyword_attribution=keyword_attribution_data,
+        winning_paragraphs=winning_paragraphs_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -1022,6 +1039,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_impact=paragraph_impact_data,
             semantic_ablation=semantic_ablation_data,
             keyword_attribution=keyword_attribution_data,
+            winning_paragraphs=winning_paragraphs_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,

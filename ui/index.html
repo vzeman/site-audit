@@ -567,12 +567,32 @@
     <!-- Paragraph impact -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="paragraph-impact-block">
       <div class="mb-4">
-        <h3 class="text-lg font-semibold">High-impact paragraphs</h3>
+        <h3 class="text-lg font-semibold">Winning paragraphs</h3>
         <p class="text-xs text-gray-500 mt-1" id="paragraph-impact-meta">
           Estimated paragraph contribution to organic demand. This attributes page traffic across paragraphs using keyword similarity, term coverage, heading alignment, position, link context, freshness, and page demand.
         </p>
       </div>
       <div id="paragraph-impact-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <input id="paragraph-impact-search" type="search" autocomplete="off" placeholder="Search paragraph, URL, keyword, action..."
+               class="w-full sm:w-80 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        <select id="paragraph-impact-tier" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="all">All tiers</option>
+          <option value="high">High impact</option>
+          <option value="medium">Medium impact</option>
+          <option value="low">Low impact</option>
+        </select>
+        <select id="paragraph-impact-action" class="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="all">All actions</option>
+          <option value="protect_and_expand">Protect and expand</option>
+          <option value="align_heading">Align heading</option>
+          <option value="add_contextual_links">Add contextual links</option>
+          <option value="refresh_evidence">Refresh evidence</option>
+          <option value="maintain">Maintain</option>
+        </select>
+        <button id="paragraph-impact-export" type="button" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Export CSV</button>
+        <span id="paragraph-impact-count" class="text-xs text-gray-500"></span>
+      </div>
       <div id="paragraph-impact-table" class="text-xs max-h-[520px] overflow-y-auto"></div>
     </div>
 
@@ -1228,6 +1248,7 @@
 <script type="application/json" id="data-paragraph-impact">__PARAGRAPH_IMPACT_JSON__</script>
 <script type="application/json" id="data-semantic-ablation">__SEMANTIC_ABLATION_JSON__</script>
 <script type="application/json" id="data-keyword-attribution">__KEYWORD_ATTRIBUTION_JSON__</script>
+<script type="application/json" id="data-winning-paragraphs">__WINNING_PARAGRAPHS_JSON__</script>
 <script type="application/json" id="data-title-mismatch">__TITLE_MISMATCH_JSON__</script>
 <script type="application/json" id="data-wrong-home">__WRONG_HOME_JSON__</script>
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
@@ -1330,6 +1351,7 @@
       const inlinedParagraphImpact = readInlined('data-paragraph-impact');
       const inlinedSemanticAblation = readInlined('data-semantic-ablation');
       const inlinedKeywordAttribution = readInlined('data-keyword-attribution');
+      const inlinedWinningParagraphs = readInlined('data-winning-paragraphs');
       const inlinedTitleMismatch = readInlined('data-title-mismatch');
       const inlinedWrongHome = readInlined('data-wrong-home');
       const inlinedImprovement = readInlined('data-page-improvement');
@@ -1350,7 +1372,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1370,6 +1392,7 @@
         paragraphImpact = inlinedParagraphImpact || {};
         semanticAblation = inlinedSemanticAblation || {};
         keywordAttribution = inlinedKeywordAttribution || {};
+        winningParagraphs = inlinedWinningParagraphs || {};
         titleMismatch = inlinedTitleMismatch || [];
         wrongHome = inlinedWrongHome || [];
         improvement = inlinedImprovement || [];
@@ -1390,7 +1413,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1409,6 +1432,7 @@
           loadJSON('paragraph_impact.json').catch(() => ({})),
           loadJSON('semantic_ablation.json').catch(() => ({})),
           loadJSON('keyword_attribution.json').catch(() => ({})),
+          loadJSON('winning_paragraphs.json').catch(() => ({})),
           loadJSON('title_mismatch.json').catch(() => []),
           loadJSON('wrong_home_paragraphs.json').catch(() => []),
           loadJSON('page_improvement.json').catch(() => []),
@@ -1449,6 +1473,7 @@
       state.paragraphImpact = paragraphImpact || {};
       state.semanticAblation = semanticAblation || {};
       state.keywordAttribution = keywordAttribution || {};
+      state.winningParagraphs = winningParagraphs || {};
       state.titleMismatch = titleMismatch;
       state.wrongHome = wrongHome;
       state.improvement = improvement;
@@ -2302,62 +2327,110 @@
 
   function renderParagraphImpact() {
     const block = document.getElementById('paragraph-impact-block');
-    const data = state.paragraphImpact || {};
-    const summary = data.summary || {};
-    const rows = data.top_paragraphs || [];
+    const winning = state.winningParagraphs || {};
+    const impact = state.paragraphImpact || {};
+    const summary = (winning.summary && winning.summary.status === 'ok') ? winning.summary : (impact.summary || {});
+    const rows = (winning.rows && winning.rows.length) ? winning.rows : (impact.top_paragraphs || []);
     buildParagraphImpactMap();
     if (!rows.length) {
       block.style.display = 'none';
       return;
     }
     block.style.display = '';
-    const provider = summary.provider || 'search';
+    const provider = summary.provider || ((impact.summary || {}).provider) || 'search';
     document.getElementById('paragraph-impact-meta').textContent =
-      `${rows.length.toLocaleString()} top paragraphs from ${Number(summary.scored_paragraphs || 0).toLocaleString()} scored · ${provider} traffic attributed by semantic and lexical keyword fit.`;
+      `${rows.length.toLocaleString()} winning paragraphs · ${Number(summary.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} attributed visits · ${provider} traffic attributed by semantic and lexical keyword fit.`;
     document.getElementById('paragraph-impact-summary').innerHTML =
-      card('scored paragraphs', Number(summary.scored_paragraphs || 0).toLocaleString(), `${Number(summary.total_paragraphs || 0).toLocaleString()} extracted`) +
+      card('winning rows', Number(summary.rows || rows.length || 0).toLocaleString(), `${Number((impact.summary || {}).scored_paragraphs || 0).toLocaleString()} scored`) +
       card('attributed traffic', Number(summary.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), 'estimated organic visits') +
-      card('pages with data', Number(summary.pages_with_search_data || 0).toLocaleString(), 'matched search URLs') +
-      card('high impact', Number(summary.high_impact_count || 0).toLocaleString(), 'top 10% of scored paragraphs');
-    document.getElementById('paragraph-impact-table').innerHTML = `
-      <table class="w-full">
-        <thead class="text-gray-500 sticky top-0 bg-white">
-          <tr>
-            <th class="text-left py-1 pr-2">Paragraph</th>
-            <th class="text-left py-1 pr-2">Best keyword</th>
-            <th class="text-right py-1 pl-2">Impact</th>
-            <th class="text-right py-1 pl-2">Traffic</th>
-            <th class="text-right py-1 pl-2">Fit</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.slice(0, 160).map(r => {
-            const comps = r.components || {};
-            const tier = r.impact_tier === 'high' ? 'bg-emerald-100 text-emerald-800' : (r.impact_tier === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700');
-            const kws = (r.matched_keywords || []).slice(0, 3).map(k => `${escapeHtml(k.keyword)} (${Number(k.similarity || 0).toFixed(2)})`).join(' · ');
-            return `<tr class="border-b border-gray-100 align-top">
-              <td class="py-2 pr-3">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-[11px] px-1.5 py-0.5 rounded ${tier}">${escapeHtml(r.impact_tier || '')}</span>
-                  <span class="text-gray-500">para ${Number(r.paragraph_index || 0)}</span>
-                  ${r.heading ? `<span class="text-gray-400 truncate">· ${escapeHtml(r.heading)}</span>` : ''}
-                </div>
-                <a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
-                <div class="text-gray-500 mt-0.5">${escapeHtml(r.section || '')}</div>
-                <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
-              </td>
-              <td class="py-2 pr-3">
-                <div class="font-medium text-gray-900">${escapeHtml(r.best_keyword || r.top_page_keyword || '')}</div>
-                <div class="text-gray-500">${kws}</div>
-                <div class="text-gray-400 mt-1">semantic ${Number(comps.semantic || 0).toFixed(2)} · overlap ${Number(comps.keyword_overlap || 0).toFixed(2)} · heading ${Number(comps.heading_match || 0).toFixed(2)}</div>
-              </td>
-              <td class="py-2 pl-2 text-right font-mono">${Number(r.impact_score || 0).toFixed(1)}</td>
-              <td class="py-2 pl-2 text-right font-mono">${Number(r.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-              <td class="py-2 pl-2 text-right font-mono">${Number(r.relevance_score || 0).toFixed(0)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+      card('topic carriers', Number(summary.topic_carriers || 0).toLocaleString(), 'positive ablation delta') +
+      card('high impact', Number(summary.high_impact || summary.high_impact_count || 0).toLocaleString(), 'top impact tier');
+
+    const searchEl = document.getElementById('paragraph-impact-search');
+    const tierEl = document.getElementById('paragraph-impact-tier');
+    const actionEl = document.getElementById('paragraph-impact-action');
+    const countEl = document.getElementById('paragraph-impact-count');
+    const tableEl = document.getElementById('paragraph-impact-table');
+    const filterRows = () => {
+      const q = (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase();
+      const tier = tierEl ? tierEl.value : 'all';
+      const action = actionEl ? actionEl.value : 'all';
+      return rows.filter(r => {
+        if (tier !== 'all' && r.impact_tier !== tier) return false;
+        if (action !== 'all' && r.recommended_action !== action) return false;
+        if (!q) return true;
+        return semanticSearchText(r).includes(q);
+      });
+    };
+    const renderRows = () => {
+      const filtered = filterRows();
+      if (countEl) countEl.textContent = `${filtered.length.toLocaleString()} shown`;
+      tableEl.innerHTML = `
+        <table class="w-full">
+          <thead class="text-gray-500 sticky top-0 bg-white">
+            <tr>
+              <th class="text-left py-1 pr-2">Paragraph</th>
+              <th class="text-left py-1 pr-2">Best keyword / action</th>
+              <th class="text-right py-1 pl-2">Impact</th>
+              <th class="text-right py-1 pl-2">Traffic</th>
+              <th class="text-right py-1 pl-2">Fit</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.slice(0, 180).map(r => {
+              const comps = r.components || {};
+              const tierClass = r.impact_tier === 'high' ? 'bg-emerald-100 text-emerald-800' : (r.impact_tier === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700');
+              const actionClass = r.recommended_action === 'protect_and_expand' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700';
+              const kws = (r.attributed_keywords && r.attributed_keywords.length ? r.attributed_keywords : (r.matched_keywords || [])).slice(0, 3).map(k => `${escapeHtml(k.keyword)}${k.traffic ? ' ' + Number(k.traffic).toLocaleString() : ''}`).join(' · ');
+              const ablation = r.ablation_label ? `<span class="text-[11px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-800">${escapeHtml(r.ablation_label)}</span>` : '';
+              return `<tr class="border-b border-gray-100 align-top">
+                <td class="py-2 pr-3">
+                  <div class="flex flex-wrap items-center gap-2 mb-1">
+                    <span class="text-[11px] px-1.5 py-0.5 rounded ${tierClass}">${escapeHtml(r.impact_tier || '')}</span>
+                    ${ablation}
+                    <span class="text-gray-500">para ${Number(r.paragraph_index || 0)}</span>
+                    ${r.heading ? `<span class="text-gray-400 truncate">· ${escapeHtml(r.heading)}</span>` : ''}
+                  </div>
+                  <a class="text-blue-600 hover:underline" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+                  <div class="text-gray-500 mt-0.5">${escapeHtml(r.section || '')}</div>
+                  <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
+                </td>
+                <td class="py-2 pr-3">
+                  <div class="font-medium text-gray-900">${escapeHtml(r.best_keyword || r.top_page_keyword || '')}</div>
+                  <div class="text-gray-500">${kws}</div>
+                  <div class="mt-1"><span class="text-[11px] px-1.5 py-0.5 rounded ${actionClass}">${escapeHtml(r.recommended_action_label || r.recommended_action || '')}</span></div>
+                  <div class="text-gray-400 mt-1">semantic ${Number(comps.semantic || 0).toFixed(2)} · overlap ${Number(comps.keyword_overlap || 0).toFixed(2)} · heading ${Number(comps.heading_match || 0).toFixed(2)}</div>
+                </td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.impact_score || 0).toFixed(1)}</td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.attributed_traffic || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                <td class="py-2 pl-2 text-right font-mono">${Number(r.relevance_score || 0).toFixed(0)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    };
+
+    if (searchEl && !searchEl.dataset.bound) {
+      searchEl.dataset.bound = '1';
+      searchEl.addEventListener('input', renderRows);
+      tierEl.addEventListener('change', renderRows);
+      actionEl.addEventListener('change', renderRows);
+      document.getElementById('paragraph-impact-export').addEventListener('click', () => exportWinningParagraphsCsv(filterRows()));
+    }
+    state.winningParagraphRows = rows;
+    renderRows();
+  }
+
+  function exportWinningParagraphsCsv(rows) {
+    const fields = ['rank','impact_tier','recommended_action','url','title','paragraph_index','best_keyword','impact_score','attributed_traffic','relevance_score','ablation_classification','paragraph_excerpt'];
+    const csv = [fields.join(',')].concat((rows || []).map(r => fields.map(f => `"${String(r[f] == null ? '' : r[f]).replace(/"/g, '""')}"`).join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'winning_paragraphs.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function renderSemanticAblation() {

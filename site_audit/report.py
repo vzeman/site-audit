@@ -285,6 +285,7 @@ def write_all(
     paragraph_impact: Optional[dict] = None,
     semantic_ablation: Optional[dict] = None,
     keyword_attribution: Optional[dict] = None,
+    winning_paragraphs: Optional[dict] = None,
     title_mismatch: Optional[list] = None,
     wrong_home: Optional[list] = None,
     page_improvement: Optional[list] = None,
@@ -339,6 +340,8 @@ def write_all(
         _write_json(output_dir / "semantic_ablation.json", semantic_ablation)
     if keyword_attribution is not None:
         _write_json(output_dir / "keyword_attribution.json", keyword_attribution)
+    if winning_paragraphs is not None:
+        _write_json(output_dir / "winning_paragraphs.json", winning_paragraphs)
     if title_mismatch is not None:
         _write_json(output_dir / "title_mismatch.json", title_mismatch)
     if wrong_home is not None:
