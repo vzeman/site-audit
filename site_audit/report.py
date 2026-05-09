@@ -287,6 +287,7 @@ def write_all(
     keyword_attribution: Optional[dict] = None,
     answer_blocks: Optional[dict] = None,
     freshness_impact: Optional[dict] = None,
+    cannibalization: Optional[dict] = None,
     winning_paragraphs: Optional[dict] = None,
     weak_paragraphs: Optional[dict] = None,
     heading_impact: Optional[dict] = None,
@@ -350,6 +351,8 @@ def write_all(
         _write_json(output_dir / "answer_blocks.json", answer_blocks)
     if freshness_impact is not None:
         _write_json(output_dir / "freshness_impact.json", freshness_impact)
+    if cannibalization is not None:
+        _write_json(output_dir / "cannibalization.json", cannibalization)
     if winning_paragraphs is not None:
         _write_json(output_dir / "winning_paragraphs.json", winning_paragraphs)
     if weak_paragraphs is not None:

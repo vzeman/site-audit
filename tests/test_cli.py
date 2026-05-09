@@ -38,6 +38,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--ahrefs-refresh",
             "--no-answer-blocks",
             "--no-freshness-impact",
+            "--no-cannibalization",
         ]
     )
 
@@ -60,3 +61,4 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.ahrefs_refresh is True
     assert args.no_answer_blocks is True
     assert args.no_freshness_impact is True
+    assert args.no_cannibalization is True

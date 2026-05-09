@@ -38,6 +38,7 @@ from .dataforseo import fetch_snapshot as fetch_dataforseo_snapshot
 from .answerability import score_all as score_answerability
 from .answerability import to_payload as answerability_payload
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
+from .cannibalization import build_cannibalization
 from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .competitive_analysis import (
     compare_one as compare_competitor,
@@ -154,6 +155,7 @@ class PipelineConfig:
     enable_answerability: bool = True
     enable_answer_blocks: bool = True
     enable_freshness_impact: bool = True
+    enable_cannibalization: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -568,6 +570,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_heading_impact
         or config.enable_answer_blocks
         or config.enable_freshness_impact
+        or config.enable_cannibalization
         or config.enable_information_gain
         or config.enable_content_quality
         or config.enable_paragraph_fanout
@@ -1021,6 +1024,30 @@ def run(config: PipelineConfig) -> dict:
         elif ka_summary:
             LOG.info("  keyword attribution: %s", ka_summary.get("status", "unavailable"))
 
+    cannibalization_data: dict = {}
+    if config.enable_cannibalization:
+        cannibalization_data = build_cannibalization(
+            pages,
+            embeddings,
+            extracted_pages,
+            paragraph_records,
+            keyword_attribution=keyword_attribution_data,
+            search_payload=ahrefs_data,
+            linkgraph=link_payload,
+            indexability=indexability_data,
+            outlinks_map=outlinks_map,
+        )
+        cannibal_summary = cannibalization_data.get("summary", {}) or {}
+        if cannibal_summary.get("status") == "ok":
+            LOG.info(
+                "  cannibalization: %d page conflicts · %d paragraph overlaps · %d traffic at risk",
+                cannibal_summary.get("page_conflicts", 0),
+                cannibal_summary.get("paragraph_conflicts", 0),
+                cannibal_summary.get("traffic_at_risk", 0),
+            )
+        elif cannibal_summary:
+            LOG.info("  cannibalization: %s", cannibal_summary.get("status", "unavailable"))
+
     winning_paragraphs_data: dict = {}
     if paragraph_impact_data:
         winning_paragraphs_data = build_winning_paragraphs(
@@ -1139,6 +1166,7 @@ def run(config: PipelineConfig) -> dict:
         keyword_attribution=keyword_attribution_data,
         answer_blocks=answer_blocks_data,
         freshness_impact=freshness_impact_data,
+        cannibalization=cannibalization_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
@@ -1191,6 +1219,7 @@ def run(config: PipelineConfig) -> dict:
             keyword_attribution=keyword_attribution_data,
             answer_blocks=answer_blocks_data,
             freshness_impact=freshness_impact_data,
+            cannibalization=cannibalization_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,

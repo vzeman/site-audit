@@ -1054,6 +1054,34 @@
       </div>
     </div>
 
+    <!-- Cannibalization -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cannibalization-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Content cannibalization by intent</h3>
+        <p class="text-xs text-gray-500 mt-1" id="cannibalization-meta">
+          Finds keyword intents and paragraph blocks split across multiple URLs, with filters for localized and product variants.
+        </p>
+      </div>
+      <div id="cannibalization-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="flex flex-wrap gap-2 text-xs mb-3">
+        <button data-cannibal-filter="all" class="cannibal-filter px-2 py-1 rounded border border-gray-300 bg-white">All</button>
+        <button data-cannibal-filter="actionable" class="cannibal-filter px-2 py-1 rounded border border-gray-300 bg-white">Actionable</button>
+        <button data-cannibal-filter="localized_variant" class="cannibal-filter px-2 py-1 rounded border border-gray-300 bg-white">Localized</button>
+        <button data-cannibal-filter="product_variant" class="cannibal-filter px-2 py-1 rounded border border-gray-300 bg-white">Product variants</button>
+        <button data-cannibal-filter="healthy_hub_spoke" class="cannibal-filter px-2 py-1 rounded border border-gray-300 bg-white">Hub/spoke</button>
+      </div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Intent conflict matrix</h4>
+          <div id="cannibalization-matrix" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Paragraph-level overlaps</h4>
+          <div id="cannibalization-paragraphs" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Link graph -->
     <div class="grid md:grid-cols-2 gap-6 mb-8" id="linkgraph-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
@@ -1417,6 +1445,7 @@
 <script type="application/json" id="data-coverage">__COVERAGE_JSON__</script>
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-answer-blocks">__ANSWER_BLOCKS_JSON__</script>
+<script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
 <script type="application/json" id="data-external">__EXTERNAL_JSON__</script>
 <script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
@@ -1526,6 +1555,7 @@
       const inlinedCoverage = readInlined('data-coverage');
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedAnswerBlocks = readInlined('data-answer-blocks');
+      const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedLinkgraph = readInlined('data-linkgraph');
       const inlinedExternal = readInlined('data-external');
       const inlinedParaLinks = readInlined('data-paragraph-links');
@@ -1562,7 +1592,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1573,6 +1603,7 @@
         coverage = inlinedCoverage || [];
         answerability = inlinedAnswerability || [];
         answerBlocks = inlinedAnswerBlocks || {};
+        cannibalization = inlinedCannibalization || {};
         linkgraph = inlinedLinkgraph || {};
         external = inlinedExternal || {};
         paraLinks = inlinedParaLinks || [];
@@ -1609,7 +1640,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1619,6 +1650,7 @@
           loadJSON('keyword_coverage.json').catch(() => []),
           loadJSON('answerability.json').catch(() => []),
           loadJSON('answer_blocks.json').catch(() => ({})),
+          loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
           loadJSON('external_links.json').catch(() => ({})),
           loadJSON('paragraph_link_recommendations.json').catch(() => []),
@@ -1666,6 +1698,7 @@
       state.coverage = coverage;
       state.answerability = answerability;
       state.answerBlocks = answerBlocks || {};
+      state.cannibalization = cannibalization || {};
       state.linkgraph = linkgraph;
       state.external = external;
       state.paraLinks = paraLinks;
@@ -1741,6 +1774,7 @@
       renderConversion();
       renderAnswerability();
       renderAnswerBlocks();
+      renderCannibalization('all');
       renderLinkgraph();
       renderLinkFlow();
       renderLinkbuilding();
@@ -1765,6 +1799,7 @@
       wireDatasetButtons();
       wireSemanticSearchInputs();
       wireCoverageButtons();
+      wireCannibalizationButtons();
       wireFanoutButtons();
     } catch (e) {
       console.error(e);
@@ -3605,6 +3640,82 @@
         <div class="mt-1">${evidence}${risks}</div>
       </div>`;
     }).join('') || '<div class="text-gray-500">No candidate snippets.</div>';
+  }
+
+  function renderCannibalization(filter='all') {
+    const block = document.getElementById('cannibalization-block');
+    const data = state.cannibalization || {};
+    const summary = data.summary || {};
+    const matrix = data.matrix || [];
+    const paragraphs = data.paragraph_overlaps || [];
+    if (!matrix.length && !paragraphs.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    state.cannibalFilter = filter;
+    document.querySelectorAll('.cannibal-filter').forEach(b => {
+      const on = b.dataset.cannibalFilter === filter;
+      b.classList.toggle('bg-blue-600', on);
+      b.classList.toggle('text-white', on);
+      b.classList.toggle('border-blue-600', on);
+    });
+    document.getElementById('cannibalization-meta').textContent =
+      `${Number(summary.intent_groups || 0).toLocaleString()} intent groups · ${Number(summary.page_conflicts || 0).toLocaleString()} page conflicts · ${Number(summary.paragraph_conflicts || 0).toLocaleString()} paragraph overlaps.`;
+    document.getElementById('cannibalization-summary').innerHTML =
+      card('page conflicts', Number(summary.page_conflicts || 0).toLocaleString(), 'multi-URL intent groups') +
+      card('paragraph overlaps', Number(summary.paragraph_conflicts || 0).toLocaleString(), 'same intent blocks across URLs') +
+      card('traffic at risk', Number(summary.traffic_at_risk || 0).toLocaleString(), 'traffic on actionable conflicts') +
+      card('localized/variants', Number(summary.localized_or_variant_groups || 0).toLocaleString(), 'filter before merging');
+
+    const filtered = matrix.filter(r => {
+      if (filter === 'all') return true;
+      if (filter === 'actionable') return !['winner', 'localized_variant', 'product_variant', 'healthy_hub_spoke'].includes(r.classification);
+      return r.classification === filter;
+    });
+    const badge = cls => cls === 'winner' ? 'bg-green-100 text-green-800'
+      : cls === 'localized_variant' || cls === 'product_variant' ? 'bg-blue-100 text-blue-800'
+      : cls === 'healthy_hub_spoke' ? 'bg-emerald-100 text-emerald-800'
+      : 'bg-red-100 text-red-800';
+    document.getElementById('cannibalization-matrix').innerHTML = filtered.slice(0, 220).map(r => `
+      <div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(r.intent_label || r.intent_key || '')}</div>
+          <span class="px-1.5 py-0.5 rounded ${badge(r.classification)}">${escapeHtml(r.classification || '')}</span>
+        </div>
+        <a class="text-blue-600 hover:underline block truncate" href="${escapeHtml(r.url || '')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url || '')}</a>
+        <div class="text-gray-500">traffic ${Number(r.traffic || 0).toLocaleString()} · keywords ${Number(r.keywords || 0)} · pos ${Number(r.best_position || 0) || 'n/a'} · sim ${Number(r.similarity_to_winner || 0).toFixed(2)}</div>
+        <div class="text-gray-600">winner: <a class="text-blue-600 hover:underline" href="${escapeHtml(r.preferred_winner_url || '')}" target="_blank" rel="noopener">${escapeHtml(r.preferred_winner_url || '')}</a></div>
+        <div class="text-gray-700">${escapeHtml(r.recommended_action || '')}</div>
+      </div>`).join('') || '<div class="text-gray-500">No rows for this filter.</div>';
+
+    document.getElementById('cannibalization-paragraphs').innerHTML = paragraphs.slice(0, 160).map(r => `
+      <div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-medium truncate">${escapeHtml(r.intent_label || '')}</div>
+          <span class="font-mono text-red-700">${Number(r.paragraph_similarity || 0).toFixed(2)}</span>
+        </div>
+        <div class="text-gray-500">winner: <a class="text-blue-600 hover:underline" href="${escapeHtml(r.preferred_winner_url || '')}" target="_blank" rel="noopener">${escapeHtml(r.preferred_winner_url || '')}</a></div>
+        <div class="grid md:grid-cols-2 gap-2 mt-1">
+          <div>
+            <a class="text-blue-600 hover:underline block truncate" href="${escapeHtml(r.url_a || '')}" target="_blank" rel="noopener">${escapeHtml(r.title_a || r.url_a || '')}</a>
+            <div class="italic text-gray-700">"${escapeHtml(r.excerpt_a || '')}"</div>
+          </div>
+          <div>
+            <a class="text-blue-600 hover:underline block truncate" href="${escapeHtml(r.url_b || '')}" target="_blank" rel="noopener">${escapeHtml(r.title_b || r.url_b || '')}</a>
+            <div class="italic text-gray-700">"${escapeHtml(r.excerpt_b || '')}"</div>
+          </div>
+        </div>
+        <div class="text-gray-700 mt-1">${escapeHtml(r.reason || '')}</div>
+      </div>`).join('') || '<div class="text-gray-500">No paragraph-level overlaps.</div>';
+  }
+
+  function wireCannibalizationButtons() {
+    document.querySelectorAll('.cannibal-filter').forEach(b => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = '1';
+      b.addEventListener('click', () => renderCannibalization(b.dataset.cannibalFilter || 'all'));
+    });
   }
 
   function renderIndexability() {
