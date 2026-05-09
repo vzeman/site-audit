@@ -539,6 +539,16 @@
       <div id="duplicate-fragments-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
     </section>
 
+    <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="template-patterns-compare-section">
+      <div class="mb-3">
+        <h2 class="text-xl font-semibold">Template success patterns by domain</h2>
+        <p class="text-xs text-gray-500 mt-1">
+          Structural features that repeatedly appear on high-performing pages, with lift and recommendations by domain.
+        </p>
+      </div>
+      <div id="template-patterns-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
+    </section>
+
     <!-- Distribution overlays -->
     <section class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -695,6 +705,7 @@
       { key: 'descriptive_anchor_share', label: 'Descriptive anchors', better: 'high', fmt: 'pct' },
       { key: 'cannibalization_page_conflicts', label: 'Intent conflicts', better: 'low', fmt: 'int' },
       { key: 'duplicate_fragment_groups', label: 'Dup fragments', better: 'low', fmt: 'int' },
+      { key: 'template_success_patterns', label: 'Template wins', better: 'high', fmt: 'int' },
       { key: 'pages_missing_h1_share',label: 'Missing H1',   better: 'low',  fmt: 'pct' },
       { key: 'spammy_paragraph_count',label: 'Spammy paras', better: 'low',  fmt: 'int' },
     ],
@@ -2173,6 +2184,72 @@
     });
   }
   renderDuplicateFragmentsCompare();
+
+  function renderTemplatePatternsCompare() {
+    const section = document.getElementById('template-patterns-compare-section');
+    const container = document.getElementById('template-patterns-compare');
+    const payload = data.template_patterns || {};
+    const rows = payload.features || [];
+    if (!rows.length) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    container.innerHTML = '';
+    const domains = data.domains || [];
+    const visibleRows = rows.slice(0, 70);
+    const cellW = 140;
+    const cellH = 30;
+    const left = 210;
+    const top = 26;
+    const width = left + domains.length * cellW + 20;
+    const height = top + visibleRows.length * cellH + 44;
+    const maxVal = d3.max(visibleRows.flatMap(r => (r.domains || []).map(d => Number(d.count || 0) + Number(d.recommendations || 0) * 0.25))) || 1;
+    const color = d3.scaleSequential(d3.interpolateYlGnBu).domain([0, maxVal]);
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 15)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    visibleRows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 19).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.label || row.feature_key || '').slice(0, 36));
+      (row.domains || []).forEach((d, di) => {
+        const count = Number(d.count || 0);
+        const recs = Number(d.recommendations || 0);
+        const val = count + recs * 0.25;
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 5)
+          .attr('fill', val ? color(val) : '#f3f4f6').attr('rx', 2)
+          .append('title').text(`${d.domain} · ${row.label}\npatterns ${count.toLocaleString()}\nrecommendations ${recs.toLocaleString()}\navg lift ${(Number(d.avg_lift || 0) * 100).toFixed(0)}%\navg confidence ${Number(d.avg_confidence || 0).toFixed(2)}`);
+        if (count || recs) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 18)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', val > maxVal * 0.55 ? 'white' : '#111827')
+            .text(`${count} · ${(Number(d.avg_lift || 0) * 100).toFixed(0)}%`);
+        }
+      });
+    });
+    const detail = document.createElement('div');
+    detail.className = 'grid md:grid-cols-2 gap-4 mt-4 text-xs';
+    const examples = (payload.examples || []).slice(0, 12).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <div class="font-medium">${escapeHtml(r.label || '')}</div>
+        <div class="text-gray-500">${escapeHtml(r.domain || '')} · ${escapeHtml(r.page_type || '')} · ${escapeHtml(r.directory || '')} · confidence ${Number(r.confidence || 0).toFixed(2)} · lift ${(Number(r.observed_lift || 0) * 100).toFixed(0)}%</div>
+      </div>`).join('') || '<div class="text-gray-500">No examples.</div>';
+    const recs = (payload.recommendations || []).slice(0, 12).map(r => `
+      <div class="border-b border-gray-100 py-2">
+        <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url || '')}</a>
+        <div class="font-medium mt-1">${escapeHtml(r.missing_pattern || '')}</div>
+        <div class="text-gray-500">${escapeHtml(r.domain || '')} · confidence ${Number(r.confidence || 0).toFixed(2)}</div>
+      </div>`).join('') || '<div class="text-gray-500">No recommendations.</div>';
+    detail.innerHTML = `
+      <div><h3 class="font-semibold mb-2">Highest-confidence patterns</h3>${examples}</div>
+      <div><h3 class="font-semibold mb-2">Cross-domain template additions</h3>${recs}</div>
+    `;
+    container.appendChild(detail);
+  }
+  renderTemplatePatternsCompare();
 
   // ============================================================
   // Combined scatter

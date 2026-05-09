@@ -84,6 +84,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":2,"opportunity_queries":0,"strong_blocks":6},"clusters":[{"label":"support","queries":4,"traffic":100,"strong_query_share":1,"avg_best_score":82,"opportunity_queries":0,"recommended_format":"","status":"strong"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":1,"paragraph_conflicts":2,"traffic_at_risk":15},"page_conflicts":[{"classification":"duplicate_competing_page","traffic_at_risk":15,"traffic":100,"label":"support","preferred_winner_url":"https://strong.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":2,"strong_patterns":1,"harmful_boilerplate":1},"groups":[{"classification":"strong_reusable_pattern","count":1,"attributed_traffic":50,"page_traffic_sum":100}]}',
+            "template_patterns.json": '{"summary":{"patterns":2,"recommendations":1,"segments_compared":1,"median_confidence":0.7},"patterns":[{"feature_key":"primary_cta","label":"Primary CTA","category":"conversion","observed_lift":1.2,"confidence":0.7,"sample_size":8,"affected_weak_pages":[{"url":"https://strong.example/weak","title":"Weak"}]}],"recommendations":[{"url":"https://strong.example/weak","missing_pattern":"Primary CTA","confidence":0.7,"observed_lift":1.2}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":10,"matched_traffic":1000,"matched_traffic_share":1,"top_pages_value_usd":250},"metrics":{"org_traffic":1200,"org_keywords":20,"org_keywords_1_3":5}}',
         },
     )
@@ -116,6 +117,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "answer_blocks.json": '{"summary":{"top_query_clusters":2,"strong_query_clusters":0,"opportunity_queries":5,"strong_blocks":1},"clusters":[{"label":"support","queries":3,"traffic":80,"strong_query_share":0,"avg_best_score":42,"opportunity_queries":3,"recommended_format":"faq","status":"gap"}]}',
             "cannibalization.json": '{"summary":{"page_conflicts":3,"paragraph_conflicts":4,"traffic_at_risk":90},"page_conflicts":[{"classification":"consolidation_candidate","traffic_at_risk":90,"traffic":120,"label":"support","preferred_winner_url":"https://weak.example/a"}]}',
             "duplicate_fragments.json": '{"summary":{"groups":5,"strong_patterns":0,"harmful_boilerplate":4},"groups":[{"classification":"harmful_boilerplate","count":4,"attributed_traffic":0,"page_traffic_sum":0}]}',
+            "template_patterns.json": '{"summary":{"patterns":0,"recommendations":4,"segments_compared":1,"median_confidence":0},"patterns":[],"recommendations":[{"url":"https://weak.example/a","missing_pattern":"Primary CTA","confidence":0.6,"observed_lift":1.0}]}',
             "ahrefs.json": '{"summary":{"top_pages":2,"organic_keywords":3,"matched_traffic":100,"matched_traffic_share":0.5,"top_pages_value_usd":20},"metrics":{"org_traffic":150,"org_keywords":4,"org_keywords_1_3":0}}',
         },
     )
@@ -144,6 +146,9 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["leaderboard"][1]["cannibalization_page_conflicts"] == 3
     assert payload["duplicate_fragments"]["classes"]
     assert payload["leaderboard"][1]["duplicate_fragment_groups"] == 5
+    assert payload["template_patterns"]["features"]
+    assert payload["leaderboard"][0]["template_success_patterns"] == 2
+    assert payload["leaderboard"][1]["template_pattern_recommendations"] == 4
 
 
 def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Path) -> None:

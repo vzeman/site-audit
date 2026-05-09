@@ -49,6 +49,7 @@ class _Project:
     answer_blocks: dict
     cannibalization: dict
     duplicate_fragments: dict
+    template_patterns: dict
     page_link_counts: list[dict]
     linkgraph: dict
     link_flow: dict
@@ -118,6 +119,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     answer_blocks = _load_json(report / "answer_blocks.json", {})
     cannibalization = _load_json(report / "cannibalization.json", {})
     duplicate_fragments = _load_json(report / "duplicate_fragments.json", {})
+    template_patterns = _load_json(report / "template_patterns.json", {})
     linkgraph = _load_json(report / "linkgraph.json", {})
     paragraph_density = _load_json(report / "paragraph_density.json", {})
     recommendations = _load_json(report / "recommendations.json", {})
@@ -163,6 +165,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         answer_blocks=answer_blocks,
         cannibalization=cannibalization,
         duplicate_fragments=duplicate_fragments,
+        template_patterns=template_patterns,
         page_link_counts=page_link_counts,
         linkgraph=linkgraph if isinstance(linkgraph, dict) else {},
         link_flow=link_flow,
@@ -479,6 +482,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "cannibalization_paragraph_conflicts", "label": "Paragraph overlaps", "better": "low", "fmt": "int"},
             {"key": "duplicate_fragment_groups", "label": "Duplicate fragments", "better": "low", "fmt": "int"},
             {"key": "duplicate_strong_patterns", "label": "Reusable patterns", "better": "high", "fmt": "int"},
+            {"key": "template_success_patterns", "label": "Template patterns", "better": "high", "fmt": "int"},
+            {"key": "template_pattern_recommendations", "label": "Template fixes", "better": "low", "fmt": "int"},
             {"key": "zero_link_paragraph_share", "label": "Zero-link paragraphs", "better": "low", "fmt": "pct"},
             {"key": "spammy_paragraph_count", "label": "Spammy paragraphs", "better": "low", "fmt": "int"},
         ],
@@ -634,6 +639,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
     dupfrag = (proj.duplicate_fragments or {}).get("summary", {}) or {}
+    templates = (proj.template_patterns or {}).get("summary", {}) or {}
 
     n_pages = len(proj.page_link_counts) or m.get("page_count") or len(proj.pages) or 0
     orphan_share = (sum(1 for r in proj.page_link_counts if r.get("in_degree") == 0) / n_pages) if n_pages else 0.0
@@ -719,6 +725,10 @@ def _leaderboard_row(proj: _Project) -> dict:
         "duplicate_fragment_groups": int(dupfrag.get("groups", 0)),
         "duplicate_strong_patterns": int(dupfrag.get("strong_patterns", 0)),
         "duplicate_harmful_boilerplate": int(dupfrag.get("harmful_boilerplate", 0)),
+        "template_success_patterns": int(templates.get("patterns", 0)),
+        "template_pattern_recommendations": int(templates.get("recommendations", 0)),
+        "template_pattern_segments": int(templates.get("segments_compared", 0)),
+        "template_pattern_median_confidence": float(templates.get("median_confidence", 0.0)),
         "cta_coverage": float(cv.get("cta_coverage", 0.0)),
         "primary_cta_coverage": float(cv.get("primary_cta_coverage", 0.0)),
         "form_coverage": float(cv.get("form_coverage", 0.0)),
@@ -1115,6 +1125,93 @@ def _duplicate_fragments_comparison(projects: list[_Project]) -> dict:
     matrix.sort(key=lambda r: sum(_safe_int(d.get("count")) + _safe_int(d.get("traffic")) for d in r["domains"]), reverse=True)
     examples.sort(key=lambda r: (_safe_int(r.get("attributed_traffic")) + _safe_int(r.get("page_traffic_sum")), _safe_int(r.get("count"))), reverse=True)
     return {"domains": domains, "classes": matrix, "examples": examples[:200]}
+
+
+def _template_patterns_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    features: dict[str, dict[str, dict]] = defaultdict(dict)
+    examples: list[dict] = []
+    recommendations: list[dict] = []
+    for proj in projects:
+        payload = proj.template_patterns or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        buckets: dict[str, dict] = defaultdict(lambda: {
+            "label": "",
+            "category": "",
+            "count": 0,
+            "lift_sum": 0.0,
+            "confidence_sum": 0.0,
+            "recommendations": 0,
+            "sample_size": 0,
+        })
+        for row in payload.get("patterns") or []:
+            key = row.get("feature_key") or row.get("label") or "unknown"
+            bucket = buckets[key]
+            bucket["label"] = row.get("label") or key
+            bucket["category"] = row.get("category") or ""
+            bucket["count"] += 1
+            bucket["lift_sum"] += _safe_float(row.get("observed_lift"))
+            bucket["confidence_sum"] += _safe_float(row.get("confidence"))
+            bucket["recommendations"] += len(row.get("affected_weak_pages") or [])
+            bucket["sample_size"] += _safe_int(row.get("sample_size"))
+            examples.append({"domain": proj.domain, **row})
+        for row in payload.get("recommendations") or []:
+            recommendations.append({"domain": proj.domain, **row})
+        for key, values in buckets.items():
+            count = max(1, values["count"])
+            features[key][proj.domain] = {
+                "domain": proj.domain,
+                "feature_key": key,
+                "label": values["label"],
+                "category": values["category"],
+                "count": values["count"],
+                "avg_lift": values["lift_sum"] / count,
+                "avg_confidence": values["confidence_sum"] / count,
+                "recommendations": values["recommendations"],
+                "sample_size": values["sample_size"],
+            }
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for feature_key, values in features.items():
+        label = next((v.get("label") for v in values.values() if v.get("label")), feature_key)
+        category = next((v.get("category") for v in values.values() if v.get("category")), "")
+        matrix.append({
+            "feature_key": feature_key,
+            "label": label,
+            "category": category,
+            "domains": [
+                values.get(domain, {
+                    "domain": domain,
+                    "feature_key": feature_key,
+                    "label": label,
+                    "category": category,
+                    "count": 0,
+                    "avg_lift": 0.0,
+                    "avg_confidence": 0.0,
+                    "recommendations": 0,
+                    "sample_size": 0,
+                })
+                for domain in project_domains
+            ],
+        })
+    matrix.sort(
+        key=lambda r: (
+            sum(_safe_int(d.get("count")) for d in r["domains"]),
+            sum(_safe_float(d.get("avg_lift")) for d in r["domains"]),
+            sum(_safe_int(d.get("recommendations")) for d in r["domains"]),
+        ),
+        reverse=True,
+    )
+    examples.sort(key=lambda r: (_safe_float(r.get("confidence")), _safe_float(r.get("observed_lift"))), reverse=True)
+    recommendations.sort(key=lambda r: (_safe_float(r.get("confidence")), _safe_float(r.get("observed_lift"))), reverse=True)
+    return {
+        "domains": domains,
+        "features": matrix[:120],
+        "examples": examples[:200],
+        "recommendations": recommendations[:300],
+    }
 
 
 # --- competitive search/content opportunities ----------------------------
@@ -1770,6 +1867,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "freshness_impact": _freshness_impact_comparison(projects),
         "cannibalization": _cannibalization_comparison(projects),
         "duplicate_fragments": _duplicate_fragments_comparison(projects),
+        "template_patterns": _template_patterns_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

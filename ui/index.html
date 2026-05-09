@@ -862,6 +862,31 @@
       </div>
     </div>
 
+    <!-- Template success patterns -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="template-patterns-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Template success patterns</h3>
+        <p class="text-xs text-gray-500 mt-1" id="template-patterns-meta">
+          Structural features shared by high-performing pages, controlled by page type and directory where sample size allows.
+        </p>
+      </div>
+      <div id="template-patterns-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs">
+        <div>
+          <h4 class="font-semibold mb-2">Reusable patterns</h4>
+          <div id="template-patterns-list" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Top vs weak pages</h4>
+          <div id="template-patterns-comparisons" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Template additions</h4>
+          <div id="template-patterns-recommendations" class="max-h-[560px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Entities -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="entities-block">
       <div class="mb-3">
@@ -1500,6 +1525,7 @@
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
 <script type="application/json" id="data-media-accessibility">__MEDIA_ACCESSIBILITY_JSON__</script>
 <script type="application/json" id="data-page-types">__PAGE_TYPES_JSON__</script>
+<script type="application/json" id="data-template-patterns">__TEMPLATE_PATTERNS_JSON__</script>
 <script type="application/json" id="data-entities">__ENTITIES_JSON__</script>
 <script type="application/json" id="data-freshness">__FRESHNESS_JSON__</script>
 <script type="application/json" id="data-freshness-impact">__FRESHNESS_IMPACT_JSON__</script>
@@ -1611,6 +1637,7 @@
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
       const inlinedMediaAccessibility = readInlined('data-media-accessibility');
       const inlinedPageTypes = readInlined('data-page-types');
+      const inlinedTemplatePatterns = readInlined('data-template-patterns');
       const inlinedEntities = readInlined('data-entities');
       const inlinedFreshness = readInlined('data-freshness');
       const inlinedFreshnessImpact = readInlined('data-freshness-impact');
@@ -1619,7 +1646,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1660,6 +1687,7 @@
         metadataQuality = inlinedMetadataQuality || {};
         mediaAccessibility = inlinedMediaAccessibility || {};
         pageTypes = inlinedPageTypes || {};
+        templatePatterns = inlinedTemplatePatterns || {};
         entities = inlinedEntities || {};
         freshness = inlinedFreshness || {};
         freshnessImpact = inlinedFreshnessImpact || {};
@@ -1668,7 +1696,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1708,6 +1736,7 @@
           loadJSON('metadata_quality.json').catch(() => ({})),
           loadJSON('media_accessibility.json').catch(() => ({})),
           loadJSON('page_types.json').catch(() => ({})),
+          loadJSON('template_patterns.json').catch(() => ({})),
           loadJSON('entities.json').catch(() => ({})),
           loadJSON('freshness.json').catch(() => ({})),
           loadJSON('freshness_impact.json').catch(() => ({})),
@@ -1759,6 +1788,7 @@
       state.metadataQuality = metadataQuality || {};
       state.mediaAccessibility = mediaAccessibility || {};
       state.pageTypes = pageTypes || {};
+      state.templatePatterns = templatePatterns || {};
       state.entities = entities || {};
       state.freshness = freshness || {};
       state.freshnessImpact = freshnessImpact || {};
@@ -1795,6 +1825,7 @@
       renderMetadataQuality();
       renderMediaAccessibility();
       renderPageTypes();
+      renderTemplatePatterns();
       renderEntities();
       renderEntityCoverage();
       renderInformationGain();
@@ -3983,6 +4014,84 @@
           <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>
           <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || 'other')} · ${escapeHtml(r.template_family || '')} · confidence ${Number(r.confidence || 0).toFixed(2)}</div>
         </div>`).join('') || '<div class="text-gray-500">No low-confidence page classifications.</div>';
+  }
+
+  function renderTemplatePatterns() {
+    const block = document.getElementById('template-patterns-block');
+    const data = state.templatePatterns || {};
+    const summary = data.summary || {};
+    if (!summary.total_pages || summary.status === 'no_pages' || summary.status === 'insufficient_performance_data') {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('template-patterns-meta').textContent =
+      `Performance source: ${summary.performance_source || 'unknown'} · minimum segment size ${summary.min_segment_size || 0}`;
+    document.getElementById('template-patterns-summary').innerHTML =
+      card('Patterns', Number(summary.patterns || 0).toLocaleString(), 'structural wins found') +
+      card('Recommendations', Number(summary.recommendations || 0).toLocaleString(), 'weak pages missing a pattern') +
+      card('Segments compared', Number(summary.segments_compared || 0).toLocaleString(), 'page type / directory controls') +
+      card('Median confidence', Number(summary.median_confidence || 0).toFixed(2), 'sample and contrast weighted') +
+      card('Top observed lift', `${(Number(summary.top_observed_lift || 0) * 100).toFixed(0)}%`, 'feature pages vs non-feature pages');
+
+    const patternRows = data.patterns || [];
+    document.getElementById('template-patterns-list').innerHTML =
+      patternRows.slice(0, 80).map(r => {
+        const samples = (r.sample_urls || []).slice(0, 3).map(u =>
+          `<a class="block text-blue-600 hover:underline truncate" href="${escapeHtml(u.url)}" target="_blank" rel="noopener">${escapeHtml(u.title || u.url)}</a>`
+        ).join('');
+        const weak = (r.affected_weak_pages || []).length;
+        return `
+          <div class="border border-gray-200 rounded p-3 mb-2">
+            <div class="flex items-start justify-between gap-3">
+              <div class="font-semibold">${escapeHtml(r.label || '')}</div>
+              <span class="text-[11px] bg-green-100 text-green-800 px-1.5 py-0.5 rounded">${Number(r.confidence || 0).toFixed(2)}</span>
+            </div>
+            <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || '')} · ${escapeHtml(r.directory || '')} · sample ${Number(r.sample_size || 0).toLocaleString()}</div>
+            <div class="grid grid-cols-3 gap-2 mt-2 font-mono text-[11px]">
+              <div>top ${((r.top_rate || 0) * 100).toFixed(0)}%</div>
+              <div>weak ${((r.weak_rate || 0) * 100).toFixed(0)}%</div>
+              <div>lift ${(Number(r.observed_lift || 0) * 100).toFixed(0)}%</div>
+            </div>
+            <div class="text-gray-700 mt-2">${escapeHtml(r.recommendation || '')}</div>
+            <div class="mt-2">${samples}</div>
+            ${weak ? `<div class="text-orange-700 mt-2">${weak} weak page${weak === 1 ? '' : 's'} missing this pattern</div>` : ''}
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No reusable template patterns found at the current sample threshold.</div>';
+
+    document.getElementById('template-patterns-comparisons').innerHTML =
+      (data.comparisons || []).slice(0, 50).map(r => {
+        const seg = r.segment || {};
+        const features = (r.common_top_features || []).slice(0, 5).map(f =>
+          `<span class="inline-block bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(f.label || f.feature_key)} ${((f.contrast || 0) * 100).toFixed(0)}pt</span>`
+        ).join('');
+        const top = (r.top_pages || []).slice(0, 2).map(p =>
+          `<a class="block text-blue-600 hover:underline truncate" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>`
+        ).join('');
+        const weak = (r.weak_pages || []).slice(0, 2).map(p =>
+          `<a class="block text-orange-700 hover:underline truncate" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title || p.url)}</a>`
+        ).join('');
+        return `
+          <div class="border-b border-gray-100 py-3">
+            <div class="font-semibold">${escapeHtml(seg.page_type || '')} · ${escapeHtml(seg.directory || '')}</div>
+            <div class="text-gray-500 mt-1">top score ${Number(r.avg_top_score || 0).toFixed(1)} · weak score ${Number(r.avg_weak_score || 0).toFixed(1)} · sample ${Number(seg.sample_size || 0).toLocaleString()}</div>
+            <div class="mt-2">${features}</div>
+            <div class="grid grid-cols-2 gap-3 mt-2">
+              <div>${top}</div>
+              <div>${weak}</div>
+            </div>
+          </div>`;
+      }).join('') || '<div class="text-gray-500">No top-vs-weak comparisons available.</div>';
+
+    document.getElementById('template-patterns-recommendations').innerHTML =
+      (data.recommendations || []).slice(0, 120).map(r => `
+        <div class="border-b border-gray-100 py-2">
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <div class="font-medium mt-1">${escapeHtml(r.missing_pattern || '')}</div>
+          <div class="text-gray-700 mt-1">${escapeHtml(r.recommendation || '')}</div>
+          <div class="text-gray-500 mt-1">${escapeHtml(r.page_type || '')} · ${escapeHtml(r.directory || '')} · confidence ${Number(r.confidence || 0).toFixed(2)} · lift ${(Number(r.observed_lift || 0) * 100).toFixed(0)}%</div>
+        </div>
+      `).join('') || '<div class="text-gray-500">No weak-page template additions found.</div>';
   }
 
   function renderEntities() {

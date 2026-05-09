@@ -111,6 +111,7 @@ from .scatter import project
 from .semantic_ablation import build_semantic_ablation
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
+from .template_patterns import build_template_patterns
 from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
@@ -158,6 +159,7 @@ class PipelineConfig:
     enable_freshness_impact: bool = True
     enable_cannibalization: bool = True
     enable_duplicate_fragments: bool = True
+    enable_template_patterns: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -1071,6 +1073,26 @@ def run(config: PipelineConfig) -> dict:
         elif df_summary:
             LOG.info("  duplicate fragments: %s", df_summary.get("status", "unavailable"))
 
+    template_patterns_data: dict = {}
+    if config.enable_template_patterns:
+        template_patterns_data = build_template_patterns(
+            pages,
+            extracted_pages,
+            page_types=page_types_data,
+            search_payload=ahrefs_data,
+            linkgraph=link_payload,
+        )
+        tp_summary = template_patterns_data.get("summary", {}) or {}
+        if tp_summary.get("status") == "ok":
+            LOG.info(
+                "  template patterns: %d patterns · %d recommendations · source %s",
+                tp_summary.get("patterns", 0),
+                tp_summary.get("recommendations", 0),
+                tp_summary.get("performance_source", ""),
+            )
+        elif tp_summary:
+            LOG.info("  template patterns: %s", tp_summary.get("status", "unavailable"))
+
     winning_paragraphs_data: dict = {}
     if paragraph_impact_data:
         winning_paragraphs_data = build_winning_paragraphs(
@@ -1191,6 +1213,7 @@ def run(config: PipelineConfig) -> dict:
         freshness_impact=freshness_impact_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
+        template_patterns=template_patterns_data,
         winning_paragraphs=winning_paragraphs_data,
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
@@ -1245,6 +1268,7 @@ def run(config: PipelineConfig) -> dict:
             freshness_impact=freshness_impact_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
+            template_patterns=template_patterns_data,
             winning_paragraphs=winning_paragraphs_data,
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,

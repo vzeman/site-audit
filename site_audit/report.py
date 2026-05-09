@@ -289,6 +289,7 @@ def write_all(
     freshness_impact: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
+    template_patterns: Optional[dict] = None,
     winning_paragraphs: Optional[dict] = None,
     weak_paragraphs: Optional[dict] = None,
     heading_impact: Optional[dict] = None,
@@ -356,6 +357,8 @@ def write_all(
         _write_json(output_dir / "cannibalization.json", cannibalization)
     if duplicate_fragments is not None:
         _write_json(output_dir / "duplicate_fragments.json", duplicate_fragments)
+    if template_patterns is not None:
+        _write_json(output_dir / "template_patterns.json", template_patterns)
     if winning_paragraphs is not None:
         _write_json(output_dir / "winning_paragraphs.json", winning_paragraphs)
     if weak_paragraphs is not None:
