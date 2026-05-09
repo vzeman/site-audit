@@ -60,6 +60,7 @@ class _Project:
     page_types: dict
     entities: dict
     entity_coverage: dict
+    information_gain: dict
     freshness: dict
     conversion: dict
     indexability: dict
@@ -122,6 +123,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     page_types = _load_json(report / "page_types.json", {})
     entities = _load_json(report / "entities.json", {})
     entity_coverage = _load_json(report / "entity_coverage.json", {})
+    information_gain = _load_json(report / "information_gain.json", {})
     freshness = _load_json(report / "freshness.json", {})
     conversion = _load_json(report / "conversion.json", {})
     indexability = _load_json(report / "indexability.json", {})
@@ -164,6 +166,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         page_types=page_types,
         entities=entities,
         entity_coverage=entity_coverage,
+        information_gain=information_gain,
         freshness=freshness,
         conversion=conversion,
         indexability=indexability,
@@ -863,6 +866,38 @@ def _entity_coverage_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _information_gain_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    clusters: dict[str, dict[str, dict]] = defaultdict(dict)
+    low_pages: list[dict] = []
+    for proj in projects:
+        payload = proj.information_gain or {}
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for cluster in payload.get("clusters") or []:
+            key = str(cluster.get("label") or cluster.get("cluster") or "cluster")
+            clusters[key][proj.domain] = {
+                "domain": proj.domain,
+                "cluster": key,
+                "avg_score": _safe_float(cluster.get("avg_score")),
+                "pages": _safe_int(cluster.get("pages")),
+                "low_score_pages": _safe_int(cluster.get("low_score_pages")),
+            }
+        for page in (payload.get("pages") or [])[:80]:
+            if _safe_float(page.get("information_gain_score")) < 55:
+                low_pages.append({"domain": proj.domain, **page})
+    matrix = []
+    for cluster, values in clusters.items():
+        matrix.append({
+            "cluster": cluster,
+            "domains": [values.get(domain, {"domain": domain, "cluster": cluster, "avg_score": 0.0, "pages": 0}) for domain in [p.domain for p in projects]],
+        })
+    matrix.sort(key=lambda r: sum(_safe_float(d.get("avg_score")) for d in r["domains"]) / max(len(r["domains"]), 1))
+    low_pages.sort(key=lambda r: _safe_float(r.get("information_gain_score")))
+    return {"domains": domains, "clusters": matrix[:80], "low_pages": low_pages[:200]}
+
+
 # --- competitive search/content opportunities ----------------------------
 
 
@@ -1511,6 +1546,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "search": _search_payload(projects),
         "entity_alignment": _entity_alignment_comparison(projects),
         "entity_coverage": _entity_coverage_comparison(projects),
+        "information_gain": _information_gain_comparison(projects),
         "keyword_gaps": _keyword_gap_payload(projects),
         "serp_features": _serp_feature_payload(projects),
         "content_efficiency": _efficiency_payload(projects),

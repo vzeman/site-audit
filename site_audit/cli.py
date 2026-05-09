@@ -82,6 +82,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_weak_paragraphs=not args.no_weak_paragraphs,
         enable_heading_impact=not args.no_heading_impact,
         enable_entity_coverage=not args.no_entity_coverage,
+        enable_information_gain=not args.no_information_gain,
         enable_content_quality=not args.no_content_quality,
         enable_paragraph_fanout=not args.no_paragraph_fanout,
         check_external_links=args.check_external,
@@ -268,6 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-weak-paragraphs", action="store_true")
     run_p.add_argument("--no-heading-impact", action="store_true")
     run_p.add_argument("--no-entity-coverage", action="store_true")
+    run_p.add_argument("--no-information-gain", action="store_true")
     run_p.add_argument("--no-content-quality", action="store_true")
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")

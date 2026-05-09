@@ -346,6 +346,11 @@
         <div id="entity-coverage-compare" class="w-full overflow-x-auto" style="min-height:360px;"></div>
       </div>
       <div class="mt-6">
+        <h3 class="text-sm font-semibold mb-1">Information gain by domain and cluster</h3>
+        <p class="text-xs text-gray-500 mb-2">Originality score by cluster. Low cells indicate generic, duplicated, or evidence-light content compared with same-cluster pages.</p>
+        <div id="information-gain-compare" class="w-full overflow-x-auto" style="min-height:320px;"></div>
+      </div>
+      <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-specific semantic comparisons</h3>
         <p class="text-xs text-gray-500 mb-3">
           Separate projections for link titles, header names, and page titles. Color = domain, dot size = traffic or usage, so vocabulary overlap and naming gaps are visible without mixing entity types.
@@ -1055,6 +1060,7 @@
     renderAhrefsSemanticCompare();
     renderEntityAlignmentCompare();
     renderEntityCoverageCompare();
+    renderInformationGainCompare();
     renderSemanticEntityComparisons();
   }
 
@@ -1290,6 +1296,47 @@
           svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 13)
             .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', '#111827')
             .text(weight.toFixed(1));
+        }
+      });
+    });
+  }
+
+  function renderInformationGainCompare() {
+    const container = document.getElementById('information-gain-compare');
+    const payload = data.information_gain || {};
+    const rows = (payload.clusters || []).slice(0, 50);
+    container.innerHTML = '';
+    if (!rows.length) {
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">No information-gain comparison data.</div>';
+      return;
+    }
+    const domains = data.domains || [];
+    const cellW = 112;
+    const cellH = 24;
+    const left = 190;
+    const top = 24;
+    const width = left + domains.length * cellW + 20;
+    const height = top + rows.length * cellH + 40;
+    const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+    const color = d3.scaleSequential(d3.interpolateRdYlGn).domain([30, 90]);
+    domains.forEach((domain, i) => {
+      svg.append('text').attr('x', left + i * cellW + cellW / 2).attr('y', 14)
+        .attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#374151').text(domain);
+    });
+    rows.forEach((row, ri) => {
+      const y = top + ri * cellH;
+      svg.append('text').attr('x', 0).attr('y', y + 16).style('font-size', '10px').style('fill', '#374151')
+        .text(String(row.cluster || '').slice(0, 34));
+      (row.domains || []).forEach((d, di) => {
+        const score = Number(d.avg_score || 0);
+        svg.append('rect').attr('x', left + di * cellW).attr('y', y)
+          .attr('width', cellW - 3).attr('height', cellH - 3)
+          .attr('fill', score > 0 ? color(score) : '#f3f4f6').attr('rx', 2)
+          .append('title').text(`${d.domain} · ${row.cluster}\nscore ${score.toFixed(1)}\npages ${Number(d.pages || 0).toLocaleString()}`);
+        if (score > 0) {
+          svg.append('text').attr('x', left + di * cellW + cellW / 2).attr('y', y + 15)
+            .attr('text-anchor', 'middle').style('font-size', '9px').style('fill', '#111827')
+            .text(score.toFixed(0));
         }
       });
     });

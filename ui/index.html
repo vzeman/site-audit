@@ -908,6 +908,27 @@
       </div>
     </div>
 
+    <!-- Information gain -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="information-gain-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Information gain and originality</h3>
+        <p class="text-xs text-gray-500 mt-1" id="information-gain-meta">
+          Scores pages and paragraphs for original data, examples, citations, media, schema, rare entities, duplication, and generic phrasing.
+        </p>
+      </div>
+      <div id="information-gain-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Pages needing originality</h4>
+          <div id="information-gain-pages" class="text-xs max-h-[520px] overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-2">Paragraph evidence snippets</h4>
+          <div id="information-gain-paragraphs" class="text-xs max-h-[520px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Content freshness -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="freshness-block">
       <div class="mb-3">
@@ -1368,6 +1389,7 @@
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
 <script type="application/json" id="data-heading-impact">__HEADING_IMPACT_JSON__</script>
 <script type="application/json" id="data-entity-coverage">__ENTITY_COVERAGE_JSON__</script>
+<script type="application/json" id="data-information-gain">__INFORMATION_GAIN_JSON__</script>
 <script type="application/json" id="data-linkbuilding">__LINKBUILDING_JSON__</script>
 <script type="application/json" id="data-structured-data">__STRUCTURED_DATA_JSON__</script>
 <script type="application/json" id="data-metadata-quality">__METADATA_QUALITY_JSON__</script>
@@ -1474,6 +1496,7 @@
       const inlinedHeaderScatter = readInlined('data-header-scatter');
       const inlinedHeadingImpact = readInlined('data-heading-impact');
       const inlinedEntityCoverage = readInlined('data-entity-coverage');
+      const inlinedInformationGain = readInlined('data-information-gain');
       const inlinedLinkbuilding = readInlined('data-linkbuilding');
       const inlinedStructuredData = readInlined('data-structured-data');
       const inlinedMetadataQuality = readInlined('data-metadata-quality');
@@ -1486,7 +1509,7 @@
       const inlinedPerformance = readInlined('data-performance');
       const inlinedAhrefs = readInlined('data-ahrefs');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -1518,6 +1541,7 @@
         headerScatter = inlinedHeaderScatter || {};
         headingImpact = inlinedHeadingImpact || {};
         entityCoverage = inlinedEntityCoverage || {};
+        informationGain = inlinedInformationGain || {};
         linkbuilding = inlinedLinkbuilding || {};
         structuredData = inlinedStructuredData || {};
         metadataQuality = inlinedMetadataQuality || {};
@@ -1530,7 +1554,7 @@
         performance = inlinedPerformance || {};
         ahrefs = inlinedAhrefs || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, metadataQuality, mediaAccessibility, pageTypes, entities, freshness, conversion, indexability, performance, ahrefs] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -1561,6 +1585,7 @@
           loadJSON('header_scatter.json').catch(() => ({})),
           loadJSON('heading_impact.json').catch(() => ({})),
           loadJSON('entity_coverage.json').catch(() => ({})),
+          loadJSON('information_gain.json').catch(() => ({})),
           loadJSON('linkbuilding.json').catch(() => ({})),
           loadJSON('structured_data.json').catch(() => ({})),
           loadJSON('metadata_quality.json').catch(() => ({})),
@@ -1607,6 +1632,7 @@
       state.headerScatter = headerScatter || {};
       state.headingImpact = headingImpact || {};
       state.entityCoverage = entityCoverage || {};
+      state.informationGain = informationGain || {};
       state.linkbuilding = linkbuilding || {};
       state.structuredData = structuredData || {};
       state.metadataQuality = metadataQuality || {};
@@ -1649,6 +1675,7 @@
       renderPageTypes();
       renderEntities();
       renderEntityCoverage();
+      renderInformationGain();
       renderFreshness();
       renderPerformance();
       renderConversion();
@@ -3731,6 +3758,59 @@
         <div class="mt-1">${chips}</div>
       </div>`;
     }).join('');
+  }
+
+  function renderInformationGain() {
+    const block = document.getElementById('information-gain-block');
+    const data = state.informationGain || {};
+    const summary = data.summary || {};
+    const pages = data.pages || [];
+    const paragraphs = data.paragraphs || [];
+    if (!pages.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    document.getElementById('information-gain-meta').textContent =
+      `${Number(summary.pages || pages.length).toLocaleString()} pages scored · avg ${Number(summary.avg_page_score || 0).toFixed(1)} · ${Number(summary.low_score_pages || 0).toLocaleString()} low-originality pages.`;
+    document.getElementById('information-gain-summary').innerHTML =
+      card('avg score', Number(summary.avg_page_score || 0).toFixed(1), '0-100 originality heuristic') +
+      card('low-score pages', Number(summary.low_score_pages || 0).toLocaleString(), 'below 55') +
+      card('high-score pages', Number(summary.high_score_pages || 0).toLocaleString(), '75+') +
+      card('paragraph rows', Number(summary.paragraphs || paragraphs.length).toLocaleString(), 'evidence or risk snippets');
+
+    const evidence = arr => (arr || []).slice(0, 4).map(x => `<span class="inline-block bg-green-50 text-green-800 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(x)}</span>`).join('');
+    const reasons = arr => (arr || []).slice(0, 4).map(x => `<span class="inline-block bg-red-50 text-red-800 rounded px-1.5 py-0.5 mr-1 mb-1">${escapeHtml(x)}</span>`).join('');
+    document.getElementById('information-gain-pages').innerHTML = pages.slice(0, 140).map(r => {
+      const color = Number(r.information_gain_score || 0) >= 75 ? 'text-green-700' : (Number(r.information_gain_score || 0) >= 55 ? 'text-amber-700' : 'text-red-700');
+      const facts = (r.unique_facts || []).slice(0, 2).map(f => `<li>${escapeHtml(f)}</li>`).join('');
+      const recs = (r.recommendations || []).slice(0, 3).map(rec => `<li>${escapeHtml(rec)}</li>`).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono ${color}">${Number(r.information_gain_score || 0).toFixed(0)}</span>
+        </div>
+        <div class="text-gray-500">${escapeHtml(r.cluster_label || r.section || '')} · entities ${Number(r.entity_count || 0)} · citations ${Number(r.external_links || 0)}</div>
+        <div class="mt-1">${evidence(r.positive_evidence)}${reasons(r.negative_reasons)}</div>
+        ${facts ? `<ul class="list-disc list-inside text-gray-600 mt-1">${facts}</ul>` : ''}
+        ${recs ? `<ul class="list-disc list-inside text-gray-500 mt-1">${recs}</ul>` : ''}
+      </div>`;
+    }).join('');
+
+    document.getElementById('information-gain-paragraphs').innerHTML = paragraphs.slice(0, 140).map(r => {
+      const color = Number(r.information_gain_score || 0) >= 75 ? 'text-green-700' : (Number(r.information_gain_score || 0) >= 55 ? 'text-amber-700' : 'text-red-700');
+      const facts = (r.unique_facts || []).slice(0, 2).map(f => `<li>${escapeHtml(f)}</li>`).join('');
+      return `<div class="py-2 border-b border-gray-100">
+        <div class="flex items-center justify-between gap-2">
+          <a class="text-blue-600 hover:underline truncate" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>
+          <span class="font-mono ${color}">${Number(r.information_gain_score || 0).toFixed(0)}</span>
+        </div>
+        <div class="text-gray-500">para ${Number(r.paragraph_index || 0)} · ${escapeHtml(r.cluster_label || '')}</div>
+        <div class="italic text-gray-700 mt-1">"${escapeHtml(r.paragraph_excerpt || '')}"</div>
+        <div class="mt-1">${evidence(r.positive_evidence)}${reasons(r.negative_reasons)}</div>
+        ${facts ? `<ul class="list-disc list-inside text-gray-600 mt-1">${facts}</ul>` : ''}
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No paragraph rows.</div>';
   }
 
   function renderFreshness() {

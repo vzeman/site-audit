@@ -76,6 +76,7 @@ from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
 from .indexability import analyze as analyze_indexability
 from .indexability import to_payload as indexability_payload
+from .information_gain import build_information_gain
 from .keyword_coverage import (
     auto_mine_queries, load_queries_from_file, match_queries,
     match_queries_to_paragraphs, paragraph_match_payload,
@@ -159,6 +160,7 @@ class PipelineConfig:
     enable_weak_paragraphs: bool = True
     enable_heading_impact: bool = True
     enable_entity_coverage: bool = True
+    enable_information_gain: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
     check_external_links: bool = False     # opt-in HEAD requests
@@ -560,6 +562,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_keyword_attribution
         or config.enable_weak_paragraphs
         or config.enable_heading_impact
+        or config.enable_information_gain
         or config.enable_content_quality
         or config.enable_paragraph_fanout
     ):
@@ -894,6 +897,24 @@ def run(config: PipelineConfig) -> dict:
                 ec_summary.get("pages_with_core_gaps", 0),
             )
 
+    information_gain_data: dict = {}
+    if config.enable_information_gain:
+        information_gain_data = build_information_gain(
+            pages,
+            extracted_pages,
+            paragraph_records,
+            cluster_labels=labels,
+            cluster_summaries=cluster_summaries,
+        )
+        ig_summary = information_gain_data.get("summary", {}) or {}
+        if ig_summary.get("status") == "ok":
+            LOG.info(
+                "  information gain: avg %.1f · %d low-score pages · %d high-score pages",
+                ig_summary.get("avg_page_score", 0.0),
+                ig_summary.get("low_score_pages", 0),
+                ig_summary.get("high_score_pages", 0),
+            )
+
     paragraph_impact_data: dict = {}
     if config.enable_paragraph_impact and paragraph_records and ahrefs_data:
         paragraph_impact_data = build_paragraph_impact(
@@ -1072,6 +1093,7 @@ def run(config: PipelineConfig) -> dict:
         weak_paragraphs=weak_paragraphs_data,
         heading_impact=heading_impact_data,
         entity_coverage=entity_coverage_data,
+        information_gain=information_gain_data,
         title_mismatch=title_mismatch_data,
         wrong_home=wrong_home_data,
         page_improvement=page_improvement_data,
@@ -1121,6 +1143,7 @@ def run(config: PipelineConfig) -> dict:
             weak_paragraphs=weak_paragraphs_data,
             heading_impact=heading_impact_data,
             entity_coverage=entity_coverage_data,
+            information_gain=information_gain_data,
             title_mismatch=title_mismatch_data,
             wrong_home=wrong_home_data,
             page_improvement=page_improvement_data,
