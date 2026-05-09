@@ -80,6 +80,7 @@ from .freshness_impact import build_freshness_impact
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
+from .history import build_history_snapshot, save_report_snapshot
 from .internal_link_patterns import build_internal_link_patterns
 from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
@@ -202,6 +203,7 @@ class PipelineConfig:
     link_similarity_threshold: float = 0.85
     link_recommendations_top_k: int = 75
     search_provider: str = "auto"
+    save_snapshot: bool = True
     enable_dataforseo: bool = True
     enable_ahrefs: bool = True
     ahrefs_date: Optional[str] = None
@@ -1411,6 +1413,16 @@ def run(config: PipelineConfig) -> dict:
         pe_summary.get("sample_size", 0),
         pe_summary.get("validation_r2", 0.0) or 0.0,
     )
+    history_snapshot_data = build_history_snapshot(
+        host,
+        pages,
+        extracted_pages,
+        outlinks_map=outlinks_map,
+        structured_data=structured_data_data,
+        freshness=freshness_data,
+        metadata_quality=metadata_quality_data,
+        search_payload=ahrefs_data,
+    )
 
     # 13) Reports
     summary = write_all(
@@ -1466,6 +1478,7 @@ def run(config: PipelineConfig) -> dict:
         ahrefs=ahrefs_data,
         best_pages=best_pages_data,
         performance_explainer=performance_explainer_data,
+        history_snapshot=history_snapshot_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"
@@ -1527,6 +1540,10 @@ def run(config: PipelineConfig) -> dict:
             performance_explainer=performance_explainer_data,
         )
         LOG.info("  HTML report: %s", html_path)
+
+    if config.save_snapshot:
+        snapshot_dir = save_report_snapshot(host, config.projects_root, report_dir)
+        LOG.info("  history snapshot: %s", snapshot_dir)
 
     LOG.info("=== summary ===")
     LOG.info("  pages: %d", len(pages))

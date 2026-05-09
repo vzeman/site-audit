@@ -9,13 +9,16 @@ Two subcommands:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
 
 from . import __version__
 from . import compare as _compare
+from .cache import domain_slug
 from .embedder import DEFAULT_MODEL
+from .history import compare_snapshots, list_snapshots, save_report_snapshot, write_history_html
 from .pipeline import PipelineConfig, project_paths, run
 from .server import serve
 
@@ -108,6 +111,7 @@ def _run_command(args: argparse.Namespace) -> int:
         sitemap_lastmod_after=args.sitemap_lastmod_after,
         sitemap_lastmod_within_days=args.sitemap_lastmod_within_days,
         search_provider="none" if args.no_search_data else args.search_provider,
+        save_snapshot=not args.no_snapshot,
         enable_dataforseo=not args.no_dataforseo,
         enable_ahrefs=not args.no_ahrefs,
         ahrefs_date=args.ahrefs_date,
@@ -213,6 +217,61 @@ def _serve_command(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
     )
+    return 0
+
+
+def _history_snapshot_command(args: argparse.Namespace) -> int:
+    projects_root = Path(args.projects_root)
+    cfg = PipelineConfig(domain=args.domain, projects_root=projects_root)
+    _, report_dir = project_paths(cfg)
+    if not report_dir.exists():
+        print(f"No report found at {report_dir}. Run `site-audit run {args.domain}` first.")
+        return 1
+    target = save_report_snapshot(
+        args.domain,
+        projects_root,
+        report_dir,
+        snapshot_id=args.id,
+        overwrite=args.overwrite,
+    )
+    print(f"Wrote snapshot {target.name}: {target}")
+    return 0
+
+
+def _history_list_command(args: argparse.Namespace) -> int:
+    rows = list_snapshots(args.domain, Path(args.projects_root))
+    if not rows:
+        print(f"No snapshots for {args.domain}.")
+        return 0
+    for row in rows:
+        print(
+            f"{row['snapshot_id']}\t{row.get('created_at', '')}\t"
+            f"{row.get('pages', 0)} pages\t{row.get('traffic', 0)} traffic"
+        )
+    return 0
+
+
+def _history_compare_command(args: argparse.Namespace) -> int:
+    projects_root = Path(args.projects_root)
+    payload = compare_snapshots(
+        args.domain,
+        args.before,
+        args.after,
+        projects_root,
+        window_days=args.window_days,
+    )
+    out_dir = projects_root / domain_slug(args.domain) / "history" / (args.name or f"{args.before}_vs_{args.after}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "history.json").write_text(
+        json.dumps(payload, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    template = Path(__file__).resolve().parent.parent / "ui" / "history.html"
+    if template.is_file():
+        out_html = out_dir / "index.html"
+        write_history_html(template, payload, out_html)
+        print(f"Wrote {out_html}")
+    print(f"Wrote {out_dir / 'history.json'}")
     return 0
 
 
@@ -327,6 +386,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Rows to request from DataForSEO ranked-keywords (default: 1000)")
     run_p.add_argument("--dataforseo-include-clickstream", action="store_true",
                        help="Request DataForSEO clickstream data where supported")
+    run_p.add_argument("--no-snapshot", action="store_true",
+                       help="Do not copy this finished report into projects/<domain>/snapshots/")
     run_p.add_argument("--competitive", default=None, help="TSV file with `query<TAB>competitor_url` per line")
     run_p.add_argument("--queries-file", default=None, help="Optional file: one target query per line")
     run_p.add_argument("--auto-queries-max", type=int, default=200)
@@ -351,6 +412,30 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8765)
     serve_p.set_defaults(func=_serve_command)
+
+    hist_p = sub.add_parser("history", help="Store and compare historical snapshots for one domain")
+    hist_sub = hist_p.add_subparsers(dest="history_command", required=True)
+    hist_snap = hist_sub.add_parser("snapshot", help="Copy the current report into a named historical snapshot")
+    hist_snap.add_argument("domain")
+    hist_snap.add_argument("--projects-root", default="projects")
+    hist_snap.add_argument("--id", default=None, help="Snapshot id. Default: UTC timestamp")
+    hist_snap.add_argument("--overwrite", action="store_true")
+    hist_snap.set_defaults(func=_history_snapshot_command)
+
+    hist_list = hist_sub.add_parser("list", help="List snapshots for a domain")
+    hist_list.add_argument("domain")
+    hist_list.add_argument("--projects-root", default="projects")
+    hist_list.set_defaults(func=_history_list_command)
+
+    hist_cmp = hist_sub.add_parser("compare", help="Compare two snapshots for one domain")
+    hist_cmp.add_argument("domain")
+    hist_cmp.add_argument("before")
+    hist_cmp.add_argument("after")
+    hist_cmp.add_argument("--projects-root", default="projects")
+    hist_cmp.add_argument("--name", default=None, help="Output subdir under projects/<domain>/history/")
+    hist_cmp.add_argument("--window-days", type=int, default=None,
+                          help="Observation window in days between tracked changes and metric movement")
+    hist_cmp.set_defaults(func=_history_compare_command)
 
     return p
 

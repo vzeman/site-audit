@@ -43,6 +43,7 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--no-template-patterns",
             "--no-trust-signals",
             "--no-conversion-balance",
+            "--no-snapshot",
         ]
     )
 
@@ -70,3 +71,27 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.no_template_patterns is True
     assert args.no_trust_signals is True
     assert args.no_conversion_balance is True
+    assert args.no_snapshot is True
+
+
+def test_history_parser_accepts_snapshot_and_compare_commands() -> None:
+    snapshot_args = build_parser().parse_args(
+        ["history", "snapshot", "example.com", "--projects-root", "/tmp/projects", "--id", "baseline", "--overwrite"]
+    )
+    compare_args = build_parser().parse_args(
+        [
+            "history", "compare", "example.com", "baseline", "after",
+            "--projects-root", "/tmp/projects", "--name", "baseline-vs-after", "--window-days", "28",
+        ]
+    )
+
+    assert snapshot_args.history_command == "snapshot"
+    assert snapshot_args.domain == "example.com"
+    assert snapshot_args.projects_root == "/tmp/projects"
+    assert snapshot_args.id == "baseline"
+    assert snapshot_args.overwrite is True
+    assert compare_args.history_command == "compare"
+    assert compare_args.before == "baseline"
+    assert compare_args.after == "after"
+    assert compare_args.name == "baseline-vs-after"
+    assert compare_args.window_days == 28
