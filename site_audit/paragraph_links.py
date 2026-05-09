@@ -32,8 +32,9 @@ Algorithm sketch::
 from __future__ import annotations
 
 import logging
+import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -292,3 +293,169 @@ def to_payload(recs: Iterable[ParagraphLinkRec]) -> list[dict]:
         }
         for r in recs
     ]
+
+
+def _safe_int(value) -> int:
+    try:
+        if value is None or value == "":
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _scale(value: float, max_value: float) -> float:
+    if max_value <= 0:
+        return 0.0
+    return max(0.0, min(100.0, value / max_value * 100.0))
+
+
+def build_addition_simulation(
+    recommendations: list[dict],
+    pages,
+    linkgraph: dict | None,
+    *,
+    paragraph_saturation: dict[tuple[int, int], float] | None = None,
+    saturation_floor_per_100w: float = 5.0,
+) -> dict:
+    if not recommendations:
+        return {"summary": {"status": "no_recommendations", "total_recommendations": 0}, "recommendations": []}
+
+    linkgraph = linkgraph or {}
+    authority_payload = linkgraph.get("traffic_weighted_pagerank") or {}
+    authority_by_url = {
+        row.get("url"): row
+        for row in authority_payload.get("pages", [])
+        if row.get("url")
+    }
+    counts_by_url = {
+        row.get("url"): row
+        for row in linkgraph.get("page_link_counts", [])
+        if row.get("url")
+    }
+    page_by_url = {p.url: p for p in pages}
+    page_idx = {p.url: i for i, p in enumerate(pages)}
+
+    target_traffic_values = [
+        math.log1p(_safe_int((authority_by_url.get(r.get("target_url")) or {}).get("traffic")))
+        for r in recommendations
+    ]
+    target_keyword_values = [
+        math.sqrt(_safe_int((authority_by_url.get(r.get("target_url")) or {}).get("keywords")))
+        for r in recommendations
+    ]
+    max_traffic = max(target_traffic_values, default=0.0)
+    max_keywords = max(target_keyword_values, default=0.0)
+
+    rows: list[dict] = []
+    for rec in recommendations:
+        source_url = rec.get("source_url") or ""
+        target_url = rec.get("target_url") or ""
+        source_auth = authority_by_url.get(source_url) or counts_by_url.get(source_url) or {}
+        target_auth = authority_by_url.get(target_url) or counts_by_url.get(target_url) or {}
+        source_page = page_by_url.get(source_url)
+        target_page = page_by_url.get(target_url)
+        source_pr_pct = _safe_float(source_auth.get("weighted_pagerank_percentile") or source_auth.get("pagerank_percentile"))
+        source_pr = _safe_float(source_auth.get("traffic_weighted_pagerank") or source_auth.get("pagerank"))
+        source_out = _safe_int(source_auth.get("out_degree"))
+        target_in = _safe_int(target_auth.get("in_degree"))
+        target_traffic = _safe_int(target_auth.get("traffic"))
+        target_keywords = _safe_int(target_auth.get("keywords"))
+        target_gap = max(0.0, _safe_float(target_auth.get("authority_traffic_gap")))
+        fit = max(0.0, _safe_float(rec.get("fit")))
+        lift = max(0.0, _safe_float(rec.get("lift")))
+        anchor_conf = max(0.0, _safe_float(rec.get("anchor_confidence")))
+        paragraph_index = _safe_int(rec.get("paragraph_index"))
+        source_i = page_idx.get(source_url, -1)
+        density = paragraph_saturation.get((source_i, paragraph_index), 0.0) if paragraph_saturation is not None else 0.0
+
+        authority_component = max(0.0, min(100.0, source_pr_pct * 100.0))
+        relevance_component = max(0.0, min(100.0, fit * 65.0 + lift * 220.0))
+        opportunity_component = max(
+            0.0,
+            min(
+                100.0,
+                _scale(math.log1p(target_traffic), max_traffic) * 0.62
+                + _scale(math.sqrt(target_keywords), max_keywords) * 0.18
+                + target_gap * 20.0,
+            ),
+        )
+        deficit_component = max(0.0, min(100.0, (1.0 - _safe_float(target_auth.get("weighted_pagerank_percentile"))) * 65.0 + max(0, 6 - target_in) * 6.0))
+        anchor_component = max(35.0, min(100.0, anchor_conf * 100.0)) if anchor_conf else 45.0
+        density_component = 100.0 if density < saturation_floor_per_100w else 0.0
+        expected = (
+            authority_component * 0.22
+            + relevance_component * 0.24
+            + opportunity_component * 0.22
+            + deficit_component * 0.16
+            + anchor_component * 0.10
+            + density_component * 0.06
+        )
+        estimated_gain = source_pr * (1.0 / max(1, source_out + 1)) * (0.5 + fit / 2.0) * (0.7 + anchor_component / 300.0)
+        row = {
+            **rec,
+            "source_title": getattr(source_page, "title", source_url),
+            "source_section": getattr(source_page, "section", ""),
+            "target_section": getattr(target_page, "section", ""),
+            "expected_benefit_score": round(expected, 2),
+            "priority": "high" if expected >= 72 else "medium" if expected >= 48 else "low",
+            "estimated_pagerank_gain": round(float(estimated_gain), 10),
+            "current_target_in_degree": target_in,
+            "after_target_in_degree": target_in + 1,
+            "source_out_degree": source_out,
+            "after_source_out_degree": source_out + 1,
+            "target_traffic": target_traffic,
+            "target_keywords": target_keywords,
+            "target_authority_gap": round(target_gap, 4),
+            "paragraph_links_per_100w": round(float(density), 4),
+            "respects_density_cap": density < saturation_floor_per_100w,
+            "score_components": {
+                "authority_flow": round(authority_component, 2),
+                "relevance": round(relevance_component, 2),
+                "opportunity": round(opportunity_component, 2),
+                "internal_link_deficit": round(deficit_component, 2),
+                "anchor_relevance": round(anchor_component, 2),
+                "density_cap": round(density_component, 2),
+            },
+            "recommended_action": "Add this contextual link in the suggested paragraph with the proposed anchor, then keep paragraph link density below the cap.",
+        }
+        rows.append(row)
+
+    rows.sort(key=lambda r: (_safe_float(r.get("expected_benefit_score")), _safe_float(r.get("lift"))), reverse=True)
+    priorities = Counter(row["priority"] for row in rows)
+    pattern_counts = Counter(
+        f"{row.get('source_section') or 'unknown'} -> {row.get('target_section') or 'unknown'}"
+        for row in rows
+    )
+    patterns = [
+        {"pattern": pattern, "count": count}
+        for pattern, count in pattern_counts.most_common(40)
+    ]
+    return {
+        "summary": {
+            "status": "ok",
+            "model": "internal_link_addition_simulation_v1",
+            "total_recommendations": len(rows),
+            "high_priority": priorities.get("high", 0),
+            "medium_priority": priorities.get("medium", 0),
+            "low_priority": priorities.get("low", 0),
+            "avg_expected_benefit": round(sum(_safe_float(r.get("expected_benefit_score")) for r in rows) / max(1, len(rows)), 2),
+            "density_safe_recommendations": sum(1 for r in rows if r.get("respects_density_cap")),
+        },
+        "recommendations": rows,
+        "graph_preview": rows[:30],
+        "patterns": patterns,
+        "interpretation": {
+            "expected_benefit_score": "Weighted estimate of authority flow, paragraph-target relevance, target traffic/keyword opportunity, internal-link deficit, anchor relevance, and paragraph density safety.",
+            "before_after": "The simulation treats each recommendation as one new edge: target in-degree increases by one and source out-degree increases by one.",
+        },
+    }

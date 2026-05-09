@@ -195,6 +195,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "weak_or_harmful_links": [],
                     "edit_warnings": [{"source_url": "https://alpha.example/", "source_title": "Alpha", "critical_links": 1, "max_loss_score": 91.0}],
                 },
+                "link_addition_simulation": {
+                    "summary": {"total_recommendations": 1, "high_priority": 1, "medium_priority": 0, "avg_expected_benefit": 82.0, "density_safe_recommendations": 1},
+                    "recommendations": [{"source_url": "https://alpha.example/guide", "source_title": "Guide", "target_url": alpha_url, "target_title": "AI workflow", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "suggested_anchor": "AI workflow", "expected_benefit_score": 82.0, "priority": "high", "current_target_in_degree": 0, "after_target_in_degree": 1, "score_components": {"authority_flow": 90, "relevance": 80, "opportunity": 70, "internal_link_deficit": 90}}],
+                    "patterns": [{"pattern": "guide -> blog", "count": 1}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -234,6 +239,11 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
                     "weak_or_harmful_links": [],
                     "edit_warnings": [],
                 },
+                "link_addition_simulation": {
+                    "summary": {"total_recommendations": 1, "high_priority": 0, "medium_priority": 1, "avg_expected_benefit": 55.0, "density_safe_recommendations": 1},
+                    "recommendations": [{"source_url": "https://beta.example/guide", "source_title": "Guide", "target_url": beta_url, "target_title": "Automation tool", "paragraph_index": 1, "paragraph_excerpt": "Useful paragraph", "suggested_anchor": "Automation tool", "expected_benefit_score": 55.0, "priority": "medium", "current_target_in_degree": 5, "after_target_in_degree": 6, "score_components": {"authority_flow": 50, "relevance": 60, "opportunity": 40, "internal_link_deficit": 20}}],
+                    "patterns": [{"pattern": "guide -> blog", "count": 1}],
+                },
             }),
             "ahrefs.json": json.dumps({
                 "top_pages": [
@@ -260,7 +270,9 @@ def test_compare_payload_includes_competitive_opportunity_sections(tmp_path: Pat
     assert payload["authority_demand"]["ranked_orphans"][0]["url"] == alpha_url
     assert payload["traffic_weighted_pagerank"]["underserved"][0]["url"] == alpha_url
     assert payload["link_removal_simulation"]["critical_links"][0]["target_url"] == alpha_url
+    assert payload["link_addition_simulation"]["recommendations"][0]["target_url"] == alpha_url
     assert payload["leaderboard"][0]["critical_internal_links"] == 1
+    assert payload["leaderboard"][0]["high_priority_link_additions"] == 1
     assert payload["leaderboard"][0]["authority_traffic_alignment"] == 0.35
     assert payload["leaderboard"][1]["authority_traffic_alignment"] == 0.9
     assert payload["traffic_readiness"]["weak_high_traffic"][0]["url"] == alpha_url

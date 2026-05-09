@@ -478,6 +478,8 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "authority_without_demand_pages", "label": "Authority without demand", "better": "low", "fmt": "int"},
             {"key": "critical_internal_links", "label": "Critical links", "better": "na", "fmt": "int"},
             {"key": "weak_internal_links", "label": "Weak/harmful links", "better": "low", "fmt": "int"},
+            {"key": "high_priority_link_additions", "label": "High-priority additions", "better": "na", "fmt": "int"},
+            {"key": "avg_link_addition_benefit", "label": "Addition benefit", "better": "high", "fmt": "0.0"},
             {"key": "descriptive_anchor_share", "label": "Descriptive anchors", "better": "high", "fmt": "pct"},
             {"key": "generic_anchor_share", "label": "Generic anchors", "better": "low", "fmt": "pct"},
         ],
@@ -656,6 +658,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     ah_metrics = ah.get("metrics", {}) or {}
     twpr = ((proj.linkgraph or {}).get("traffic_weighted_pagerank") or {}).get("summary", {}) or {}
     removal = ((proj.linkgraph or {}).get("link_removal_simulation") or {}).get("summary", {}) or {}
+    addition = ((proj.linkgraph or {}).get("link_addition_simulation") or {}).get("summary", {}) or {}
     ablocks = (proj.answer_blocks or {}).get("summary", {}) or {}
     ablock_clusters = int(ablocks.get("top_query_clusters", 0) or 0)
     cannibal = (proj.cannibalization or {}).get("summary", {}) or {}
@@ -705,6 +708,8 @@ def _leaderboard_row(proj: _Project) -> dict:
         "critical_internal_links": int(removal.get("critical_links", 0)),
         "weak_internal_links": int(removal.get("irrelevant_links", 0)) + int(removal.get("potentially_harmful_links", 0)),
         "template_navigation_links": int(removal.get("template_navigation_links", 0)),
+        "high_priority_link_additions": int(addition.get("high_priority", 0)),
+        "avg_link_addition_benefit": float(addition.get("avg_expected_benefit", 0.0)),
         # Paragraph link density
         "paragraph_density_median": float(pd_summary.get("median_page_density_per_100w", pd_page_distribution["median"])),
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
@@ -2399,6 +2404,37 @@ def _link_removal_comparison(projects: list[_Project]) -> dict:
     }
 
 
+def _link_addition_comparison(projects: list[_Project]) -> dict:
+    domains = []
+    recommendations: list[dict] = []
+    patterns: dict[str, dict[str, dict]] = defaultdict(dict)
+    for proj in projects:
+        payload = ((proj.linkgraph or {}).get("link_addition_simulation") or {})
+        summary = payload.get("summary", {}) or {}
+        if summary:
+            domains.append({"domain": proj.domain, **summary})
+        for row in payload.get("recommendations") or []:
+            recommendations.append({"domain": proj.domain, **row})
+        for row in payload.get("patterns") or []:
+            pattern = row.get("pattern") or ""
+            if pattern:
+                patterns[pattern][proj.domain] = {"domain": proj.domain, **row}
+    project_domains = [p.domain for p in projects]
+    matrix = []
+    for pattern, values in patterns.items():
+        matrix.append({
+            "pattern": pattern,
+            "domains": [values.get(domain, {"domain": domain, "pattern": pattern, "count": 0}) for domain in project_domains],
+        })
+    recommendations.sort(key=lambda r: _safe_float(r.get("expected_benefit_score")), reverse=True)
+    matrix.sort(key=lambda r: sum(_safe_int(d.get("count")) for d in r["domains"]), reverse=True)
+    return {
+        "domains": domains,
+        "recommendations": recommendations[:400],
+        "patterns": matrix[:100],
+    }
+
+
 def _readiness_payload(projects: list[_Project]) -> dict:
     rows: list[dict] = []
     weak_high_traffic: list[dict] = []
@@ -2587,6 +2623,7 @@ def build_payload(domains: list[str], projects_root: Path) -> dict:
         "authority_demand": _authority_demand_payload(projects),
         "traffic_weighted_pagerank": _traffic_weighted_pagerank_comparison(projects),
         "link_removal_simulation": _link_removal_comparison(projects),
+        "link_addition_simulation": _link_addition_comparison(projects),
         "traffic_readiness": _readiness_payload(projects),
         "link_flows": [
             {"domain": p.domain, **(p.link_flow or {})}

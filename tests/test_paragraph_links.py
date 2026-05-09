@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from site_audit.paragraph_links import recommend
+from site_audit.paragraph_links import build_addition_simulation, recommend, to_payload
 
 
 class CountingEmbedder:
@@ -53,3 +53,45 @@ def test_recommend_trims_candidates_before_anchor_embedding() -> None:
 
     assert len(recs) == 1
     assert embedder.encoded_count <= 120
+
+
+def test_addition_simulation_scores_components_and_density_cap() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="blog"),
+        SimpleNamespace(url="https://example.com/target", title="Target", section="docs"),
+    ]
+    recs = to_payload([
+        SimpleNamespace(
+            source_url=pages[0].url,
+            paragraph_index=2,
+            paragraph_excerpt="Contextual paragraph about target topics.",
+            target_url=pages[1].url,
+            target_title=pages[1].title,
+            fit=0.9,
+            lift=0.2,
+            suggested_anchor="target topics",
+            anchor_confidence=0.8,
+        )
+    ])
+    linkgraph = {
+        "page_link_counts": [
+            {"url": pages[0].url, "pagerank": 0.6, "out_degree": 4},
+            {"url": pages[1].url, "pagerank": 0.1, "in_degree": 1},
+        ],
+        "traffic_weighted_pagerank": {
+            "pages": [
+                {"url": pages[0].url, "weighted_pagerank_percentile": 0.9, "traffic_weighted_pagerank": 0.05, "out_degree": 4},
+                {"url": pages[1].url, "weighted_pagerank_percentile": 0.2, "traffic": 500, "keywords": 10, "authority_traffic_gap": 0.7, "in_degree": 1},
+            ]
+        },
+    }
+
+    payload = build_addition_simulation(recs, pages, linkgraph, paragraph_saturation={(0, 2): 1.5})
+
+    row = payload["recommendations"][0]
+    assert row["expected_benefit_score"] > 70
+    assert row["priority"] == "high"
+    assert row["current_target_in_degree"] == 1
+    assert row["after_target_in_degree"] == 2
+    assert row["score_components"]["authority_flow"] > 0
+    assert row["respects_density_cap"] is True

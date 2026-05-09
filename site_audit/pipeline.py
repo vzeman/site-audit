@@ -103,6 +103,7 @@ from .paragraph_density import compute_rows as compute_paragraph_density_rows
 from .paragraph_density import density_lookup as paragraph_density_lookup
 from .paragraph_density import to_payload as paragraph_density_payload
 from .paragraph_impact import build_paragraph_impact
+from .paragraph_links import build_addition_simulation as build_link_addition_simulation
 from .paragraph_links import recommend as recommend_paragraph_links
 from .paragraph_links import to_payload as paragraph_links_payload
 from .performance import analyze as analyze_performance
@@ -1229,6 +1230,20 @@ def run(config: PipelineConfig) -> dict:
                 removal_summary.get("critical_links", 0),
                 removal_summary.get("irrelevant_links", 0) + removal_summary.get("potentially_harmful_links", 0),
                 removal_summary.get("template_navigation_links", 0),
+            )
+        link_payload["link_addition_simulation"] = build_link_addition_simulation(
+            paragraph_recs_payload,
+            pages,
+            link_payload,
+            paragraph_saturation=paragraph_saturation,
+        )
+        addition_summary = (link_payload.get("link_addition_simulation") or {}).get("summary", {}) or {}
+        if addition_summary.get("status") == "ok":
+            paragraph_recs_payload = (link_payload["link_addition_simulation"].get("recommendations") or paragraph_recs_payload)
+            LOG.info(
+                "  link addition simulation: %d high-priority · %.1f avg expected benefit",
+                addition_summary.get("high_priority", 0),
+                addition_summary.get("avg_expected_benefit", 0.0),
             )
         link_payload["link_flow"] = link_flow_payload(
             link_result,

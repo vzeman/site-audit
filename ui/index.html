@@ -1416,6 +1416,8 @@
           Already-saturated paragraphs (≥ 5 links per 100w) are skipped automatically.
         </p>
       </div>
+      <div id="audit-para-link-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div id="audit-para-link-preview" class="mb-4"></div>
       <div id="audit-para-links" class="text-sm max-h-[36rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -5457,24 +5459,66 @@
 
   function renderParaLinks() {
     const block = document.getElementById('para-links-block');
-    const recs = state.paraLinks || [];
+    const addition = ((state.linkgraph || {}).link_addition_simulation || {});
+    const recs = (addition.recommendations && addition.recommendations.length) ? addition.recommendations : (state.paraLinks || []);
     if (!recs.length) {
       block.style.display = 'none';
       return;
     }
-    const summary = `<div class="text-xs text-gray-500 mb-2">${recs.length} suggestions · sorted by lift (paragraph specificity over page average)</div>`;
+    block.style.display = '';
+    const s = addition.summary || {};
+    const summaryEl = document.getElementById('audit-para-link-summary');
+    if (summaryEl) {
+      summaryEl.innerHTML =
+        card('Recommendations', Number(recs.length || 0).toLocaleString(), 'exact paragraph placements') +
+        card('High priority', Number(s.high_priority || recs.filter(r => r.priority === 'high').length || 0).toLocaleString(), 'authority + opportunity') +
+        card('Avg benefit', Number(s.avg_expected_benefit || 0).toFixed(1), '0-100 simulation score') +
+        card('Density safe', Number(s.density_safe_recommendations || recs.filter(r => r.respects_density_cap !== false).length || 0).toLocaleString(), 'below paragraph cap');
+    }
+    renderParaLinkPreview(recs[0]);
+    const summary = `<div class="text-xs text-gray-500 mb-2">${recs.length} suggestions · sorted by expected benefit when available, then lift</div>`;
     const rows = recs.slice(0, 200).map((r, i) => `
       <div class="py-3 border-b border-gray-100">
         <div class="flex items-center justify-between gap-2 mb-1">
-          <div class="text-xs text-gray-500">#${i + 1} · fit ${r.fit} · lift +${r.lift}</div>
-          <span class="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800">para ${r.paragraph_index}</span>
+          <div class="text-xs text-gray-500">#${i + 1} · benefit ${Number(r.expected_benefit_score || 0).toFixed(1)} · fit ${r.fit} · lift +${r.lift}</div>
+          <span class="text-xs px-2 py-0.5 rounded ${r.priority === 'high' ? 'bg-green-100 text-green-800' : r.priority === 'medium' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}">para ${r.paragraph_index}</span>
         </div>
         <div class="text-xs italic text-gray-600 mb-2">"${escapeHtml(r.paragraph_excerpt)}"</div>
         <div class="text-xs"><span class="text-gray-500">on </span><a class="text-blue-600 hover:underline" href="${escapeHtml(r.source_url)}" target="_blank" rel="noopener">${escapeHtml(r.source_url)}</a></div>
         <div class="text-xs mt-1"><span class="text-gray-500">→ link to </span><a class="text-blue-600 hover:underline font-medium" href="${escapeHtml(r.target_url)}" target="_blank" rel="noopener">${escapeHtml(r.target_title || r.target_url)}</a></div>
         <div class="text-xs mt-1"><span class="text-gray-500">suggested anchor: </span><span class="font-mono bg-yellow-50 px-1 rounded">${escapeHtml(r.suggested_anchor)}</span> <span class="text-gray-400">(confidence ${r.anchor_confidence})</span></div>
+        ${r.score_components ? `<div class="text-[11px] text-gray-500 mt-1">authority ${Number(r.score_components.authority_flow || 0).toFixed(0)} · relevance ${Number(r.score_components.relevance || 0).toFixed(0)} · opportunity ${Number(r.score_components.opportunity || 0).toFixed(0)} · deficit ${Number(r.score_components.internal_link_deficit || 0).toFixed(0)} · target links ${Number(r.current_target_in_degree || 0).toLocaleString()}→${Number(r.after_target_in_degree || 0).toLocaleString()}</div>` : ''}
       </div>`).join('');
     document.getElementById('audit-para-links').innerHTML = summary + rows;
+  }
+
+  function renderParaLinkPreview(rec) {
+    const el = document.getElementById('audit-para-link-preview');
+    if (!el || !rec || !rec.expected_benefit_score) {
+      if (el) el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = `
+      <div class="border border-gray-200 rounded-lg p-3 bg-gray-50">
+        <div class="text-xs text-gray-500 mb-2">Before/after graph preview for the top recommendation</div>
+        <div class="grid md:grid-cols-[1fr_auto_1fr] gap-3 items-center">
+          <div class="bg-white border border-gray-200 rounded p-3">
+            <div class="text-xs text-gray-500 mb-1">Source after adding link</div>
+            <a class="text-sm text-blue-600 hover:underline break-all" href="${escapeHtml(rec.source_url)}" target="_blank" rel="noopener">${escapeHtml(rec.source_title || rec.source_url)}</a>
+            <div class="text-xs text-gray-500 mt-1">outlinks ${Number(rec.source_out_degree || 0).toLocaleString()} -> ${Number(rec.after_source_out_degree || 0).toLocaleString()}</div>
+          </div>
+          <div class="text-center text-xs text-gray-500">
+            <div class="font-mono text-lg text-gray-900">${Number(rec.expected_benefit_score || 0).toFixed(1)}</div>
+            expected benefit<br>
+            <span class="font-mono">${escapeHtml(rec.suggested_anchor || '')}</span>
+          </div>
+          <div class="bg-white border border-gray-200 rounded p-3">
+            <div class="text-xs text-gray-500 mb-1">Target after receiving link</div>
+            <a class="text-sm text-blue-600 hover:underline break-all" href="${escapeHtml(rec.target_url)}" target="_blank" rel="noopener">${escapeHtml(rec.target_title || rec.target_url)}</a>
+            <div class="text-xs text-gray-500 mt-1">inlinks ${Number(rec.current_target_in_degree || 0).toLocaleString()} -> ${Number(rec.after_target_in_degree || 0).toLocaleString()} · est. PR gain ${Number(rec.estimated_pagerank_gain || 0).toFixed(6)}</div>
+          </div>
+        </div>
+      </div>`;
   }
 
   function renderImprovement() {
