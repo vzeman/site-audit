@@ -1,5 +1,9 @@
 # site-audit
 
+For interpreting competitor paragraph gaps, see [SERP Paragraph Gap Analysis](docs/serp-paragraph-gap-analysis.md). It explains how to choose relevant keywords, read missing/partial topics, and turn the report into an editorial action plan.
+
+For section-by-section interpretation of the report UI, see [Report Section Guide](docs/report-sections.md).
+
 Crawl any website, embed every page, and surface near-duplicates,
 outliers, topic clusters, GEO citability, and internal-link
 recommendations on an interactive D3 scatterplot.

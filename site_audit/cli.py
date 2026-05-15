@@ -136,6 +136,16 @@ def _run_command(args: argparse.Namespace) -> int:
         dataforseo_keywords_limit=args.dataforseo_keywords_limit,
         dataforseo_refresh=args.dataforseo_refresh,
         dataforseo_include_clickstream=args.dataforseo_include_clickstream,
+        competitive_auto=args.competitive_auto,
+        competitive_auto_clusters=args.competitive_auto_clusters,
+        competitive_auto_keywords_per_cluster=args.competitive_auto_keywords_per_cluster,
+        competitive_auto_results_per_keyword=args.competitive_auto_results_per_keyword,
+        competitive_auto_min_relevance=args.competitive_auto_min_relevance,
+        competitive_auto_min_position=args.competitive_auto_min_position,
+        competitive_auto_max_position=args.competitive_auto_max_position,
+        competitive_auto_product_seeds=args.competitive_auto_product_seed,
+        competitive_auto_allow_nonlatin=args.competitive_auto_allow_nonlatin,
+        competitive_auto_refresh_serp=args.competitive_auto_refresh_serp,
     )
     summary = run(config)
     if summary.get("pages", 0) == 0:
@@ -410,6 +420,26 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-snapshot", action="store_true",
                        help="Do not copy this finished report into projects/<domain>/snapshots/")
     run_p.add_argument("--competitive", default=None, help="TSV file with `query<TAB>competitor_url` per line")
+    run_p.add_argument("--competitive-auto", action="store_true",
+                       help="Auto-select relevant search clusters and fetch top SERP URLs from DataForSEO for paragraph-gap analysis")
+    run_p.add_argument("--competitive-auto-clusters", type=int, default=3,
+                       help="Max relevant keyword clusters to analyze in --competitive-auto mode (default: 3)")
+    run_p.add_argument("--competitive-auto-keywords-per-cluster", type=int, default=1,
+                       help="Max keywords per selected cluster to fetch SERPs for (default: 1)")
+    run_p.add_argument("--competitive-auto-results-per-keyword", type=int, default=5,
+                       help="Top organic SERP URLs per keyword to analyze (default: 5)")
+    run_p.add_argument("--competitive-auto-min-relevance", type=float, default=0.35,
+                       help="Minimum keyword business-relevance score for auto competitive analysis (default: 0.35)")
+    run_p.add_argument("--competitive-auto-min-position", type=int, default=2,
+                       help="Only auto-analyze keywords ranking at this position or worse (default: 2)")
+    run_p.add_argument("--competitive-auto-max-position", type=int, default=20,
+                       help="Only auto-analyze keywords ranking at this position or better (default: 20)")
+    run_p.add_argument("--competitive-auto-product-seed", action="append", default=[],
+                       help="Product/service seed phrase for relevance filtering; repeat for multiple seeds")
+    run_p.add_argument("--competitive-auto-allow-nonlatin", action="store_true",
+                       help="Allow non-Latin keywords in auto competitive selection")
+    run_p.add_argument("--competitive-auto-refresh-serp", action="store_true",
+                       help="Ignore cached DataForSEO SERP snapshots for auto competitive targets")
     run_p.add_argument("--queries-file", default=None, help="Optional file: one target query per line")
     run_p.add_argument("--auto-queries-max", type=int, default=200)
     run_p.add_argument("--coverage-threshold", type=float, default=0.55, help="Min similarity for query→page to count as 'covered'")

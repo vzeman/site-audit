@@ -519,7 +519,7 @@
       </div>
     </div>
 
-    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8">
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="link-addition-block">
       <h3 class="text-lg font-semibold mb-1">Top duplicate pairs (merge candidates)</h3>
       <p class="text-xs text-gray-500 mb-3">
         Page pairs with cosine similarity ≥ 0.92 (default). <strong>Sim ≥ 0.97</strong> = essentially the same page,
@@ -1611,11 +1611,17 @@
     <!-- Competitive analysis -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="competitive-block">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-semibold">Competitor comparison: why they rank, why we don't</h3>
+        <div>
+          <h3 class="text-lg font-semibold">Competitor comparison: why they rank, why we don't</h3>
+          <div class="text-xs text-gray-500">
+            Read the action guide:
+            <a class="text-blue-600 hover:underline" href="https://github.com/vzeman/site-audit/blob/main/docs/serp-paragraph-gap-analysis.md" target="_blank" rel="noopener">SERP paragraph gap analysis</a>
+          </div>
+        </div>
         <span class="text-xs text-gray-500">supply <code>--competitive query.tsv</code> to populate</span>
       </div>
       <div id="audit-competitive" class="text-sm">
-        <div class="text-gray-500">Run with <code>--competitive my_targets.tsv</code> (one <code>query &lt;TAB&gt; competitor_url</code> per line).</div>
+        <div class="text-gray-500">Run with <code>--competitive my_targets.tsv</code> (one <code>query &lt;TAB&gt; competitor_url</code> per line). See <a class="text-blue-600 hover:underline" href="https://github.com/vzeman/site-audit/blob/main/docs/serp-paragraph-gap-analysis.md" target="_blank" rel="noopener">how to choose keywords and act on the gaps</a>.</div>
       </div>
     </div>
 
@@ -1837,6 +1843,24 @@
 <script>
 (function() {
   const basePath = '/data';
+  const REPORT_SECTION_GUIDE_URL = 'https://github.com/vzeman/site-audit/blob/main/docs/report-sections.md';
+  const SECTION_DOC_BLOCKS = [
+    'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
+    'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block',
+    'ahrefs-block', 'best-pages-block', 'paragraph-impact-block', 'weak-paragraphs-block',
+    'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
+    'indexability-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
+    'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
+    'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
+    'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
+    'answerability-block', 'answer-blocks-block', 'cannibalization-block', 'duplicate-fragments-block',
+    'linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block',
+    'hub-bottleneck-block', 'link-removal-block', 'link-addition-block', 'linkbuilding-block',
+    'link-counts-block', 'para-density-block', 'para-links-block', 'wrong-home-block',
+    'para-clusters-block', 'fanout-block', 'competitive-block', 'hits-block', 'depth-block',
+    'cluster-auth-block', 'anchor-block', 'contextual-link-block', 'internal-link-patterns-block',
+    'external-block', 'broken-block'
+  ];
 
   function readInlined(id) {
     const el = document.getElementById(id);
@@ -1895,6 +1919,22 @@
         <div class="text-xs text-gray-500">${label}</div>
         ${hint ? `<div class="text-xs ${hintClass} mt-0.5">${hint}</div>` : ''}
       </div>`;
+  }
+
+  function addSectionDocLinks() {
+    SECTION_DOC_BLOCKS.forEach(id => {
+      const block = document.getElementById(id);
+      if (!block || block.querySelector('.section-doc-link')) return;
+      const heading = block.querySelector('h3');
+      if (!heading) return;
+      const link = document.createElement('a');
+      link.className = 'section-doc-link inline-flex items-center text-xs text-blue-600 hover:underline ml-2 align-middle';
+      link.href = `${REPORT_SECTION_GUIDE_URL}#${id}`;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'How to use this section';
+      heading.appendChild(link);
+    });
   }
 
   async function boot() {
@@ -2189,6 +2229,7 @@
       renderParaClusters();
       renderFanout('all');
       renderCompetitive();
+      addSectionDocLinks();
       wireModeButtons();
       wireDatasetButtons();
       wireSemanticSearchInputs();
@@ -6859,9 +6900,109 @@
 
   function renderCompetitive() {
     const block = document.getElementById('competitive-block');
-    const rows = state.competitive || [];
-    if (!rows.length) return;  // keep the "Run with --competitive…" placeholder
-    document.getElementById('audit-competitive').innerHTML = rows.map(r => {
+    const payload = state.competitive || {};
+    const rows = Array.isArray(payload) ? payload : (payload.comparisons || []);
+    const serpClusters = Array.isArray(payload) ? [] : (payload.serp_clusters || []);
+    const auto = Array.isArray(payload) ? null : (payload.auto || null);
+    if (!rows.length && !serpClusters.length) return;  // keep the "Run with --competitive…" placeholder
+    const autoHtml = auto ? (() => {
+      const autoSummary = auto.summary || {};
+      const selected = (((auto.selection || {}).selected_keywords) || []).slice(0, 8).map(k => `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-1.5">${escapeHtml(k.keyword || '')}<div class="text-gray-500">${escapeHtml(k.cluster || '')}</div></td>
+          <td class="px-2 py-1.5 text-right font-mono">${escapeHtml(String(k.position || 0))}</td>
+          <td class="px-2 py-1.5 text-right font-mono">${Number(k.traffic || 0).toLocaleString()}</td>
+          <td class="px-2 py-1.5 text-right font-mono">${escapeHtml(String(k.relevance || 0))}</td>
+        </tr>`).join('');
+      return `
+        <div class="border border-blue-100 bg-blue-50 rounded p-3 mb-4 text-xs">
+          <div class="font-semibold text-blue-900 mb-1">Auto-selected competitive targets</div>
+          <div class="text-blue-900 mb-2">status ${escapeHtml(auto.status || '')} · selected keywords ${autoSummary.selected_keywords || 0} · SERP targets ${autoSummary.serp_targets || 0} · clusters ${autoSummary.clusters || 0}</div>
+          ${selected ? `<div class="overflow-x-auto"><table class="min-w-full bg-white border border-blue-100"><thead class="text-gray-500"><tr><th class="px-2 py-1.5 text-left">Keyword</th><th class="px-2 py-1.5 text-right">Pos</th><th class="px-2 py-1.5 text-right">Traffic</th><th class="px-2 py-1.5 text-right">Fit</th></tr></thead><tbody>${selected}</tbody></table></div>` : ''}
+        </div>`;
+    })() : '';
+    const summary = payload.summary ? `
+      <div class="text-xs text-gray-600 mb-3">
+        Use this as a content brief, not a causal ranking proof. Confirm the target URL first, then add relevant missing topics, improve partial topics, and ignore irrelevant competitor topics.
+        <a class="text-blue-600 hover:underline" href="https://github.com/vzeman/site-audit/blob/main/docs/serp-paragraph-gap-analysis.md" target="_blank" rel="noopener">Open the action guide</a>.
+      </div>
+      <div class="grid md:grid-cols-4 gap-2 mb-4">
+        ${[
+          ['Queries', payload.summary.queries || 0],
+          ['Competitor URLs', payload.summary.competitor_urls || 0],
+          ['Critical gaps', payload.summary.critical_missing_topics || 0],
+          ['High-priority topics', payload.summary.high_priority_topics || 0],
+        ].map(([label, value]) => `<div class="border border-gray-200 rounded p-2"><div class="text-[11px] uppercase text-gray-500">${label}</div><div class="text-lg font-semibold">${value}</div></div>`).join('')}
+      </div>` : '';
+    const serpHtml = serpClusters.map(c => {
+      const s = c.summary || {};
+      const competitorUrls = Array.from(new Set((c.topics || []).flatMap(t => t.competitor_urls || []))).slice(0, 5);
+      const coverageClass = (coverage) => {
+        if (coverage === 'missing') return 'bg-red-100 text-red-800 border-red-200';
+        if (coverage === 'partial') return 'bg-amber-100 text-amber-800 border-amber-200';
+        if (coverage === 'covered') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+      };
+      const matrixRows = (c.topics || []).slice(0, 10).map(t => {
+        const seen = new Set(t.competitor_urls || []);
+        const cells = competitorUrls.map((url, idx) => `
+          <td class="px-1 py-1 text-center">
+            <span title="${escapeHtml(url)}" class="inline-block w-3 h-3 rounded-sm ${seen.has(url) ? 'bg-blue-600' : 'bg-gray-200'}"></span>
+          </td>`).join('');
+        const prevalence = Math.round(Number(t.competitor_prevalence || 0) * 100);
+        return `
+          <tr class="border-t border-gray-100">
+            <td class="px-2 py-1.5 align-top">
+              <div class="font-medium text-gray-900">${escapeHtml(t.label || '')}</div>
+              <div class="h-1.5 bg-gray-100 rounded mt-1 overflow-hidden"><div class="h-full bg-blue-500" style="width:${prevalence}%"></div></div>
+            </td>
+            <td class="px-2 py-1.5 align-top"><span class="inline-block border rounded px-1.5 py-0.5 ${coverageClass(t.coverage)}">${escapeHtml(t.coverage || '')}</span></td>
+            <td class="px-2 py-1.5 align-top text-right font-mono">${escapeHtml(String(t.our_best_similarity || 0))}</td>
+            ${cells}
+          </tr>`;
+      }).join('');
+      const matrix = matrixRows ? `
+        <div class="mt-3 overflow-x-auto">
+          <div class="text-xs font-semibold mb-1">Topic coverage matrix</div>
+          <table class="min-w-full text-xs border border-gray-200">
+            <thead class="bg-gray-50 text-gray-600">
+              <tr>
+                <th class="px-2 py-1.5 text-left">SERP topic / prevalence</th>
+                <th class="px-2 py-1.5 text-left">You</th>
+                <th class="px-2 py-1.5 text-right">Sim</th>
+                ${competitorUrls.map((url, idx) => `<th class="px-1 py-1.5 text-center" title="${escapeHtml(url)}">C${idx + 1}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>${matrixRows}</tbody>
+          </table>
+          <div class="text-[11px] text-gray-500 mt-1">Blue competitor cells mean that URL contains the topic. Red/amber/green shows whether your selected page is missing, partial, or covered.</div>
+        </div>` : '';
+      const topics = (c.topics || []).filter(t => t.coverage !== 'covered').slice(0, 8).map(t => {
+        const examples = (t.examples || []).slice(0, 2).map(ex => `
+          <div class="text-xs text-gray-700 border-l-2 border-gray-200 pl-2 mt-1">
+            <a class="text-blue-600 hover:underline" href="${escapeHtml(ex.url || '#')}" target="_blank" rel="noopener">${escapeHtml(ex.title || ex.url || '')}</a>
+            ${ex.rank ? `<span class="text-gray-500"> · rank ${escapeHtml(String(ex.rank))}</span>` : ''}
+            <div class="italic">"${escapeHtml(ex.paragraph || '')}"</div>
+          </div>`).join('');
+        return `
+          <li class="mb-2">
+            <div><strong>${escapeHtml(t.label || '')}</strong> <span class="text-gray-500">${escapeHtml(t.coverage || '')} · ${escapeHtml(t.priority || '')} · seen on ${escapeHtml(String(t.competitor_coverage || 0))}/${escapeHtml(String(c.competitors || 0))} competitors · our sim ${escapeHtml(String(t.our_best_similarity || 0))}</span></div>
+            ${t.our_best_paragraph ? `<div class="text-xs text-gray-500">closest paragraph: "${escapeHtml(t.our_best_paragraph)}"</div>` : ''}
+            ${examples}
+          </li>`;
+      }).join('');
+      const offIntent = (c.off_intent_paragraphs || []).slice(0, 3).map(p => `
+        <li><span class="text-gray-500">sim ${escapeHtml(String(p.similarity_to_serp_topics || 0))}</span> "${escapeHtml(p.paragraph || '')}"</li>`).join('');
+      return `
+        <div class="py-4 border-b border-gray-100">
+          <div class="font-semibold">${escapeHtml(c.cluster || c.query || '')}</div>
+          <div class="text-xs text-gray-700 mb-2">query: ${escapeHtml(c.query || '')} · our page: <a class="text-blue-600 hover:underline" href="${escapeHtml(c.our_url || '#')}" target="_blank" rel="noopener">${escapeHtml(c.our_title || c.our_url || '')}</a> · topics ${s.topics || 0}, missing ${s.missing || 0}, partial ${s.partial || 0}</div>
+          ${matrix}
+          ${topics ? `<ul class="list-disc list-inside text-xs space-y-1">${topics}</ul>` : '<div class="text-xs text-gray-500">No missing or weak SERP topics found.</div>'}
+          ${offIntent ? `<div class="text-xs font-semibold mt-3 mb-1">Possible off-intent paragraphs:</div><ul class="list-disc list-inside text-xs text-gray-700">${offIntent}</ul>` : ''}
+        </div>`;
+    }).join('');
+    const legacyHtml = rows.map(r => {
       if (r.error) {
         return `<div class="py-2 border-b border-gray-100">
           <div class="font-medium">${escapeHtml(r.query)}</div>
@@ -6884,6 +7025,12 @@
           ${topics ? `<div class="text-xs font-semibold mt-3 mb-1">Sub-topics they cover, we don't:</div><ul class="list-disc list-inside text-xs space-y-1">${topics}</ul>` : ''}
         </div>`;
     }).join('');
+    document.getElementById('audit-competitive').innerHTML = `
+      ${summary}
+      ${autoHtml}
+      ${serpHtml ? `<div class="text-sm font-semibold mb-1">SERP paragraph gap model</div>${serpHtml}` : ''}
+      ${legacyHtml ? `<div class="text-sm font-semibold mt-4 mb-1">Individual competitor comparisons</div>${legacyHtml}` : ''}
+    `;
   }
 
   boot();

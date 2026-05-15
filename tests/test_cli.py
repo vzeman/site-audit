@@ -58,6 +58,25 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
             "--no-trust-signals",
             "--no-conversion-balance",
             "--no-snapshot",
+            "--competitive-auto",
+            "--competitive-auto-clusters",
+            "5",
+            "--competitive-auto-keywords-per-cluster",
+            "2",
+            "--competitive-auto-results-per-keyword",
+            "4",
+            "--competitive-auto-min-relevance",
+            "0.42",
+            "--competitive-auto-min-position",
+            "3",
+            "--competitive-auto-max-position",
+            "15",
+            "--competitive-auto-product-seed",
+            "AI workflow automation",
+            "--competitive-auto-product-seed",
+            "AI agents",
+            "--competitive-auto-allow-nonlatin",
+            "--competitive-auto-refresh-serp",
         ]
     )
 
@@ -94,6 +113,16 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.no_trust_signals is True
     assert args.no_conversion_balance is True
     assert args.no_snapshot is True
+    assert args.competitive_auto is True
+    assert args.competitive_auto_clusters == 5
+    assert args.competitive_auto_keywords_per_cluster == 2
+    assert args.competitive_auto_results_per_keyword == 4
+    assert args.competitive_auto_min_relevance == 0.42
+    assert args.competitive_auto_min_position == 3
+    assert args.competitive_auto_max_position == 15
+    assert args.competitive_auto_product_seed == ["AI workflow automation", "AI agents"]
+    assert args.competitive_auto_allow_nonlatin is True
+    assert args.competitive_auto_refresh_serp is True
 
 
 def test_history_parser_accepts_snapshot_and_compare_commands() -> None:
