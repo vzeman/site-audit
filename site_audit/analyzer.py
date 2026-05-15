@@ -330,8 +330,33 @@ def find_near_duplicates(
     return pairs
 
 
+def _url_dedup_key(url: str) -> str:
+    """Normalise a URL to a canonical form used only for deduplication.
+
+    Strips scheme differences (http vs https) and the www. subdomain so that
+    redirect variants of the same page collapse to one key. The original URL
+    is kept intact on the PageInfo object.
+    """
+    from urllib.parse import urlparse, urlunparse
+    try:
+        p = urlparse(url)
+        host = p.netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        # Normalise scheme to https and drop default ports
+        normalised = urlunparse(("https", host, p.path, p.params, p.query, ""))
+        return normalised.rstrip("/") or "/"
+    except Exception:
+        return url
+
+
 def deduplicate_pages_by_url(pages, embeddings: np.ndarray):
     """Drop rows where the same URL appears twice (e.g. from redirect collapses).
+
+    Compares URLs after normalising scheme and www-prefix so that
+    ``http://www.example.com/page`` and ``https://example.com/page`` are
+    treated as the same page. The canonical URL (the one seen first, which
+    for live fetches is always the redirect destination) is kept.
 
     Returns ``(unique_pages, unique_embeddings, kept_indices)`` so callers
     can also filter associated structures (paragraphs, outlinks).
@@ -339,9 +364,10 @@ def deduplicate_pages_by_url(pages, embeddings: np.ndarray):
     seen: dict[str, int] = {}
     kept: list[int] = []
     for i, p in enumerate(pages):
-        if p.url in seen:
+        key = _url_dedup_key(p.url)
+        if key in seen:
             continue
-        seen[p.url] = i
+        seen[key] = i
         kept.append(i)
     if len(kept) == len(pages):
         return pages, embeddings, kept
