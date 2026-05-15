@@ -264,7 +264,7 @@ def write_html_report(
     title_mismatch: Optional[list] = None,
     wrong_home: Optional[list] = None,
     page_improvement: Optional[list] = None,
-    competitive: Optional[list] = None,
+    competitive: Optional[dict | list] = None,
     recommendations: Optional[dict] = None,
     paragraph_density: Optional[dict] = None,
     header_analysis: Optional[dict] = None,

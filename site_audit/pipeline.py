@@ -44,9 +44,10 @@ from .cannibalization import build_cannibalization
 from .duplicate_fragments import build_duplicate_fragments
 from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .competitive_analysis import (
-    compare_one as compare_competitor,
-    load_competitive_pairs,
-    to_payload as competitive_payload,
+    CompetitiveAutoConfig,
+    build_auto_competitive_targets,
+    compare_serp_targets,
+    load_competitive_targets,
 )
 from .content_quality import (
     improvement_payload,
@@ -198,6 +199,16 @@ class PipelineConfig:
     paragraph_scatter_sample: int = 5000
     paragraph_num_clusters: int = 60
     competitive_pairs_file: Optional[Path] = None
+    competitive_auto: bool = False
+    competitive_auto_clusters: int = 3
+    competitive_auto_keywords_per_cluster: int = 1
+    competitive_auto_results_per_keyword: int = 5
+    competitive_auto_min_relevance: float = 0.35
+    competitive_auto_min_position: int = 2
+    competitive_auto_max_position: int = 20
+    competitive_auto_product_seeds: list[str] = field(default_factory=list)
+    competitive_auto_allow_nonlatin: bool = False
+    competitive_auto_refresh_serp: bool = False
     queries_file: Optional[Path] = None
     auto_queries_max: int = 200
     coverage_threshold: float = 0.55
@@ -777,23 +788,7 @@ def run(config: PipelineConfig) -> dict:
             len(page_improvement_data),
         )
 
-    # 11e) Competitive analysis (optional, takes a query/url file)
-    competitive_data: list[dict] = []
-    if config.competitive_pairs_file and config.competitive_pairs_file.is_file():
-        pairs = load_competitive_pairs(config.competitive_pairs_file)
-        if pairs:
-            LOG.info("  competitive: comparing against %d competitor URLs", len(pairs))
-            comparisons = []
-            for q, url in pairs:
-                cmp_result = compare_competitor(
-                    q, url, pages, embeddings, paragraph_records,
-                    extracted_pages, embedder, http_cache,
-                    user_agent=crawl_config.user_agent,
-                )
-                comparisons.append(cmp_result)
-            competitive_data = competitive_payload(comparisons)
-
-    # 11.f) Linkbuilding overview — site-level link health, anchor
+    # 11e) Linkbuilding overview — site-level link health, anchor
     # quality audit, and a UMAP scatter of the most-used anchor texts.
     linkbuilding_data: dict = {}
     if pages:
@@ -814,7 +809,7 @@ def run(config: PipelineConfig) -> dict:
             s.get("image_links_no_alt", 0),
         )
 
-    # 11.g) Organic search enrichment. Cache-first by default. GSC is the
+    # 11.f) Organic search enrichment. Cache-first by default. GSC is the
     # preferred first-party provider in auto mode; Ahrefs/DataForSEO remain
     # fallback proxy providers when GSC is unavailable.
     ahrefs_data: dict = {}
@@ -946,6 +941,61 @@ def run(config: PipelineConfig) -> dict:
             )
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
+
+    competitive_data: dict = {}
+    competitive_targets = []
+    competitive_auto_meta: dict = {}
+    if config.competitive_pairs_file and config.competitive_pairs_file.is_file():
+        competitive_targets.extend(load_competitive_targets(config.competitive_pairs_file))
+    if config.competitive_auto:
+        auto_config = CompetitiveAutoConfig(
+            enabled=True,
+            max_clusters=config.competitive_auto_clusters,
+            keywords_per_cluster=config.competitive_auto_keywords_per_cluster,
+            results_per_keyword=config.competitive_auto_results_per_keyword,
+            min_position=config.competitive_auto_min_position,
+            max_position=config.competitive_auto_max_position,
+            min_relevance=config.competitive_auto_min_relevance,
+            product_seeds=config.competitive_auto_product_seeds,
+            allow_nonlatin=config.competitive_auto_allow_nonlatin,
+            refresh_serp=config.competitive_auto_refresh_serp,
+            location_code=config.dataforseo_location_code,
+            location_name=config.dataforseo_location_name,
+            language_code=config.dataforseo_language_code,
+            language_name=config.dataforseo_language_name,
+        )
+        auto_targets, competitive_auto_meta = build_auto_competitive_targets(
+            host,
+            ahrefs_data,
+            pages,
+            embedder,
+            cache_dir,
+            auto_config,
+        )
+        competitive_targets.extend(auto_targets)
+        auto_summary = competitive_auto_meta.get("summary") or {}
+        LOG.info(
+            "  competitive auto: %s · %d clusters · %d SERP targets",
+            competitive_auto_meta.get("status", "unknown"),
+            auto_summary.get("clusters", 0),
+            auto_summary.get("serp_targets", 0),
+        )
+    if competitive_targets:
+        LOG.info("  competitive: comparing against %d competitor URLs", len(competitive_targets))
+        competitive_data = compare_serp_targets(
+            competitive_targets, pages, embeddings, paragraph_records,
+            extracted_pages, embedder, http_cache,
+            user_agent=crawl_config.user_agent,
+        )
+        if competitive_auto_meta:
+            competitive_data["auto"] = competitive_auto_meta
+    elif competitive_auto_meta:
+        competitive_data = {
+            "summary": {"queries": 0, "competitor_urls": 0, "serp_clusters": 0},
+            "comparisons": [],
+            "serp_clusters": [],
+            "auto": competitive_auto_meta,
+        }
 
     structured_data_data = structured_data_payload(
         analyze_structured_data(extracted_pages, search_payload=ahrefs_data)

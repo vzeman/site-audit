@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +43,18 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _copy_report_docs(output_dir: Path) -> None:
+    root = Path(__file__).resolve().parent.parent
+    docs = {
+        root / "docs" / "serp-paragraph-gap-analysis.md": output_dir / "serp-paragraph-gap-analysis.md",
+        root / "docs" / "report-sections.md": output_dir / "report-sections.md",
+    }
+    for source, target in docs.items():
+        if source.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
 
 
 def write_site_metrics(path: Path, result: AuditResult, model_name: str, domain: str) -> None:
@@ -298,7 +311,7 @@ def write_all(
     title_mismatch: Optional[list] = None,
     wrong_home: Optional[list] = None,
     page_improvement: Optional[list] = None,
-    competitive: Optional[list] = None,
+    competitive: Optional[dict | list] = None,
     recommendations: Optional[dict] = None,
     paragraph_density: Optional[dict] = None,
     header_analysis: Optional[dict] = None,
@@ -321,6 +334,7 @@ def write_all(
     history_snapshot: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _copy_report_docs(output_dir)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
     write_section_report(output_dir / "section_report.json", result)
     write_page_drift(output_dir / "page_drift.csv", result)
