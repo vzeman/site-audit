@@ -609,7 +609,7 @@ class Crawler:
                         xrt = (v or "").lower()
                         break
                 return FetchResult(
-                    url=url,
+                    url=cached.canonical_url or url,
                     status=cached.status,
                     body=self._prepare_html_body(cached.text),
                     content_type=cached_content_type,
@@ -633,9 +633,11 @@ class Crawler:
             self.cache.put(final_url, r.status_code, dict(r.headers), body_bytes)
             # Also cache under the original request URL when it differs
             # (e.g. apex → www redirect) so a future fetch of the same
-            # request URL hits cache directly.
+            # request URL hits cache directly. Store canonical_url so the
+            # cache hit returns the same URL as a live fetch would.
             if url != final_url:
-                self.cache.put(url, r.status_code, dict(r.headers), body_bytes)
+                self.cache.put(url, r.status_code, dict(r.headers), body_bytes,
+                               canonical_url=final_url)
 
         if "html" not in ctype:
             return None

@@ -45,10 +45,14 @@ CREATE TABLE IF NOT EXISTS responses (
     fetched_at REAL NOT NULL,
     etag TEXT,
     last_modified TEXT,
-    content_type TEXT
+    content_type TEXT,
+    canonical_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_responses_fetched ON responses(fetched_at);
 """
+
+# Migration: add canonical_url to databases created before this column existed.
+_HTTP_MIGRATION = "ALTER TABLE responses ADD COLUMN canonical_url TEXT"
 
 
 @dataclass
@@ -61,6 +65,7 @@ class CachedResponse:
     etag: Optional[str]
     last_modified: Optional[str]
     content_type: Optional[str]
+    canonical_url: Optional[str] = None
 
     @property
     def text(self) -> str:
@@ -83,6 +88,10 @@ class HttpCache:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_HTTP_SCHEMA)
+            try:
+                conn.execute(_HTTP_MIGRATION)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -96,7 +105,8 @@ class HttpCache:
     def get(self, url: str) -> Optional[CachedResponse]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT url, status, headers, body, fetched_at, etag, last_modified, content_type "
+                "SELECT url, status, headers, body, fetched_at, etag, last_modified, "
+                "content_type, canonical_url "
                 "FROM responses WHERE url = ?",
                 (url,),
             ).fetchone()
@@ -111,6 +121,7 @@ class HttpCache:
             etag=row[5],
             last_modified=row[6],
             content_type=row[7],
+            canonical_url=row[8],
         )
 
     def put(
@@ -119,6 +130,7 @@ class HttpCache:
         status: int,
         headers: dict,
         body: bytes,
+        canonical_url: Optional[str] = None,
     ) -> None:
         etag = headers.get("ETag") or headers.get("etag")
         last_modified = headers.get("Last-Modified") or headers.get("last-modified")
@@ -126,8 +138,9 @@ class HttpCache:
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO responses "
-                "(url, status, headers, body, fetched_at, etag, last_modified, content_type) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(url, status, headers, body, fetched_at, etag, last_modified, "
+                "content_type, canonical_url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     int(status),
@@ -137,6 +150,7 @@ class HttpCache:
                     etag,
                     last_modified,
                     content_type,
+                    canonical_url,
                 ),
             )
 
