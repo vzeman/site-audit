@@ -55,6 +55,17 @@ class Embedder:
         self._model = SentenceTransformer(
             self.model_name, trust_remote_code=True, device=device
         )
+        # On macOS (Apple Silicon), the gte-multilingual-base model's
+        # position_ids buffer (persistent=False) appears to contain garbage
+        # memory after loading rather than the expected arange values.
+        # Reinitializing it here works around the issue.
+        import torch as _torch
+        _am = self._model[0].auto_model
+        _am.embeddings.register_buffer(
+            "position_ids",
+            _torch.arange(_am.config.max_position_embeddings, dtype=_torch.long),
+            persistent=False,
+        )
 
     def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
         if not texts:
