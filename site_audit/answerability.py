@@ -58,8 +58,11 @@ def score_page(page: ExtractedPage) -> AnswerabilityScore:
     elif schema_types & _STRUCTURED_TYPES:
         breakdown["structured_schema"] = 1.5
         flags.append(f"structured schema: {sorted(schema_types & _STRUCTURED_TYPES)[0]}")
+    elif schema_types:
+        other = ", ".join(sorted(schema_types)[:3])
+        flags.append(f"schema present ({other}) — consider adding Article/FAQ/HowTo")
     else:
-        flags.append("no Article/FAQ/HowTo schema")
+        flags.append("no schema markup")
 
     q_h = _question_heading_count(page)
     if q_h >= 3:
