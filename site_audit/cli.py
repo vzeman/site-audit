@@ -262,6 +262,8 @@ def _settings_command(args: argparse.Namespace) -> int:
         env_file=Path(args.env_file),
         host=args.host,
         port=args.port,
+        projects_root=Path(args.projects_root),
+        ui_dir=Path(args.ui_dir) if args.ui_dir else None,
     )
     return 0
 
@@ -513,6 +515,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     settings_p = sub.add_parser("settings", help="Open a local UI for editing .env-backed defaults")
     settings_p.add_argument("--env-file", default=".env", help="Local env file to edit (default: .env)")
+    settings_p.add_argument("--projects-root", default="projects", help="Projects directory for report/comparison links")
+    settings_p.add_argument("--ui-dir", default=None, help="UI assets directory for report rendering")
     settings_p.add_argument("--host", default="127.0.0.1")
     settings_p.add_argument("--port", type=int, default=8780)
     settings_p.set_defaults(func=_settings_command)

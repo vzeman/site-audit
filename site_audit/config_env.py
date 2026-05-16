@@ -87,6 +87,8 @@ def apply_env_defaults(args: argparse.Namespace, parser: argparse.ArgumentParser
         raw = _first_env(env_names(command, action.dest))
         if raw is None:
             continue
+        if raw == "":
+            continue
         setattr(args, action.dest, _coerce_value(raw, action))
 
 

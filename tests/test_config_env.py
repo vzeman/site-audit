@@ -2,7 +2,7 @@ from pathlib import Path
 
 from site_audit.cli import build_parser
 from site_audit.config_env import apply_env_defaults, update_env_file
-from site_audit.settings_ui import _schema
+from site_audit.settings_ui import _render_home, _render_reports_page, _schema
 
 
 def test_env_defaults_apply_to_run_options(monkeypatch) -> None:
@@ -31,6 +31,16 @@ def test_cli_options_override_env_defaults(monkeypatch) -> None:
 
     assert args.domain == "cli.com"
     assert args.max_pages == 50
+
+
+def test_blank_env_values_do_not_override_defaults(monkeypatch) -> None:
+    parser = build_parser()
+    args = parser.parse_args(["run"])
+    monkeypatch.setenv("SITE_AUDIT_RUN_SITEMAP_LASTMOD_WITHIN_DAYS", "")
+
+    apply_env_defaults(args, parser, ["run"])
+
+    assert args.sitemap_lastmod_within_days is None
 
 
 def test_update_env_file_preserves_unrelated_lines(tmp_path: Path) -> None:
@@ -70,3 +80,28 @@ def test_settings_schema_includes_field_explanations() -> None:
     assert "without logging in" in ads["why"]
     assert fallback["what"]
     assert fallback["example"]
+
+
+def test_settings_home_links_to_reports_comparisons_and_settings(tmp_path: Path) -> None:
+    (tmp_path / "example.com" / "report").mkdir(parents=True)
+    (tmp_path / "example.com" / "report" / "site_metrics.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "_compare" / "alpha-vs-beta").mkdir(parents=True)
+    (tmp_path / "_compare" / "alpha-vs-beta" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (tmp_path / "_compare" / "alpha-vs-beta" / "comparison.json").write_text(
+        '{"domains":["alpha.example","beta.example"]}',
+        encoding="utf-8",
+    )
+
+    html = _render_home(tmp_path)
+    reports = _render_reports_page(tmp_path)
+
+    assert 'href="/reports"' in html
+    assert 'href="/comparisons"' in html
+    assert 'href="/settings"' in html
+    assert html.index("Comparisons") < html.index("Domain Reports")
+    assert 'href="/comparisons/alpha-vs-beta/"' in html
+    assert 'href="/reports/example.com/"' in html
+    assert "domain=alpha.example" in html
+    assert "domain=beta.example" in html
+    assert "domain=example.com" in html
+    assert 'href="/reports/example.com/"' in reports

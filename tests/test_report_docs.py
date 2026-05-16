@@ -41,6 +41,19 @@ def test_report_template_has_section_navigation() -> None:
     assert "initReportNavigation();" in template
 
 
+def test_report_template_links_generated_csv_files_in_sections() -> None:
+    template = Path("ui/index.html").read_text(encoding="utf-8")
+
+    for filename in [
+        "page_drift.csv",
+        "outliers.csv",
+        "duplicates.csv",
+        "internal_linkbuilding_recommendations.csv",
+    ]:
+        assert f'data-report-csv="{filename}"' in template
+    assert "document.querySelectorAll('[data-report-csv]')" in template
+
+
 def test_report_section_doc_links_have_matching_blocks_and_anchors() -> None:
     template = Path("ui/index.html").read_text(encoding="utf-8")
     guide = Path("docs/report-sections.md").read_text(encoding="utf-8")

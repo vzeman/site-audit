@@ -39,11 +39,11 @@ SITE_AUDIT_VERBOSE="true"
 
 Boolean values accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and `off`.
 
-Repeated values such as `--sitemap-url`, `--url-exclude`, and `--competitive-auto-product-seed` can be comma-separated or entered one per line in the settings UI.
+Repeated values such as `--sitemap-url`, `--url-exclude`, and `--competitive-auto-product-seed` can be comma-separated or entered one per line in the settings screen.
 
-## Settings UI
+## Local App
 
-Open the local editor:
+Open the local app:
 
 ```bash
 site-audit settings
@@ -55,7 +55,11 @@ Then open:
 http://127.0.0.1:8780/
 ```
 
-The UI shows:
+The top menu links to Reports, Comparisons, and Settings. Reports and
+comparison dashboards are served from the same local app, so you do not
+need a separate viewer just to open generated outputs.
+
+The settings screen shows:
 
 - every CLI setting
 - the `.env` key used for that setting

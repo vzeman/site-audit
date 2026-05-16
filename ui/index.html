@@ -611,6 +611,11 @@
         </div>
       </div>
       <div id="audit-legend" class="mt-4 flex flex-wrap gap-2"></div>
+      <div class="mt-4">
+        <a data-report-csv="page_drift.csv" href="/data/page_drift.csv" target="_blank" rel="noopener" class="inline-flex items-center rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-blue-100">
+          Open page drift CSV
+        </a>
+      </div>
     </div>
 
     <!-- Side panels -->
@@ -634,6 +639,11 @@
           (URL belongs in a different section), or <strong>remove</strong> (thin / off-brand). The biggest wins usually come
           from acting on pages with high PageRank that are also outliers.
         </p>
+        <div class="mb-3">
+          <a data-report-csv="outliers.csv" href="/data/outliers.csv" target="_blank" rel="noopener" class="inline-flex items-center rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100">
+            Open outliers CSV
+          </a>
+        </div>
         <div id="audit-outliers" class="text-sm max-h-96 overflow-y-auto">
           <div class="text-gray-500">Loading…</div>
         </div>
@@ -648,6 +658,11 @@
         <strong>0.92–0.94</strong> = review — strong overlap but not always a duplicate (e.g. product variants).
         Pick the side with higher PageRank as canonical.
       </p>
+      <div class="mb-3">
+        <a data-report-csv="duplicates.csv" href="/data/duplicates.csv" target="_blank" rel="noopener" class="inline-flex items-center rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-blue-100">
+          Open duplicates CSV
+        </a>
+      </div>
       <div id="audit-duplicates" class="text-sm max-h-96 overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
       </div>
@@ -1688,8 +1703,8 @@
       </div>
       <div id="audit-para-link-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
       <div class="mb-4">
-        <a id="internal-linkbuilding-csv-link" href="/data/internal_linkbuilding_recommendations.csv" class="inline-flex items-center rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-sm font-semibold text-orange-800 hover:bg-orange-100">
-          Download internal linkbuilding CSV
+        <a id="internal-linkbuilding-csv-link" data-report-csv="internal_linkbuilding_recommendations.csv" href="/data/internal_linkbuilding_recommendations.csv" target="_blank" rel="noopener" class="inline-flex items-center rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-sm font-semibold text-orange-800 hover:bg-orange-100">
+          Open internal linkbuilding CSV
         </a>
       </div>
       <div id="audit-para-link-preview" class="mb-4"></div>
@@ -1993,8 +2008,10 @@
   const reportPathParts = window.location.pathname.split('/').filter(Boolean);
   const servedReportDomain = reportPathParts[0] === 'reports' ? reportPathParts[1] : '';
   const basePath = servedReportDomain ? `/reports-data/${servedReportDomain}` : '/data';
-  const internalLinkCsv = document.getElementById('internal-linkbuilding-csv-link');
-  if (internalLinkCsv) internalLinkCsv.href = `${basePath}/internal_linkbuilding_recommendations.csv`;
+  document.querySelectorAll('[data-report-csv]').forEach(link => {
+    const filename = link.getAttribute('data-report-csv');
+    if (filename) link.href = `${basePath}/${filename}`;
+  });
   const REPORT_SECTION_GUIDE_URL = 'https://github.com/vzeman/site-audit/blob/main/docs/report-sections.md';
   const REPORT_NAV_SECTIONS = [
     {key: 'overview', label: 'Overview', selectors: ['body > .max-w-7xl > header'], ids: ['audit-metrics-primary', 'audit-metrics-secondary', 'hist-block']},

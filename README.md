@@ -129,7 +129,7 @@ when paid spend is the best signal of product/service relevance. See
 Google Ads API and OAuth setup steps.
 
 Repeated settings can be saved in `.env` with `SITE_AUDIT_*` keys, and a
-local editor is available with `site-audit settings`. See
+local app is available with `site-audit settings`. See
 [Local Configuration](docs/local-configuration.md).
 
 Useful flags:
@@ -165,7 +165,7 @@ semantic space.
 
 **Save settings once, then run shorter commands**
 
-Open the local settings editor:
+Open the local app:
 
 ```bash
 site-audit settings
@@ -177,10 +177,11 @@ Then open:
 http://127.0.0.1:8780/
 ```
 
-The editor writes to `.env`, which is ignored by git. It shows every CLI
-setting, the matching `.env` key, the default value, and credential fields
-for GSC, Ahrefs, DataForSEO, and Google Ads. After saving settings, command
-line flags are optional unless you want to override the saved value.
+The app has menu entries for reports, comparisons, and settings. The
+settings screen writes to `.env`, which is ignored by git. It shows every
+CLI setting, the matching `.env` key, the default value, and credential
+fields for GSC, Ahrefs, DataForSEO, and Google Ads. After saving settings,
+command line flags are optional unless you want to override the saved value.
 
 For example, this `.env`:
 
@@ -332,13 +333,14 @@ Use `.env` when you do not want to retype the same domain, provider,
 credentials, crawl limits, or competitive-analysis settings every run.
 The repo already ignores `.env`, so it should not be committed.
 
-The easiest way to edit settings is:
+The easiest way to open the local app is:
 
 ```bash
 site-audit settings
 ```
 
-Open `http://127.0.0.1:8780/`, edit the fields, and save. The UI writes
+Open `http://127.0.0.1:8780/`. Use the menu to open generated reports,
+comparison dashboards, or the settings form. The settings screen writes
 the matching environment variables into `.env`.
 
 The naming pattern is:
@@ -383,8 +385,9 @@ Full details are in [Local Configuration](docs/local-configuration.md).
 site-audit settings
 ```
 
-Open `http://127.0.0.1:8780/`, fill the settings you use repeatedly,
-and save. The values go into `.env`, which is ignored by git.
+Open `http://127.0.0.1:8780/`, then choose Settings from the menu. Fill
+the settings you use repeatedly and save. The values go into `.env`,
+which is ignored by git.
 
 Useful first settings:
 
@@ -404,7 +407,7 @@ site-audit serve
 
 ### Use Google Ads spend to choose competitive keywords
 
-First configure Google Ads credentials in the settings UI or `.env`.
+First configure Google Ads credentials in the settings screen or `.env`.
 See [Google Ads Keyword Source](docs/google-ads-keyword-source.md) for
 the Google Ads application/OAuth setup.
 
