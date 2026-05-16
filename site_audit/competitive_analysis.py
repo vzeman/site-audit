@@ -334,7 +334,7 @@ def _keyword_relevance(
     if url:
         score += min(0.25, max(0.0, (url_multiplier - 0.8) * 0.6))
         reasons.append("eligible_target_page")
-    traffic = _safe_float(row.get("traffic"))
+    traffic = max(_safe_float(row.get("traffic")), _safe_float(row.get("paid_cost")))
     volume = _safe_float(row.get("volume"))
     if traffic > 0 or volume > 0:
         score += 0.1
@@ -399,7 +399,7 @@ def select_competitive_auto_keywords(
             "keywords": [],
             "matched_urls": {},
         })
-        traffic = _safe_int(row.get("traffic"))
+        traffic = max(_safe_int(row.get("traffic")), int(round(_safe_float(row.get("paid_cost")))))
         volume = _safe_int(row.get("volume"))
         position = _safe_int(row.get("position"))
         opportunity = (traffic or max(1, volume // 100)) * max(1, min(12, position or 10))
@@ -407,6 +407,7 @@ def select_competitive_auto_keywords(
             "keyword": row.get("keyword") or "",
             "position": position,
             "traffic": traffic,
+            "paid_cost": round(_safe_float(row.get("paid_cost")), 2),
             "volume": volume,
             "matched_url": row.get("matched_url") or row.get("url") or "",
             "cluster": cluster,

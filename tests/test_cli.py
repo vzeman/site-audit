@@ -146,3 +146,9 @@ def test_history_parser_accepts_snapshot_and_compare_commands() -> None:
     assert compare_args.after == "after"
     assert compare_args.name == "baseline-vs-after"
     assert compare_args.window_days == 28
+
+
+def test_run_parser_accepts_combined_search_provider() -> None:
+    args = build_parser().parse_args(["run", "example.com", "--search-provider", "all"])
+
+    assert args.search_provider == "all"

@@ -163,11 +163,11 @@ The right question is:
 
 > Which search-intent requirements are common in winning pages, relevant to our product, and missing or weak on our target page?
 
-## Keyword Selection With Ahrefs And DataForSEO
+## Keyword Selection With GSC, Ahrefs, Google Ads, And DataForSEO
 
-Use Ahrefs, GSC, and DataForSEO for different jobs.
+Use Ahrefs, GSC, Google Ads, and DataForSEO for different jobs.
 
-Ahrefs or GSC should decide which keywords deserve analysis:
+Ahrefs or GSC should decide which organic keywords deserve analysis:
 
 - current position
 - impressions or traffic potential
@@ -176,6 +176,22 @@ Ahrefs or GSC should decide which keywords deserve analysis:
 - cluster size
 - ranking gap
 - trend or lost traffic
+
+When you want to compare sources instead of choosing one source, run with
+`--search-provider all`. The report keeps the provider label on every
+keyword and plots all sources in the same semantic space as titles, H1-H4
+headings, paragraphs, and link titles. Use the filters to isolate GSC,
+Google Ads, Ahrefs, DataForSEO, or site entities.
+
+Google Ads should decide which paid search terms deserve analysis when product/service relevance matters more than raw organic traffic:
+
+- highest spend
+- clicks and impressions
+- conversion volume/value where available
+- campaign and ad group context
+- business relevance confirmed by product seeds
+
+See [Google Ads Keyword Source](google-ads-keyword-source.md) for exact setup instructions.
 
 DataForSEO should fetch current SERP URLs after filtering:
 
@@ -187,7 +203,7 @@ DataForSEO should fetch current SERP URLs after filtering:
 
 To avoid wasting API credits:
 
-1. Start from Ahrefs/GSC keywords.
+1. Start from Ahrefs/GSC keywords, or from Google Ads search terms when paid spend is the relevance signal.
 2. Remove irrelevant languages, branded noise, glossary-only terms, and non-business topics.
 3. Keep only product, service, use-case, and comparison clusters.
 4. Require a relevant target URL or planned target URL.
@@ -196,7 +212,7 @@ To avoid wasting API credits:
 
 ## Auto Mode
 
-Manual TSV input is safest when you already know the exact keywords and competitor URLs. Auto mode is useful when you want the audit to choose relevant opportunities from Ahrefs/GSC/DataForSEO search data and then fetch live SERP URLs from DataForSEO.
+Manual TSV input is safest when you already know the exact keywords and competitor URLs. Auto mode is useful when you want the audit to choose relevant opportunities from Ahrefs/GSC/Google Ads/DataForSEO search data and then fetch live SERP URLs from DataForSEO.
 
 Run:
 
@@ -212,7 +228,7 @@ site-audit run flowhunt.io \
 
 Auto mode does this:
 
-1. Reads organic keywords from the selected search provider payload.
+1. Reads keywords from the selected search provider payload. With Google Ads, these are paid search terms sorted by spend.
 2. Rejects non-Latin keywords by default.
 3. Rejects low-intent pages such as author, tag, category, glossary, and localized pages.
 4. Scores business relevance using commercial modifiers, intent labels, page type, demand, and optional product seed phrases.

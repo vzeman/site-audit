@@ -275,7 +275,26 @@ def recommend(
         ))
 
     raw_recs.sort(key=lambda r: (r.lift, r.fit), reverse=True)
-    return raw_recs
+    return _dedupe_same_paragraph_anchor(raw_recs)
+
+
+def _normalize_anchor(anchor: str) -> str:
+    return re.sub(r"\s+", " ", str(anchor or "").strip().lower())
+
+
+def _dedupe_same_paragraph_anchor(recs: list[ParagraphLinkRec]) -> list[ParagraphLinkRec]:
+    out: list[ParagraphLinkRec] = []
+    seen: set[tuple[str, int, str]] = set()
+    for rec in recs:
+        anchor = _normalize_anchor(rec.suggested_anchor)
+        if not anchor:
+            continue
+        key = (rec.source_url, int(rec.paragraph_index), anchor)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(rec)
+    return out
 
 
 def to_payload(recs: Iterable[ParagraphLinkRec]) -> list[dict]:

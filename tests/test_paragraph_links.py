@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from site_audit.paragraph_links import build_addition_simulation, recommend, to_payload
+from site_audit.report import write_internal_linkbuilding_csv
 
 
 class CountingEmbedder:
@@ -55,6 +56,45 @@ def test_recommend_trims_candidates_before_anchor_embedding() -> None:
     assert embedder.encoded_count <= 120
 
 
+def test_recommend_dedupes_same_anchor_in_same_paragraph() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source"),
+        SimpleNamespace(url="https://example.com/target-a", title="Target A"),
+        SimpleNamespace(url="https://example.com/target-b", title="Target B"),
+    ]
+    page_embeddings = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    paragraph_records = [
+        (
+            0,
+            4,
+            "Use the shared anchor phrase when improving internal links.",
+            np.array([0.0, 1.0, 1.0], dtype=np.float32),
+        )
+    ]
+
+    recs = recommend(
+        pages,
+        page_embeddings,
+        paragraph_records,
+        pages_with_outlinks=[],
+        embedder=CountingEmbedder(),
+        similarity_floor=0.1,
+        lift_floor=0.0,
+        top_k_per_page=2,
+        top_k_total=10,
+    )
+
+    keys = {(r.source_url, r.paragraph_index, r.suggested_anchor.lower()) for r in recs}
+    assert len(recs) == len(keys)
+
+
 def test_addition_simulation_scores_components_and_density_cap() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/source", title="Source", section="blog"),
@@ -95,3 +135,95 @@ def test_addition_simulation_scores_components_and_density_cap() -> None:
     assert row["after_target_in_degree"] == 2
     assert row["score_components"]["authority_flow"] > 0
     assert row["respects_density_cap"] is True
+
+
+def test_internal_linkbuilding_csv_uses_exact_anchor_and_destination_description(tmp_path) -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", description="Source desc"),
+        SimpleNamespace(url="https://example.com/target", title="Target", description="Target meta description"),
+    ]
+    result = SimpleNamespace(pages=pages)
+    recs = [{
+        "source_url": pages[0].url,
+        "source_title": pages[0].title,
+        "paragraph_index": 3,
+        "paragraph_excerpt": "Mention target topics here.",
+        "target_url": pages[1].url,
+        "target_title": pages[1].title,
+        "suggested_anchor": "target topics",
+        "priority": "high",
+        "expected_benefit_score": 81.2,
+        "fit": 0.91,
+        "lift": 0.18,
+        "anchor_confidence": 0.8,
+    }]
+
+    rows = write_internal_linkbuilding_csv(tmp_path / "links.csv", result, recs)
+    text = (tmp_path / "links.csv").read_text(encoding="utf-8")
+
+    assert rows[0]["url_where_to_place_link"] == pages[0].url
+    assert rows[0]["exact_keywords_to_link"] == "target topics"
+    assert rows[0]["destination_url"] == pages[1].url
+    assert rows[0]["link_title"] == "Target meta description"
+    assert "exact_keywords_to_link" in text
+
+
+def test_internal_linkbuilding_csv_prefers_paid_converting_anchor_when_present(tmp_path) -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", description=""),
+        SimpleNamespace(url="https://example.com/affiliate-software", title="Affiliate Software", description="Affiliate tracking software for partner programs."),
+    ]
+    result = SimpleNamespace(pages=pages)
+    recs = [{
+        "source_url": pages[0].url,
+        "paragraph_excerpt": "Compare affiliate software before you choose a partner platform.",
+        "target_url": pages[1].url,
+        "target_title": pages[1].title,
+        "suggested_anchor": "partner platform",
+    }]
+    search = {
+        "organic_keywords": [
+            {"provider": "google_ads", "keyword": "affiliate software", "paid_conversions": 12, "paid_conversion_value": 1200, "paid_cost": 300},
+            {"provider": "google_ads", "keyword": "unrelated crm", "paid_conversions": 30, "paid_conversion_value": 3000, "paid_cost": 500},
+        ]
+    }
+
+    rows = write_internal_linkbuilding_csv(tmp_path / "links.csv", result, recs, search)
+
+    assert rows[0]["exact_keywords_to_link"] == "affiliate software"
+    assert rows[0]["anchor_source"] == "paid_converting_keyword"
+    assert rows[0]["paid_conversions"] == 12
+
+
+def test_internal_linkbuilding_csv_dedupes_same_anchor_in_same_paragraph(tmp_path) -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", description=""),
+        SimpleNamespace(url="https://example.com/target-a", title="Target A", description="A"),
+        SimpleNamespace(url="https://example.com/target-b", title="Target B", description="B"),
+    ]
+    result = SimpleNamespace(pages=pages)
+    recs = [
+        {
+            "source_url": pages[0].url,
+            "paragraph_index": 3,
+            "paragraph_excerpt": "Mention target topics here.",
+            "target_url": pages[1].url,
+            "target_title": pages[1].title,
+            "suggested_anchor": "target topics",
+            "expected_benefit_score": 80,
+        },
+        {
+            "source_url": pages[0].url,
+            "paragraph_index": 3,
+            "paragraph_excerpt": "Mention target topics here.",
+            "target_url": pages[2].url,
+            "target_title": pages[2].title,
+            "suggested_anchor": "Target   Topics",
+            "expected_benefit_score": 70,
+        },
+    ]
+
+    rows = write_internal_linkbuilding_csv(tmp_path / "links.csv", result, recs)
+
+    assert len(rows) == 1
+    assert rows[0]["destination_url"] == pages[1].url

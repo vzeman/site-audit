@@ -202,9 +202,126 @@
     svg text {
       fill: var(--audit-muted);
     }
+
+    .report-sidebar {
+      position: fixed;
+      inset: 18px auto 18px 18px;
+      z-index: 50;
+      width: 260px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--audit-line);
+      border-radius: 24px;
+      background: rgba(255, 253, 250, 0.94);
+      box-shadow: var(--audit-shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .report-sidebar-header {
+      padding: 18px 18px 12px;
+      border-bottom: 1px solid var(--audit-line);
+    }
+
+    .report-sidebar-title {
+      display: block;
+      color: var(--audit-text);
+      font-size: 0.82rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .report-sidebar-subtitle {
+      margin-top: 4px;
+      color: var(--audit-muted);
+      font-size: 0.75rem;
+      line-height: 1.3;
+    }
+
+    .report-nav {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      padding: 10px;
+    }
+
+    .report-nav-button {
+      width: 100%;
+      border: 0 !important;
+      border-radius: 14px !important;
+      background: transparent;
+      color: var(--audit-muted);
+      cursor: pointer;
+      padding: 9px 10px;
+      text-align: left;
+      transform: none !important;
+    }
+
+    .report-nav-button:hover {
+      background: var(--audit-panel-soft);
+      color: var(--audit-text);
+      transform: none;
+    }
+
+    .report-nav-button.is-active {
+      background: var(--audit-accent-soft);
+      color: var(--audit-accent-dark);
+      font-weight: 800;
+    }
+
+    .report-nav-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.84rem;
+      line-height: 1.15;
+    }
+
+    .report-section-hidden {
+      display: none !important;
+    }
+
+    .report-summary-note {
+      margin-bottom: 28px;
+    }
+
+    @media (min-width: 1180px) {
+      body > .max-w-7xl {
+        margin-left: 300px !important;
+        margin-right: 28px !important;
+      }
+    }
+
+    @media (max-width: 1179px) {
+      .report-sidebar {
+        position: sticky;
+        inset: 0;
+        top: 0;
+        width: auto;
+        max-height: 42vh;
+        margin: 0;
+        border-radius: 0 0 22px 22px;
+      }
+
+      body > .max-w-7xl {
+        padding-top: 22px !important;
+      }
+    }
   </style>
 </head>
 <body class="bg-white text-gray-900">
+  <aside class="report-sidebar" aria-label="Report sections">
+    <div class="report-sidebar-header">
+      <span class="report-sidebar-title">Report sections</span>
+      <div class="report-sidebar-subtitle">Choose one section to keep the report focused.</div>
+      <a href="/scans" class="report-sidebar-subtitle" style="display:block;margin-top:8px;color:#a04400;font-weight:800;">Scans and reports</a>
+    </div>
+    <nav id="report-nav" class="report-nav"></nav>
+  </aside>
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
     <header class="text-center mb-8">
@@ -448,7 +565,7 @@
     </div>
 
     <!-- Scatterplot -->
-    <div class="bg-gray-50 rounded-lg shadow p-6 mb-6">
+    <div class="bg-gray-50 rounded-lg shadow p-6 mb-6" id="scatter-block">
       <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
         <div>
           <h2 class="text-2xl font-bold">Semantic Scatterplot</h2>
@@ -477,6 +594,10 @@
         <input id="audit-scatter-search" type="search" autocomplete="off" placeholder="Type title, URL, header, paragraph, keyword..."
                class="w-full sm:w-96 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
         <span id="audit-scatter-search-count" class="text-xs text-gray-500"></span>
+        <label class="inline-flex items-center gap-1 text-xs text-gray-600">
+          <input id="audit-cluster-traffic-toggle" type="checkbox" checked class="rounded border-gray-300">
+          Topic traffic bubbles
+        </label>
       </div>
       <div id="audit-scatter-container" class="w-full" style="min-height: 640px;">
         <div class="flex items-center justify-center h-96">
@@ -493,7 +614,7 @@
     </div>
 
     <!-- Side panels -->
-    <div class="grid md:grid-cols-2 gap-6 mb-8">
+    <div class="grid md:grid-cols-2 gap-6 mb-8" id="section-outliers-block">
       <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
         <h3 class="text-lg font-semibold mb-1">Weakest sections (lowest cohesion)</h3>
         <p class="text-xs text-gray-500 mb-3">
@@ -615,6 +736,28 @@
                  class="w-full sm:w-80 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
           <span id="ahrefs-semantic-map-search-count" class="text-xs text-gray-500"></span>
           <span id="ahrefs-semantic-type-toggles" class="text-xs text-gray-600 flex flex-wrap gap-2"></span>
+          <span id="ahrefs-semantic-provider-toggles" class="text-xs text-gray-600 flex flex-wrap gap-2"></span>
+          <span id="ahrefs-semantic-header-toggles" class="text-xs text-gray-600 flex flex-wrap gap-2"></span>
+          <label class="text-xs font-medium text-gray-600 inline-flex items-center gap-1">
+            Keyword size
+            <select id="ahrefs-semantic-size-metric" class="rounded border border-gray-300 px-2 py-1 bg-white">
+              <option value="demand">traffic / volume</option>
+              <option value="paid_cost">cost</option>
+              <option value="paid_conversions">events</option>
+              <option value="paid_conversion_value">sales value</option>
+              <option value="clicks">clicks</option>
+              <option value="impressions">impressions</option>
+            </select>
+          </label>
+          <label class="text-xs font-medium text-gray-600 inline-flex items-center gap-1">
+            Keyword color
+            <select id="ahrefs-semantic-color-metric" class="rounded border border-gray-300 px-2 py-1 bg-white">
+              <option value="provider">provider</option>
+              <option value="paid_cost">cost</option>
+              <option value="paid_conversions">events</option>
+              <option value="paid_conversion_value">sales value</option>
+            </select>
+          </label>
         </div>
         <div id="ahrefs-semantic-map" class="w-full" style="min-height: 560px;"></div>
         <div id="ahrefs-semantic-legend" class="text-xs text-gray-600 mt-2 flex flex-wrap gap-3"></div>
@@ -1544,6 +1687,11 @@
         </p>
       </div>
       <div id="audit-para-link-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="mb-4">
+        <a id="internal-linkbuilding-csv-link" href="/data/internal_linkbuilding_recommendations.csv" class="inline-flex items-center rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-sm font-semibold text-orange-800 hover:bg-orange-100">
+          Download internal linkbuilding CSV
+        </a>
+      </div>
       <div id="audit-para-link-preview" class="mb-4"></div>
       <div id="audit-para-links" class="text-sm max-h-[36rem] overflow-y-auto">
         <div class="text-gray-500">Loading…</div>
@@ -1783,7 +1931,7 @@
       </div>
     </div>
 
-    <div class="bg-blue-50 rounded-lg p-5 text-sm text-gray-700">
+    <div class="bg-blue-50 rounded-lg p-5 text-sm text-gray-700 report-summary-note" id="report-summary-note">
       <strong>How to read:</strong> the scatterplot shows topical clustering of every crawled page. Tightly-packed dots = similar content. Pages in the <em>Drift</em> view colored orange/red are furthest from their section centroid — refocus or removal candidates. The <em>Outliers + duplicates</em> view highlights pages flagged as off-topic (orange) or near-duplicate (red ring). The <em>GEO answer-ability</em> score is a coarse 0–10 estimate of how cite-able a page is to AI answer engines (FAQ schema, question-form headings, statistics, citations).
     </div>
   </div>
@@ -1842,8 +1990,32 @@
 <script type="application/json" id="data-performance-explainer">__PERFORMANCE_EXPLAINER_JSON__</script>
 <script>
 (function() {
-  const basePath = '/data';
+  const reportPathParts = window.location.pathname.split('/').filter(Boolean);
+  const servedReportDomain = reportPathParts[0] === 'reports' ? reportPathParts[1] : '';
+  const basePath = servedReportDomain ? `/reports-data/${servedReportDomain}` : '/data';
+  const internalLinkCsv = document.getElementById('internal-linkbuilding-csv-link');
+  if (internalLinkCsv) internalLinkCsv.href = `${basePath}/internal_linkbuilding_recommendations.csv`;
   const REPORT_SECTION_GUIDE_URL = 'https://github.com/vzeman/site-audit/blob/main/docs/report-sections.md';
+  const REPORT_NAV_SECTIONS = [
+    {key: 'overview', label: 'Overview', selectors: ['body > .max-w-7xl > header'], ids: ['audit-metrics-primary', 'audit-metrics-secondary', 'hist-block']},
+    {key: 'action-plan', label: 'Action plan', ids: ['action-plan-block']},
+    {key: 'editing', label: 'Pages needing edits', ids: ['improvement-block']},
+    {key: 'titles', label: 'Titles and headings', ids: ['title-mismatch-block', 'headers-block', 'heading-impact-block']},
+    {key: 'semantic-map', label: 'Semantic map', ids: ['scatter-block', 'section-outliers-block', 'link-addition-block']},
+    {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'heatmap-block']},
+    {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'coverage-block']},
+    {key: 'paragraphs', label: 'Paragraph analysis', ids: ['paragraph-impact-block', 'weak-paragraphs-block', 'semantic-ablation-block', 'keyword-attribution-block']},
+    {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
+    {key: 'authority', label: 'Authority and trust', ids: ['trust-signals-block', 'entities-block', 'entity-coverage-block', 'information-gain-block']},
+    {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
+    {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
+    {key: 'conversion', label: 'Conversion', ids: ['conversion-balance-block', 'conversion-block']},
+    {key: 'geo', label: 'GEO and snippets', ids: ['answerability-block', 'answer-blocks-block', 'fanout-block']},
+    {key: 'duplication', label: 'Cannibalization', ids: ['cannibalization-block', 'duplicate-fragments-block', 'wrong-home-block', 'para-clusters-block']},
+    {key: 'links', label: 'Internal links', ids: ['linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block', 'hub-bottleneck-block', 'link-removal-block', 'linkbuilding-block', 'link-counts-block', 'para-density-block', 'para-links-block', 'cluster-auth-block', 'anchor-block', 'contextual-link-block', 'internal-link-patterns-block']},
+    {key: 'competitive', label: 'SERP competitors', ids: ['competitive-block']},
+    {key: 'crawl', label: 'Crawl diagnostics', ids: ['hits-block', 'depth-block', 'external-block', 'broken-block', 'report-summary-note']},
+  ];
   const SECTION_DOC_BLOCKS = [
     'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
     'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block',
@@ -1891,6 +2063,7 @@
     sectionColor: null,
     clusterColor: null,
     driftColor: null,
+    auditShowClusterTraffic: true,
   };
 
   function fixUrl(url) {
@@ -1935,6 +2108,68 @@
       link.textContent = 'How to use this section';
       heading.appendChild(link);
     });
+  }
+
+  function reportSectionElements(section) {
+    const fromIds = (section.ids || []).map(id => document.getElementById(id)).filter(Boolean);
+    const fromSelectors = (section.selectors || []).flatMap(selector => Array.from(document.querySelectorAll(selector)));
+    return [...fromSelectors, ...fromIds];
+  }
+
+  function allReportSectionElements() {
+    const seen = new Set();
+    return REPORT_NAV_SECTIONS.flatMap(reportSectionElements).filter(el => {
+      if (!el || seen.has(el)) return false;
+      seen.add(el);
+      return true;
+    });
+  }
+
+  function visibleReportSections() {
+    return REPORT_NAV_SECTIONS.filter(section => {
+      const elements = reportSectionElements(section);
+      return elements.length && elements.some(el => el.style.display !== 'none');
+    });
+  }
+
+  function reportHashKey() {
+    const match = String(window.location.hash || '').match(/^#view=([a-z0-9-]+)$/);
+    return match ? match[1] : '';
+  }
+
+  function showReportSection(key, updateHash = true) {
+    const sections = visibleReportSections();
+    const active = sections.find(section => section.key === key) || sections.find(section => section.key === 'action-plan') || sections[0];
+    if (!active) return;
+    const activeElements = new Set(reportSectionElements(active));
+    allReportSectionElements().forEach(el => {
+      el.classList.toggle('report-section-hidden', !activeElements.has(el));
+    });
+    document.querySelectorAll('.report-nav-button').forEach(button => {
+      const selected = button.dataset.sectionKey === active.key;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-current', selected ? 'page' : 'false');
+    });
+    if (updateHash && reportHashKey() !== active.key) {
+      history.replaceState(null, '', `#view=${active.key}`);
+    }
+    window.scrollTo({top: 0, behavior: 'smooth'});
+    window.setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
+  }
+
+  function initReportNavigation() {
+    const nav = document.getElementById('report-nav');
+    if (!nav) return;
+    const sections = visibleReportSections();
+    nav.innerHTML = sections.map(section => `
+      <button type="button" class="report-nav-button" data-section-key="${escapeHtml(section.key)}">
+        <span class="report-nav-label">${escapeHtml(section.label)}</span>
+      </button>`).join('');
+    nav.querySelectorAll('.report-nav-button').forEach(button => {
+      button.addEventListener('click', () => showReportSection(button.dataset.sectionKey || 'action-plan'));
+    });
+    showReportSection(reportHashKey() || 'action-plan', false);
+    window.addEventListener('hashchange', () => showReportSection(reportHashKey() || 'action-plan', false));
   }
 
   async function boot() {
@@ -2230,6 +2465,7 @@
       renderFanout('all');
       renderCompetitive();
       addSectionDocLinks();
+      initReportNavigation();
       wireModeButtons();
       wireDatasetButtons();
       wireSemanticSearchInputs();
@@ -2899,6 +3135,22 @@
     paragraph: 'Paragraph',
     link_title: 'Link title',
   };
+  const SEARCH_PROVIDER_COLORS = {
+    site: '#64748b',
+    gsc: '#2563eb',
+    google_ads: '#f97316',
+    ahrefs: '#7c3aed',
+    dataforseo: '#059669',
+    search: '#dc2626',
+  };
+  const SEARCH_PROVIDER_LABELS = {
+    site: 'Site',
+    gsc: 'GSC',
+    google_ads: 'Google Ads',
+    ahrefs: 'Ahrefs',
+    dataforseo: 'DataForSEO',
+    search: 'Search',
+  };
 
   function renderAhrefs() {
     const block = document.getElementById('ahrefs-block');
@@ -2914,16 +3166,30 @@
     const metaEl = document.getElementById('ahrefs-meta');
     const providerLabel = summary.provider_label || meta.provider_label || meta.provider || 'Search provider';
     const isGsc = (meta.provider || summary.provider || '').toLowerCase() === 'gsc';
-    metaEl.textContent = `${providerLabel} status: ${meta.status || 'unknown'} · cache ${meta.cache_status || 'unknown'}${params.start_date ? ' · ' + params.start_date + ' to ' + (params.end_date || '') : ''}${params.date ? ' · date ' + params.date : ''}${params.country ? ' · country ' + params.country : ''}${params.location_code ? ' · location ' + params.location_code : ''}${summary.api_cost_usd ? ' · API cost $' + Number(summary.api_cost_usd).toFixed(4) : ''}. ${isGsc ? 'GSC rows are first-party Google clicks, impressions, CTR, and average position.' : 'Traffic and value are provider estimates.'}`;
+    const isCombined = (meta.provider || summary.provider || '').toLowerCase() === 'combined';
+    const isGoogleAds = (meta.provider || summary.provider || '').toLowerCase() === 'google_ads';
+    metaEl.textContent = `${providerLabel} status: ${meta.status || 'unknown'} · cache ${meta.cache_status || 'unknown'}${params.start_date ? ' · ' + params.start_date + ' to ' + (params.end_date || '') : ''}${params.date ? ' · date ' + params.date : ''}${params.country ? ' · country ' + params.country : ''}${params.location_code ? ' · location ' + params.location_code : ''}${summary.api_cost_usd ? ' · API cost $' + Number(summary.api_cost_usd).toFixed(4) : ''}. ${isCombined ? 'Combined view compares first-party, paid, and third-party keyword sources in one semantic map.' : (isGsc ? 'GSC rows are first-party Google clicks, impressions, CTR, and average position.' : 'Traffic and value are provider estimates.')}`;
 
     const metrics = ah.metrics || {};
     const money = v => '$' + Math.round(Number(v || 0)).toLocaleString();
-    document.getElementById('ahrefs-summary').innerHTML = isGsc ? (
+    document.getElementById('ahrefs-summary').innerHTML = isCombined ? (
+      card('Search sources', Number(summary.providers || (meta.providers || []).length || 0).toLocaleString(), 'GSC, Ads, Ahrefs, DataForSEO when enabled') +
+      card('Keywords loaded', Number(summary.organic_keywords || 0).toLocaleString(), `paid spend ${money(summary.paid_cost || 0)}${summary.paid_conversions ? ' · events ' + Number(summary.paid_conversions).toLocaleString() : ''}`) +
+      card('Top pages loaded', Number(summary.top_pages || 0).toLocaleString(), `${Number(summary.matched_top_pages || 0).toLocaleString()} matched to crawl`) +
+      card('Matched traffic', Number(summary.matched_traffic || 0).toLocaleString(), 'matched provider page demand') +
+      card('Source coverage', (summary.provider_breakdown || []).map(p => `${p.label || p.provider}: ${Number(p.keywords || 0).toLocaleString()}`).join(' · ') || 'No provider breakdown')
+    ) : isGsc ? (
       card('GSC clicks', Number(metrics.gsc_clicks || metrics.org_traffic || summary.total_clicks || 0).toLocaleString(), `${providerLabel} selected range`) +
       card('GSC impressions', Number(metrics.gsc_impressions || summary.total_impressions || 0).toLocaleString(), 'Google Search impressions') +
       card('CTR', `${(Number(metrics.gsc_ctr || summary.avg_ctr || 0) * 100).toFixed(2)}%`, 'clicks / impressions') +
       card('Avg position', Number(metrics.gsc_avg_position || summary.avg_position || 0).toFixed(2), 'lower is better') +
       card('Top pages loaded', Number(summary.top_pages || 0).toLocaleString(), `${Number(summary.matched_top_pages || 0).toLocaleString()} matched to crawl`)
+    ) : isGoogleAds ? (
+      card('Paid spend', money(summary.paid_cost || metrics.paid_cost || 0), `${providerLabel} selected range`) +
+      card('Paid terms', Number(summary.organic_keywords || 0).toLocaleString(), `${Number(summary.paid_clicks || 0).toLocaleString()} clicks · ${Number(summary.paid_impressions || 0).toLocaleString()} impressions`) +
+      card('Events', Number(summary.paid_conversions || metrics.paid_conversions || 0).toLocaleString(), `${money(summary.paid_conversion_value || metrics.paid_conversion_value || 0)} sales value`) +
+      card('Cost / event', money(summary.cost_per_conversion || 0), `ROAS ${Number(summary.roas || 0).toFixed(2)}`) +
+      card('Avg CPC', money(summary.avg_cpc || 0), 'cost / click')
     ) : (
       card('Organic traffic', Number(metrics.org_traffic || summary.top_pages_traffic || 0).toLocaleString(), `${providerLabel} monthly estimate`) +
       card('Organic keywords', Number(metrics.org_keywords || summary.organic_keywords || 0).toLocaleString(), `${Number(metrics.org_keywords_1_3 || summary.top3_keywords || 0).toLocaleString()} top 3 · ${Number(metrics.org_keywords_1_10 || summary.top10_keywords || 0).toLocaleString()} top 10`) +
@@ -3124,9 +3390,37 @@
     const container = document.getElementById('ahrefs-semantic-map');
     const legend = document.getElementById('ahrefs-semantic-legend');
     const toggles = document.getElementById('ahrefs-semantic-type-toggles');
+    const providerToggles = document.getElementById('ahrefs-semantic-provider-toggles');
+    const headerToggles = document.getElementById('ahrefs-semantic-header-toggles');
+    const sizeMetricSelect = document.getElementById('ahrefs-semantic-size-metric');
+    const colorMetricSelect = document.getElementById('ahrefs-semantic-color-metric');
     const allPoints = (((state.ahrefs || {}).semantic_map || {}).points || []);
     if (!state.ahrefsEntityTypes) {
       state.ahrefsEntityTypes = Object.fromEntries(Object.keys(AHREFS_ENTITY_COLORS).map(t => [t, true]));
+    }
+    if (!state.ahrefsProviders) {
+      state.ahrefsProviders = {};
+    }
+    if (!state.ahrefsHeaderLevels) {
+      state.ahrefsHeaderLevels = { 1: true, 2: true, 3: true, 4: true };
+    }
+    if (!state.ahrefsKeywordSizeMetric) state.ahrefsKeywordSizeMetric = 'demand';
+    if (!state.ahrefsKeywordColorMetric) state.ahrefsKeywordColorMetric = 'provider';
+    if (sizeMetricSelect && !sizeMetricSelect.dataset.bound) {
+      sizeMetricSelect.dataset.bound = '1';
+      sizeMetricSelect.value = state.ahrefsKeywordSizeMetric;
+      sizeMetricSelect.addEventListener('change', () => {
+        state.ahrefsKeywordSizeMetric = sizeMetricSelect.value || 'demand';
+        renderAhrefsSemanticMap();
+      });
+    }
+    if (colorMetricSelect && !colorMetricSelect.dataset.bound) {
+      colorMetricSelect.dataset.bound = '1';
+      colorMetricSelect.value = state.ahrefsKeywordColorMetric;
+      colorMetricSelect.addEventListener('change', () => {
+        state.ahrefsKeywordColorMetric = colorMetricSelect.value || 'provider';
+        renderAhrefsSemanticMap();
+      });
     }
     if (toggles && !toggles.dataset.ready) {
       toggles.dataset.ready = '1';
@@ -3142,7 +3436,46 @@
         });
       });
     }
-    const points = allPoints.filter(p => state.ahrefsEntityTypes[p.type] !== false);
+    const providers = Array.from(new Set(allPoints.map(p => semanticPointProvider(p)))).filter(Boolean).sort((a, b) => providerLabel(a).localeCompare(providerLabel(b)));
+    providers.forEach(provider => {
+      if (state.ahrefsProviders[provider] == null) state.ahrefsProviders[provider] = true;
+    });
+    if (providerToggles) {
+      const signature = providers.join('|');
+      if (providerToggles.dataset.signature !== signature) {
+        providerToggles.dataset.signature = signature;
+        providerToggles.innerHTML = providers.map(provider => `
+          <label class="inline-flex items-center gap-1">
+            <input type="checkbox" data-provider="${escapeHtml(provider)}" ${state.ahrefsProviders[provider] !== false ? 'checked' : ''} class="rounded border-gray-300">
+            <span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1" style="background:${providerColor(provider)}"></span>${escapeHtml(providerLabel(provider))}</span>
+          </label>`).join('');
+        providerToggles.querySelectorAll('input[type="checkbox"]').forEach(input => {
+          input.addEventListener('change', () => {
+            state.ahrefsProviders[input.dataset.provider] = input.checked;
+            renderAhrefsSemanticMap();
+          });
+        });
+      }
+    }
+    if (headerToggles && !headerToggles.dataset.ready) {
+      headerToggles.dataset.ready = '1';
+      headerToggles.innerHTML = [1, 2, 3, 4].map(level => `
+        <label class="inline-flex items-center gap-1">
+          <input type="checkbox" data-header-level="${level}" ${state.ahrefsHeaderLevels[level] !== false ? 'checked' : ''} class="rounded border-gray-300">
+          <span>H${level}</span>
+        </label>`).join('');
+      headerToggles.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.addEventListener('change', () => {
+          state.ahrefsHeaderLevels[Number(input.dataset.headerLevel)] = input.checked;
+          renderAhrefsSemanticMap();
+        });
+      });
+    }
+    const points = allPoints.filter(p =>
+      state.ahrefsEntityTypes[p.type] !== false &&
+      state.ahrefsProviders[semanticPointProvider(p)] !== false &&
+      headerLevelAllowed(p)
+    );
     container.innerHTML = '';
     legend.innerHTML = '';
     if (!allPoints.length) {
@@ -3150,12 +3483,17 @@
       return;
     }
     if (!points.length) {
-      container.innerHTML = '<div class="text-gray-500 text-center py-12">All entity types are hidden.</div>';
+      container.innerHTML = '<div class="text-gray-500 text-center py-12">All selected entity types, providers, or heading levels are hidden.</div>';
       return;
     }
-    legend.innerHTML = Object.keys(AHREFS_ENTITY_COLORS).map(type =>
+    state.ahrefsSemanticPoints = points;
+    const entityLegend = Object.keys(AHREFS_ENTITY_COLORS).map(type =>
       `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${AHREFS_ENTITY_COLORS[type]}"></span>${AHREFS_ENTITY_LABELS[type]}</span>`
-    ).join('');
+    );
+    const providerLegend = providers.filter(p => p !== 'site').map(provider =>
+      `<span class="inline-flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background:${providerColor(provider)}"></span>${escapeHtml(providerLabel(provider))} keywords</span>`
+    );
+    legend.innerHTML = entityLegend.concat(providerLegend).join('');
     const margin = { top: 20, right: 20, bottom: 36, left: 40 };
     const width = container.offsetWidth - margin.left - margin.right;
     const height = 560 - margin.top - margin.bottom;
@@ -3167,7 +3505,7 @@
     const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
     const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, width]);
     const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([height, 0]);
-    const maxSize = d3.max(points, d => Number(d.size || d.traffic || d.count || 0)) || 1;
+    const maxSize = d3.max(points, d => semanticPointSizeValue(d)) || 1;
     const r = d3.scaleSqrt().domain([0, maxSize]).range([3, 16]);
     const tooltip = d3.select('body').append('div').attr('class', 'ahrefs-map-tt')
       .style('position', 'absolute').style('visibility', 'hidden').style('background', 'rgba(0,0,0,.92)')
@@ -3177,15 +3515,17 @@
     svg.append('g').call(d3.axisLeft(y).ticks(8));
     const dots = svg.append('g').selectAll('circle').data(points).join('circle')
       .attr('cx', d => x(d.x)).attr('cy', d => y(d.y))
-      .attr('r', d => r(Number(d.size || d.traffic || d.count || 0)))
-      .attr('fill', d => AHREFS_ENTITY_COLORS[d.type] || '#64748b')
+      .attr('r', d => r(semanticPointSizeValue(d)))
+      .attr('fill', d => semanticPointColor(d))
       .attr('fill-opacity', d => d.type === 'paragraph' ? 0.42 : 0.72)
       .attr('stroke', 'white').attr('stroke-width', 0.5)
       .style('cursor', d => d.url ? 'pointer' : 'default')
       .on('click', (event, d) => { if (d.url) window.open(d.url, '_blank', 'noopener'); })
       .on('mouseover', function(event, d) {
         d3.select(this).attr('stroke', '#111827').attr('stroke-width', 1.5);
-        tooltip.style('visibility', 'visible').html(`<strong style="color:${AHREFS_ENTITY_COLORS[d.type]}">${AHREFS_ENTITY_LABELS[d.type] || d.type}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
+        const typeLabel = `${AHREFS_ENTITY_LABELS[d.type] || d.type}${d.type === 'header' && d.level ? ' H' + d.level : ''}`;
+        const provider = semanticPointProvider(d);
+        tooltip.style('visibility', 'visible').html(`<strong style="color:${semanticPointColor(d)}">${escapeHtml(providerLabel(provider))} · ${escapeHtml(typeLabel)}</strong><br><strong>${escapeHtml(d.label || '')}</strong><br><span style="color:#93c5fd;font-size:11px">${escapeHtml(d.url || '')}</span><br><span style="color:#fbbf24;font-size:11px">traffic ${Number(d.traffic || 0).toLocaleString()}${d.volume ? ' · volume ' + Number(d.volume).toLocaleString() : ''}${d.clicks ? ' · clicks ' + Number(d.clicks).toLocaleString() : ''}${d.impressions ? ' · impressions ' + Number(d.impressions).toLocaleString() : ''}${d.paid_cost ? ' · cost ' + Number(d.paid_cost).toLocaleString() : ''}${d.paid_conversions ? ' · events ' + Number(d.paid_conversions).toLocaleString() : ''}${d.paid_conversion_value ? ' · sales value ' + Number(d.paid_conversion_value).toLocaleString() : ''}${d.position ? ' · pos ' + d.position : ''}</span>`);
       })
       .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
       .on('mouseout', function() {
@@ -3194,7 +3534,6 @@
         applyAhrefsSemanticSearchOverlay();
       });
     state.ahrefsSemanticDots = dots;
-    state.ahrefsSemanticPoints = points;
     applyAhrefsSemanticSearchOverlay();
     const zoom = d3.zoom().scaleExtent([0.5, 20]).filter(e => e.type === 'wheel' || e.type === 'dblclick')
       .on('zoom', e => {
@@ -3203,6 +3542,50 @@
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
       });
     svgOuter.call(zoom);
+  }
+
+  function semanticPointProvider(point) {
+    if (!point) return 'site';
+    return point.provider || (point.type === 'keyword' ? 'search' : 'site');
+  }
+
+  function providerLabel(provider) {
+    return SEARCH_PROVIDER_LABELS[provider] || String(provider || 'Search').replace(/_/g, ' ');
+  }
+
+  function providerColor(provider) {
+    return SEARCH_PROVIDER_COLORS[provider] || '#dc2626';
+  }
+
+  function semanticPointColor(point) {
+    if ((point || {}).type === 'keyword') {
+      const metric = state.ahrefsKeywordColorMetric || 'provider';
+      if (metric !== 'provider') {
+        const value = Number((point || {})[metric] || 0);
+        if (value > 0) {
+          const metricMax = d3.max((state.ahrefsSemanticPoints || []), p => p.type === 'keyword' ? Number(p[metric] || 0) : 0) || value;
+          const scale = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, metricMax || 1]);
+          return scale(value);
+        }
+        return '#9ca3af';
+      }
+      return providerColor(semanticPointProvider(point));
+    }
+    return AHREFS_ENTITY_COLORS[(point || {}).type] || '#64748b';
+  }
+
+  function semanticPointSizeValue(point) {
+    if (!point) return 0;
+    if (point.type !== 'keyword') return Number(point.size || point.traffic || point.count || 0);
+    const metric = state.ahrefsKeywordSizeMetric || 'demand';
+    if (metric === 'demand') return Number(point.size || point.traffic || point.volume || 0);
+    return Number(point[metric] || 0);
+  }
+
+  function headerLevelAllowed(point) {
+    if ((point || {}).type !== 'header') return true;
+    const level = Number(point.level || 0);
+    return level >= 1 && level <= 4 && state.ahrefsHeaderLevels[level] !== false;
   }
 
   function renderEntityAlignment() {
@@ -3915,6 +4298,7 @@
     const clipId = 'audit-clip-' + Date.now();
     svg.append('defs').append('clipPath').attr('id', clipId)
       .append('rect').attr('width', width).attr('height', height);
+    const clusterTrafficGroup = svg.append('g').attr('clip-path', `url(#${clipId})`);
 
     const isPara = state.scatterDataset === 'paragraphs';
     const isHeader = state.scatterDataset === 'headers';
@@ -3959,6 +4343,8 @@
       .style('padding', '8px 12px').style('border-radius', '6px')
       .style('font-size', '13px').style('pointer-events', 'none')
       .style('z-index', '1000').style('max-width', '380px');
+
+    renderClusterTrafficOverlay(clusterTrafficGroup, data, xScale, yScale, tooltip);
 
     dots.on('mouseover', function(event, d) {
         d3.select(this).attr('r', Math.max(hoverR, dotRadius(d) + 3)).attr('stroke', '#000').attr('stroke-width', 1.5);
@@ -4017,11 +4403,97 @@
         xAxis.call(d3.axisBottom(nx).ticks(8));
         yAxis.call(d3.axisLeft(ny).ticks(8));
         dots.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+        if (state.clusterTrafficBubbles) {
+          state.clusterTrafficBubbles.attr('cx', d => nx(d.x)).attr('cy', d => ny(d.y));
+        }
+        if (state.clusterTrafficLabels) {
+          state.clusterTrafficLabels.attr('x', d => nx(d.x)).attr('y', d => ny(d.y) + 3);
+        }
       });
     svgOuter.call(zoom);
     svgOuter.on('dblclick.zoom', () => svgOuter.transition().duration(600).call(zoom.transform, d3.zoomIdentity));
 
     applyMode(isHeader ? 'level' : (isPara ? 'cluster' : (state.mode || 'section')));
+  }
+
+  function renderClusterTrafficOverlay(group, data, xScale, yScale, tooltip) {
+    state.clusterTrafficBubbles = null;
+    state.clusterTrafficLabels = null;
+    group.selectAll('*').remove();
+    const rows = buildClusterTrafficRows(data);
+    if (state.scatterDataset !== 'pages' || !state.auditShowClusterTraffic || !rows.length) return;
+    const maxTraffic = d3.max(rows, d => Number(d.traffic || 0)) || 1;
+    const radius = d3.scaleSqrt().domain([0, maxTraffic]).range([12, 48]);
+    const topRows = rows.slice().sort((a, b) => Number(b.traffic || 0) - Number(a.traffic || 0)).slice(0, 18);
+    const rowSet = new Set(topRows.map(r => String(r.cluster)));
+    state.clusterTrafficBubbles = group.selectAll('circle.cluster-traffic')
+      .data(rows)
+      .join('circle')
+      .attr('class', 'cluster-traffic')
+      .attr('cx', d => xScale(d.x))
+      .attr('cy', d => yScale(d.y))
+      .attr('r', d => radius(Number(d.traffic || 0)))
+      .attr('fill', d => state.clusterColor ? state.clusterColor(d.cluster) : '#2563eb')
+      .attr('fill-opacity', 0.12)
+      .attr('stroke', d => state.clusterColor ? state.clusterColor(d.cluster) : '#2563eb')
+      .attr('stroke-opacity', 0.55)
+      .attr('stroke-width', 1.4)
+      .style('pointer-events', 'all')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('fill-opacity', 0.22).attr('stroke-opacity', 0.95).attr('stroke-width', 2);
+        const kws = (d.top_keywords || []).slice(0, 6).map(k => escapeHtml(k.keyword || k)).join(' · ');
+        tooltip.style('visibility', 'visible').html(`
+          <strong>Cluster ${escapeHtml(d.cluster)} · ${escapeHtml(d.label || '')}</strong>
+          <br><span style="font-size:12px;color:#86efac">traffic ${Number(d.traffic || 0).toLocaleString()} · pages ${Number(d.pages || d.page_count || 0).toLocaleString()} · matched ${Number(d.matched_pages || 0).toLocaleString()}</span>
+          <br><span style="font-size:12px;color:#fbbf24">${kws}</span>
+          <br><span style="font-size:11px;color:#93c5fd">Bubble position is the centroid of crawled pages in this semantic cluster.</span>`);
+      })
+      .on('mousemove', event => tooltip.style('top', (event.pageY - 10) + 'px').style('left', (event.pageX + 10) + 'px'))
+      .on('mouseout', function() {
+        d3.select(this).attr('fill-opacity', 0.12).attr('stroke-opacity', 0.55).attr('stroke-width', 1.4);
+        tooltip.style('visibility', 'hidden');
+      });
+    state.clusterTrafficLabels = group.selectAll('text.cluster-traffic-label')
+      .data(topRows.filter(r => rowSet.has(String(r.cluster))))
+      .join('text')
+      .attr('class', 'cluster-traffic-label')
+      .attr('x', d => xScale(d.x))
+      .attr('y', d => yScale(d.y) + 3)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', 10)
+      .attr('font-weight', 700)
+      .attr('fill', '#111827')
+      .attr('paint-order', 'stroke')
+      .attr('stroke', 'white')
+      .attr('stroke-width', 3)
+      .style('pointer-events', 'none')
+      .text(d => Number(d.traffic || 0).toLocaleString());
+  }
+
+  function buildClusterTrafficRows(data) {
+    if (state.scatterDataset !== 'pages') return [];
+    const trafficByCluster = new Map(((state.ahrefs || {}).clusters || [])
+      .filter(row => Number(row.traffic || 0) > 0)
+      .map(row => [String(row.cluster != null ? row.cluster : row.key), row]));
+    if (!trafficByCluster.size) return [];
+    const groups = new Map();
+    (data || []).forEach(page => {
+      const key = String(page.cluster);
+      const traffic = trafficByCluster.get(key);
+      if (!traffic) return;
+      const group = groups.get(key) || { cluster: page.cluster, x: 0, y: 0, count: 0, traffic };
+      group.x += Number(page.x || 0);
+      group.y += Number(page.y || 0);
+      group.count += 1;
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).map(group => ({
+      ...group.traffic,
+      cluster: group.cluster,
+      x: group.x / Math.max(group.count, 1),
+      y: group.y / Math.max(group.count, 1),
+      page_count: group.count,
+    })).sort((a, b) => Number(b.traffic || 0) - Number(a.traffic || 0));
   }
 
   function applyMode(mode) {
@@ -4125,6 +4597,13 @@
         <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#f59e0b"></span>outlier (refocus)</span>
         <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200"><span class="w-3 h-3 rounded-full mr-1.5" style="background:#94a3b8"></span>normal</span>`;
     }
+    if (state.scatterDataset === 'pages' && state.auditShowClusterTraffic && buildClusterTrafficRows(currentScatterRows()).length) {
+      el.innerHTML += `
+        <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-white border border-gray-200">
+          <span class="w-5 h-3 rounded-full mr-1.5" style="background:rgba(37,99,235,.12);border:1px solid rgba(37,99,235,.55)"></span>
+          topic bubble size = search traffic by cluster
+        </span>`;
+    }
   }
 
   function wireModeButtons() {
@@ -4175,6 +4654,15 @@
     if (ahrefsSearch && !ahrefsSearch.dataset.bound) {
       ahrefsSearch.dataset.bound = '1';
       ahrefsSearch.addEventListener('input', applyAhrefsSemanticSearchOverlay);
+    }
+    const clusterTrafficToggle = document.getElementById('audit-cluster-traffic-toggle');
+    if (clusterTrafficToggle && !clusterTrafficToggle.dataset.bound) {
+      clusterTrafficToggle.dataset.bound = '1';
+      clusterTrafficToggle.checked = state.auditShowClusterTraffic !== false;
+      clusterTrafficToggle.addEventListener('change', () => {
+        state.auditShowClusterTraffic = clusterTrafficToggle.checked;
+        drawScatter();
+      });
     }
   }
 
@@ -6911,14 +7399,14 @@
         <tr class="border-t border-gray-100">
           <td class="px-2 py-1.5">${escapeHtml(k.keyword || '')}<div class="text-gray-500">${escapeHtml(k.cluster || '')}</div></td>
           <td class="px-2 py-1.5 text-right font-mono">${escapeHtml(String(k.position || 0))}</td>
-          <td class="px-2 py-1.5 text-right font-mono">${Number(k.traffic || 0).toLocaleString()}</td>
+          <td class="px-2 py-1.5 text-right font-mono">${Number(k.paid_cost || k.traffic || 0).toLocaleString()}</td>
           <td class="px-2 py-1.5 text-right font-mono">${escapeHtml(String(k.relevance || 0))}</td>
         </tr>`).join('');
       return `
         <div class="border border-blue-100 bg-blue-50 rounded p-3 mb-4 text-xs">
           <div class="font-semibold text-blue-900 mb-1">Auto-selected competitive targets</div>
           <div class="text-blue-900 mb-2">status ${escapeHtml(auto.status || '')} · selected keywords ${autoSummary.selected_keywords || 0} · SERP targets ${autoSummary.serp_targets || 0} · clusters ${autoSummary.clusters || 0}</div>
-          ${selected ? `<div class="overflow-x-auto"><table class="min-w-full bg-white border border-blue-100"><thead class="text-gray-500"><tr><th class="px-2 py-1.5 text-left">Keyword</th><th class="px-2 py-1.5 text-right">Pos</th><th class="px-2 py-1.5 text-right">Traffic</th><th class="px-2 py-1.5 text-right">Fit</th></tr></thead><tbody>${selected}</tbody></table></div>` : ''}
+          ${selected ? `<div class="overflow-x-auto"><table class="min-w-full bg-white border border-blue-100"><thead class="text-gray-500"><tr><th class="px-2 py-1.5 text-left">Keyword</th><th class="px-2 py-1.5 text-right">Pos</th><th class="px-2 py-1.5 text-right">Demand/spend</th><th class="px-2 py-1.5 text-right">Fit</th></tr></thead><tbody>${selected}</tbody></table></div>` : ''}
         </div>`;
     })() : '';
     const summary = payload.summary ? `

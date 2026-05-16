@@ -17,10 +17,12 @@ from pathlib import Path
 from . import __version__
 from . import compare as _compare
 from .cache import domain_slug
+from .config_env import apply_env_defaults
 from .embedder import DEFAULT_MODEL
 from .history import compare_snapshots, list_snapshots, save_report_snapshot, write_history_html
 from .pipeline import PipelineConfig, project_paths, run
 from .server import serve
+from .settings_ui import serve_settings_ui
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -39,6 +41,10 @@ def _run_command(args: argparse.Namespace) -> int:
     # only *bypass* the caches, they don't reset them. Use --clean when the
     # crawler / extractor / embedder logic itself has changed and you want
     # the new logic applied to every page.
+    if not args.domain:
+        print("run needs a domain. Pass it as an argument or set SITE_AUDIT_RUN_DOMAIN in .env.")
+        return 1
+
     if args.clean:
         from .pipeline import PipelineConfig as _PC
         probe = _PC(
@@ -113,12 +119,21 @@ def _run_command(args: argparse.Namespace) -> int:
         search_provider="none" if args.no_search_data else args.search_provider,
         save_snapshot=not args.no_snapshot,
         enable_gsc=not args.no_gsc,
+        enable_google_ads=not args.no_google_ads,
+        use_google_ads_keywords=args.use_google_ads_keywords,
         gsc_property_url=args.gsc_property_url,
         gsc_start_date=args.gsc_start_date,
         gsc_end_date=args.gsc_end_date,
         gsc_top_pages_limit=args.gsc_top_pages_limit,
         gsc_keywords_limit=args.gsc_keywords_limit,
         gsc_refresh=args.gsc_refresh,
+        google_ads_customer_id=args.google_ads_customer_id,
+        google_ads_login_customer_id=args.google_ads_login_customer_id,
+        google_ads_start_date=args.google_ads_start_date,
+        google_ads_end_date=args.google_ads_end_date,
+        google_ads_search_terms_limit=args.google_ads_search_terms_limit,
+        google_ads_min_cost=args.google_ads_min_cost,
+        google_ads_refresh=args.google_ads_refresh,
         enable_dataforseo=not args.no_dataforseo,
         enable_ahrefs=not args.no_ahrefs,
         ahrefs_date=args.ahrefs_date,
@@ -219,6 +234,9 @@ def _compare_command(args: argparse.Namespace) -> int:
 
 
 def _serve_command(args: argparse.Namespace) -> int:
+    if not args.domain:
+        print("serve needs a domain. Pass it as an argument or set SITE_AUDIT_SERVE_DOMAIN in .env.")
+        return 1
     here = Path(__file__).resolve().parent.parent
     ui_dir = Path(args.ui_dir) if args.ui_dir else here / "ui"
     cfg = PipelineConfig(
@@ -231,6 +249,17 @@ def _serve_command(args: argparse.Namespace) -> int:
     serve(
         report_dir=report_dir,
         ui_dir=ui_dir,
+        host=args.host,
+        port=args.port,
+    )
+    return 0
+
+
+def _settings_command(args: argparse.Namespace) -> int:
+    parser = build_parser()
+    serve_settings_ui(
+        parser,
+        env_file=Path(args.env_file),
         host=args.host,
         port=args.port,
     )
@@ -299,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     run_p = sub.add_parser("run", help="Crawl + analyze a domain")
-    run_p.add_argument("domain", help="Domain or URL, e.g. example.com or https://example.com")
+    run_p.add_argument("domain", nargs="?", help="Domain or URL, e.g. example.com or https://example.com")
     run_p.add_argument("--projects-root", default="projects", help="Where projects live (default: projects/)")
     run_p.add_argument("--cache-dir", default=None, help="Override cache directory")
     run_p.add_argument("--output-dir", default=None, help="Override report directory")
@@ -364,12 +393,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
     run_p.add_argument("--search-provider", default="auto",
-                       choices=["auto", "gsc", "ahrefs", "dataforseo", "none"],
-                       help="Search-demand data source. auto uses GSC first, then Ahrefs/DataForSEO fallback")
+                       choices=["auto", "all", "combined", "gsc", "google_ads", "ahrefs", "dataforseo", "none"],
+                       help="Search-demand data source. auto uses GSC first, then optional Google Ads, then Ahrefs/DataForSEO fallback; all combines every enabled provider")
     run_p.add_argument("--no-search-data", action="store_true",
                        help="Skip all paid search-data provider enrichment")
     run_p.add_argument("--no-gsc", action="store_true",
                        help="Skip Google Search Console enrichment even when GSC credentials are set")
+    run_p.add_argument("--no-google-ads", action="store_true",
+                       help="Skip Google Ads enrichment even when Google Ads credentials are set")
+    run_p.add_argument("--use-google-ads-keywords", action="store_true",
+                       help="Allow --search-provider auto to use Google Ads search terms after GSC and before Ahrefs/DataForSEO")
     run_p.add_argument("--no-ahrefs", action="store_true",
                        help="Skip Ahrefs API enrichment even when AHREFS_API_KEY is set")
     run_p.add_argument("--no-dataforseo", action="store_true",
@@ -386,6 +419,20 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Rows to request from GSC page report (default: 1000)")
     run_p.add_argument("--gsc-keywords-limit", type=int, default=1000,
                        help="Rows to request from GSC query/page report (default: 1000)")
+    run_p.add_argument("--google-ads-refresh", action="store_true",
+                       help="Ignore cached Google Ads search-term snapshots and fetch fresh API data")
+    run_p.add_argument("--google-ads-customer-id", default=None,
+                       help="Google Ads customer ID to query, with or without dashes")
+    run_p.add_argument("--google-ads-login-customer-id", default=None,
+                       help="Optional manager account ID for the login-customer-id header")
+    run_p.add_argument("--google-ads-start-date", default=None,
+                       help="Google Ads start date in YYYY-MM-DD. Default: 90-day window ending yesterday")
+    run_p.add_argument("--google-ads-end-date", default=None,
+                       help="Google Ads end date in YYYY-MM-DD. Default: yesterday")
+    run_p.add_argument("--google-ads-search-terms-limit", type=int, default=1000,
+                       help="Rows to request from Google Ads search_term_view, sorted by spend (default: 1000)")
+    run_p.add_argument("--google-ads-min-cost", type=float, default=0.0,
+                       help="Minimum spend in account currency for a Google Ads search term to be imported")
     run_p.add_argument("--ahrefs-refresh", action="store_true",
                        help="Ignore cached Ahrefs snapshots and fetch fresh API data")
     run_p.add_argument("--ahrefs-date", default=None,
@@ -456,13 +503,19 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.set_defaults(func=_compare_command)
 
     serve_p = sub.add_parser("serve", help="Serve the local viewer for a previously-generated report")
-    serve_p.add_argument("domain", help="Domain whose report to serve")
+    serve_p.add_argument("domain", nargs="?", help="Domain whose report to serve")
     serve_p.add_argument("--projects-root", default="projects")
     serve_p.add_argument("--output-dir", default=None)
     serve_p.add_argument("--ui-dir", default=None)
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8765)
     serve_p.set_defaults(func=_serve_command)
+
+    settings_p = sub.add_parser("settings", help="Open a local UI for editing .env-backed defaults")
+    settings_p.add_argument("--env-file", default=".env", help="Local env file to edit (default: .env)")
+    settings_p.add_argument("--host", default="127.0.0.1")
+    settings_p.add_argument("--port", type=int, default=8780)
+    settings_p.set_defaults(func=_settings_command)
 
     hist_p = sub.add_parser("history", help="Store and compare historical snapshots for one domain")
     hist_sub = hist_p.add_subparsers(dest="history_command", required=True)
@@ -492,8 +545,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
+    apply_env_defaults(args, parser, raw_argv)
     _setup_logging(args.verbose)
     return args.func(args)
 

@@ -20,6 +20,7 @@ open projects/example.com/report/index.html
 ## Table of contents
 
 - [Quickstart](#quickstart) — install + first run + open the report
+- [Persistent settings](#persistent-settings) — save defaults in `.env` or edit them in the local UI
 - [Common recipes](#common-recipes) — what to type for typical jobs
 - [What the report shows](#what-the-report-shows) — section-by-section guide
 - [Comparing multiple domains](#comparing-multiple-domains) — `site-audit compare`
@@ -109,6 +110,11 @@ GSC_SERVICE_ACCOUNT_FILE=/absolute/path/to/service-account.json
 AHREFS_API_KEY=...
 DATAFORSEO_LOGIN=you@example.com
 DATAFORSEO_PASSWORD=...
+GOOGLE_ADS_DEVELOPER_TOKEN=...
+GOOGLE_ADS_CLIENT_ID=...
+GOOGLE_ADS_CLIENT_SECRET=...
+GOOGLE_ADS_REFRESH_TOKEN=...
+GOOGLE_ADS_CUSTOMER_ID=123-456-7890
 ```
 
 By default, `site-audit run` uses cached provider snapshots first,
@@ -117,11 +123,22 @@ falls back to Ahrefs/DataForSEO when GSC is unavailable. Provider data is cached
 `projects/<domain>/cache/` so repeat reports do not spend API credits
 unless you request a refresh.
 
+Google Ads search terms can also be used as an opt-in keyword source
+when paid spend is the best signal of product/service relevance. See
+[Google Ads Keyword Source](docs/google-ads-keyword-source.md) for the
+Google Ads API and OAuth setup steps.
+
+Repeated settings can be saved in `.env` with `SITE_AUDIT_*` keys, and a
+local editor is available with `site-audit settings`. See
+[Local Configuration](docs/local-configuration.md).
+
 Useful flags:
 
 ```bash
 site-audit run example.com --search-provider auto
+site-audit run example.com --search-provider all
 site-audit run example.com --search-provider gsc --gsc-property-url sc-domain:example.com --gsc-start-date 2026-04-01 --gsc-end-date 2026-04-30
+site-audit run example.com --search-provider google_ads --google-ads-customer-id 123-456-7890
 site-audit run example.com --search-provider ahrefs --ahrefs-country US
 site-audit run example.com --search-provider dataforseo --dataforseo-location-code 2840 --dataforseo-language-code en
 site-audit run example.com --gsc-refresh
@@ -130,6 +147,14 @@ site-audit run example.com --dataforseo-refresh
 site-audit run example.com --no-search-data
 ```
 
+Use `--search-provider all` to import every enabled source and compare
+GSC, Google Ads, Ahrefs, and DataForSEO keywords in one semantic
+scatterplot against page vectors, titles, H1-H4 headings, paragraphs,
+and link titles. The report filters let the reader choose which sources
+and content entities to inspect. Google Ads keywords can also be sized
+or colored by spend, conversions/events, sales value, clicks, and
+impressions when those metrics are available.
+
 When provider data is available, the report adds organic traffic and
 keyword overlays, traffic by directory/topic cluster, ranking position
 buckets, SERP features, search intent mix, a keyword/content semantic
@@ -137,6 +162,56 @@ map, and an internal link equity flow chart where page traffic is shown
 alongside internal link paths. The same search-demand payloads are used
 in `site-audit compare` so competing domains can be compared in one
 semantic space.
+
+**Save settings once, then run shorter commands**
+
+Open the local settings editor:
+
+```bash
+site-audit settings
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8780/
+```
+
+The editor writes to `.env`, which is ignored by git. It shows every CLI
+setting, the matching `.env` key, the default value, and credential fields
+for GSC, Ahrefs, DataForSEO, and Google Ads. After saving settings, command
+line flags are optional unless you want to override the saved value.
+
+For example, this `.env`:
+
+```bash
+SITE_AUDIT_RUN_DOMAIN="example.com"
+SITE_AUDIT_RUN_MAX_PAGES="500"
+SITE_AUDIT_RUN_WORKERS="4"
+SITE_AUDIT_RUN_SEARCH_PROVIDER="all"
+SITE_AUDIT_RUN_COMPETITIVE_AUTO="true"
+SITE_AUDIT_RUN_COMPETITIVE_AUTO_PRODUCT_SEED="help desk software, live chat software"
+SITE_AUDIT_SERVE_DOMAIN="example.com"
+
+GOOGLE_ADS_CUSTOMER_ID="123-456-7890"
+GOOGLE_ADS_DEVELOPER_TOKEN="..."
+GOOGLE_ADS_CLIENT_ID="..."
+GOOGLE_ADS_CLIENT_SECRET="..."
+GOOGLE_ADS_REFRESH_TOKEN="..."
+```
+
+Lets you run:
+
+```bash
+site-audit run
+site-audit serve
+```
+
+instead of retyping the same flags every time. Explicit flags still win:
+
+```bash
+site-audit run --max-pages 100 --no-snapshot
+```
 
 That:
 
@@ -251,7 +326,106 @@ differences across competitors at a glance.
 
 ---
 
+## Persistent settings
+
+Use `.env` when you do not want to retype the same domain, provider,
+credentials, crawl limits, or competitive-analysis settings every run.
+The repo already ignores `.env`, so it should not be committed.
+
+The easiest way to edit settings is:
+
+```bash
+site-audit settings
+```
+
+Open `http://127.0.0.1:8780/`, edit the fields, and save. The UI writes
+the matching environment variables into `.env`.
+
+The naming pattern is:
+
+```text
+SITE_AUDIT_<COMMAND>_<SETTING>
+```
+
+Examples:
+
+```bash
+SITE_AUDIT_RUN_DOMAIN="example.com"
+SITE_AUDIT_RUN_MAX_PAGES="500"
+SITE_AUDIT_RUN_SEARCH_PROVIDER="all"
+SITE_AUDIT_RUN_COMPETITIVE_AUTO="true"
+SITE_AUDIT_RUN_COMPETITIVE_AUTO_PRODUCT_SEED="help desk software, live chat software"
+SITE_AUDIT_SERVE_DOMAIN="example.com"
+```
+
+After that:
+
+```bash
+site-audit run
+site-audit serve
+```
+
+CLI flags override saved values, so this temporarily changes only one run:
+
+```bash
+site-audit run --max-pages 100 --no-snapshot
+```
+
+Full details are in [Local Configuration](docs/local-configuration.md).
+
+---
+
 ## Common recipes
+
+### Save repeated settings in the local UI
+
+```bash
+site-audit settings
+```
+
+Open `http://127.0.0.1:8780/`, fill the settings you use repeatedly,
+and save. The values go into `.env`, which is ignored by git.
+
+Useful first settings:
+
+- `SITE_AUDIT_RUN_DOMAIN`
+- `SITE_AUDIT_RUN_MAX_PAGES`
+- `SITE_AUDIT_RUN_SEARCH_PROVIDER`
+- `SITE_AUDIT_RUN_COMPETITIVE_AUTO`
+- `SITE_AUDIT_RUN_COMPETITIVE_AUTO_PRODUCT_SEED`
+- provider credentials such as `AHREFS_API_KEY`, `DATAFORSEO_LOGIN`, or `GOOGLE_ADS_REFRESH_TOKEN`
+
+After that, run:
+
+```bash
+site-audit run
+site-audit serve
+```
+
+### Use Google Ads spend to choose competitive keywords
+
+First configure Google Ads credentials in the settings UI or `.env`.
+See [Google Ads Keyword Source](docs/google-ads-keyword-source.md) for
+the Google Ads application/OAuth setup.
+
+Then either use Google Ads directly:
+
+```bash
+site-audit run example.com \
+  --search-provider google_ads \
+  --google-ads-customer-id 123-456-7890 \
+  --competitive-auto \
+  --competitive-auto-product-seed "help desk software"
+```
+
+Or save those values in `.env` and run:
+
+```bash
+site-audit run
+```
+
+Use this when paid search spend is the best signal of which keywords are
+commercially relevant to the product or service.
 
 ### Audit a small site quickly
 

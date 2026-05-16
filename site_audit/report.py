@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -43,6 +44,175 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _slim_linkgraph_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    if isinstance(out.get("anchor_relevance"), dict):
+        anchor = dict(out["anchor_relevance"])
+        anchor["links"] = []
+        anchor["weak_links"] = (anchor.get("weak_links") or [])[:500]
+        out["anchor_relevance"] = anchor
+    if isinstance(out.get("contextual_link_impact"), dict):
+        contextual = dict(out["contextual_link_impact"])
+        contextual["links"] = []
+        contextual["top_contextual_links"] = (contextual.get("top_contextual_links") or [])[:500]
+        contextual["weak_context_links"] = (contextual.get("weak_context_links") or [])[:500]
+        contextual["source_pages"] = [
+            {**row, "strongest_outbound_links": (row.get("strongest_outbound_links") or [])[:5]}
+            for row in (contextual.get("source_pages") or [])[:250]
+        ]
+        out["contextual_link_impact"] = contextual
+    if isinstance(out.get("link_flow"), dict):
+        flow = dict(out["link_flow"])
+        flow["edges"] = (flow.get("edges") or [])[:2500]
+        flow["nodes"] = (flow.get("nodes") or [])[:2500]
+        out["link_flow"] = flow
+    if isinstance(out.get("hub_bottlenecks"), dict):
+        hubs = dict(out["hub_bottlenecks"])
+        hubs["pages"] = []
+        hubs["risks"] = (hubs.get("risks") or [])[:250]
+        hubs["bridges"] = (hubs.get("bridges") or [])[:150]
+        hubs["bottlenecks"] = (hubs.get("bottlenecks") or [])[:150]
+        hubs["authority_hubs"] = (hubs.get("authority_hubs") or [])[:150]
+        out["hub_bottlenecks"] = hubs
+    if isinstance(out.get("high_demand_low_link"), dict):
+        demand = dict(out["high_demand_low_link"])
+        demand["pages"] = (demand.get("pages") or [])[:2000]
+        out["high_demand_low_link"] = demand
+    if isinstance(out.get("traffic_weighted_pagerank"), dict):
+        pagerank = dict(out["traffic_weighted_pagerank"])
+        pagerank["pages"] = (pagerank.get("pages") or [])[:2500]
+        out["traffic_weighted_pagerank"] = pagerank
+    if isinstance(out.get("page_link_counts"), list):
+        out["page_link_counts"] = out["page_link_counts"][:3000]
+    return out
+
+
+def write_internal_linkbuilding_csv(
+    path: Path,
+    result: AuditResult,
+    recommendations: list[dict],
+    search_payload: Optional[dict] = None,
+) -> list[dict]:
+    page_by_url = {page.url: page for page in result.pages}
+    paid_keywords = _paid_keywords(search_payload)
+    rows: list[dict] = []
+    seen_paragraph_anchors: set[tuple[str, str, str]] = set()
+    for rec in recommendations or []:
+        source_url = rec.get("source_url") or ""
+        target_url = rec.get("target_url") or ""
+        suggested_anchor = rec.get("suggested_anchor") or rec.get("anchor") or ""
+        paid_candidate = _best_paid_anchor_candidate(
+            paid_keywords,
+            rec.get("paragraph_excerpt") or "",
+            target_url,
+            rec.get("target_title") or "",
+            page_by_url.get(target_url),
+        )
+        anchor = paid_candidate.get("keyword") or suggested_anchor
+        if not source_url or not target_url or not anchor:
+            continue
+        paragraph_index = str(rec.get("paragraph_index", ""))
+        anchor_key = (source_url, paragraph_index, _normalize_anchor(anchor))
+        if anchor_key in seen_paragraph_anchors:
+            continue
+        seen_paragraph_anchors.add(anchor_key)
+        target_page = page_by_url.get(target_url)
+        source_page = page_by_url.get(source_url)
+        destination_title = rec.get("target_title") or getattr(target_page, "title", "") or target_url
+        destination_description = getattr(target_page, "description", "") if target_page else ""
+        rows.append({
+            "url_where_to_place_link": source_url,
+            "source_page_title": rec.get("source_title") or getattr(source_page, "title", "") or source_url,
+            "paragraph_index": paragraph_index,
+            "paragraph_excerpt": rec.get("paragraph_excerpt", ""),
+            "exact_keywords_to_link": anchor,
+            "original_suggested_anchor": suggested_anchor,
+            "anchor_source": "paid_converting_keyword" if paid_candidate else "semantic_paragraph_match",
+            "paid_keyword_candidate": paid_candidate.get("keyword", ""),
+            "paid_conversions": paid_candidate.get("paid_conversions", ""),
+            "paid_conversion_value": paid_candidate.get("paid_conversion_value", ""),
+            "paid_cost": paid_candidate.get("paid_cost", ""),
+            "destination_url": target_url,
+            "link_title": destination_description or destination_title,
+            "destination_title": destination_title,
+            "destination_meta_description": destination_description,
+            "priority": rec.get("priority", ""),
+            "expected_benefit_score": rec.get("expected_benefit_score", ""),
+            "fit": rec.get("fit", ""),
+            "lift": rec.get("lift", ""),
+            "anchor_confidence": rec.get("anchor_confidence", ""),
+        })
+    _write_csv(path, rows)
+    return rows
+
+
+def _paid_keywords(search_payload: Optional[dict]) -> list[dict]:
+    rows = []
+    for row in (search_payload or {}).get("organic_keywords") or []:
+        if row.get("provider") == "google_ads" or row.get("paid_conversions") or row.get("paid_cost"):
+            if row.get("keyword"):
+                rows.append(row)
+    rows.sort(
+        key=lambda r: (
+            _safe_float(r.get("paid_conversions")),
+            _safe_float(r.get("paid_conversion_value")),
+            _safe_float(r.get("paid_cost")),
+            _safe_float(r.get("clicks")),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
+def _normalize_anchor(anchor: str) -> str:
+    return re.sub(r"\s+", " ", str(anchor or "").strip().lower())
+
+
+def _best_paid_anchor_candidate(
+    paid_keywords: list[dict],
+    paragraph_excerpt: str,
+    target_url: str,
+    target_title: str,
+    target_page,
+) -> dict:
+    if not paid_keywords or not paragraph_excerpt:
+        return {}
+    paragraph = paragraph_excerpt.lower()
+    target_text = " ".join([
+        target_url,
+        target_title,
+        getattr(target_page, "title", "") if target_page else "",
+        getattr(target_page, "description", "") if target_page else "",
+    ]).lower()
+    for row in paid_keywords:
+        keyword = str(row.get("keyword") or "").strip()
+        if len(keyword) < 3:
+            continue
+        lower = keyword.lower()
+        if lower in paragraph and _keyword_plausible_for_target(lower, target_text):
+            return row
+    return {}
+
+
+def _keyword_plausible_for_target(keyword: str, target_text: str) -> bool:
+    tokens = [t for t in keyword.replace("-", " ").split() if len(t) > 2]
+    if not tokens:
+        return False
+    matches = sum(1 for token in tokens if token in target_text)
+    return matches >= max(1, min(2, len(tokens)))
+
+
+def _safe_float(value) -> float:
+    try:
+        if value in (None, ""):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _copy_report_docs(output_dir: Path) -> None:
@@ -349,11 +519,12 @@ def write_all(
     if answerability is not None:
         _write_json(output_dir / "answerability.json", answerability)
     if linkgraph is not None:
-        _write_json(output_dir / "linkgraph.json", linkgraph)
+        _write_json(output_dir / "linkgraph.json", _slim_linkgraph_payload(linkgraph))
     if external_links is not None:
         _write_json(output_dir / "external_links.json", external_links)
     if paragraph_link_recs is not None:
         _write_json(output_dir / "paragraph_link_recommendations.json", paragraph_link_recs)
+        write_internal_linkbuilding_csv(output_dir / "internal_linkbuilding_recommendations.csv", result, paragraph_link_recs, ahrefs)
     if cluster_overlap is not None:
         _write_json(output_dir / "cluster_overlap.json", cluster_overlap)
     if paragraph_clusters is not None:

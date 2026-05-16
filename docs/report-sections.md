@@ -69,9 +69,9 @@ Action: compare content mass with business importance. Large low-value clusters 
 <a id="ahrefs-block"></a>
 ## Organic search demand overlay
 
-Shows Ahrefs, GSC, or DataForSEO search demand mapped onto audited pages and clusters.
+Shows GSC, Google Ads, Ahrefs, and DataForSEO search demand mapped onto audited pages and clusters. With `--search-provider all`, keywords from each source appear in one semantic scatterplot against page content, page titles, H1-H4 headings, paragraphs, and link titles.
 
-Action: prioritize pages with meaningful demand, weak rankings, or high opportunity. Filter out irrelevant traffic before making content decisions.
+Action: use the source filters to compare first-party demand, paid spend, and third-party estimates. Prioritize terms that are commercially relevant and close to existing content vectors; treat far-away keyword clusters as candidates for new pages or major rewrites.
 
 <a id="best-pages-block"></a>
 ## Best page reverse engineering

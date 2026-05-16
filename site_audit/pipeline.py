@@ -80,6 +80,8 @@ from .freshness import to_payload as freshness_payload
 from .freshness_impact import build_freshness_impact
 from .gsc import GSCConfig, build_analysis as build_gsc_analysis
 from .gsc import fetch_snapshot as fetch_gsc_snapshot
+from .google_ads import GoogleAdsConfig, build_analysis as build_google_ads_analysis
+from .google_ads import fetch_snapshot as fetch_google_ads_snapshot
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
@@ -124,6 +126,7 @@ from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
 from .scatter import project
 from .semantic_ablation import build_semantic_ablation
+from .search_fusion import build_combined_search_analysis
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 from .template_patterns import build_template_patterns
@@ -218,12 +221,21 @@ class PipelineConfig:
     search_provider: str = "auto"
     save_snapshot: bool = True
     enable_gsc: bool = True
+    enable_google_ads: bool = True
+    use_google_ads_keywords: bool = False
     gsc_property_url: Optional[str] = None
     gsc_start_date: Optional[str] = None
     gsc_end_date: Optional[str] = None
     gsc_top_pages_limit: int = 1000
     gsc_keywords_limit: int = 1000
     gsc_refresh: bool = False
+    google_ads_customer_id: Optional[str] = None
+    google_ads_login_customer_id: Optional[str] = None
+    google_ads_start_date: Optional[str] = None
+    google_ads_end_date: Optional[str] = None
+    google_ads_search_terms_limit: int = 1000
+    google_ads_min_cost: float = 0.0
+    google_ads_refresh: bool = False
     enable_dataforseo: bool = True
     enable_ahrefs: bool = True
     ahrefs_date: Optional[str] = None
@@ -814,8 +826,10 @@ def run(config: PipelineConfig) -> dict:
     # fallback proxy providers when GSC is unavailable.
     ahrefs_data: dict = {}
     provider_choice = (config.search_provider or "auto").lower()
+    collect_all_search = provider_choice in {"all", "combined"}
+    search_provider_payloads: list[dict] = []
     if provider_choice not in {"none", "disabled", "off"}:
-        if config.enable_gsc and provider_choice in {"auto", "gsc"}:
+        if config.enable_gsc and provider_choice in {"auto", "gsc", "all", "combined"}:
             gsc_config = GSCConfig(
                 enabled=True,
                 property_url=config.gsc_property_url,
@@ -841,6 +855,8 @@ def run(config: PipelineConfig) -> dict:
                 semantic_sample_cap=config.ahrefs_semantic_sample,
             )
             candidate = gsc_analysis.payload
+            if _search_payload_usable(candidate):
+                search_provider_payloads.append(candidate)
             if _search_payload_usable(candidate) or provider_choice == "gsc":
                 ahrefs_data = candidate
                 write_ahrefs_semantic_cache(
@@ -848,6 +864,49 @@ def run(config: PipelineConfig) -> dict:
                     config.model,
                     gsc_analysis.semantic_rows,
                     gsc_analysis.semantic_embeddings,
+                )
+
+        needs_google_ads = provider_choice in {"google_ads", "all", "combined"} or (
+            provider_choice == "auto"
+            and config.use_google_ads_keywords
+            and not _search_payload_usable(ahrefs_data)
+        )
+        if config.enable_google_ads and needs_google_ads:
+            google_ads_config = GoogleAdsConfig(
+                enabled=True,
+                customer_id=config.google_ads_customer_id,
+                login_customer_id=config.google_ads_login_customer_id,
+                start_date=config.google_ads_start_date,
+                end_date=config.google_ads_end_date,
+                search_terms_limit=config.google_ads_search_terms_limit,
+                min_cost=config.google_ads_min_cost,
+                refresh=config.google_ads_refresh,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            snapshot = fetch_google_ads_snapshot(cache_dir, google_ads_config)
+            google_ads_analysis = build_google_ads_analysis(
+                snapshot,
+                pages,
+                embeddings,
+                coords=coords,
+                cluster_labels=labels,
+                cluster_summaries=cluster_summaries,
+                extracted_pages=extracted_pages,
+                paragraph_records=paragraph_records,
+                linkbuilding=linkbuilding_data,
+                embedder=embedder,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            candidate = google_ads_analysis.payload
+            if _search_payload_usable(candidate):
+                search_provider_payloads.append(candidate)
+            if _search_payload_usable(candidate) or provider_choice == "google_ads":
+                ahrefs_data = candidate
+                write_ahrefs_semantic_cache(
+                    cache_dir,
+                    config.model,
+                    google_ads_analysis.semantic_rows,
+                    google_ads_analysis.semantic_embeddings,
                 )
 
         ahrefs_config = AhrefsConfig(
@@ -860,7 +919,7 @@ def run(config: PipelineConfig) -> dict:
             refresh=config.ahrefs_refresh,
             semantic_sample_cap=config.ahrefs_semantic_sample,
         )
-        needs_ahrefs = provider_choice == "ahrefs" or (
+        needs_ahrefs = provider_choice in {"ahrefs", "all", "combined"} or (
             provider_choice == "auto" and not _search_payload_usable(ahrefs_data)
         )
         if config.enable_ahrefs and needs_ahrefs:
@@ -879,6 +938,8 @@ def run(config: PipelineConfig) -> dict:
                 semantic_sample_cap=config.ahrefs_semantic_sample,
             )
             candidate = ahrefs_analysis.payload
+            if _search_payload_usable(candidate):
+                search_provider_payloads.append(candidate)
             if _search_payload_usable(candidate) or provider_choice == "ahrefs":
                 ahrefs_data = candidate
                 write_ahrefs_semantic_cache(
@@ -888,7 +949,7 @@ def run(config: PipelineConfig) -> dict:
                     ahrefs_analysis.semantic_embeddings,
                 )
 
-        needs_dataforseo = provider_choice == "dataforseo" or (
+        needs_dataforseo = provider_choice in {"dataforseo", "all", "combined"} or (
             provider_choice == "auto" and not _search_payload_usable(ahrefs_data)
         )
         if config.enable_dataforseo and needs_dataforseo:
@@ -918,13 +979,36 @@ def run(config: PipelineConfig) -> dict:
                 embedder=embedder,
                 semantic_sample_cap=config.ahrefs_semantic_sample,
             )
-            if _search_payload_usable(dataforseo_analysis.payload) or not ahrefs_data:
+            candidate = dataforseo_analysis.payload
+            if _search_payload_usable(candidate):
+                search_provider_payloads.append(candidate)
+            if _search_payload_usable(candidate) or not ahrefs_data:
                 ahrefs_data = dataforseo_analysis.payload
                 write_ahrefs_semantic_cache(
                     cache_dir,
                     config.model,
                     dataforseo_analysis.semantic_rows,
                     dataforseo_analysis.semantic_embeddings,
+                )
+
+        if collect_all_search and search_provider_payloads:
+            combined_analysis = build_combined_search_analysis(
+                search_provider_payloads,
+                pages,
+                embeddings,
+                extracted_pages=extracted_pages,
+                paragraph_records=paragraph_records,
+                linkbuilding=linkbuilding_data,
+                embedder=embedder,
+                semantic_sample_cap=config.ahrefs_semantic_sample,
+            )
+            if combined_analysis.payload:
+                ahrefs_data = combined_analysis.payload
+                write_ahrefs_semantic_cache(
+                    cache_dir,
+                    config.model,
+                    combined_analysis.semantic_rows,
+                    combined_analysis.semantic_embeddings,
                 )
 
         search_meta = ahrefs_data.get("meta", {}) or {}

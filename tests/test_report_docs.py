@@ -30,6 +30,17 @@ def test_report_template_links_serp_guide_to_github() -> None:
     assert 'href="serp-paragraph-gap-analysis.md"' not in template
 
 
+def test_report_template_has_section_navigation() -> None:
+    template = Path("ui/index.html").read_text(encoding="utf-8")
+
+    assert 'aria-label="Report sections"' in template
+    assert 'id="report-nav"' in template
+    assert "const REPORT_NAV_SECTIONS = [" in template
+    assert "function showReportSection" in template
+    assert "report-section-hidden" in template
+    assert "initReportNavigation();" in template
+
+
 def test_report_section_doc_links_have_matching_blocks_and_anchors() -> None:
     template = Path("ui/index.html").read_text(encoding="utf-8")
     guide = Path("docs/report-sections.md").read_text(encoding="utf-8")

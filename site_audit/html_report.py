@@ -16,6 +16,7 @@ from typing import Optional
 import numpy as np
 
 from .analyzer import AuditResult, recommend_action
+from .report import _slim_linkgraph_payload
 
 _PLACEHOLDERS = {
     "__SCATTERPLOT_JSON__": "scatter",
@@ -296,7 +297,7 @@ def write_html_report(
         "clusters": _clusters_payload(cluster_summaries),
         "coverage": coverage or [],
         "answerability": answerability or [],
-        "linkgraph": linkgraph or {},
+        "linkgraph": _slim_linkgraph_payload(linkgraph or {}),
         "external": external_links or {},
         "paragraph_links": paragraph_link_recs or [],
         "cluster_overlap": cluster_overlap or {},

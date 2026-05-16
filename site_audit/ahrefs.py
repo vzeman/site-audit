@@ -907,6 +907,8 @@ def _semantic_map(
                 "cluster": _cluster_for_top_page(top_pages, page.url),
                 "traffic": traffic_by_index.get(idx, 0),
                 "size": traffic_by_index.get(idx, 0),
+                "provider": "site",
+                "provider_label": "Site",
             },
             embeddings[idx],
         )
@@ -926,6 +928,8 @@ def _semantic_map(
             "cluster": _cluster_for_top_page(top_pages, page.url),
             "traffic": traffic_by_index.get(idx, 0),
             "size": traffic_by_index.get(idx, 0),
+            "provider": "site",
+            "provider_label": "Site",
         })
     _encode_and_add(title_texts, title_rows, embedder, add_vector)
 
@@ -943,6 +947,14 @@ def _semantic_map(
             "volume": int(row.get("volume", 0)),
             "position": int(row.get("position", 0)),
             "size": max(int(row.get("traffic", 0)), int(row.get("volume", 0))),
+            "provider": row.get("provider", "search"),
+            "provider_label": row.get("provider_label") or row.get("provider", "search"),
+            "paid_cost": row.get("paid_cost", 0),
+            "paid_conversions": row.get("paid_conversions", 0),
+            "paid_conversion_value": row.get("paid_conversion_value", 0),
+            "clicks": row.get("clicks", 0),
+            "impressions": row.get("impressions", 0),
+            "cpc_usd": row.get("cpc_usd", 0),
         })
     _encode_and_add(keyword_texts, keyword_rows, embedder, add_vector)
 
@@ -967,6 +979,8 @@ def _semantic_map(
                 "cluster": _cluster_for_top_page(top_pages, page.url),
                 "traffic": traffic_by_index.get(idx, 0),
                 "size": traffic_by_index.get(idx, 0),
+                "provider": "site",
+                "provider_label": "Site",
             })
             if len(header_texts) >= sample_cap:
                 break
@@ -989,6 +1003,8 @@ def _semantic_map(
                 "cluster": _cluster_for_top_page(top_pages, page.url),
                 "traffic": traffic_by_index.get(page_i, 0),
                 "size": traffic_by_index.get(page_i, 0),
+                "provider": "site",
+                "provider_label": "Site",
             },
             emb,
         )
@@ -1012,6 +1028,8 @@ def _semantic_map(
             "traffic": 0,
             "count": int(count),
             "size": int(count),
+            "provider": "site",
+            "provider_label": "Site",
         })
     _encode_and_add(anchor_texts, anchor_rows, embedder, add_vector)
 
