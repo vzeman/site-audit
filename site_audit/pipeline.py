@@ -129,6 +129,7 @@ from .semantic_ablation import build_semantic_ablation
 from .search_fusion import build_combined_search_analysis
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
+from .sitemap_coverage import analyze as analyze_sitemap_coverage
 from .template_patterns import build_template_patterns
 from .technical_seo import build_technical_seo
 from .trust_signals import build_trust_signals
@@ -432,12 +433,26 @@ def run(config: PipelineConfig) -> dict:
     indexability_data = indexability_payload(
         analyze_indexability(fetched, extraction_rows, {p.url for p in pages})
     )
+    sitemap_coverage_data = analyze_sitemap_coverage(
+        getattr(crawler, "sitemap_entries", []),
+        fetched,
+        extraction_rows,
+        indexability_data,
+    )
     ix_summary = indexability_data.get("summary", {}) or {}
     LOG.info(
         "  indexability: %.0f%% analyzed · %d noindex · %d skipped",
         (ix_summary.get("indexable_share", 0.0) or 0.0) * 100,
         ix_summary.get("noindex_pages", 0),
         ix_summary.get("skipped_pages", 0),
+    )
+    sc_summary = sitemap_coverage_data.get("summary", {}) or {}
+    LOG.info(
+        "  sitemap coverage: %d sitemap URLs · %d not fetched · %d non-indexable · %d crawled missing from sitemap",
+        sc_summary.get("total_sitemap_urls", 0),
+        sc_summary.get("sitemap_not_fetched", 0),
+        sc_summary.get("sitemap_non_indexable", 0),
+        sc_summary.get("crawled_not_in_sitemap", 0),
     )
 
     performance_data = performance_payload(analyze_performance(fetched))
@@ -1694,6 +1709,7 @@ def run(config: PipelineConfig) -> dict:
         freshness=freshness_data,
         conversion=conversion_data,
         indexability=indexability_data,
+        sitemap_coverage=sitemap_coverage_data,
         performance=performance_data,
         ahrefs=ahrefs_data,
         best_pages=best_pages_data,

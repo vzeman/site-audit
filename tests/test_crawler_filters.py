@@ -137,6 +137,13 @@ def test_sitemap_lastmod_after_filters_urlset_entries() -> None:
     )
 
     assert crawler._discover_via_sitemaps() == ["https://example.com/recent"]
+    assert crawler.sitemap_entries == [
+        {
+            "url": "https://example.com/recent",
+            "source_sitemaps": ["https://example.com/sitemap.xml"],
+            "lastmod": "2026-05-04T10:00:00+00:00",
+        }
+    ]
 
 
 def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:

@@ -177,6 +177,12 @@ def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:
     _write_csv(output_dir / "indexability_issues.csv", [_csv_safe_row(row) for row in issues])
 
 
+def write_sitemap_coverage_exports(output_dir: Path, sitemap_coverage: dict) -> None:
+    _write_json(output_dir / "sitemap_coverage.json", sitemap_coverage)
+    _write_csv(output_dir / "sitemap_coverage.csv", [_csv_safe_row(row) for row in (sitemap_coverage or {}).get("rows", [])])
+    _write_csv(output_dir / "sitemap_coverage_issues.csv", [_csv_safe_row(row) for row in (sitemap_coverage or {}).get("issues", [])])
+
+
 def _csv_safe_row(row: dict) -> dict:
     out = {}
     for key, value in row.items():
@@ -536,6 +542,7 @@ def write_all(
     freshness: Optional[dict] = None,
     conversion: Optional[dict] = None,
     indexability: Optional[dict] = None,
+    sitemap_coverage: Optional[dict] = None,
     performance: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
@@ -638,6 +645,8 @@ def write_all(
     if indexability is not None:
         _write_json(output_dir / "indexability.json", indexability)
         write_indexability_issues_csv(output_dir, indexability)
+    if sitemap_coverage is not None:
+        write_sitemap_coverage_exports(output_dir, sitemap_coverage)
     if performance is not None:
         _write_json(output_dir / "performance.json", performance)
     if ahrefs is not None:

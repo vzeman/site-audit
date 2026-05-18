@@ -145,6 +145,13 @@ class FetchResult:
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
 
 
+@dataclass
+class SitemapEntry:
+    url: str
+    source_sitemaps: list[str] = field(default_factory=list)
+    lastmod: str = ""
+
+
 def normalize_url(url: str) -> str:
     """Strip fragments and trailing slashes consistently."""
     url, _ = urldefrag(url)
@@ -170,6 +177,8 @@ class Crawler:
         self._sitemap_exclude_re = [re.compile(p) for p in config.sitemap_exclude_patterns]
         self._sitemap_lastmod_cutoff = self._lastmod_cutoff()
         self._robots: Optional[urllib.robotparser.RobotFileParser] = None
+        self.sitemap_entries: list[dict] = []
+        self.sitemap_urls_seen: list[str] = []
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -285,7 +294,10 @@ class Crawler:
 
         seen_sitemaps: Set[str] = set()
         urls: Set[str] = set()
+        entries: dict[str, SitemapEntry] = {}
         queue = collections.deque(dict.fromkeys(sm for sm in candidates if self._sitemap_allowed(sm)))
+        self.sitemap_entries = []
+        self.sitemap_urls_seen = []
 
         while queue:
             sm = queue.popleft()
@@ -334,7 +346,21 @@ class Crawler:
                     url = normalize_url(loc_text)
                     if self._url_pattern_allowed(url) and self._lastmod_allowed(lastmod_text):
                         urls.add(url)
+                        entry = entries.setdefault(url, SitemapEntry(url=url))
+                        if sm not in entry.source_sitemaps:
+                            entry.source_sitemaps.append(sm)
+                        if lastmod_text and not entry.lastmod:
+                            entry.lastmod = lastmod_text
 
+        self.sitemap_urls_seen = sorted(seen_sitemaps)
+        self.sitemap_entries = [
+            {
+                "url": entry.url,
+                "source_sitemaps": sorted(entry.source_sitemaps),
+                "lastmod": entry.lastmod,
+            }
+            for entry in sorted(entries.values(), key=lambda item: item.url)
+        ]
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
 
