@@ -346,6 +346,8 @@ def run(config: PipelineConfig) -> dict:
                 "status": "skipped",
                 "reason": "unusable",
                 "http_status": getattr(r, "status", 0),
+                "content_type": getattr(r, "content_type", ""),
+                "x_robots_tag": getattr(r, "x_robots_tag", ""),
             })
             continue
         if ext.noindex:
@@ -362,6 +364,13 @@ def run(config: PipelineConfig) -> dict:
                 "reason": "noindex",
                 "source": ext.noindex_source,
                 "http_status": getattr(r, "status", 0),
+                "content_type": getattr(r, "content_type", ""),
+                "canonical_url": ext.canonical_url,
+                "robots_content": ext.robots_content,
+                "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                "noindex_source": ext.noindex_source,
+                "language": ext.language or "",
+                "word_count": ext.word_count,
             })
             continue
         section = section_for_url(r.url)
@@ -373,6 +382,13 @@ def run(config: PipelineConfig) -> dict:
                 "status": "skipped",
                 "reason": "empty_embedding_text",
                 "http_status": getattr(r, "status", 0),
+                "content_type": getattr(r, "content_type", ""),
+                "canonical_url": ext.canonical_url,
+                "robots_content": ext.robots_content,
+                "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                "noindex_source": ext.noindex_source,
+                "language": ext.language or "",
+                "word_count": ext.word_count,
             })
             continue
         page = PageInfo(
@@ -394,6 +410,13 @@ def run(config: PipelineConfig) -> dict:
             "status": "analyzed",
             "reason": "",
             "http_status": getattr(r, "status", 0),
+            "content_type": getattr(r, "content_type", ""),
+            "canonical_url": ext.canonical_url,
+            "robots_content": ext.robots_content,
+            "x_robots_tag": getattr(r, "x_robots_tag", ""),
+            "noindex_source": ext.noindex_source,
+            "language": ext.language or "",
+            "word_count": ext.word_count,
         })
         if idx % 500 == 0 or idx == fetched_total:
             LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
