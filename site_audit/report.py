@@ -183,6 +183,12 @@ def write_sitemap_coverage_exports(output_dir: Path, sitemap_coverage: dict) -> 
     _write_csv(output_dir / "sitemap_coverage_issues.csv", [_csv_safe_row(row) for row in (sitemap_coverage or {}).get("issues", [])])
 
 
+def write_canonical_consistency_exports(output_dir: Path, canonical_consistency: dict) -> None:
+    _write_json(output_dir / "canonical_consistency.json", canonical_consistency)
+    _write_csv(output_dir / "canonical_consistency.csv", [_csv_safe_row(row) for row in (canonical_consistency or {}).get("rows", [])])
+    _write_csv(output_dir / "canonical_consistency_issues.csv", [_csv_safe_row(row) for row in (canonical_consistency or {}).get("issues", [])])
+
+
 def _csv_safe_row(row: dict) -> dict:
     out = {}
     for key, value in row.items():
@@ -543,6 +549,7 @@ def write_all(
     conversion: Optional[dict] = None,
     indexability: Optional[dict] = None,
     sitemap_coverage: Optional[dict] = None,
+    canonical_consistency: Optional[dict] = None,
     performance: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
@@ -647,6 +654,8 @@ def write_all(
         write_indexability_issues_csv(output_dir, indexability)
     if sitemap_coverage is not None:
         write_sitemap_coverage_exports(output_dir, sitemap_coverage)
+    if canonical_consistency is not None:
+        write_canonical_consistency_exports(output_dir, canonical_consistency)
     if performance is not None:
         _write_json(output_dir / "performance.json", performance)
     if ahrefs is not None:
