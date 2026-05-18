@@ -24,6 +24,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -105,6 +106,8 @@ def write_internal_linkbuilding_csv(
         source_url = rec.get("source_url") or ""
         target_url = rec.get("target_url") or ""
         suggested_anchor = rec.get("suggested_anchor") or rec.get("anchor") or ""
+        if _canonical_url(source_url) == _canonical_url(target_url):
+            continue
         paid_candidate = _best_paid_anchor_candidate(
             paid_keywords,
             rec.get("paragraph_excerpt") or "",
@@ -221,6 +224,20 @@ def _paid_keywords(search_payload: Optional[dict]) -> list[dict]:
 
 def _normalize_anchor(anchor: str) -> str:
     return re.sub(r"\s+", " ", str(anchor or "").strip().lower())
+
+
+def _canonical_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return str(url or "").rstrip("/")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    netloc = parsed.netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return f"{parsed.scheme.lower() or 'https'}://{netloc}{path}".rstrip("/") or str(url or "").rstrip("/")
 
 
 def _best_paid_anchor_candidate(

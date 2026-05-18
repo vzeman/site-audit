@@ -95,6 +95,44 @@ def test_recommend_dedupes_same_anchor_in_same_paragraph() -> None:
     assert len(recs) == len(keys)
 
 
+def test_recommend_skips_canonical_self_link_variants() -> None:
+    pages = [
+        SimpleNamespace(url="https://www.example.com/source/", title="Source"),
+        SimpleNamespace(url="https://example.com/source", title="Source canonical duplicate"),
+        SimpleNamespace(url="https://example.com/target", title="Target"),
+    ]
+    page_embeddings = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.99, 0.01, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    paragraph_records = [
+        (
+            0,
+            1,
+            "This paragraph strongly matches source duplicate content.",
+            np.array([0.99, 0.01, 0.0], dtype=np.float32),
+        )
+    ]
+
+    recs = recommend(
+        pages,
+        page_embeddings,
+        paragraph_records,
+        pages_with_outlinks=[],
+        embedder=CountingEmbedder(),
+        similarity_floor=0.1,
+        lift_floor=-1.0,
+        top_k_per_page=3,
+        top_k_total=10,
+    )
+
+    assert all(r.source_url != "https://www.example.com/source/" or r.target_url != "https://example.com/source" for r in recs)
+
+
 def test_addition_simulation_scores_components_and_density_cap() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/source", title="Source", section="blog"),
@@ -220,6 +258,37 @@ def test_internal_linkbuilding_csv_dedupes_same_anchor_in_same_paragraph(tmp_pat
             "target_title": pages[2].title,
             "suggested_anchor": "Target   Topics",
             "expected_benefit_score": 70,
+        },
+    ]
+
+    rows = write_internal_linkbuilding_csv(tmp_path / "links.csv", result, recs)
+
+    assert len(rows) == 1
+    assert rows[0]["destination_url"] == pages[1].url
+
+
+def test_internal_linkbuilding_csv_skips_canonical_self_links(tmp_path) -> None:
+    pages = [
+        SimpleNamespace(url="https://www.example.com/source/", title="Source", description=""),
+        SimpleNamespace(url="https://example.com/target", title="Target", description=""),
+    ]
+    result = SimpleNamespace(pages=pages)
+    recs = [
+        {
+            "source_url": "https://www.example.com/source/",
+            "paragraph_index": 1,
+            "paragraph_excerpt": "Self link should not be exported.",
+            "target_url": "https://example.com/source",
+            "target_title": "Source",
+            "suggested_anchor": "source page",
+        },
+        {
+            "source_url": pages[0].url,
+            "paragraph_index": 2,
+            "paragraph_excerpt": "Valid target link.",
+            "target_url": pages[1].url,
+            "target_title": pages[1].title,
+            "suggested_anchor": "target page",
         },
     ]
 
