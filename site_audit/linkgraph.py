@@ -487,9 +487,11 @@ def link_recommendations(
     sims, idxs = index.search(embeddings.astype(np.float32), k)
 
     edge_set: set[tuple[str, str]] = set()
+    canonical_edge_set: set[tuple[str, str]] = set()
     for src, outs in graph.items():
         for tgt in outs:
             edge_set.add((src, tgt))
+            canonical_edge_set.add((_canonical_url(src), _canonical_url(tgt)))
 
     seen_pairs: set[tuple[int, int]] = set()
     recs: list[dict] = []
@@ -505,7 +507,13 @@ def link_recommendations(
             seen_pairs.add(key)
             url_a = pages[i].url
             url_b = pages[j].url
+            canonical_a = _canonical_url(url_a)
+            canonical_b = _canonical_url(url_b)
+            if canonical_a == canonical_b:
+                continue
             if (url_a, url_b) in edge_set or (url_b, url_a) in edge_set:
+                continue
+            if (canonical_a, canonical_b) in canonical_edge_set or (canonical_b, canonical_a) in canonical_edge_set:
                 continue
             recs.append({
                 "url_a": url_a,

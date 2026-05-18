@@ -1,7 +1,7 @@
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, high_demand_low_link_payload, hub_bottleneck_payload, link_flow_payload, link_removal_simulation_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import analyze, high_demand_low_link_payload, hub_bottleneck_payload, link_flow_payload, link_recommendations, link_removal_simulation_payload, traffic_weighted_pagerank_payload
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -49,6 +49,33 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
     assert target_edge["target_cluster"] == "guides"
     assert target_edge["target_page_type"] == "article"
     assert "guide" in target_edge["anchor_samples"]
+
+
+def test_link_recommendations_skip_canonical_self_link_variants() -> None:
+    pages = [
+        PageInfo(url="https://www.example.com/source/", title="Source", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/source", title="Source Duplicate", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/target", title="Target", description="", section="root", word_count=100, language="en"),
+    ]
+    embeddings = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.99, 0.01, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    recs = link_recommendations(
+        pages,
+        embeddings,
+        graph={},
+        similarity_threshold=0.1,
+        knn=3,
+        top_k=10,
+    )
+
+    assert all({rec["url_a"], rec["url_b"]} != {pages[0].url, pages[1].url} for rec in recs)
 
 
 def test_link_removal_simulation_ranks_contextual_and_template_links() -> None:

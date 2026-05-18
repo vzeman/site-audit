@@ -37,6 +37,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Iterable
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -75,12 +76,25 @@ class ParagraphLinkRec:
 
 
 def _is_nav_url(url: str) -> bool:
-    from urllib.parse import urlparse
     try:
         path = urlparse(url).path or "/"
     except Exception:
         return False
     return bool(_NAV_PATH_RE.match(path))
+
+
+def _canonical_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return str(url or "").rstrip("/")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    netloc = parsed.netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return f"{parsed.scheme.lower() or 'https'}://{netloc}{path}".rstrip("/") or str(url or "").rstrip("/")
 
 
 def _tokenize(text: str) -> list[str]:
@@ -159,6 +173,10 @@ def recommend(
         page_avg_sims[page_i] = sims[para_idxs].mean(axis=0)
 
     existing_links = _existing_link_targets_for_page(pages_with_outlinks)
+    canonical_existing_links = {
+        _canonical_url(src): {_canonical_url(tgt) for tgt in targets}
+        for src, targets in existing_links.items()
+    }
 
     # answerability filter: low-quality target pages get skipped
     drop_target_idx: set[int] = set()
@@ -199,7 +217,13 @@ def recommend(
                 continue
             src_url = pages[page_i].url
             tgt_url = pages[tgt_i].url
+            canonical_src = _canonical_url(src_url)
+            canonical_tgt = _canonical_url(tgt_url)
+            if canonical_src == canonical_tgt:
+                continue
             if tgt_url in existing_links.get(src_url, set()):
+                continue
+            if canonical_tgt in canonical_existing_links.get(canonical_src, set()):
                 continue
             if (page_i, tgt_i) in page_target_seen:
                 continue
