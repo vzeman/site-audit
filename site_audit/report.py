@@ -172,6 +172,11 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
     _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
 
 
+def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:
+    issues = list((indexability or {}).get("issues") or [])
+    _write_csv(output_dir / "indexability_issues.csv", [_csv_safe_row(row) for row in issues])
+
+
 def _csv_safe_row(row: dict) -> dict:
     out = {}
     for key, value in row.items():
@@ -632,6 +637,7 @@ def write_all(
         _write_json(output_dir / "conversion.json", conversion)
     if indexability is not None:
         _write_json(output_dir / "indexability.json", indexability)
+        write_indexability_issues_csv(output_dir, indexability)
     if performance is not None:
         _write_json(output_dir / "performance.json", performance)
     if ahrefs is not None:
