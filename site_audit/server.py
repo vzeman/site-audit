@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
@@ -27,10 +28,16 @@ def _build_handler(ui_dir: Path, data_dir: Path, projects_root: Path):
         def do_GET(self):  # noqa: N802
             path = unquote(self.path.split("?", 1)[0])
             if path == "/":
-                self._serve_file(ui_dir / "index.html")
+                self._send_html(_render_home(projects_root))
                 return
             if path == "/scans":
                 self._send_html(_render_scans_page(projects_root, _scan_rows()))
+                return
+            if path == "/reports":
+                self._send_html(_render_reports_page(projects_root))
+                return
+            if path == "/comparisons":
+                self._send_html(_render_comparisons_page(projects_root))
                 return
             if path == "/api/reports":
                 self._send_json({"reports": _report_rows(projects_root)})
@@ -40,6 +47,10 @@ def _build_handler(ui_dir: Path, data_dir: Path, projects_root: Path):
                 return
             if path.startswith("/reports/") and path.rstrip("/").count("/") == 2:
                 self._serve_file(ui_dir / "index.html")
+                return
+            if path.startswith("/comparisons/") and path.rstrip("/").count("/") == 2:
+                name = path.strip("/").split("/", 1)[1]
+                self._serve_file(projects_root / "_compare" / name / "index.html")
                 return
             if path.startswith("/reports-data/"):
                 parts = path[len("/reports-data/"):].split("/", 1)
@@ -52,6 +63,10 @@ def _build_handler(ui_dir: Path, data_dir: Path, projects_root: Path):
             if path.startswith("/data/"):
                 rel = path[len("/data/"):]
                 self._serve_file(data_dir / rel)
+                return
+            if path.startswith("/comparison-data/"):
+                rel = path[len("/comparison-data/"):]
+                self._serve_file(projects_root / "_compare" / rel)
                 return
             target = ui_dir / path.lstrip("/")
             if target.is_file():
@@ -213,6 +228,204 @@ def _report_rows(projects_root: Path) -> list[dict]:
     return rows
 
 
+def _comparison_rows(projects_root: Path) -> list[dict]:
+    rows = []
+    for index in sorted((projects_root / "_compare").glob("*/index.html")):
+        rows.append({
+            "name": index.parent.name,
+            "url": f"/comparisons/{index.parent.name}/",
+            "updated_at": int(index.stat().st_mtime),
+            "domains": _comparison_domains(index.parent),
+        })
+    rows.sort(key=lambda row: row["updated_at"], reverse=True)
+    return rows
+
+
+def _comparison_domains(compare_dir: Path) -> list[str]:
+    comparison_json = compare_dir / "comparison.json"
+    if comparison_json.is_file():
+        try:
+            payload = json.loads(comparison_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        domains = payload.get("domains")
+        if isinstance(domains, list):
+            return [_clean_domain(str(domain)) for domain in domains if _clean_domain(str(domain))]
+    parts = [
+        part.strip()
+        for part in compare_dir.name.replace("_", "-").split("-vs-")
+        if part.strip()
+    ]
+    return [_clean_domain(part) for part in parts]
+
+
+def _render_home(projects_root: Path) -> str:
+    reports = _report_rows(projects_root)
+    comparisons = _comparison_rows(projects_root)
+    comparison_cards = "".join(
+        _item_card(
+            row["name"],
+            row["url"],
+            f'updated {_format_ts(row["updated_at"])}',
+            "Open comparison",
+            row.get("domains") or [],
+        )
+        for row in comparisons
+    ) or '<div class="panel muted empty">No generated comparisons found under projects/_compare.</div>'
+    report_cards = "".join(
+        _item_card(row["domain"], row["url"], f'updated {_format_ts(row["updated_at"])}', "Open report", [row["domain"]])
+        for row in reports
+    ) or '<div class="panel muted empty">No generated reports found under projects/&lt;domain&gt;/report.</div>'
+    body = f"""
+      <section>
+        <h2>Comparisons</h2>
+        <div class="hint">Generated cross-domain dashboards from <code style="display:inline">projects/_compare</code>.</div>
+        <div class="cards">{comparison_cards}</div>
+      </section>
+      <section>
+        <h2>Domain Reports</h2>
+        <div class="hint">Completed audits from <code style="display:inline">projects/&lt;domain&gt;/report</code>.</div>
+        <div class="cards">{report_cards}</div>
+      </section>
+    """
+    return _layout("Site Audit", "home", body, subtitle="Local app for reports, comparisons, and scans.")
+
+
+def _render_reports_page(projects_root: Path) -> str:
+    rows = _report_rows(projects_root)
+    if rows:
+        body = "<table><thead><tr><th>Domain</th><th>Updated</th><th>Open</th></tr></thead><tbody>" + "".join(
+            f'<tr><td>{escape(row["domain"])}</td><td>{escape(_format_ts(row["updated_at"]))}</td><td><a href="{escape(row["url"])}">Open report</a></td></tr>'
+            for row in rows
+        ) + "</tbody></table>"
+    else:
+        body = '<div class="panel muted">No generated reports found under projects/&lt;domain&gt;/report.</div>'
+    return _layout("Reports", "reports", body, subtitle=f"Reading generated reports from {projects_root}.")
+
+
+def _render_comparisons_page(projects_root: Path) -> str:
+    rows = _comparison_rows(projects_root)
+    if rows:
+        body = '<ul class="list">' + "".join(
+            f'<li><a href="{escape(row["url"])}">{escape(row["name"])}</a><span class="muted">updated {escape(_format_ts(row["updated_at"]))}</span></li>'
+            for row in rows
+        ) + "</ul>"
+    else:
+        body = '<div class="panel muted">No generated comparisons found under projects/_compare.</div>'
+    return _layout("Comparisons", "comparisons", body, subtitle="Open outputs from site-audit compare.")
+
+
+def _layout(title: str, active: str, body: str, *, subtitle: str = "") -> str:
+    nav_items = [
+        ("home", "/", "Overview"),
+        ("reports", "/reports", "Reports"),
+        ("comparisons", "/comparisons", "Comparisons"),
+        ("scans", "/scans", "Scans"),
+    ]
+    nav = "".join(
+        f'<a class="{"active" if key == active else ""}" href="{href}">{label}</a>'
+        for key, href, label in nav_items
+    )
+    subtitle_html = f'<div class="hint">{escape(subtitle)}</div>' if subtitle else ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(title)}</title>
+  <style>
+    body {{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; background:#f6f2ea; color:#231f1a; }}
+    header {{ position:sticky; top:0; z-index:2; display:grid; grid-template-columns:1fr auto; gap:20px; align-items:center; padding:18px 28px; background:#fffdfa; border-bottom:1px solid #eadfce; }}
+    nav {{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }}
+    nav a {{ color:#4f463c; text-decoration:none; font-weight:800; font-size:13px; padding:9px 11px; border-radius:8px; }}
+    nav a.active, nav a:hover {{ background:#231f1a; color:#fffdfa; }}
+    main {{ max-width:1120px; margin:0 auto; padding:28px; }}
+    h1 {{ margin:0 0 4px; font-size:28px; }}
+    h2 {{ margin:28px 0 12px; font-size:18px; text-transform:capitalize; }}
+    .hint, .muted {{ color:#756d65; font-size:13px; line-height:1.45; }}
+    .panel {{ background:#fffdfa; border:1px solid #eadfce; border-radius:10px; padding:18px; }}
+    .cards {{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; margin-top:12px; }}
+    .item-card {{ display:flex; flex-direction:column; min-height:118px; color:inherit; text-decoration:none; }}
+    .item-card:hover {{ border-color:#d77d24; box-shadow:0 2px 10px rgba(80,54,24,.08); }}
+    .card-head {{ display:flex; align-items:center; gap:10px; }}
+    .favicon-stack {{ display:flex; flex:0 0 auto; min-width:32px; }}
+    .favicon-stack img {{ width:28px; height:28px; border-radius:7px; border:1px solid #eadfce; background:#fff; object-fit:contain; }}
+    .favicon-stack img + img {{ margin-left:-9px; }}
+    .card-title {{ font-weight:900; line-height:1.25; word-break:break-word; }}
+    .card-meta {{ margin-top:8px; }}
+    .card-action {{ margin-top:auto; padding-top:14px; color:#a04400; font-weight:900; font-size:13px; }}
+    .empty {{ margin-top:12px; }}
+    .panel a, td a, li a {{ color:#a04400; font-weight:800; text-decoration:none; }}
+    .grid {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }}
+    label {{ display:block; font-weight:700; font-size:13px; margin-bottom:5px; }}
+    input, select, textarea {{ width:100%; box-sizing:border-box; border:1px solid #d8cbb9; border-radius:8px; padding:9px 10px; font:inherit; background:white; }}
+    textarea {{ min-height:80px; }}
+    button {{ border:0; border-radius:8px; padding:11px 16px; background:#ff8a1f; color:white; font-weight:800; cursor:pointer; }}
+    .status {{ display:inline-block; padding:3px 7px; border-radius:999px; background:#eee2d1; }}
+    .status.running {{ background:#fff3c4; color:#805800; }}
+    .status.finished {{ background:#dff4e8; color:#17613d; }}
+    .status.failed {{ background:#f8d7da; color:#8a1f2d; }}
+    table {{ width:100%; border-collapse:collapse; background:#fffdfa; border:1px solid #eadfce; border-radius:10px; overflow:hidden; }}
+    td, th {{ padding:11px 12px; border-top:1px solid #f0e7da; text-align:left; font-size:13px; vertical-align:top; }}
+    th {{ border-top:0; color:#756d65; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }}
+    ul.list {{ margin:0; padding:0; list-style:none; background:#fffdfa; border:1px solid #eadfce; border-radius:10px; overflow:hidden; }}
+    ul.list li {{ display:flex; justify-content:space-between; gap:14px; padding:12px 14px; border-top:1px solid #f0e7da; }}
+    ul.list li:first-child {{ border-top:0; }}
+    code {{ color:#9a5200; font-size:12px; word-break:break-all; }}
+    @media (max-width:820px) {{
+      header {{ grid-template-columns:1fr; }}
+      nav {{ justify-content:flex-start; }}
+      .cards, .grid {{ grid-template-columns:1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>{escape(title)}</h1>
+      {subtitle_html}
+    </div>
+    <nav>{nav}</nav>
+  </header>
+  <main>{body}</main>
+</body>
+</html>"""
+
+
+def _item_card(title: str, url: str, meta: str, action: str, domains: list[str] | None = None) -> str:
+    icons = _favicon_stack(domains or [])
+    return f"""
+      <a class="panel item-card" href="{escape(url)}">
+        <div class="card-head">{icons}<div class="card-title">{escape(title)}</div></div>
+        <div class="hint card-meta">{escape(meta)}</div>
+        <div class="card-action">{escape(action)}</div>
+      </a>"""
+
+
+def _favicon_stack(domains: list[str]) -> str:
+    clean_domains = [_clean_domain(domain) for domain in domains if _clean_domain(domain)]
+    if not clean_domains:
+        return '<span class="favicon-stack"></span>'
+    imgs = "".join(
+        f'<img src="{escape(_favicon_url(domain))}" alt="{escape(domain)} favicon" loading="lazy">'
+        for domain in clean_domains[:3]
+    )
+    return f'<span class="favicon-stack">{imgs}</span>'
+
+
+def _favicon_url(domain: str) -> str:
+    return f"https://www.google.com/s2/favicons?domain={escape(domain)}&sz=64"
+
+
+def _clean_domain(value: str) -> str:
+    domain = str(value or "").strip().replace("https://", "").replace("http://", "")
+    return domain.split("/", 1)[0].strip()
+
+
+def _format_ts(value: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
+
+
 def _append_optional_arg(cmd: list[str], form: dict[str, list[str]], key: str, flag: str) -> None:
     value = (form.get(key) or [""])[-1].strip()
     if value:
@@ -251,44 +464,8 @@ def _render_scans_page(projects_root: Path, scans: list[dict]) -> str:
         f'<span class="muted">updated {time.strftime("%Y-%m-%d %H:%M", time.localtime(row["updated_at"]))}</span></li>'
         for row in reports
     ) or '<li class="muted">No generated reports found.</li>'
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
-  <title>Site Audit Scans</title>
-  <style>
-    body {{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; background:#f6f2ea; color:#231f1a; }}
-    header {{ padding:22px 28px; background:#fffdfa; border-bottom:1px solid #eadfce; }}
-    main {{ max-width:1100px; margin:0 auto; padding:28px; display:grid; gap:22px; }}
-    h1 {{ margin:0 0 4px; font-size:28px; }}
-    h2 {{ margin:0 0 12px; font-size:18px; }}
-    .hint, .muted {{ color:#756d65; font-size:13px; }}
-    .card {{ background:#fffdfa; border:1px solid #eadfce; border-radius:10px; padding:18px; }}
-    .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:14px; }}
-    label {{ display:block; font-weight:700; font-size:13px; margin-bottom:5px; }}
-    input, select, textarea {{ width:100%; box-sizing:border-box; border:1px solid #d8cbb9; border-radius:8px; padding:9px 10px; font:inherit; background:white; }}
-    textarea {{ min-height:80px; }}
-    button {{ border:0; border-radius:8px; padding:11px 16px; background:#ff8a1f; color:white; font-weight:800; cursor:pointer; }}
-    table {{ width:100%; border-collapse:collapse; }}
-    td, th {{ padding:9px 8px; border-top:1px solid #f0e7da; text-align:left; font-size:13px; }}
-    code {{ color:#9a5200; font-size:12px; word-break:break-all; }}
-    a {{ color:#a04400; font-weight:700; }}
-    .status {{ display:inline-block; padding:3px 7px; border-radius:999px; background:#eee2d1; }}
-    .status.running {{ background:#fff3c4; color:#805800; }}
-    .status.finished {{ background:#dff4e8; color:#17613d; }}
-    .status.failed {{ background:#f8d7da; color:#8a1f2d; }}
-    @media (max-width: 760px) {{ .grid {{ grid-template-columns:1fr; }} }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Site Audit Scans</h1>
-    <div class="hint">Start a scan from the browser, then open generated reports without using the CLI.</div>
-  </header>
-  <main>
-    <section class="card">
+    body = f"""
+    <section class="panel">
       <h2>Start Scan</h2>
       <form method="post" action="/api/scans" enctype="application/x-www-form-urlencoded">
         <div class="grid">
@@ -317,17 +494,20 @@ def _render_scans_page(projects_root: Path, scans: list[dict]) -> str:
         <button type="submit">Start scan</button>
       </form>
     </section>
-    <section class="card">
+    <section class="panel">
       <h2>Running And Recent Scans</h2>
       <table><thead><tr><th>Domain</th><th>Status</th><th>Result</th><th>Log</th></tr></thead><tbody>{scan_rows}</tbody></table>
     </section>
-    <section class="card">
+    <section class="panel">
       <h2>Available Reports</h2>
       <ul>{report_rows}</ul>
-    </section>
-  </main>
-</body>
-</html>"""
+    </section>"""
+    return _layout(
+        "Site Audit Scans",
+        "scans",
+        body,
+        subtitle="Start a scan from the browser, then open generated reports without using the CLI.",
+    )
 
 
 def _esc(value: object) -> str:
