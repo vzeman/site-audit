@@ -130,6 +130,7 @@ from .search_fusion import build_combined_search_analysis
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 from .template_patterns import build_template_patterns
+from .technical_seo import build_technical_seo
 from .trust_signals import build_trust_signals
 from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
@@ -1594,6 +1595,21 @@ def run(config: PipelineConfig) -> dict:
         pe_summary.get("sample_size", 0),
         pe_summary.get("validation_r2", 0.0) or 0.0,
     )
+    technical_seo_data = build_technical_seo(
+        pages,
+        indexability=indexability_data,
+        metadata_quality=metadata_quality_data,
+        performance=performance_data,
+        search_payload=ahrefs_data,
+        page_types=page_types_data,
+    )
+    tech_summary = technical_seo_data.get("summary", {}) or {}
+    LOG.info(
+        "  technical SEO model: %d pages · %d issues · %d high",
+        tech_summary.get("total_pages", 0),
+        tech_summary.get("total_issues", 0),
+        tech_summary.get("high_issues", 0),
+    )
     history_snapshot_data = build_history_snapshot(
         host,
         pages,
@@ -1660,6 +1676,7 @@ def run(config: PipelineConfig) -> dict:
         best_pages=best_pages_data,
         performance_explainer=performance_explainer_data,
         history_snapshot=history_snapshot_data,
+        technical_seo=technical_seo_data,
     )
 
     template_path = Path(__file__).resolve().parent.parent / "ui" / "index.html"

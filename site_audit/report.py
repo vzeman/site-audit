@@ -150,6 +150,40 @@ def write_internal_linkbuilding_csv(
     return rows
 
 
+def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
+    pages = list((technical_seo or {}).get("pages") or [])
+    issues = list((technical_seo or {}).get("issues") or [])
+    page_payload = {
+        "summary": (technical_seo or {}).get("summary", {}),
+        "pages": pages,
+        "interpretation": (technical_seo or {}).get("interpretation", {}),
+    }
+    issue_payload = {
+        "summary": (technical_seo or {}).get("summary", {}),
+        "issue_counts": (technical_seo or {}).get("issue_counts", {}),
+        "category_counts": (technical_seo or {}).get("category_counts", {}),
+        "severity_counts": (technical_seo or {}).get("severity_counts", {}),
+        "issues": issues,
+        "interpretation": (technical_seo or {}).get("interpretation", {}),
+    }
+    _write_json(output_dir / "technical_pages.json", page_payload)
+    _write_json(output_dir / "technical_issues.json", issue_payload)
+    _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
+    _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
+
+
+def _csv_safe_row(row: dict) -> dict:
+    out = {}
+    for key, value in row.items():
+        if isinstance(value, list):
+            out[key] = ", ".join(str(item) for item in value)
+        elif isinstance(value, dict):
+            out[key] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        else:
+            out[key] = value
+    return out
+
+
 def _paid_keywords(search_payload: Optional[dict]) -> list[dict]:
     rows = []
     for row in (search_payload or {}).get("organic_keywords") or []:
@@ -502,6 +536,7 @@ def write_all(
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
     history_snapshot: Optional[dict] = None,
+    technical_seo: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     _copy_report_docs(output_dir)
@@ -611,4 +646,6 @@ def write_all(
         _write_json(output_dir / "performance_explainer.json", performance_explainer)
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
+    if technical_seo is not None:
+        write_technical_seo_exports(output_dir, technical_seo)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}
