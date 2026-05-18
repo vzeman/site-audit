@@ -41,6 +41,7 @@ from .answerability import to_payload as answerability_payload
 from .best_pages import build_best_page_explainers
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
 from .cannibalization import build_cannibalization
+from .canonical_consistency import analyze as analyze_canonical_consistency
 from .duplicate_fragments import build_duplicate_fragments
 from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .competitive_analysis import (
@@ -439,6 +440,10 @@ def run(config: PipelineConfig) -> dict:
         extraction_rows,
         indexability_data,
     )
+    canonical_consistency_data = analyze_canonical_consistency(
+        extraction_rows,
+        indexability_data,
+    )
     ix_summary = indexability_data.get("summary", {}) or {}
     LOG.info(
         "  indexability: %.0f%% analyzed · %d noindex · %d skipped",
@@ -453,6 +458,14 @@ def run(config: PipelineConfig) -> dict:
         sc_summary.get("sitemap_not_fetched", 0),
         sc_summary.get("sitemap_non_indexable", 0),
         sc_summary.get("crawled_not_in_sitemap", 0),
+    )
+    cc_summary = canonical_consistency_data.get("summary", {}) or {}
+    LOG.info(
+        "  canonical consistency: %d pages with issues · %d missing · %d external · %d non-self",
+        cc_summary.get("pages_with_canonical_issues", 0),
+        cc_summary.get("missing_canonical", 0),
+        cc_summary.get("canonical_external_host", 0),
+        cc_summary.get("canonical_non_self", 0),
     )
 
     performance_data = performance_payload(analyze_performance(fetched))
@@ -1710,6 +1723,7 @@ def run(config: PipelineConfig) -> dict:
         conversion=conversion_data,
         indexability=indexability_data,
         sitemap_coverage=sitemap_coverage_data,
+        canonical_consistency=canonical_consistency_data,
         performance=performance_data,
         ahrefs=ahrefs_data,
         best_pages=best_pages_data,
