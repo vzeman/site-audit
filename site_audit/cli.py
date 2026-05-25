@@ -348,8 +348,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Only discover URLs from this sitemap URL; repeat for multiple sitemaps")
     run_p.add_argument("--sitemap-only", action="store_true",
                        help="Fetch only sitemap-discovered URLs; do not enqueue internal page links")
-    run_p.add_argument("--strip-header-footer", action="store_true",
-                       help="Remove <header> and <footer> HTML before text extraction and link analysis")
+    run_p.add_argument("--strip-header-footer", action=argparse.BooleanOptionalAction, default=True,
+                       help="Remove <header> and <footer> HTML before text extraction and link analysis (default)")
     run_p.add_argument("--content-include-class", "--include-class", action="append", default=[],
                        help="Only analyze HTML elements with this class; repeat for multiple classes")
     run_p.add_argument("--content-exclude-class", "--exclude-class", action="append", default=[],

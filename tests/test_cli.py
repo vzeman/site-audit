@@ -125,6 +125,18 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.competitive_auto_refresh_serp is True
 
 
+def test_run_parser_strips_header_footer_by_default() -> None:
+    args = build_parser().parse_args(["run", "example.com"])
+
+    assert args.strip_header_footer is True
+
+
+def test_run_parser_accepts_disabling_header_footer_stripping() -> None:
+    args = build_parser().parse_args(["run", "example.com", "--no-strip-header-footer"])
+
+    assert args.strip_header_footer is False
+
+
 def test_history_parser_accepts_snapshot_and_compare_commands() -> None:
     snapshot_args = build_parser().parse_args(
         ["history", "snapshot", "example.com", "--projects-root", "/tmp/projects", "--id", "baseline", "--overwrite"]

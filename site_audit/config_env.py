@@ -100,7 +100,7 @@ def _first_env(names: list[str]) -> str | None:
 
 
 def _coerce_value(raw: str, action: argparse.Action) -> Any:
-    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse.BooleanOptionalAction)):
         return _to_bool(raw)
     if isinstance(action, argparse._AppendAction):
         return _to_list(raw)

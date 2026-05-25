@@ -21,6 +21,16 @@ def test_env_defaults_apply_to_run_options(monkeypatch) -> None:
     assert args.competitive_auto_product_seed == ["help desk", "live chat"]
 
 
+def test_env_defaults_apply_to_boolean_optional_run_options(monkeypatch) -> None:
+    parser = build_parser()
+    args = parser.parse_args(["run", "example.com"])
+    monkeypatch.setenv("SITE_AUDIT_RUN_STRIP_HEADER_FOOTER", "false")
+
+    apply_env_defaults(args, parser, ["run", "example.com"])
+
+    assert args.strip_header_footer is False
+
+
 def test_cli_options_override_env_defaults(monkeypatch) -> None:
     parser = build_parser()
     args = parser.parse_args(["run", "cli.com", "--max-pages", "50"])

@@ -415,7 +415,7 @@ def _default_value(action: argparse.Action) -> str:
 
 
 def _kind(action: argparse.Action) -> str:
-    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse.BooleanOptionalAction)):
         return "bool"
     if isinstance(action, argparse._AppendAction) or action.nargs in {"+", "*"}:
         return "list"
