@@ -1531,15 +1531,27 @@
     const tbl = document.getElementById('gap-table');
     const gaps = (data.biggest_gaps || []).slice(0, 15);
     if (!tbl || !gaps.length) return;
+    const domains = data.domains || [];
     tbl.querySelector('thead').innerHTML = `
       <tr>
         <th class="px-3 py-2 text-left">Metric</th>
         <th class="px-3 py-2 text-left">Group</th>
         <th class="px-3 py-2 text-left">Leader</th>
         <th class="px-3 py-2 text-left">Trailing</th>
+        <th class="px-3 py-2 text-left">Report sections</th>
         <th class="px-3 py-2 text-right">Gap</th>
       </tr>`;
-    tbl.querySelector('tbody').innerHTML = gaps.map(g => `
+    tbl.querySelector('tbody').innerHTML = gaps.map(g => {
+      const section = g.report_section || {};
+      const anchor = section.id ? `#${encodeURIComponent(section.id)}` : '';
+      const sectionLabel = section.label || 'Report';
+      const sectionLinks = domains.map(domain => `
+        <a class="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+           href="../../${escapeHtml(domain)}/report/index.html${anchor}" target="_blank" rel="noopener"
+           title="${escapeHtml(domain)} · ${escapeHtml(sectionLabel)}">
+          ${escapeHtml(domain)}
+        </a>`).join(' ');
+      return `
       <tr class="border-b border-gray-100">
         <td class="px-3 py-1.5 font-medium">${escapeHtml(g.metric)}</td>
         <td class="px-3 py-1.5 text-gray-600">${escapeHtml(g.group)}</td>
@@ -1551,8 +1563,13 @@
           <span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${domainColor(g.worst)}"></span>
           ${escapeHtml(g.worst)} <span class="font-mono text-red-700">${fmt(g.worst_value, g.fmt)}</span>
         </td>
+        <td class="px-3 py-1.5">
+          <div class="text-xs text-gray-500 mb-1">${escapeHtml(sectionLabel)}</div>
+          <div class="flex flex-wrap gap-1">${sectionLinks}</div>
+        </td>
         <td class="px-3 py-1.5 text-right font-mono">${Math.round((g.relative_gap || 0) * 100)}%</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
   }
 
   let matrixGroup = ((data.metric_groups || [])[0] || {}).key || '';

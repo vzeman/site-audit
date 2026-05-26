@@ -85,6 +85,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "freshness.json": '{"summary":{"date_coverage":1,"stale_share":0.1}}',
             "entities.json": '{"summary":{"entity_coverage":1,"topical_authority_score":80}}',
             "paragraph_density.json": '{"summary":{"zero_link_share":0.2,"spammy_count":1}}',
+            "weak_paragraphs.json": '{"summary":{"flagged_rows":2,"high_severity_rows":0,"template_rows":1}}',
             "indexability.json": '{"summary":{"indexable_share":1}}',
             "media_accessibility.json": '{"summary":{"issue_share":0.05}}',
             "performance.json": '{"summary":{"median_html_weight_bytes":1000,"heavy_page_share":0.1,"render_blocking_share":0.2}}',
@@ -120,6 +121,7 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
             "freshness.json": '{"summary":{"date_coverage":0.2,"stale_share":0.8}}',
             "entities.json": '{"summary":{"entity_coverage":0.3,"topical_authority_score":20}}',
             "paragraph_density.json": '{"summary":{"zero_link_share":0.9,"spammy_count":10}}',
+            "weak_paragraphs.json": '{"summary":{"flagged_rows":12,"high_severity_rows":3,"template_rows":4}}',
             "indexability.json": '{"summary":{"indexable_share":0.6}}',
             "media_accessibility.json": '{"summary":{"issue_share":0.5}}',
             "performance.json": '{"summary":{"median_html_weight_bytes":5000,"heavy_page_share":0.8,"render_blocking_share":1}}',
@@ -142,6 +144,24 @@ def test_compare_payload_includes_scorecards_metric_groups_and_gaps(tmp_path: Pa
     assert payload["scorecards"][0]["overall_score"] > payload["scorecards"][1]["overall_score"]
     assert payload["biggest_gaps"]
     assert any(gap["winner"] == "strong.example" for gap in payload["biggest_gaps"])
+    assert all((gap.get("report_section") or {}).get("id") for gap in payload["biggest_gaps"])
+    assert any(
+        gap["key"] == "schema_coverage"
+        and gap["report_section"] == {"id": "structured-data-block", "label": "Structured data"}
+        for gap in payload["biggest_gaps"]
+    )
+    assert payload["leaderboard"][1]["weak_paragraph_count"] == 12
+    assert any(
+        metric["key"] == "spammy_paragraph_count" and metric["label"] == "Link-stuffed paragraphs"
+        for group in payload["metric_groups"]
+        for metric in group["metrics"]
+    )
+    assert any(
+        metric["key"] == "weak_paragraph_count"
+        and metric["report_section"] == {"id": "weak-paragraphs-block", "label": "Weak paragraphs"}
+        for group in payload["metric_groups"]
+        for metric in group["metrics"]
+    )
     assert any(group["key"] == "search" for group in payload["metric_groups"])
     assert payload["leaderboard"][0]["ahrefs_org_traffic"] == 1200
     assert payload["semantic_entity_maps"]["link_titles"]["total"] == 2

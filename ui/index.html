@@ -2154,7 +2154,22 @@
     return match ? match[1] : '';
   }
 
-  function showReportSection(key, updateHash = true) {
+  function reportBlockHashId() {
+    const hash = String(window.location.hash || '');
+    if (!hash || hash.startsWith('#view=')) return '';
+    try {
+      return decodeURIComponent(hash.slice(1));
+    } catch (e) {
+      return hash.slice(1);
+    }
+  }
+
+  function reportSectionKeyForBlock(blockId) {
+    if (!blockId) return '';
+    return (REPORT_NAV_SECTIONS.find(section => (section.ids || []).includes(blockId)) || {}).key || '';
+  }
+
+  function showReportSection(key, updateHash = true, scrollTargetId = '') {
     const sections = visibleReportSections();
     const active = sections.find(section => section.key === key) || sections.find(section => section.key === 'action-plan') || sections[0];
     if (!active) return;
@@ -2170,7 +2185,14 @@
     if (updateHash && reportHashKey() !== active.key) {
       history.replaceState(null, '', `#view=${active.key}`);
     }
-    window.scrollTo({top: 0, behavior: 'smooth'});
+    if (scrollTargetId) {
+      window.setTimeout(() => {
+        const target = document.getElementById(scrollTargetId);
+        if (target) target.scrollIntoView({block: 'start'});
+      }, 80);
+    } else {
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
     window.setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
   }
 
@@ -2185,8 +2207,12 @@
     nav.querySelectorAll('.report-nav-button').forEach(button => {
       button.addEventListener('click', () => showReportSection(button.dataset.sectionKey || 'action-plan'));
     });
-    showReportSection(reportHashKey() || 'action-plan', false);
-    window.addEventListener('hashchange', () => showReportSection(reportHashKey() || 'action-plan', false));
+    const initialBlockId = reportBlockHashId();
+    showReportSection(reportHashKey() || reportSectionKeyForBlock(initialBlockId) || 'action-plan', false, initialBlockId);
+    window.addEventListener('hashchange', () => {
+      const blockId = reportBlockHashId();
+      showReportSection(reportHashKey() || reportSectionKeyForBlock(blockId) || 'action-plan', false, blockId);
+    });
   }
 
   async function boot() {

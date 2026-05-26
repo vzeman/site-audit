@@ -53,6 +53,7 @@ class _Project:
     cannibalization: dict
     duplicate_fragments: dict
     template_patterns: dict
+    weak_paragraphs: dict
     page_link_counts: list[dict]
     linkgraph: dict
     link_flow: dict
@@ -127,6 +128,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
     cannibalization = _load_json(report / "cannibalization.json", {})
     duplicate_fragments = _load_json(report / "duplicate_fragments.json", {})
     template_patterns = _load_json(report / "template_patterns.json", {})
+    weak_paragraphs = _load_json(report / "weak_paragraphs.json", {})
     linkgraph = _load_json(report / "linkgraph.json", {})
     paragraph_density = _load_json(report / "paragraph_density.json", {})
     recommendations = _load_json(report / "recommendations.json", {})
@@ -177,6 +179,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
         cannibalization=cannibalization,
         duplicate_fragments=duplicate_fragments,
         template_patterns=template_patterns,
+        weak_paragraphs=weak_paragraphs,
         page_link_counts=page_link_counts,
         linkgraph=linkgraph if isinstance(linkgraph, dict) else {},
         link_flow=link_flow,
@@ -567,7 +570,10 @@ COMPARISON_METRIC_GROUPS = [
             {"key": "template_success_patterns", "label": "Template patterns", "better": "high", "fmt": "int"},
             {"key": "template_pattern_recommendations", "label": "Template fixes", "better": "low", "fmt": "int"},
             {"key": "zero_link_paragraph_share", "label": "Zero-link paragraphs", "better": "low", "fmt": "pct"},
-            {"key": "spammy_paragraph_count", "label": "Spammy paragraphs", "better": "low", "fmt": "int"},
+            {"key": "spammy_paragraph_count", "label": "Link-stuffed paragraphs", "better": "low", "fmt": "int"},
+            {"key": "weak_paragraph_count", "label": "Weak paragraphs", "better": "low", "fmt": "int"},
+            {"key": "weak_paragraph_high_severity", "label": "High-severity weak paragraphs", "better": "low", "fmt": "int"},
+            {"key": "weak_paragraph_template_rows", "label": "Boilerplate weak paragraphs", "better": "low", "fmt": "int"},
         ],
     },
     {
@@ -597,6 +603,92 @@ COMPARISON_METRIC_GROUPS = [
         ],
     },
 ]
+
+
+METRIC_REPORT_SECTIONS: dict[str, tuple[str, str]] = {
+    "ahrefs_org_traffic": ("ahrefs-block", "Search demand"),
+    "ahrefs_org_keywords": ("ahrefs-block", "Search demand"),
+    "ahrefs_matched_traffic": ("ahrefs-block", "Search demand"),
+    "ahrefs_top_pages_value_usd": ("ahrefs-block", "Search demand"),
+    "ahrefs_top3_keywords": ("ahrefs-block", "Search demand"),
+    "calibrated_focus": ("audit-scatter-container", "Topic map"),
+    "site_radius": ("audit-scatter-container", "Topic map"),
+    "section_coherence": ("audit-sections", "Sections"),
+    "topic_dimension": ("audit-scatter-container", "Topic map"),
+    "answerability_median": ("answerability-block", "GEO score"),
+    "answerability_p90": ("answerability-block", "GEO score"),
+    "answerability_below_4_share": ("answerability-block", "GEO score"),
+    "answer_block_strong_cluster_share": ("answer-blocks-block", "Answer blocks"),
+    "answer_block_opportunities": ("answer-blocks-block", "Answer blocks"),
+    "schema_coverage": ("structured-data-block", "Structured data"),
+    "invalid_jsonld_blocks": ("structured-data-block", "Structured data"),
+    "schema_type_count": ("structured-data-block", "Structured data"),
+    "schema_opportunities": ("structured-data-block", "Structured data"),
+    "trust_avg_score": ("trust-signals-block", "Trust signals"),
+    "trust_high_priority_pages": ("trust-signals-block", "Trust signals"),
+    "median_in_degree": ("link-counts-block", "Internal links"),
+    "p90_in_degree": ("link-counts-block", "Internal links"),
+    "median_out_degree": ("link-counts-block", "Internal links"),
+    "orphan_share": ("linkgraph-block", "Orphan pages"),
+    "authority_traffic_alignment": ("traffic-pagerank-block", "Traffic PageRank"),
+    "high_traffic_low_authority_pages": ("traffic-pagerank-block", "Traffic PageRank"),
+    "authority_without_demand_pages": ("traffic-pagerank-block", "Traffic PageRank"),
+    "demand_support_alignment": ("high-demand-link-block", "Demand/link support"),
+    "high_demand_low_support_pages": ("high-demand-link-block", "Demand/link support"),
+    "high_demand_low_support_traffic": ("high-demand-link-block", "Demand/link support"),
+    "critical_internal_links": ("link-removal-block", "Link risk"),
+    "weak_internal_links": ("link-removal-block", "Link risk"),
+    "high_priority_link_additions": ("link-addition-block", "Link additions"),
+    "avg_link_addition_benefit": ("link-addition-block", "Link additions"),
+    "anchor_relevance_descriptive_rate": ("anchor-block", "Anchor relevance"),
+    "anchor_relevance_weak_links": ("anchor-block", "Anchor relevance"),
+    "contextual_link_avg_impact": ("contextual-link-block", "Contextual links"),
+    "contextual_template_links": ("contextual-link-block", "Contextual links"),
+    "internal_link_patterns": ("internal-link-patterns-block", "Link patterns"),
+    "internal_link_pattern_recommendations": ("internal-link-patterns-block", "Link patterns"),
+    "internal_link_pattern_confidence": ("internal-link-patterns-block", "Link patterns"),
+    "architecture_resilience": ("hub-bottleneck-block", "Architecture"),
+    "bottleneck_pages": ("hub-bottleneck-block", "Architecture"),
+    "descriptive_anchor_share": ("linkbuilding-block", "Linkbuilding"),
+    "generic_anchor_share": ("linkbuilding-block", "Linkbuilding"),
+    "metadata_issue_share": ("metadata-quality-block", "Metadata"),
+    "freshness_date_coverage": ("freshness-block", "Freshness"),
+    "freshness_stale_share": ("freshness-block", "Freshness"),
+    "freshness_impact_traffic_at_risk": ("freshness-impact-block", "Freshness impact"),
+    "freshness_high_impact_sections": ("freshness-impact-block", "Freshness impact"),
+    "entity_coverage": ("entity-coverage-block", "Entity coverage"),
+    "topical_authority_score": ("entities-block", "Entities"),
+    "cannibalization_page_conflicts": ("cannibalization-block", "Cannibalization"),
+    "cannibalization_paragraph_conflicts": ("cannibalization-block", "Cannibalization"),
+    "duplicate_fragment_groups": ("duplicate-fragments-block", "Duplicate fragments"),
+    "duplicate_strong_patterns": ("duplicate-fragments-block", "Duplicate fragments"),
+    "template_success_patterns": ("template-patterns-block", "Template patterns"),
+    "template_pattern_recommendations": ("template-patterns-block", "Template patterns"),
+    "zero_link_paragraph_share": ("para-density-block", "Paragraph links"),
+    "spammy_paragraph_count": ("para-density-block", "Paragraph links"),
+    "weak_paragraph_count": ("weak-paragraphs-block", "Weak paragraphs"),
+    "weak_paragraph_high_severity": ("weak-paragraphs-block", "Weak paragraphs"),
+    "weak_paragraph_template_rows": ("weak-paragraphs-block", "Weak paragraphs"),
+    "indexable_share": ("indexability-block", "Indexability"),
+    "media_accessibility_issue_share": ("media-accessibility-block", "Media accessibility"),
+    "median_html_weight_bytes": ("performance-block", "Performance"),
+    "heavy_page_share": ("performance-block", "Performance"),
+    "render_blocking_share": ("performance-block", "Performance"),
+    "pages_missing_h1_share": ("headers-block", "Headers"),
+    "pages_multi_h1": ("headers-block", "Headers"),
+    "cta_coverage": ("conversion-block", "Conversion"),
+    "primary_cta_coverage": ("conversion-block", "Conversion"),
+    "form_coverage": ("conversion-block", "Conversion"),
+    "conversion_balance_efficiency": ("conversion-balance-block", "Conversion balance"),
+    "conversion_balance_high_risk": ("conversion-balance-block", "Conversion balance"),
+    "lead_pages_without_capture": ("conversion-block", "Conversion"),
+    "cta_overload_pages": ("conversion-block", "Conversion"),
+}
+
+
+def _metric_report_section(metric_key: str) -> dict:
+    section_id, label = METRIC_REPORT_SECTIONS.get(metric_key, ("", "Domain report"))
+    return {"id": section_id, "label": label}
 
 
 def _comparison_metric_payload(leaderboard: list[dict]) -> dict:
@@ -652,6 +744,7 @@ def _comparison_metric_payload(leaderboard: list[dict]) -> dict:
                     "group": group["label"],
                     "metric": metric["label"],
                     "key": metric["key"],
+                    "report_section": _metric_report_section(metric["key"]),
                     "fmt": metric["fmt"],
                     "better": better,
                     "winner": winner,
@@ -664,6 +757,7 @@ def _comparison_metric_payload(leaderboard: list[dict]) -> dict:
 
             metric_payloads.append({
                 **metric,
+                "report_section": _metric_report_section(metric["key"]),
                 "values": values,
                 "winner": winner,
                 "worst": worst,
@@ -701,6 +795,7 @@ def _leaderboard_row(proj: _Project) -> dict:
     pd_summary = (proj.paragraph_density or {}).get("summary", {}) or {}
     pd_pages = (proj.paragraph_density or {}).get("per_page") or []
     pd_page_distribution = _distribution([float(r.get("links_per_100w", 0.0)) for r in pd_pages])
+    weak_summary = (proj.weak_paragraphs or {}).get("summary", {}) or {}
     rec_pri = (proj.recommendations or {}).get("by_priority", {}) or {}
     rec_cat = (proj.recommendations or {}).get("by_category", {}) or {}
     ext_summary = (proj.external_links or {}).get("citation_density_summary", {}) or {}
@@ -799,6 +894,9 @@ def _leaderboard_row(proj: _Project) -> dict:
         "paragraph_density_p90": float(pd_summary.get("p90_page_density_per_100w", pd_page_distribution["p90"])),
         "spammy_paragraph_count": int(pd_summary.get("spammy_count", 0)),
         "zero_link_paragraph_share": float(pd_summary.get("zero_link_share", 0.0)),
+        "weak_paragraph_count": int(weak_summary.get("flagged_rows", 0)),
+        "weak_paragraph_high_severity": int(weak_summary.get("high_severity_rows", 0)),
+        "weak_paragraph_template_rows": int(weak_summary.get("template_rows", 0)),
         # External citation
         "citation_density_median": float(ext_summary.get("median", 0.0)),
         "schema_coverage": float(sd.get("schema_coverage", 0.0)),

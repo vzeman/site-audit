@@ -481,11 +481,13 @@ def _geo(
             priority = "high" if page_pr >= 0.005 else "medium"
             flags = p.get("flags") or []
             flag_text = "; ".join(flags[:4]) if flags else "no specific flags"
+            page_label = p.get("title") or p.get("url") or "page"
+            authority_label = "high-PR page" if page_pr >= 0.005 else "page"
             out.append(Recommendation(
                 id=f"geo-{i}",
                 category="geo",
                 priority=priority,
-                title=f"Low answer-ability ({score:.1f}/10) on {'high-PR' if page_pr >= 0.005 else ''} page",
+                title=f"Low answer-ability ({score:.1f}/10) on {authority_label}: {page_label}",
                 instruction=(
                     f"Add the missing GEO signals: {flag_text}. "
                     f"Concretely: add an FAQ block with question H2s, include 1–2 stats with "
@@ -543,16 +545,20 @@ def _linking(
     # Page-level link recs
     for i, r in enumerate((lg.get("recommendations") or [])[:15]):
         sim = float(r.get("similarity", 0.0))
+        source_url = r.get("source_url") or r.get("url_a") or ""
+        target_url = r.get("target_url") or r.get("url_b") or ""
+        source_label = r.get("source_title") or r.get("title_a") or source_url or "source page"
+        target_label = r.get("target_title") or r.get("title_b") or target_url or "target page"
         out.append(Recommendation(
             id=f"link-{i}",
             category="linking",
             priority="medium",
             title="Add internal link",
             instruction=(
-                f"Add a contextual link from {r.get('source_url')} to "
-                f"{r.get('target_url')} (the topics overlap at sim {sim:.2f} but no link exists today)."
+                f"Add a contextual link from {source_label} to "
+                f"{target_label} (the topics overlap at sim {sim:.2f} but no link exists today)."
             ),
-            targets=[r.get("source_url", ""), r.get("target_url", "")],
+            targets=[source_url, target_url],
             evidence={"similarity": sim, "anchor_hint": r.get("suggested_anchor")},
             effort="quick",
             score=sim * 100,
