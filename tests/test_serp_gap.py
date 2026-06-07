@@ -1,7 +1,13 @@
 import json
 from pathlib import Path
 
-from site_audit.serp_gap import SerpGapConfig, _targets_from_serp, run
+from site_audit.serp_gap import (
+    SerpGapConfig,
+    _add_serp_url_rankings,
+    _serp_url_ranking_rows,
+    _targets_from_serp,
+    run,
+)
 
 
 def _write_base_report(root: Path) -> None:
@@ -133,6 +139,53 @@ def test_serp_gap_serp_targets_skip_ignored_hosts_and_take_next_results() -> Non
     ]
 
 
+def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
+    rankings = {}
+    _add_serp_url_rankings(
+        rankings,
+        "example.com",
+        "live chat software",
+        {
+            "meta": {"provider": "serper"},
+            "raw": {
+                "organic": [
+                    {"link": "https://competitor-one.com/live-chat", "position": 1},
+                    {"link": "https://x.com/livechat", "position": 2},
+                    {"link": "https://competitor-two.com/chat", "position": 8},
+                    {"link": "https://outside-top-ten.com/chat", "position": 11},
+                ]
+            },
+        },
+    )
+    _add_serp_url_rankings(
+        rankings,
+        "example.com",
+        "livechat",
+        {
+            "meta": {"provider": "serper"},
+            "raw": {
+                "organic": [
+                    {"link": "https://competitor-two.com/chat", "position": 1},
+                    {"link": "https://competitor-one.com/live-chat", "position": 4},
+                    {"link": "https://www.example.com/live-chat/", "position": 7},
+                ]
+            },
+        },
+    )
+
+    rows = _serp_url_ranking_rows(rankings)
+
+    assert rows[0]["url"] == "https://competitor-one.com/live-chat"
+    assert rows[0]["top10_count"] == 2
+    assert rows[0]["best_rank"] == 1
+    assert [row["url"] for row in rows] == [
+        "https://competitor-one.com/live-chat",
+        "https://competitor-two.com/chat",
+        "https://www.example.com/live-chat/",
+    ]
+    assert rows[-1]["is_selected_domain"] is True
+
+
 def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> None:
     _write_base_report(tmp_path)
 
@@ -151,6 +204,9 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Semantic Clusters" in html
     assert "Topic Relations" in html
     assert "Keyword and Content Semantic Map" in html
+    assert "Top-10 URLs Across Selected Keywords" in html
+    assert "serp_url_rankings" in html
+    assert "serpRankingList" in html
     assert "All Keywords, URLs, and Content" in html
     assert "overview_scatter" in html
     assert "overview-section" in html

@@ -152,6 +152,7 @@ def run(config: SerpGapConfig) -> dict:
 
     page_results: list[dict] = []
     all_competitor_urls: set[str] = set()
+    serp_url_rankings: dict[str, dict] = {}
     overview_rows: list[dict] = []
     overview_texts: list[str] = []
     overview_keywords_seen: set[str] = set()
@@ -230,6 +231,13 @@ def run(config: SerpGapConfig) -> dict:
                     "competitors": [],
                 })
                 continue
+            _add_serp_url_rankings(
+                serp_url_rankings,
+                config.domain,
+                kw["keyword"],
+                serp,
+                top_n=10,
+            )
             targets = _targets_from_serp(config.domain, kw["keyword"], serp, config)
             remaining_slots = max(0, config.max_competitor_pages - len(all_competitor_urls))
             targets = [t for t in targets if t.competitor_url not in all_competitor_urls][:remaining_slots]
@@ -334,6 +342,7 @@ def run(config: SerpGapConfig) -> dict:
         "selected_keywords": keyword_rows,
         "skipped_pages": skipped_pages,
         "skipped_keywords": skipped_keywords,
+        "serp_url_rankings": _serp_url_ranking_rows(serp_url_rankings),
         "overview_scatter": _overview_scatter(overview_rows, overview_texts, embedder),
         "pages": page_results,
     }
@@ -608,18 +617,9 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
 
 
 def _targets_from_serp(domain: str, keyword: str, payload: dict, config: SerpGapConfig) -> list[CompetitiveTarget]:
-    provider = (payload.get("meta") or {}).get("provider") or ""
-    rows = []
-    if provider == "serper" or "organic" in (payload.get("raw") or {}):
-        for item in (payload.get("raw") or {}).get("organic") or []:
-            rows.append({"url": item.get("link"), "rank": item.get("position")})
-    else:
-        for item in _serp_items(payload):
-            if item.get("type") == "organic":
-                rows.append({"url": item.get("url"), "rank": item.get("rank_group") or item.get("rank_absolute")})
     out = []
     seen = set()
-    for row in rows:
+    for row in _serp_result_rows(payload):
         url = row.get("url") or ""
         if not url or _is_own_url(url, domain) or _is_ignored_serp_url(url) or url in seen:
             continue
@@ -628,6 +628,85 @@ def _targets_from_serp(domain: str, keyword: str, payload: dict, config: SerpGap
         if len(out) >= config.results_per_keyword:
             break
     return out
+
+
+def _serp_result_rows(payload: dict) -> list[dict]:
+    provider = (payload.get("meta") or {}).get("provider") or ""
+    rows = []
+    if provider == "serper" or "organic" in (payload.get("raw") or {}):
+        for item in (payload.get("raw") or {}).get("organic") or []:
+            rows.append({"url": item.get("link"), "rank": item.get("position"), "title": item.get("title", "")})
+    else:
+        for item in _serp_items(payload):
+            if item.get("type") == "organic":
+                rows.append({
+                    "url": item.get("url"),
+                    "rank": item.get("rank_group") or item.get("rank_absolute"),
+                    "title": item.get("title", ""),
+                })
+    return rows
+
+
+def _add_serp_url_rankings(
+    rankings: dict[str, dict],
+    domain: str,
+    keyword: str,
+    payload: dict,
+    top_n: int = 10,
+) -> None:
+    keyword_seen: set[str] = set()
+    for row in _serp_result_rows(payload):
+        rank = _safe_int(row.get("rank"))
+        if rank <= 0 or rank > top_n:
+            continue
+        url = _canonical_serp_url(str(row.get("url") or ""))
+        if not url or _is_ignored_serp_url(url) or url in keyword_seen:
+            continue
+        keyword_seen.add(url)
+        host = urlparse(url).netloc.lower()
+        item = rankings.setdefault(url, {
+            "url": url,
+            "domain": host,
+            "is_selected_domain": _is_own_url(url, domain),
+            "top10_count": 0,
+            "best_rank": rank,
+            "rank_sum": 0,
+            "keywords": [],
+        })
+        item["top10_count"] += 1
+        item["best_rank"] = min(int(item.get("best_rank") or rank), rank)
+        item["rank_sum"] += rank
+        item["keywords"].append({"keyword": keyword, "rank": rank})
+
+
+def _serp_url_ranking_rows(rankings: dict[str, dict]) -> list[dict]:
+    rows = []
+    for item in rankings.values():
+        count = max(1, int(item.get("top10_count") or 0))
+        keywords = sorted(item.get("keywords") or [], key=lambda row: (_safe_int(row.get("rank")), row.get("keyword", "")))
+        rows.append({
+            "url": item.get("url", ""),
+            "domain": item.get("domain", ""),
+            "is_selected_domain": bool(item.get("is_selected_domain")),
+            "top10_count": count,
+            "best_rank": int(item.get("best_rank") or 0),
+            "average_rank": round(float(item.get("rank_sum") or 0) / count, 2),
+            "keywords": keywords,
+        })
+    return sorted(rows, key=lambda row: (
+        -int(row.get("top10_count") or 0),
+        int(row.get("best_rank") or 999),
+        float(row.get("average_rank") or 999),
+        row.get("domain", ""),
+        row.get("url", ""),
+    ))
+
+
+def _canonical_serp_url(url: str) -> str:
+    parsed = urlparse(url.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return parsed._replace(fragment="", path=parsed.path or "/").geturl()
 
 
 def _is_ignored_serp_url(url: str) -> bool:
@@ -990,6 +1069,57 @@ def _html(payload: dict) -> str:
     margin: 0;
     accent-color: var(--audit-accent);
   }
+  .serp-ranking-list {
+    display: grid;
+    gap: 10px;
+  }
+  .serp-ranking-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+    border: 1px solid var(--audit-line);
+    border-radius: 16px;
+    background: #fffdfa;
+    padding: 10px 12px;
+  }
+  .serp-ranking-url {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-weight: 750;
+  }
+  .serp-ranking-domain {
+    color: var(--audit-muted);
+    font-size: 0.76rem;
+    margin-top: 3px;
+  }
+  .serp-ranking-stats {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 160px;
+  }
+  .serp-ranking-keywords {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    grid-column: 1 / -1;
+  }
+  .serp-ranking-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--audit-line);
+    border-radius: 999px;
+    background: var(--audit-panel-soft);
+    color: var(--audit-muted);
+    font-size: 0.74rem;
+    padding: 3px 7px;
+  }
+  .serp-ranking-chip strong {
+    color: var(--audit-text);
+  }
   .topic-chart {
     display: grid;
     gap: 9px;
@@ -1160,8 +1290,9 @@ function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td 
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">${esc(ownDomain)} ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No ${esc(ownDomain)} paragraphs available for review.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
+function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const keywords=(row.keywords||[]).map(k=>`<span class="serp-ranking-chip"><strong>#${esc(k.rank)}</strong> ${esc(k.keyword)}</span>`).join('');return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span></div><div class="serp-ranking-keywords">${keywords}</div></div>`;}).join('')}</div>`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function overviewSection(){const points=data.overview_scatter?.points||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
+function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${serpRankingList(rankings)}</div></div><div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
 function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>${esc(ownDomain)} Paragraphs To Review</h4><div class="panel-body">${reviewList(reviewRows)}</div></div></div></div>`;}
 function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and content map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
