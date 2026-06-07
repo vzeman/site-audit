@@ -4,10 +4,12 @@ from pathlib import Path
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
+    _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
     run,
 )
+from site_audit.competitive_analysis import CompetitiveTarget
 
 
 def _write_base_report(root: Path) -> None:
@@ -184,6 +186,23 @@ def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
         "https://www.example.com/live-chat/",
     ]
     assert rows[-1]["is_selected_domain"] is True
+
+
+def test_serp_gap_reuses_known_competitors_for_overlapping_keywords() -> None:
+    config = SerpGapConfig(domain="example.com", results_per_keyword=3, max_competitor_pages=2)
+    known = {"https://competitor-one.com/", "https://competitor-two.com/"}
+    targets = [
+        CompetitiveTarget("livechat software", "https://competitor-one.com/", "livechat software", 1),
+        CompetitiveTarget("livechat software", "https://competitor-two.com/", "livechat software", 2),
+        CompetitiveTarget("livechat software", "https://new-competitor.com/", "livechat software", 3),
+    ]
+
+    selected = _select_targets_with_budget(targets, known, config)
+
+    assert [target.competitor_url for target in selected] == [
+        "https://competitor-one.com/",
+        "https://competitor-two.com/",
+    ]
 
 
 def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> None:

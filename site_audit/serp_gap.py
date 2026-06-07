@@ -238,9 +238,11 @@ def run(config: SerpGapConfig) -> dict:
                 serp,
                 top_n=10,
             )
-            targets = _targets_from_serp(config.domain, kw["keyword"], serp, config)
-            remaining_slots = max(0, config.max_competitor_pages - len(all_competitor_urls))
-            targets = [t for t in targets if t.competitor_url not in all_competitor_urls][:remaining_slots]
+            targets = _select_targets_with_budget(
+                _targets_from_serp(config.domain, kw["keyword"], serp, config),
+                all_competitor_urls,
+                config,
+            )
             if not targets:
                 page_blocks.append({
                     "keyword": kw,
@@ -628,6 +630,24 @@ def _targets_from_serp(domain: str, keyword: str, payload: dict, config: SerpGap
         if len(out) >= config.results_per_keyword:
             break
     return out
+
+
+def _select_targets_with_budget(
+    targets: list[CompetitiveTarget],
+    known_competitor_urls: set[str],
+    config: SerpGapConfig,
+) -> list[CompetitiveTarget]:
+    selected = []
+    projected_new_urls = set(known_competitor_urls)
+    for target in targets:
+        is_known = target.competitor_url in known_competitor_urls
+        if not is_known and len(projected_new_urls) >= config.max_competitor_pages:
+            continue
+        selected.append(target)
+        projected_new_urls.add(target.competitor_url)
+        if len(selected) >= config.results_per_keyword:
+            break
+    return selected
 
 
 def _serp_result_rows(payload: dict) -> list[dict]:
