@@ -1163,6 +1163,43 @@ def _html(payload: dict) -> str:
   .serp-ranking-chip strong {
     color: var(--audit-text);
   }
+  .serp-ranking-chart {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .serp-ranking-chart-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.82fr) minmax(220px, 1.4fr) 128px;
+    gap: 10px;
+    align-items: center;
+  }
+  .serp-ranking-chart-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 750;
+  }
+  .serp-ranking-chart-track {
+    position: relative;
+    height: 18px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #f2e7d9;
+  }
+  .serp-ranking-chart-bar {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--audit-accent), #ffc06f);
+  }
+  .serp-ranking-chart-meta {
+    color: var(--audit-muted);
+    font-size: 0.76rem;
+    text-align: right;
+    white-space: nowrap;
+  }
   .topic-chart {
     display: grid;
     gap: 9px;
@@ -1333,9 +1370,10 @@ function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td 
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">${esc(ownDomain)} ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No ${esc(ownDomain)} paragraphs available for review.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
+function serpRankingChart(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 URL chart available.</div>';const maxCount=Math.max(1,...rows.map(row=>Number(row.top10_count||0)));return `<div class="serp-ranking-chart" aria-label="Top-10 URL relevance chart">${rows.slice(0,12).map(row=>{const count=Number(row.top10_count||0);const width=Math.max(6,Math.round((count/maxCount)*100));const title=`${row.url} · ${count} top-10 appearances · best #${row.best_rank||''} · avg #${row.average_rank||''}`;return `<div class="serp-ranking-chart-row"><div class="serp-ranking-chart-label" title="${esc(row.url||'')}">${urlLink(row.url,row.domain||row.url)}</div><div class="serp-ranking-chart-track" title="${esc(title)}"><span class="serp-ranking-chart-bar" style="width:${width}%"></span></div><div class="serp-ranking-chart-meta">${n(count)} top-10 · best #${esc(row.best_rank||'')}</div></div>`;}).join('')}</div>`;}
 function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const keywords=(row.keywords||[]).map(k=>`<span class="serp-ranking-chip"><strong>#${esc(k.rank)}</strong> ${esc(k.keyword)}</span>`).join('');return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span></div><div class="serp-ranking-keywords">${keywords}</div></div>`;}).join('')}</div>`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${serpRankingList(rankings)}</div></div><div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
+function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${serpRankingChart(rankings)}${serpRankingList(rankings)}</div></div><div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
 function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>${esc(ownDomain)} Paragraphs To Review</h4><div class="panel-body">${reviewList(reviewRows)}</div></div></div></div>`;}
 function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and content map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
