@@ -134,4 +134,8 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "function pointSize" in html
     assert "data-detail" in html
     assert "tip-badge" in html
+    assert "keyword_distance" in html
+    assert "keyword_similarity" in html
+    assert "function pointLabel" in html
+    assert ".scatter-tooltip.open" in html
     assert "page-section" in html
