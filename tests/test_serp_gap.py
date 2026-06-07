@@ -139,3 +139,9 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "function pointLabel" in html
     assert ".scatter-tooltip.open" in html
     assert "page-section" in html
+    assert "report-sidebar" in html
+    assert 'id="report-nav"' in html
+    assert "report-nav-button" in html
+    assert "report-nav-label" in html
+    assert "--audit-accent" in html
+    assert "buildNav" in html

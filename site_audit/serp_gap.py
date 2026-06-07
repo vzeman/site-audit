@@ -701,8 +701,182 @@ def _html(payload: dict) -> str:
 <style>
 :root{--ink:#17202a;--muted:#5d6d7e;--line:#d7dee8;--soft:#f5f7fa;--panel:#fff;--ours:#176a35;--comp:#2d5b9a;--kw:#8a4b00;--missing:#b42318;--partial:#9a6700;--covered:#176a35;--shadow:0 1px 3px rgba(22,34,51,.08)}
 *{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.45}a{color:#1b5dbf;text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1440px;margin:0 auto;padding:24px}.topbar{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.title h1{font-size:28px;line-height:1.1;margin:0 0 8px}.title p{margin:0;color:var(--muted);max-width:820px}.summary{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px;margin:18px 0}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow)}.metric b{display:block;font-size:22px;line-height:1.1}.metric span{color:var(--muted);font-size:12px}.page-section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:18px 0 28px;box-shadow:var(--shadow);overflow:hidden}.page-head{padding:18px 20px;border-bottom:1px solid var(--line);background:#fff}.page-head h2{font-size:21px;margin:0 0 6px}.url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.keyword-card{padding:20px;border-top:1px solid var(--line)}.keyword-card:first-of-type{border-top:0}.keyword-grid{display:grid;grid-template-columns:minmax(460px,1.2fr) minmax(420px,.8fr);gap:18px;align-items:start}.keyword-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.keyword-head h3{font-size:19px;margin:0}.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:999px;padding:3px 8px;background:#fff;font-size:12px;color:var(--muted)}.chip.missing{color:var(--missing);border-color:#f1b4ad;background:#fff7f6}.chip.partial{color:var(--partial);border-color:#e8cf85;background:#fff9e8}.chip.covered{color:var(--covered);border-color:#a8d5b6;background:#f1faf4}.panel{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}.panel h4{margin:0;padding:11px 12px;border-bottom:1px solid var(--line);font-size:14px;background:var(--soft)}.panel-body{padding:12px}.scatter-wrap{position:relative}.scatter{width:100%;height:390px;display:block;background:#fbfcfe}.scatter-point{cursor:pointer}.scatter-point:focus{outline:none;stroke:#111;stroke-width:2.4}.scatter-tooltip{display:none;position:absolute;left:12px;right:12px;bottom:12px;max-height:250px;overflow:auto;background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid #b9c7d8;border-radius:10px;box-shadow:0 14px 34px rgba(22,34,51,.22);padding:0;z-index:2}.scatter-tooltip.open{display:block}.tip-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-bottom:1px solid #e3e9f2;background:#f4f7fb}.tip-title{font-weight:750;font-size:13px;color:#142033}.tip-sub{margin-top:2px;color:#637083;font-size:11px}.tip-close{border:0;background:#e7edf5;border-radius:6px;padding:2px 8px;cursor:pointer}.tip-body{padding:11px 12px}.tip-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.tip-badge{display:inline-flex;align-items:center;border:1px solid #d5deea;border-radius:999px;padding:3px 7px;background:#fff;font-size:11px;color:#405166}.tip-badge.ours{border-color:#9bd0ae;color:#176a35;background:#f1faf4}.tip-badge.competitor{border-color:#acc3e5;color:#2d5b9a;background:#f3f7ff}.tip-badge.keyword{border-color:#e7c889;color:#8a4b00;background:#fff9e8}.tip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:9px}.tip-field{border:1px solid #edf1f5;border-radius:7px;background:#fff;padding:6px 7px;min-width:0}.tip-field span{display:block;color:#768395;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tip-field strong{display:block;color:#1b2838;font-size:12px;overflow-wrap:anywhere}.tip-text{border-left:3px solid #8fb2df;background:#f7faff;border-radius:6px;padding:8px 9px;color:#263445;font-size:12px;line-height:1.45}.tip-explain{color:#637083;font-size:12px;margin-bottom:9px}.scatter-controls{position:absolute;top:10px;right:10px;display:flex;gap:5px;z-index:3}.scatter-controls button{border:1px solid #c9d3df;background:#fff;color:#263445;border-radius:6px;padding:3px 8px;font-size:12px;line-height:1;box-shadow:0 1px 3px rgba(22,34,51,.12);cursor:pointer}.scatter-controls button:hover{background:#f1f5f9}.scatter.is-panning{cursor:grabbing}.scatter{cursor:grab}.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.tables{display:grid;grid-template-columns:1fr;gap:14px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 9px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fbfcfe}.topic-label{font-weight:600}.coverage-missing{color:var(--missing);font-weight:700}.coverage-partial{color:var(--partial);font-weight:700}.coverage-covered{color:var(--covered);font-weight:700}.cluster-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.cluster{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.cluster strong{display:block;margin-bottom:5px}.bar{height:7px;background:#e9eef5;border-radius:999px;overflow:hidden;margin:8px 0}.bar span{display:block;height:100%;background:#5f8cc9}.muted{color:var(--muted)}.empty{padding:18px;color:var(--muted)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}.competitors li,.review li{margin:0 0 8px}.competitors,.review{padding-left:18px;margin:0}.mini{font-size:12px;color:var(--muted)}@media(max-width:980px){.wrap{padding:14px}.summary{grid-template-columns:repeat(2,1fr)}.keyword-grid,.two-col{grid-template-columns:1fr}.scatter{height:320px}.topbar{display:block}}
+  :root {
+    --audit-bg: #f5efe6;
+    --audit-panel: #fffdfa;
+    --audit-panel-soft: #fff8ef;
+    --audit-line: #eadfce;
+    --audit-text: #241f19;
+    --audit-muted: #7f776f;
+    --audit-accent: #ff8a1f;
+    --audit-accent-dark: #b85a00;
+    --audit-accent-soft: #fff0df;
+    --audit-green: #1f9d66;
+    --audit-red: #cf5060;
+    --audit-blue: #4766ff;
+    --audit-shadow: 0 18px 48px rgba(61, 43, 18, 0.08);
+    --audit-radius: 26px;
+  }
+  body {
+    color: var(--audit-text);
+    background:
+      radial-gradient(circle at 8% 0%, rgba(255, 138, 31, 0.16), transparent 30%),
+      radial-gradient(circle at 88% 10%, rgba(71, 102, 255, 0.10), transparent 26%),
+      linear-gradient(135deg, #fbf6ee 0%, var(--audit-bg) 54%, #efe2d2 100%);
+  }
+  .wrap { max-width: 1500px; margin-left: 300px; padding: 28px 28px 72px; }
+  .topbar {
+    position: relative;
+    overflow: hidden;
+    padding: 30px 32px;
+    margin-bottom: 28px;
+    border: 1px solid var(--audit-line);
+    border-radius: 30px;
+    background: linear-gradient(135deg, rgba(255, 253, 250, 0.96), rgba(255, 240, 223, 0.82));
+    box-shadow: var(--audit-shadow);
+  }
+  .topbar::before {
+    content: "";
+    position: absolute;
+    right: -90px;
+    top: -110px;
+    width: 330px;
+    height: 330px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(255, 138, 31, 0.28), rgba(255, 138, 31, 0));
+    pointer-events: none;
+  }
+  .title h1 {
+    position: relative;
+    font-size: clamp(2.35rem, 5vw, 4.75rem);
+    line-height: 0.95;
+    letter-spacing: -0.055em;
+    color: var(--audit-text);
+  }
+  .title p, .mini, .muted, .url { color: var(--audit-muted); }
+  #status {
+    min-width: 230px;
+    text-align: right;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .metric, .page-section, .panel, .cluster {
+    background: var(--audit-panel);
+    border-color: var(--audit-line);
+    border-radius: var(--audit-radius);
+    box-shadow: var(--audit-shadow);
+  }
+  .page-head, .panel h4, th { background: var(--audit-panel-soft); }
+  .keyword-card, .page-head, .panel h4, th, td { border-color: var(--audit-line); }
+  .chip, .tip-badge, .tip-field, .scatter-controls button {
+    border-color: var(--audit-line);
+    border-radius: 999px;
+  }
+  .scatter-tooltip {
+    border-color: var(--audit-line);
+    border-radius: 18px;
+    background: linear-gradient(180deg, var(--audit-panel), #fff8ef);
+    box-shadow: 0 24px 56px rgba(61, 43, 18, 0.16);
+  }
+  .tip-head { background: var(--audit-accent-soft); border-color: var(--audit-line); }
+  .tip-title { color: var(--audit-text); }
+  .tip-text { border-left-color: var(--audit-accent); background: #fffdfa; color: var(--audit-text); }
+  a { color: var(--audit-accent-dark); }
+  button { transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease; }
+  button:hover { transform: translateY(-1px); }
+  .report-sidebar {
+    position: fixed;
+    inset: 18px auto 18px 18px;
+    z-index: 50;
+    width: 260px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--audit-line);
+    border-radius: 24px;
+    background: rgba(255, 253, 250, 0.94);
+    box-shadow: var(--audit-shadow);
+    backdrop-filter: blur(16px);
+  }
+  .report-sidebar-header {
+    padding: 18px 18px 12px;
+    border-bottom: 1px solid var(--audit-line);
+  }
+  .report-sidebar-title {
+    display: block;
+    color: var(--audit-text);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .report-sidebar-subtitle {
+    display: block;
+    margin-top: 4px;
+    color: var(--audit-muted);
+    font-size: 0.75rem;
+    line-height: 1.3;
+  }
+  .report-nav {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    padding: 10px;
+  }
+  .report-nav-button {
+    width: 100%;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--audit-muted);
+    cursor: pointer;
+    padding: 9px 10px;
+    text-align: left;
+    text-decoration: none;
+    transform: none !important;
+  }
+  .report-nav-button:hover {
+    background: var(--audit-panel-soft);
+    color: var(--audit-text);
+    transform: none;
+  }
+  .report-nav-button.is-active {
+    background: var(--audit-accent-soft);
+    color: var(--audit-accent-dark);
+    font-weight: 800;
+  }
+  .report-nav-label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84rem;
+    line-height: 1.15;
+  }
+  .report-nav-button.nav-keyword {
+    margin-left: 10px;
+    width: calc(100% - 10px);
+    padding: 6px 10px;
+  }
+  .report-nav-button.nav-keyword .report-nav-label {
+    font-size: 0.78rem;
+  }
+  @media(max-width:1180px) {
+    .report-sidebar { position: static; width: auto; margin: 14px; }
+    .wrap { margin-left: 0; padding: 14px; }
+    #status { min-width: 0; text-align: left; white-space: normal; }
+  }
 </style>
 <body>
+<aside class="report-sidebar">
+  <div class="report-sidebar-header">
+    <span class="report-sidebar-title">SERP Gap</span>
+    <span class="report-sidebar-subtitle">Page and keyword sections</span>
+  </div>
+  <nav class="report-nav" id="report-nav"></nav>
+</aside>
 <div class="wrap">
   <div class="topbar"><div class="title"><h1>SERP Semantic Gap</h1><p>Semantic comparison of selected audited pages against live SERP competitors. Each page section contains keyword-level scatterplots, topic clusters, competitor relationships, and editorial gaps.</p></div><div class="url" id="status"></div></div>
   <div class="summary" id="summary"></div>
@@ -713,6 +887,7 @@ const data = __DATA__;
 const app = document.getElementById('app');
 const summaryEl = document.getElementById('summary');
 const statusEl = document.getElementById('status');
+const navEl = document.getElementById('report-nav');
 const colors = {keyword:'#8a4b00', ours:'#176a35', competitor:'#2d5b9a', title:'#7b3fb2', h1:'#b65f00', header:'#68788b', paragraph:'#2d5b9a'};
 function esc(s){return String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function n(v){return Number(v||0).toLocaleString();}
@@ -736,11 +911,14 @@ function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td 
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">Own ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li><a href="${esc(c.url)}">${esc(c.title||c.url)}</a><div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return '<div class="empty">No own paragraphs were far from the SERP topic space.</div>';return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
-function keywordCard(a){const s=a.summary||{};const points=a.scatter?.points||[];return `<div class="keyword-card"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>Own sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>Own Paragraphs To Review</h4><div class="panel-body">${reviewList(a.off_intent_paragraphs)}</div></div></div></div>`;}
-function pageSection(page, index){return `<section class="page-section"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${esc(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map(keywordCard).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
+function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>Own sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>Own Paragraphs To Review</h4><div class="panel-body">${reviewList(a.off_intent_paragraphs)}</div></div></div></div>`;}
+function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${esc(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
+function buildNav(){if(!navEl)return;navEl.innerHTML=(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
 function bindScatterInteractions(){document.querySelectorAll('.scatter-wrap').forEach(wrap=>{const svg=wrap.querySelector('svg.scatter');const tooltip=wrap.querySelector('.scatter-tooltip');if(!svg||!tooltip)return;const base=(svg.getAttribute('data-base-viewbox')||'0 0 820 390').split(/\\s+/).map(Number);let vb={x:base[0],y:base[1],w:base[2],h:base[3]};const setVb=()=>svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);function zoomAt(factor,cx=base[2]/2,cy=base[3]/2){const nx=cx-(cx-vb.x)*factor;const ny=cy-(cy-vb.y)*factor;vb={x:nx,y:ny,w:vb.w*factor,h:vb.h*factor};setVb();}function pointFromEvent(event){const rect=svg.getBoundingClientRect();return{x:vb.x+(event.clientX-rect.left)/Math.max(rect.width,1)*vb.w,y:vb.y+(event.clientY-rect.top)/Math.max(rect.height,1)*vb.h};}function show(point){let detail=null;try{detail=JSON.parse(point.getAttribute('data-detail')||'{}');}catch(_){detail={type:'point',explanation:point.getAttribute('data-tooltip')||point.getAttribute('aria-label')||''};}tooltip.innerHTML=pointDetailHtml(detail);tooltip.classList.add('open');tooltip.querySelector('.tip-close')?.addEventListener('click',event=>{event.stopPropagation();tooltip.classList.remove('open');});}wrap.querySelectorAll('.scatter-point').forEach(point=>{point.addEventListener('click',event=>{event.stopPropagation();show(point);});point.addEventListener('focus',()=>show(point));});svg.addEventListener('wheel',event=>{event.preventDefault();const p=pointFromEvent(event);zoomAt(event.deltaY<0?0.82:1.22,p.x,p.y);},{passive:false});let drag=null;svg.addEventListener('mousedown',event=>{if(event.target.classList?.contains('scatter-point'))return;drag={x:event.clientX,y:event.clientY,vx:vb.x,vy:vb.y};svg.classList.add('is-panning');});window.addEventListener('mousemove',event=>{if(!drag)return;const rect=svg.getBoundingClientRect();vb.x=drag.vx-(event.clientX-drag.x)/Math.max(rect.width,1)*vb.w;vb.y=drag.vy-(event.clientY-drag.y)/Math.max(rect.height,1)*vb.h;setVb();});window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('is-panning');});svg.addEventListener('dblclick',()=>{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();});wrap.querySelectorAll('[data-zoom]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const action=button.getAttribute('data-zoom');if(action==='in')zoomAt(0.78);else if(action==='out')zoomAt(1.28);else{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();}}));});document.addEventListener('click',event=>{const target=event.target;if(target?.closest?.('.scatter-tooltip')||target?.closest?.('.scatter-point'))return;document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});}
 app.innerHTML = (data.pages||[]).map(pageSection).join('') || '<div class="empty">No analyzed pages in this report.</div>';
+buildNav();
 bindScatterInteractions();
 </script>
 </body>
