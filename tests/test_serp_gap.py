@@ -230,6 +230,9 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "function markerSvg" in html
     assert "function pointSize" in html
     assert "data-entity-filter" in html
+    assert "data-domain-filter" in html
+    assert "domainFilters" in html
+    assert "pointDomain" in html
     assert "bindScatterFilters" in html
     assert "topicChart" in html
     assert "topic-chart" in html
