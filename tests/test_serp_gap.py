@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from site_audit.serp_gap import SerpGapConfig, run
+from site_audit.serp_gap import SerpGapConfig, _targets_from_serp, run
 
 
 def _write_base_report(root: Path) -> None:
@@ -105,6 +105,34 @@ def test_serp_gap_budget_cap_stops_before_paid_work(tmp_path: Path) -> None:
     assert payload["summary"]["budget_status"] == "over_budget"
 
 
+def test_serp_gap_serp_targets_skip_ignored_hosts_and_take_next_results() -> None:
+    payload = {
+        "meta": {"provider": "serper"},
+        "raw": {
+            "organic": [
+                {"link": "https://www.example.com/live-chat/", "position": 1},
+                {"link": "https://x.com/livechat", "position": 2},
+                {"link": "https://www.youtube.com/watch?v=123", "position": 3},
+                {"link": "https://competitor-one.com/live-chat", "position": 4},
+                {"link": "https://competitor-two.com/live-chat", "position": 5},
+                {"link": "https://competitor-three.com/live-chat", "position": 6},
+            ]
+        },
+    }
+
+    targets = _targets_from_serp(
+        "example.com",
+        "live chat software",
+        payload,
+        SerpGapConfig(domain="example.com", results_per_keyword=2),
+    )
+
+    assert [target.competitor_url for target in targets] == [
+        "https://competitor-one.com/live-chat",
+        "https://competitor-two.com/live-chat",
+    ]
+
+
 def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> None:
     _write_base_report(tmp_path)
 
@@ -122,11 +150,13 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Semantic Scatterplot" in html
     assert "Semantic Clusters" in html
     assert "Topic Relations" in html
-    assert "Keyword and URL Semantic Map" in html
-    assert "All Keywords and URLs" in html
+    assert "Keyword and Content Semantic Map" in html
+    assert "All Keywords, URLs, and Content" in html
     assert "overview_scatter" in html
     assert "overview-section" in html
     assert "nearest_keyword" in html
+    assert "own_paragraphs_to_review" in html
+    assert "review_reason" in html
     assert "Wheel to zoom, drag to pan, double-click to reset" in html
     assert "pointTooltip" in html
     assert "scatter-tooltip" in html
@@ -154,3 +184,4 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "report-nav-label" in html
     assert "--audit-accent" in html
     assert "buildNav" in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html

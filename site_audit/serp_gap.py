@@ -39,6 +39,21 @@ from .scatter import project
 
 USER_AGENT = "site-audit-serp-gap/0.1 (+https://github.com/vzeman/site-audit)"
 
+_IGNORED_SERP_HOSTS = {
+    "x.com",
+    "twitter.com",
+    "youtube.com",
+    "youtu.be",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "pinterest.com",
+    "tiktok.com",
+    "reddit.com",
+    "play.google.com",
+    "apps.apple.com",
+}
+
 
 @dataclass
 class SerpGapConfig:
@@ -160,6 +175,34 @@ def run(config: SerpGapConfig) -> dict:
                 "domain": urlparse(page.url).netloc,
             })
             overview_texts.append(" ".join([own_ext.title, own_ext.h1, page.url]).strip() or page.url)
+            if own_ext.title:
+                overview_rows.append({"entity_type": "title", "source": "ours", "text": own_ext.title, "url": page.url})
+                overview_texts.append(own_ext.title)
+            if own_ext.h1:
+                overview_rows.append({"entity_type": "h1", "source": "ours", "text": own_ext.h1, "url": page.url})
+                overview_texts.append(own_ext.h1)
+            for header in own_ext.headers_rich[:40]:
+                text = str(header.get("text") or "").strip()
+                if not text:
+                    continue
+                overview_rows.append({
+                    "entity_type": "header",
+                    "source": "ours",
+                    "text": text,
+                    "level": header.get("level"),
+                    "url": page.url,
+                })
+                overview_texts.append(text)
+            for para in (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]:
+                if not para.strip():
+                    continue
+                overview_rows.append({
+                    "entity_type": "paragraph",
+                    "source": "ours",
+                    "text": para[:300],
+                    "url": page.url,
+                })
+                overview_texts.append(para)
 
         page_blocks: list[dict] = []
         for kw in page_keywords:
@@ -217,6 +260,52 @@ def run(config: SerpGapConfig) -> dict:
                     "text": competitor_page.title or competitor_url,
                 })
                 overview_texts.append(" ".join([competitor_page.title, competitor_url]).strip() or competitor_url)
+                if competitor_page.title:
+                    overview_rows.append({
+                        "entity_type": "title",
+                        "source": "competitor",
+                        "domain": urlparse(competitor_url).netloc,
+                        "url": competitor_url,
+                        "rank": competitor_page.target.rank,
+                        "text": competitor_page.title,
+                    })
+                    overview_texts.append(competitor_page.title)
+                if competitor_page.h1:
+                    overview_rows.append({
+                        "entity_type": "h1",
+                        "source": "competitor",
+                        "domain": urlparse(competitor_url).netloc,
+                        "url": competitor_url,
+                        "rank": competitor_page.target.rank,
+                        "text": competitor_page.h1,
+                    })
+                    overview_texts.append(competitor_page.h1)
+                for header in competitor_page.headers_rich[:40]:
+                    text = str(header.get("text") or "").strip()
+                    if not text:
+                        continue
+                    overview_rows.append({
+                        "entity_type": "header",
+                        "source": "competitor",
+                        "domain": urlparse(competitor_url).netloc,
+                        "url": competitor_url,
+                        "rank": competitor_page.target.rank,
+                        "level": header.get("level"),
+                        "text": text,
+                    })
+                    overview_texts.append(text)
+                for para in competitor_page.paragraphs[:config.max_paragraphs_per_page]:
+                    if not para.strip():
+                        continue
+                    overview_rows.append({
+                        "entity_type": "paragraph",
+                        "source": "competitor",
+                        "domain": urlparse(competitor_url).netloc,
+                        "url": competitor_url,
+                        "rank": competitor_page.target.rank,
+                        "text": para[:300],
+                    })
+                    overview_texts.append(para)
             gap = _build_gap(page, kw, own_ext, competitor_pages, embedder, config)
             gap["serp"] = {
                 "provider": provider,
@@ -479,7 +568,7 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
     if provider == "dataforseo":
         auto_config = CompetitiveAutoConfig(
             enabled=True,
-            results_per_keyword=config.results_per_keyword,
+            results_per_keyword=max(config.results_per_keyword * 3, config.results_per_keyword + 10),
             refresh_serp=config.refresh_serp,
         )
         if config.country:
@@ -506,7 +595,7 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
     resp = requests.post(
         "https://google.serper.dev/search",
         headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
-        json={"q": keyword, "gl": country, "hl": language, "num": config.results_per_keyword + 3},
+        json={"q": keyword, "gl": country, "hl": language, "num": max(config.results_per_keyword * 3, config.results_per_keyword + 10)},
         timeout=60,
     )
     if resp.status_code >= 400:
@@ -532,13 +621,19 @@ def _targets_from_serp(domain: str, keyword: str, payload: dict, config: SerpGap
     seen = set()
     for row in rows:
         url = row.get("url") or ""
-        if not url or _is_own_url(url, domain) or url in seen:
+        if not url or _is_own_url(url, domain) or _is_ignored_serp_url(url) or url in seen:
             continue
         seen.add(url)
         out.append(CompetitiveTarget(keyword, url, keyword, _safe_int(row.get("rank"))))
         if len(out) >= config.results_per_keyword:
             break
     return out
+
+
+def _is_ignored_serp_url(url: str) -> bool:
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    host = parsed.netloc.lower().removeprefix("www.")
+    return any(host == ignored or host.endswith(f".{ignored}") for ignored in _IGNORED_SERP_HOSTS)
 
 
 def _competitor_page(
@@ -569,6 +664,8 @@ def _competitor_page(
         structural_gaps=[],
         answerability=0.0,
         paragraph_count=len(paragraphs),
+        h1=ext.h1,
+        headers_rich=ext.headers_rich,
     )
 
 
@@ -1036,7 +1133,9 @@ const summaryEl = document.getElementById('summary');
 const statusEl = document.getElementById('status');
 const navEl = document.getElementById('report-nav');
 const colors = {keyword:'#8a4b00', ours:'#176a35', competitor:'#2d5b9a', title:'#7b3fb2', h1:'#b65f00', header:'#68788b', paragraph:'#2d5b9a'};
+const ownDomain = data.domain || 'selected domain';
 function esc(s){return String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function urlLink(url,label=url){return url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label||url)}</a>`:'';}
 function n(v){return Number(v||0).toLocaleString();}
 function pct(v){return Math.round(Number(v||0)*100)+'%';}
 const domainPalette=['#2563eb','#dc2626','#16a34a','#9333ea','#ea580c','#0891b2','#be123c','#4f46e5','#0f766e','#a16207','#7c3aed','#15803d'];
@@ -1046,26 +1145,26 @@ function sourceColor(p){if(p.entity_type==='keyword')return colors.keyword;if(p.
 function metrics(){const s=data.summary||{};return [['Pages',s.pages_analyzed||0],['Keywords',s.keywords_selected||0],['SERP calls',s.serp_api_calls_after_cache ?? s.serp_api_calls ?? 0],['Missing topics',s.missing_topics||0],['Partial topics',s.partial_topics||0],['Review paragraphs',s.off_intent_paragraphs||0]];}
 statusEl.textContent = `${data.domain || ''} · ${data.provider || ''} · ${data.status || ''}`;
 summaryEl.innerHTML = metrics().map(([label,value])=>`<div class="metric"><b>${n(value)}</b><span>${esc(label)}</span></div>`).join('');
-function pointLabel(d){if(d.type==='keyword')return 'Keyword';if(d.type==='url'&&d.source==='ours')return 'Our URL';if(d.type==='url'&&d.source==='competitor')return 'Competitor URL';if(d.type==='url')return 'URL';if(d.type==='title')return 'Page title';if(d.type==='h1')return 'H1 heading';if(d.type==='header')return 'Header';if(d.source==='ours')return 'Our paragraph';if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
+function pointLabel(d){if(d.type==='keyword')return 'Keyword';if(d.type==='url'&&d.source==='ours')return `${ownDomain} URL`;if(d.type==='url'&&d.source==='competitor')return 'Competitor URL';if(d.type==='url')return 'URL';if(d.type==='title')return 'Page title';if(d.type==='h1')return 'H1 heading';if(d.type==='header')return 'Header';if(d.source==='ours')return `${ownDomain} paragraph`;if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
 function pointDetail(p){const type=p.entity_type||'point';return{type,source:p.source||'',cluster:p.cluster??'',domain:p.domain||'',rank:p.rank||'',url:p.url||'',text:String(p.text||'').slice(0,520),nearest_keyword:p.nearest_keyword||'',keyword_similarity:p.keyword_similarity??'',keyword_distance:p.keyword_distance??''};}
 function pointTooltip(p){const d=pointDetail(p);return [pointLabel(d),d.text,d.keyword_distance!==''&&`Keyword distance: ${d.keyword_distance}`,d.keyword_similarity!==''&&`Keyword similarity: ${d.keyword_similarity}`,d.domain&&`Domain: ${d.domain}`,d.rank&&`SERP rank: ${d.rank}`,d.cluster!==''&&`Cluster: ${d.cluster}`].filter(Boolean).join('\\n');}
-function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source||d.type)}</span>`);if(d.nearest_keyword&&d.type!=='keyword')badges.push(`<span class="tip-badge">nearest ${esc(d.nearest_keyword)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${esc(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
+function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source==='ours'?ownDomain:(d.source||d.type))}</span>`);if(d.nearest_keyword&&d.type!=='keyword')badges.push(`<span class="tip-badge">nearest ${esc(d.nearest_keyword)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${urlLink(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
 function clusterSummary(points){const groups=new Map();for(const p of points||[]){const id=p.cluster ?? 0;const g=groups.get(id)||{id,total:0,ours:0,competitor:0,keyword:0,headers:0,samples:[]};g.total++;if(p.entity_type==='keyword')g.keyword++;else if(p.source==='ours')g.ours++;else if(p.source==='competitor')g.competitor++;if(['h1','header','title'].includes(p.entity_type))g.headers++;if(g.samples.length<3 && p.text)g.samples.push(p.text);groups.set(id,g);}return [...groups.values()].sort((a,b)=>b.total-a.total).slice(0,8);}
 function pointSize(p){if(p.clicks)return Math.max(5,Math.min(14,4+Math.sqrt(Number(p.clicks)||0)));if(p.rank)return Math.max(4.5,12-Number(p.rank||10)*0.65);if(p.entity_type==='keyword')return 8;if(p.entity_type==='url')return 8;if(p.entity_type==='title'||p.entity_type==='h1')return 7;if(p.entity_type==='header')return 5.8;return 3.9;}
 function markerSvg(p, xRaw, yRaw, color, stroke, tip, detail){const x=Number(xRaw),y=Number(yRaw);const type=p.entity_type||'paragraph';const size=pointSize(p);const attrs=`class="scatter-point" tabindex="0" fill="${color}" stroke="${stroke}" stroke-width="1.2" opacity=".86" aria-label="${esc(tip)}" data-tooltip="${esc(tip)}" data-detail="${esc(detail)}" data-entity="${esc(type)}"`;const title=`<title>${esc(tip)}</title>`;if(type==='keyword'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y} ${x},${y+size} ${x-size},${y}">${title}</polygon>`;}if(type==='title'||type==='h1'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y+size*.85} ${x-size},${y+size*.85}">${title}</polygon>`;}if(type==='header'){const s=size*1.7;return `<rect ${attrs} x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" rx="1.5">${title}</rect>`;}return `<circle ${attrs} cx="${x}" cy="${y}" r="${size}">${title}</circle>`;}
 function entityLabel(type){return ({keyword:'keywords',url:'URLs',title:'titles',h1:'H1s',header:'headers',paragraph:'paragraphs'}[type]||type);}
 function entityFilters(points){const order=['keyword','url','title','h1','header','paragraph'];const types=[...new Set((points||[]).map(p=>p.entity_type||'paragraph'))].sort((a,b)=>order.indexOf(a)-order.indexOf(b));return `<div class="scatter-filters" aria-label="Visible entity types">${types.map(type=>`<label class="scatter-filter"><input type="checkbox" data-entity-filter="${esc(type)}" checked> ${esc(entityLabel(type))}</label>`).join('')}</div>`;}
-function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const competitorDomains=[...new Set(points.filter(p=>p.source==='competitor'&&p.domain).map(p=>p.domain))].slice(0,8);const domainLegend=competitorDomains.map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');return `${entityFilters(points)}<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond</span><span>▲ title/H1</span><span>■ headers</span><span><i class="dot" style="background:${colors.ours}"></i>our content</span>${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
-function topicChart(topics){if(!topics||!topics.length)return '<div class="empty">No topic relation chart available.</div>';const maxSeen=Math.max(1,...topics.map(t=>Number(t.competitor_coverage||0)));return `<div class="topic-chart">${topics.slice(0,12).map(t=>{const seen=Number(t.competitor_coverage||0);const sim=Number(t.our_best_similarity||0);const width=Math.max(5,Math.min(100,Math.round((seen/maxSeen)*100)));return `<div class="topic-chart-row"><div class="topic-chart-label" title="${esc(t.label||'')}">${esc(t.label||'Untitled topic')}</div><div class="topic-chart-track" title="Seen on ${seen} competitor pages; own similarity ${sim.toFixed(2)}"><span class="topic-chart-bar coverage-${esc(t.coverage||'partial')}" style="width:${width}%"></span></div><div class="mini">${esc(t.coverage||'')}</div></div>`;}).join('')}</div>`;}
-function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td colspan="6" class="muted">No topics classified.</td></tr>';return topics.slice(0,limit).map(t=>{const ex=(t.examples||[])[0]||{};return `<tr><td class="coverage-${esc(t.coverage)}">${esc(t.coverage)}</td><td>${esc(t.priority)}</td><td><div class="topic-label">${esc(t.label)}</div><div class="mini">${esc(ex.paragraph||'')}</div></td><td>${esc(t.competitor_coverage)}/${esc(t.competitor_urls?.length||'')}</td><td>${esc(t.our_best_similarity)}</td><td>${esc(ex.url||'')}</td></tr>`}).join('');}
-function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">Own ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
-function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li><a href="${esc(c.url)}">${esc(c.title||c.url)}</a><div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
-function reviewList(rows){if(!rows||!rows.length)return '<div class="empty">No own paragraphs were far from the SERP topic space.</div>';return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
+function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const competitorDomains=[...new Set(points.filter(p=>p.source==='competitor'&&p.domain).map(p=>p.domain))].slice(0,8);const domainLegend=competitorDomains.map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');return `${entityFilters(points)}<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond</span><span>▲ title/H1</span><span>■ headers</span><span><i class="dot" style="background:${colors.ours}"></i>${esc(ownDomain)}</span>${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
+function topicChart(topics){if(!topics||!topics.length)return '<div class="empty">No topic relation chart available.</div>';const maxSeen=Math.max(1,...topics.map(t=>Number(t.competitor_coverage||0)));return `<div class="topic-chart">${topics.slice(0,12).map(t=>{const seen=Number(t.competitor_coverage||0);const sim=Number(t.our_best_similarity||0);const width=Math.max(5,Math.min(100,Math.round((seen/maxSeen)*100)));return `<div class="topic-chart-row"><div class="topic-chart-label" title="${esc(t.label||'')}">${esc(t.label||'Untitled topic')}</div><div class="topic-chart-track" title="Seen on ${seen} competitor pages; ${esc(ownDomain)} similarity ${sim.toFixed(2)}"><span class="topic-chart-bar coverage-${esc(t.coverage||'partial')}" style="width:${width}%"></span></div><div class="mini">${esc(t.coverage||'')}</div></div>`;}).join('')}</div>`;}
+function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td colspan="6" class="muted">No topics classified.</td></tr>';return topics.slice(0,limit).map(t=>{const ex=(t.examples||[])[0]||{};return `<tr><td class="coverage-${esc(t.coverage)}">${esc(t.coverage)}</td><td>${esc(t.priority)}</td><td><div class="topic-label">${esc(t.label)}</div><div class="mini">${esc(ex.paragraph||'')}</div></td><td>${esc(t.competitor_coverage)}/${esc(t.competitor_urls?.length||'')}</td><td>${esc(t.our_best_similarity)}</td><td>${urlLink(ex.url)}</td></tr>`}).join('');}
+function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">${esc(ownDomain)} ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
+function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
+function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No ${esc(ownDomain)} paragraphs available for review.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function overviewSection(){const points=data.overview_scatter?.points||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and URL Semantic Map</h2><div class="mini">All selected keywords and every own or competitor URL processed in this report, projected in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>All Keywords and URLs</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>Own sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>Own Paragraphs To Review</h4><div class="panel-body">${reviewList(a.off_intent_paragraphs)}</div></div></div></div>`;}
-function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${esc(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
-function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and URL map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
+function overviewSection(){const points=data.overview_scatter?.points||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>${esc(ownDomain)} Paragraphs To Review</h4><div class="panel-body">${reviewList(reviewRows)}</div></div></div></div>`;}
+function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
+function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and content map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
 function bindScatterInteractions(){document.querySelectorAll('.scatter-wrap').forEach(wrap=>{const svg=wrap.querySelector('svg.scatter');const tooltip=wrap.querySelector('.scatter-tooltip');if(!svg||!tooltip)return;const base=(svg.getAttribute('data-base-viewbox')||'0 0 820 390').split(/\\s+/).map(Number);let vb={x:base[0],y:base[1],w:base[2],h:base[3]};const setVb=()=>svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);function zoomAt(factor,cx=base[2]/2,cy=base[3]/2){const nx=cx-(cx-vb.x)*factor;const ny=cy-(cy-vb.y)*factor;vb={x:nx,y:ny,w:vb.w*factor,h:vb.h*factor};setVb();}function pointFromEvent(event){const rect=svg.getBoundingClientRect();return{x:vb.x+(event.clientX-rect.left)/Math.max(rect.width,1)*vb.w,y:vb.y+(event.clientY-rect.top)/Math.max(rect.height,1)*vb.h};}function show(point){let detail=null;try{detail=JSON.parse(point.getAttribute('data-detail')||'{}');}catch(_){detail={type:'point',explanation:point.getAttribute('data-tooltip')||point.getAttribute('aria-label')||''};}tooltip.innerHTML=pointDetailHtml(detail);tooltip.classList.add('open');tooltip.querySelector('.tip-close')?.addEventListener('click',event=>{event.stopPropagation();tooltip.classList.remove('open');});}wrap.querySelectorAll('.scatter-point').forEach(point=>{point.addEventListener('click',event=>{event.stopPropagation();show(point);});point.addEventListener('focus',()=>show(point));});svg.addEventListener('wheel',event=>{event.preventDefault();const p=pointFromEvent(event);zoomAt(event.deltaY<0?0.82:1.22,p.x,p.y);},{passive:false});let drag=null;svg.addEventListener('mousedown',event=>{if(event.target.classList?.contains('scatter-point'))return;drag={x:event.clientX,y:event.clientY,vx:vb.x,vy:vb.y};svg.classList.add('is-panning');});window.addEventListener('mousemove',event=>{if(!drag)return;const rect=svg.getBoundingClientRect();vb.x=drag.vx-(event.clientX-drag.x)/Math.max(rect.width,1)*vb.w;vb.y=drag.vy-(event.clientY-drag.y)/Math.max(rect.height,1)*vb.h;setVb();});window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('is-panning');});svg.addEventListener('dblclick',()=>{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();});wrap.querySelectorAll('[data-zoom]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const action=button.getAttribute('data-zoom');if(action==='in')zoomAt(0.78);else if(action==='out')zoomAt(1.28);else{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();}}));});document.addEventListener('click',event=>{const target=event.target;if(target?.closest?.('.scatter-tooltip')||target?.closest?.('.scatter-point'))return;document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});}
 function bindScatterFilters(){document.querySelectorAll('.panel-body').forEach(panel=>{const filters=[...panel.querySelectorAll('[data-entity-filter]')];const points=[...panel.querySelectorAll('.scatter-point')];const tooltip=panel.querySelector('.scatter-tooltip');if(!filters.length||!points.length)return;function apply(){const visible=new Set(filters.filter(input=>input.checked).map(input=>input.dataset.entityFilter));points.forEach(point=>{const show=visible.has(point.dataset.entity||'paragraph');point.style.display=show?'':'none';if(!show&&document.activeElement===point)point.blur();});tooltip?.classList.remove('open');}filters.forEach(input=>input.addEventListener('change',apply));apply();});}

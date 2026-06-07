@@ -25,7 +25,7 @@ import json
 import os
 import re
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Iterable, NamedTuple, Optional
@@ -93,6 +93,8 @@ class CompetitorPage:
     answerability: float
     paragraph_count: int
     error: Optional[str] = None
+    h1: str = ""
+    headers_rich: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -965,6 +967,7 @@ def build_serp_paragraph_gap(
     ))
 
     off_intent: list[dict] = []
+    review_candidates: list[dict] = []
     if len(our_paragraph_embeddings) and centroids:
         topic_matrix = np.vstack(centroids).astype(np.float32)
         for i, (text, emb) in enumerate(zip(our_paragraphs, our_paragraph_embeddings)):
@@ -972,13 +975,21 @@ def build_serp_paragraph_gap(
             if words < 35:
                 continue
             best_topic_sim = float(np.max(topic_matrix @ emb))
+            review_candidates.append({
+                "paragraph_index": i,
+                "similarity_to_serp_topics": round(best_topic_sim, 4),
+                "paragraph": text[:300],
+                "review_reason": "lowest similarity to SERP topic centroids",
+            })
             if best_topic_sim < 0.52:
                 off_intent.append({
                     "paragraph_index": i,
                     "similarity_to_serp_topics": round(best_topic_sim, 4),
                     "paragraph": text[:300],
+                    "review_reason": "below off-intent threshold",
                 })
         off_intent.sort(key=lambda r: r["similarity_to_serp_topics"])
+        review_candidates.sort(key=lambda r: r["similarity_to_serp_topics"])
 
     structural_counts: dict[str, dict] = {}
     for page in usable:
@@ -1008,6 +1019,7 @@ def build_serp_paragraph_gap(
         "weak_topics": [t for t in topics if t["coverage"] == "partial"],
         "covered_topics": [t for t in topics if t["coverage"] == "covered"],
         "off_intent_paragraphs": off_intent[:10],
+        "own_paragraphs_to_review": review_candidates[:10],
         "structural_patterns": sorted(
             structural_counts.values(),
             key=lambda r: int(r.get("competitors", 0)),
@@ -1215,6 +1227,8 @@ def compare_serp_targets(
             structural_gaps=structural,
             answerability=round(answerability_theirs, 2),
             paragraph_count=len(theirs_paragraphs),
+            h1=theirs_ext.h1,
+            headers_rich=theirs_ext.headers_rich,
         ))
 
     serp_clusters: list[dict] = []
