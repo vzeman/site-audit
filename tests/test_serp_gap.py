@@ -213,6 +213,7 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "h2:'H2s'" in html
     assert "h6:'H6s'" in html
     assert "H1-H6" in html
+    assert "unclassified headings" in html
     assert "overview_scatter" in html
     assert "overview-section" in html
     assert "nearest_keyword" in html
