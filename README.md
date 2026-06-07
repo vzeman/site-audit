@@ -1,6 +1,8 @@
 # site-audit
 
-For interpreting competitor paragraph gaps, see [SERP Paragraph Gap Analysis](docs/serp-paragraph-gap-analysis.md). It explains how to choose relevant keywords, read missing/partial topics, and turn the report into an editorial action plan.
+For the standalone SERP competitor workflow, see [SERP Gap Command](docs/serp-gap-command.md). It explains how to run `site-audit serp-gap`, analyze selected URLs against live Google competitors, and read the semantic scatterplot.
+
+For interpreting competitor paragraph gaps inside normal audit reports, see [SERP Paragraph Gap Analysis](docs/serp-paragraph-gap-analysis.md). It explains how to choose relevant keywords, read missing/partial topics, and turn the report into an editorial action plan.
 
 For section-by-section interpretation of the report UI, see [Report Section Guide](docs/report-sections.md).
 
@@ -24,6 +26,7 @@ open projects/example.com/report/index.html
 - [Common recipes](#common-recipes) — what to type for typical jobs
 - [What the report shows](#what-the-report-shows) — section-by-section guide
 - [Comparing multiple domains](#comparing-multiple-domains) — `site-audit compare`
+- [SERP gap analysis](#serp-gap-analysis) — `site-audit serp-gap`
 - [Project layout on disk](#project-layout-on-disk)
 - [All the flags](#all-the-flags)
 - [Re-runs and caching](#re-runs-and-caching)
@@ -820,6 +823,36 @@ Populated only when you pass `--competitive my_targets.tsv` (one
 
 This is *per-target* competitive analysis — for cross-domain quality
 comparison across whole sites, use `site-audit compare` (see below).
+
+---
+
+## SERP gap analysis
+
+`site-audit serp-gap` is a separate command for expensive SERP/content
+research. It starts from an existing domain audit, selects one URL or URL
+pattern, fetches live Google competitors for chosen or discovered keywords,
+and writes an independent semantic gap report.
+
+Example:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/live-chat-software/ \
+  --keyword "live chat software" \
+  --keyword "livechat software" \
+  --keyword "livechat" \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+The report includes one section per analyzed page, keyword-level semantic
+scatterplots, domain-colored competitor points, distinct shapes for keywords,
+titles/H1s, headers, and paragraphs, zoom/pan controls, click dialogs, topic
+clusters, and missing/partial topic tables.
+
+See [SERP Gap Command](docs/serp-gap-command.md) for the full workflow,
+budget controls, and a screenshot of the LiveAgent example report.
 
 ---
 

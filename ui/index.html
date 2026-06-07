@@ -1745,6 +1745,90 @@
       </div>
     </div>
 
+    <!-- Paragraph cluster treemap -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-treemap-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Paragraph topic mass — treemap</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Tile <strong>size = paragraph count</strong> in the topic, <strong>color = cohesion</strong>. This exposes the topic structure inside long pages even when the page-level map collapses to one cluster.
+        </p>
+        <p class="text-xs text-gray-500 mt-1">
+          Read large tiles as topics that take up more paragraph-level space. Darker/tighter-color tiles indicate more internally consistent paragraph clusters; pale or fragmented tiles are looser topics. Click a tile to inspect keywords and example paragraphs.
+        </p>
+      </div>
+      <div id="audit-para-treemap" class="w-full" style="height: 460px;"></div>
+      <div id="audit-para-treemap-detail" class="hidden">
+        Click a treemap tile to inspect the paragraph topic.
+      </div>
+    </div>
+
+    <!-- Paragraph cluster overlap -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-heatmap-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Paragraph cluster overlap heatmap</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Semantic similarity between paragraph-topic centroids. Hot off-diagonal cells show paragraph clusters that may be separate labels for the same underlying subject.
+        </p>
+        <p class="text-xs text-gray-500 mt-1">
+          Rows and columns are paragraph clusters. The diagonal is always self-similarity. Strong off-diagonal color means two clusters are semantically close and may be merge candidates; cooler cells mean clearer separation. Click any cell to inspect the pair.
+        </p>
+      </div>
+      <div id="audit-para-heatmap" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
+      <div id="audit-para-heatmap-detail" class="hidden">
+        Click a heatmap cell or label to inspect the overlap.
+      </div>
+    </div>
+
+    <!-- Paragraph relationship perspectives -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="para-relations-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Paragraph cluster relationship views</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          Alternate projections of the same paragraph-cluster relationships: network neighborhoods, hierarchy, centroid map, chord bundles, and section-to-topic flow.
+        </p>
+      </div>
+      <div class="grid xl:grid-cols-2 gap-5">
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Network graph</h4>
+          <p class="text-xs text-gray-500 mb-2">
+            Each bubble is a paragraph cluster. Bubble size = paragraph count, color = cohesion, and links connect only strongly similar clusters. Dense neighborhoods are related topic families; isolated nodes are distinct themes.
+          </p>
+          <div id="audit-para-network" class="w-full border border-gray-100 rounded" style="height: 460px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Cluster dendrogram</h4>
+          <p class="text-xs text-gray-500 mb-2">
+            A hierarchy built from paragraph-cluster similarity. Clusters that join near each other are semantically closer; long branches indicate topics that stay distinct until late in the merge tree.
+          </p>
+          <div id="audit-para-dendrogram" class="w-full overflow-x-auto border border-gray-100 rounded" style="height: 460px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Centroid map</h4>
+          <p class="text-xs text-gray-500 mb-2">
+            One dot per paragraph cluster, positioned from the average coordinates of its sampled paragraphs in the paragraph scatter map. Dot size = paragraph count. Nearby dots are topics that sit close in the semantic space.
+          </p>
+          <div id="audit-para-centroid-map" class="w-full border border-gray-100 rounded" style="height: 420px;"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold mb-1">Chord diagram</h4>
+          <p class="text-xs text-gray-500 mb-2">
+            Outer arcs are the largest paragraph clusters. Ribbons connect clusters whose similarity clears the strong-overlap threshold. Thick bundles mean repeated semantic overlap between major topics.
+          </p>
+          <div id="audit-para-chord" class="w-full border border-gray-100 rounded" style="height: 420px;"></div>
+        </div>
+        <div class="xl:col-span-2">
+          <h4 class="text-sm font-semibold mb-1">Section → paragraph topic flow</h4>
+          <p class="text-xs text-gray-500 mb-2">
+            Left side = URL section, right side = paragraph cluster. Flow thickness = number of sampled paragraphs from that section assigned to the cluster. Use it to see which site areas carry each topic.
+          </p>
+          <div id="audit-para-flow" class="w-full overflow-x-auto border border-gray-100 rounded" style="height: 420px;"></div>
+        </div>
+      </div>
+      <div id="audit-para-rel-detail" class="hidden">
+        Click any node, edge, arc, label, or flow to inspect its values.
+      </div>
+    </div>
+
     <!-- Paragraph-level query fanout -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="fanout-block">
       <div class="flex items-start justify-between mb-3 flex-wrap gap-2">
@@ -1968,6 +2052,7 @@
 <script type="application/json" id="data-paragraph-links">__PARAGRAPH_LINKS_JSON__</script>
 <script type="application/json" id="data-cluster-overlap">__CLUSTER_OVERLAP_JSON__</script>
 <script type="application/json" id="data-paragraph-clusters">__PARAGRAPH_CLUSTERS_JSON__</script>
+<script type="application/json" id="data-paragraph-cluster-overlap">__PARAGRAPH_CLUSTER_OVERLAP_JSON__</script>
 <script type="application/json" id="data-paragraph-scatter">__PARAGRAPH_SCATTER_JSON__</script>
 <script type="application/json" id="data-paragraph-fanout">__PARAGRAPH_FANOUT_JSON__</script>
 <script type="application/json" id="data-paragraph-impact">__PARAGRAPH_IMPACT_JSON__</script>
@@ -2019,7 +2104,7 @@
     {key: 'editing', label: 'Pages needing edits', ids: ['improvement-block']},
     {key: 'titles', label: 'Titles and headings', ids: ['title-mismatch-block', 'headers-block', 'heading-impact-block']},
     {key: 'semantic-map', label: 'Semantic map', ids: ['scatter-block', 'section-outliers-block', 'link-addition-block']},
-    {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'heatmap-block']},
+    {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block', 'heatmap-block']},
     {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'coverage-block']},
     {key: 'paragraphs', label: 'Paragraph analysis', ids: ['paragraph-impact-block', 'weak-paragraphs-block', 'semantic-ablation-block', 'keyword-attribution-block']},
     {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
@@ -2035,7 +2120,7 @@
   ];
   const SECTION_DOC_BLOCKS = [
     'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
-    'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block',
+    'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block',
     'ahrefs-block', 'best-pages-block', 'paragraph-impact-block', 'weak-paragraphs-block',
     'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
     'indexability-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
@@ -2233,6 +2318,7 @@
       const inlinedParaLinks = readInlined('data-paragraph-links');
       const inlinedClusterOverlap = readInlined('data-cluster-overlap');
       const inlinedParaClusters = readInlined('data-paragraph-clusters');
+      const inlinedParaClusterOverlap = readInlined('data-paragraph-cluster-overlap');
       const inlinedParaScatter = readInlined('data-paragraph-scatter');
       const inlinedFanout = readInlined('data-paragraph-fanout');
       const inlinedParagraphImpact = readInlined('data-paragraph-impact');
@@ -2269,7 +2355,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2287,6 +2373,7 @@
         paraLinks = inlinedParaLinks || [];
         clusterOverlap = inlinedClusterOverlap || {};
         paraClusters = inlinedParaClusters || [];
+        paraClusterOverlap = inlinedParaClusterOverlap || {};
         paraScatter = inlinedParaScatter || {};
         fanout = inlinedFanout || [];
         paragraphImpact = inlinedParagraphImpact || {};
@@ -2323,7 +2410,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2340,6 +2427,7 @@
           loadJSON('paragraph_link_recommendations.json').catch(() => []),
           loadJSON('cluster_overlap.json').catch(() => ({})),
           loadJSON('paragraph_clusters.json').catch(() => []),
+          loadJSON('paragraph_cluster_overlap.json').catch(() => ({})),
           loadJSON('paragraph_scatter.json').catch(() => ({})),
           loadJSON('paragraph_fanout.json').catch(() => []),
           loadJSON('paragraph_impact.json').catch(() => ({})),
@@ -2394,6 +2482,7 @@
       state.paraLinks = paraLinks;
       state.clusterOverlap = clusterOverlap;
       state.paraClusters = paraClusters;
+      state.paraClusterOverlap = paraClusterOverlap;
       state.paraScatter = paraScatter;
       state.fanout = fanout;
       state.paragraphImpact = paragraphImpact || {};
@@ -2505,6 +2594,9 @@
       renderHeadingImpact();
       renderWrongHome();
       renderParaClusters();
+      renderParagraphTreemap();
+      renderParagraphHeatmap();
+      renderParagraphRelationViews();
       renderFanout('all');
       renderCompetitive();
       addSectionDocLinks();
@@ -7385,6 +7477,701 @@
           ${examples}
         </div>`;
     }).join('');
+  }
+
+  function renderParagraphTreemap() {
+    const block = document.getElementById('para-treemap-block');
+    const rows = (state.paraClusters || []).filter(c => Number(c.paragraph_count || 0) > 0);
+    if (!rows.length) { block.style.display = 'none'; return; }
+
+    const el = document.getElementById('audit-para-treemap');
+    el.innerHTML = '';
+    const width = el.offsetWidth || 900;
+    const height = 460;
+    const maxCohesion = d3.max(rows, d => Number(d.cohesion || 0)) || 1;
+    const minCohesion = d3.min(rows, d => Number(d.cohesion || 0)) || 0;
+    const root = d3.hierarchy({ children: rows })
+      .sum(d => Number(d.paragraph_count || 0))
+      .sort((a, b) => (b.value || 0) - (a.value || 0));
+    d3.treemap().size([width, height]).paddingInner(2).paddingOuter(1).round(true)(root);
+
+    const color = d3.scaleSequential(d3.interpolateYlGnBu)
+      .domain([Math.max(0, minCohesion - 0.02), Math.min(1, maxCohesion + 0.02)]);
+    const svg = d3.select(el).append('svg')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('viewBox', `0 0 ${width} ${height}`)
+      .attr('role', 'img')
+      .attr('aria-label', 'Paragraph topic cluster treemap');
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 10]);
+    const tooltip = relationTooltip();
+    const cells = zoomLayer.selectAll('g')
+      .data(root.leaves())
+      .join('g')
+      .attr('transform', d => `translate(${d.x0},${d.y0})`);
+
+    cells.append('rect')
+      .attr('width', d => Math.max(0, d.x1 - d.x0))
+      .attr('height', d => Math.max(0, d.y1 - d.y0))
+      .attr('rx', 2)
+      .attr('fill', d => color(Number(d.data.cohesion || 0)))
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 1)
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#0f172a').attr('stroke-width', 2);
+        showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d.data));
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-treemap-detail', d.data, 'Treemap topic'))
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke', '#fff').attr('stroke-width', 1);
+        hideRelationTooltip(tooltip);
+      });
+
+    cells.each(function(d) {
+      const w = d.x1 - d.x0;
+      const h = d.y1 - d.y0;
+      if (w < 86 || h < 42) return;
+      const label = String(d.data.label || `cluster ${d.data.cluster_id}`);
+      const maxChars = Math.max(8, Math.floor((w - 12) / 6.4));
+      const shortLabel = label.length > maxChars ? label.slice(0, Math.max(7, maxChars - 1)) + '…' : label;
+      const text = d3.select(this).append('text')
+        .attr('x', 6)
+        .attr('y', 14)
+        .attr('font-size', 11)
+        .attr('font-weight', 600)
+        .attr('fill', Number(d.data.cohesion || 0) > 0.82 ? '#fff' : '#172554')
+        .style('pointer-events', 'none');
+      text.append('tspan').text(shortLabel);
+      if (h >= 60) {
+        text.append('tspan')
+          .attr('x', 6)
+          .attr('dy', 15)
+          .attr('font-size', 10)
+          .attr('font-weight', 400)
+          .text(`${Number(d.data.paragraph_count || 0).toLocaleString()} paras`);
+      }
+    });
+  }
+
+  function renderParagraphHeatmap() {
+    const block = document.getElementById('para-heatmap-block');
+    const payload = state.paraClusterOverlap || {};
+    const clusters = payload.clusters || [];
+    const matrix = payload.matrix || [];
+    if (clusters.length < 2 || !matrix.length) { block.style.display = 'none'; return; }
+
+    const el = document.getElementById('audit-para-heatmap');
+    el.innerHTML = '';
+    const cell = clusters.length > 50 ? 12 : 16;
+    const labelWidth = 210;
+    const labelHeight = 130;
+    const n = clusters.length;
+    const width = labelWidth + n * cell + 20;
+    const height = labelHeight + n * cell + 24;
+    const svg = d3.select(el).append('svg')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('viewBox', `0 0 ${width} ${height}`)
+      .attr('role', 'img')
+      .attr('aria-label', 'Paragraph cluster overlap heatmap');
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 12]);
+    const tooltip = relationTooltip();
+    const color = d3.scaleSequential(d3.interpolateRdYlBu).domain([1.0, 0.25]);
+
+    zoomLayer.append('g').attr('transform', `translate(${labelWidth},${labelHeight})`)
+      .selectAll('text').data(clusters).join('text')
+      .attr('x', (_, i) => i * cell + cell / 2)
+      .attr('y', -5)
+      .attr('transform', (_, i) => `rotate(-45, ${i * cell + cell / 2}, -5)`)
+      .attr('font-size', 10)
+      .attr('text-anchor', 'start')
+      .style('cursor', 'default')
+      .text(d => String(d.label || '').length > 20 ? String(d.label).slice(0, 19) + '…' : String(d.label || ''))
+      .on('mouseover', (event, d) => showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d)))
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-heatmap-detail', d, 'Heatmap column topic'))
+      .on('mouseout', () => hideRelationTooltip(tooltip));
+
+    zoomLayer.append('g').attr('transform', `translate(${labelWidth - 7},${labelHeight + cell / 2 + 3})`)
+      .selectAll('text').data(clusters).join('text')
+      .attr('y', (_, i) => i * cell)
+      .attr('font-size', 10)
+      .attr('text-anchor', 'end')
+      .style('cursor', 'default')
+      .text(d => String(d.label || '').length > 26 ? String(d.label).slice(0, 25) + '…' : String(d.label || ''))
+      .on('mouseover', (event, d) => showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d)))
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-heatmap-detail', d, 'Heatmap row topic'))
+      .on('mouseout', () => hideRelationTooltip(tooltip));
+
+    const g = zoomLayer.append('g').attr('transform', `translate(${labelWidth},${labelHeight})`);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const v = Number((matrix[i] || [])[j] || 0);
+        g.append('rect')
+          .attr('x', j * cell)
+          .attr('y', i * cell)
+          .attr('width', cell - 1)
+          .attr('height', cell - 1)
+          .attr('fill', color(v))
+          .style('cursor', 'default')
+          .on('mouseover', function(event) {
+            d3.select(this).attr('stroke', '#0f172a').attr('stroke-width', 1.5);
+            showRelationTooltip(tooltip, event, `
+              <div class="font-semibold mb-1">Cluster overlap</div>
+              <div>${escapeHtml(clusters[i].label || '')} ↔ ${escapeHtml(clusters[j].label || '')}</div>
+              <div>similarity ${v.toFixed(3)}</div>
+              <div>${Number(clusters[i].paragraph_count || 0).toLocaleString()} vs ${Number(clusters[j].paragraph_count || 0).toLocaleString()} paragraphs</div>
+            `);
+          })
+          .on('mousemove', event => moveRelationTooltip(tooltip, event))
+          .on('click', event => inspectParagraphRelation(tooltip, event, 'audit-para-heatmap-detail', 'Cluster overlap', clusters[i].label || '', clusters[j].label || '', 'similarity', v.toFixed(3), `
+              <div class="font-semibold mb-1">Cluster overlap</div>
+              <div>${escapeHtml(clusters[i].label || '')} ↔ ${escapeHtml(clusters[j].label || '')}</div>
+              <div>similarity ${v.toFixed(3)}</div>
+              <div>${Number(clusters[i].paragraph_count || 0).toLocaleString()} vs ${Number(clusters[j].paragraph_count || 0).toLocaleString()} paragraphs</div>
+            `))
+          .on('mouseout', function() {
+            d3.select(this).attr('stroke', null).attr('stroke-width', null);
+            hideRelationTooltip(tooltip);
+          });
+      }
+    }
+  }
+
+  function paragraphRelationData() {
+    const payload = state.paraClusterOverlap || {};
+    const clusters = payload.clusters || [];
+    const matrix = payload.matrix || [];
+    if (clusters.length < 2 || !matrix.length) return null;
+    const byId = new Map((state.paraClusters || []).map(c => [Number(c.cluster_id), c]));
+    const nodes = clusters.map((c, i) => ({ ...c, ...byId.get(Number(c.cluster_id)), index: i, id: String(c.cluster_id) }));
+    return { nodes, matrix };
+  }
+
+  function strongParagraphEdges(nodes, matrix, threshold = 0.82, maxEdges = 120) {
+    const edges = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const sim = Number((matrix[i] || [])[j] || 0);
+        if (sim >= threshold) edges.push({ source: nodes[i].id, target: nodes[j].id, sourceIndex: i, targetIndex: j, sim });
+      }
+    }
+    edges.sort((a, b) => b.sim - a.sim);
+    return edges.slice(0, maxEdges);
+  }
+
+  function clusterShortLabel(d, chars = 28) {
+    const label = String(d.label || `cluster ${d.cluster_id}`);
+    return label.length > chars ? label.slice(0, chars - 1) + '…' : label;
+  }
+
+  function paragraphClusterTooltipHtml(d) {
+    const kws = (d.keywords || []).slice(0, 5).map(k => k.keyword || k).join(' · ');
+    return `
+      <div class="font-semibold mb-1">${escapeHtml(d.label || `cluster ${d.cluster_id}`)}</div>
+      <div>${Number(d.paragraph_count || 0).toLocaleString()} paragraphs · ${Number(d.distinct_pages || 0).toLocaleString()} pages</div>
+      <div>cohesion ${Number(d.cohesion || 0).toFixed(3)} · site alignment ${Number(d.site_alignment || 0).toFixed(3)}</div>
+      ${kws ? `<div class="mt-1 text-gray-600">${escapeHtml(kws)}</div>` : ''}
+    `;
+  }
+
+  function setParagraphDetail(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+    openParagraphDialog(html);
+  }
+
+  function openParagraphDialog(html) {
+    d3.selectAll('.para-click-dialog').remove();
+    const wrap = d3.select('body').append('div')
+      .attr('class', 'para-click-dialog')
+      .style('position', 'fixed')
+      .style('inset', '0')
+      .style('z-index', 100000)
+      .style('background', 'rgba(15, 23, 42, 0.18)')
+      .style('display', 'flex')
+      .style('align-items', 'center')
+      .style('justify-content', 'center')
+      .style('padding', '24px');
+    const card = wrap.append('div')
+      .style('position', 'relative')
+      .style('width', 'min(560px, calc(100vw - 48px))')
+      .style('max-height', 'min(620px, calc(100vh - 48px))')
+      .style('overflow', 'auto')
+      .style('background', '#fff')
+      .style('color', '#111827')
+      .style('border', '1px solid #cbd5e1')
+      .style('border-radius', '8px')
+      .style('box-shadow', '0 24px 60px rgba(15, 23, 42, 0.28)')
+      .style('padding', '16px 18px 18px');
+    card.append('button')
+      .attr('type', 'button')
+      .attr('aria-label', 'Close')
+      .style('position', 'absolute')
+      .style('top', '8px')
+      .style('right', '10px')
+      .style('font-size', '18px')
+      .style('line-height', '1')
+      .style('color', '#64748b')
+      .text('x')
+      .on('click', event => {
+        event.stopPropagation();
+        wrap.remove();
+      });
+    card.append('div').style('padding-right', '22px').html(html);
+    wrap.on('click', () => wrap.remove());
+    card.on('click', event => event.stopPropagation());
+  }
+
+  function paragraphClusterDetailHtml(d, kicker = 'Selected paragraph topic') {
+    const kws = (d.keywords || []).slice(0, 8).map(k => k.keyword || k);
+    const examples = (d.top_paragraphs || []).slice(0, 2).map(p => `
+      <div class="mt-2 text-xs">
+        <a class="text-blue-600 hover:underline" href="${escapeHtml(p.url || '')}" target="_blank" rel="noopener">${escapeHtml(p.page_title || p.url || '')}</a>
+        <div class="italic text-gray-600">"${escapeHtml(p.excerpt || '')}"</div>
+      </div>
+    `).join('');
+    return `
+      <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">${escapeHtml(kicker)}</div>
+      <div class="font-semibold text-gray-900">${escapeHtml(d.label || `cluster ${d.cluster_id}`)}</div>
+      <div class="text-xs text-gray-600 mt-1">${Number(d.paragraph_count || 0).toLocaleString()} paragraphs · ${Number(d.distinct_pages || 0).toLocaleString()} pages · cohesion ${Number(d.cohesion || 0).toFixed(3)} · site alignment ${Number(d.site_alignment || 0).toFixed(3)}</div>
+      ${kws.length ? `<div class="mt-2">${kws.map(k => `<span class="inline-block bg-white border border-gray-200 text-gray-800 text-xs px-2 py-0.5 rounded mr-1 mb-1">${escapeHtml(k)}</span>`).join('')}</div>` : ''}
+      ${examples}
+    `;
+  }
+
+  function paragraphRelationDetailHtml(title, left, right, valueLabel, value) {
+    return `
+      <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">${escapeHtml(title)}</div>
+      <div class="font-semibold text-gray-900">${escapeHtml(left)} ↔ ${escapeHtml(right)}</div>
+      <div class="text-xs text-gray-600 mt-1">${escapeHtml(valueLabel)} ${escapeHtml(String(value))}</div>
+    `;
+  }
+
+  function relationTooltip() {
+    d3.selectAll('.para-rel-tooltip').remove();
+    d3.select(window).on('click.para-rel-tooltip', () => {
+      d3.selectAll('.para-rel-tooltip')
+        .attr('data-pinned', '0')
+        .style('visibility', 'hidden')
+        .style('pointer-events', 'none');
+    });
+    return d3.select('body').append('div')
+      .attr('class', 'para-rel-tooltip')
+      .attr('data-pinned', '0')
+      .style('position', 'fixed')
+      .style('z-index', 99999)
+      .style('visibility', 'hidden')
+      .style('max-width', '380px')
+      .style('pointer-events', 'none')
+      .style('background', '#fff')
+      .style('color', '#111827')
+      .style('border', '1px solid #cbd5e1')
+      .style('border-radius', '8px')
+      .style('padding', '10px 12px')
+      .style('font-size', '12px')
+      .style('line-height', '1.35')
+      .style('box-shadow', '0 18px 44px rgba(15, 23, 42, 0.24)');
+  }
+
+  function showRelationTooltip(tooltip, event, html, pinned = false) {
+    if (!pinned && tooltip.attr('data-pinned') === '1') return;
+    const body = pinned
+      ? `<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Pinned · click outside to close</div>${html}`
+      : html;
+    tooltip.html(body)
+      .attr('data-pinned', pinned ? '1' : '0')
+      .style('pointer-events', pinned ? 'auto' : 'none')
+      .style('visibility', 'visible');
+    moveRelationTooltip(tooltip, event);
+  }
+
+  function pinRelationTooltip(tooltip, event, html) {
+    event.preventDefault();
+    event.stopPropagation();
+    showRelationTooltip(tooltip, event, html, true);
+  }
+
+  function inspectParagraphCluster(tooltip, event, detailId, d, kicker = 'Selected paragraph topic') {
+    setParagraphDetail(detailId, paragraphClusterDetailHtml(d, kicker));
+    pinRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d));
+  }
+
+  function inspectParagraphRelation(tooltip, event, detailId, title, left, right, valueLabel, value, tooltipHtml = '') {
+    setParagraphDetail(detailId, paragraphRelationDetailHtml(title, left, right, valueLabel, value));
+    pinRelationTooltip(tooltip, event, tooltipHtml || paragraphRelationDetailHtml(title, left, right, valueLabel, value));
+  }
+
+  function moveRelationTooltip(tooltip, event) {
+    const pad = 14;
+    const node = tooltip.node();
+    const w = node ? node.offsetWidth || 260 : 260;
+    const h = node ? node.offsetHeight || 80 : 80;
+    const x = Math.min(window.innerWidth - w - 8, event.clientX + pad);
+    const y = Math.max(8, event.clientY - h - pad);
+    tooltip.style('left', `${x}px`).style('top', `${y}px`);
+  }
+
+  function hideRelationTooltip(tooltip, force = false) {
+    if (!force && tooltip.attr('data-pinned') === '1') return;
+    tooltip.style('visibility', 'hidden');
+    tooltip.attr('data-pinned', '0').style('pointer-events', 'none');
+  }
+
+  function enableChartZoom(svg, layer, scaleExtent = [0.5, 8]) {
+    const zoom = d3.zoom().scaleExtent(scaleExtent).filter(event =>
+      event.type === 'wheel' || event.type === 'dblclick' || event.type === 'mousedown' || event.type === 'touchstart'
+    ).on('zoom', event => {
+      layer.attr('transform', event.transform);
+    });
+    zoom.clickDistance(8).tapDistance(12);
+    svg.call(zoom).on('dblclick.zoom', () => svg.transition().duration(450).call(zoom.transform, d3.zoomIdentity));
+    svg.style('cursor', 'grab')
+      .on('mousedown.zoomcursor', () => svg.style('cursor', 'grabbing'))
+      .on('mouseup.zoomcursor mouseleave.zoomcursor', () => svg.style('cursor', 'grab'));
+  }
+
+  function renderParagraphRelationViews() {
+    const data = paragraphRelationData();
+    const block = document.getElementById('para-relations-block');
+    if (!data) { block.style.display = 'none'; return; }
+    block.style.display = '';
+    renderParagraphNetwork(data);
+    renderParagraphDendrogram(data);
+    renderParagraphCentroidMap(data);
+    renderParagraphChord(data);
+    renderParagraphFlow(data);
+  }
+
+  function renderParagraphNetwork({ nodes, matrix }) {
+    const el = document.getElementById('audit-para-network');
+    el.innerHTML = '';
+    const width = el.offsetWidth || 560;
+    const height = 460;
+    const edges = strongParagraphEdges(nodes, matrix, 0.82, 140);
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
+    const r = d3.scaleSqrt().domain([1, d3.max(nodes, d => Number(d.paragraph_count || 1)) || 1]).range([5, 22]);
+    const color = d3.scaleSequential(d3.interpolateViridis).domain([0.45, 1]);
+    const simWidth = d3.scaleLinear().domain([0.82, 1]).range([0.5, 4]);
+    const simNodes = nodes.map(d => ({ ...d }));
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.4, 10]);
+    const tooltip = relationTooltip();
+    const link = zoomLayer.append('g').attr('stroke', '#64748b').selectAll('line').data(edges).join('line')
+      .attr('stroke-opacity', d => 0.12 + (d.sim - 0.82) * 1.8)
+      .attr('stroke-width', d => simWidth(d.sim))
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.82).attr('stroke', '#0f172a');
+        showRelationTooltip(tooltip, event, `
+          <div class="font-semibold mb-1">Cluster relationship</div>
+          <div>${escapeHtml(d.source.label || d.source.id)} ↔ ${escapeHtml(d.target.label || d.target.id)}</div>
+          <div>similarity ${Number(d.sim || 0).toFixed(3)}</div>
+        `);
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphRelation(tooltip, event, 'audit-para-rel-detail', 'Network edge', d.source.label || d.source.id, d.target.label || d.target.id, 'similarity', Number(d.sim || 0).toFixed(3), `
+          <div class="font-semibold mb-1">Cluster relationship</div>
+          <div>${escapeHtml(d.source.label || d.source.id)} ↔ ${escapeHtml(d.target.label || d.target.id)}</div>
+          <div>similarity ${Number(d.sim || 0).toFixed(3)}</div>
+        `))
+      .on('mouseout', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.12 + (d.sim - 0.82) * 1.8).attr('stroke', '#64748b');
+        hideRelationTooltip(tooltip);
+      });
+    const node = zoomLayer.append('g').selectAll('circle').data(simNodes).join('circle')
+      .attr('r', d => r(Number(d.paragraph_count || 1)))
+      .attr('fill', d => color(Number(d.cohesion || 0.7)))
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 1.2)
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#0f172a').attr('stroke-width', 2.4);
+        showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d));
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-rel-detail', d, 'Network node'))
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke', '#fff').attr('stroke-width', 1.2);
+        hideRelationTooltip(tooltip);
+      });
+    const label = zoomLayer.append('g').selectAll('text').data(simNodes).join('text')
+      .attr('font-size', 10)
+      .attr('fill', '#334155')
+      .text(d => Number(d.paragraph_count || 0) >= 8 ? clusterShortLabel(d, 22) : '');
+    const sim = d3.forceSimulation(simNodes)
+      .force('link', d3.forceLink(edges).id(d => d.id).distance(d => 44 + (1 - d.sim) * 160).strength(d => Math.max(0.04, (d.sim - 0.78) * 0.7)))
+      .force('charge', d3.forceManyBody().strength(-120))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collide', d3.forceCollide(d => r(Number(d.paragraph_count || 1)) + 4))
+      .stop();
+    for (let i = 0; i < 220; i++) sim.tick();
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('cx', d => d.x).attr('cy', d => d.y);
+    label.attr('x', d => d.x + r(Number(d.paragraph_count || 1)) + 4).attr('y', d => d.y + 3);
+  }
+
+  function paragraphHierarchy(nodes, matrix) {
+    let groups = nodes.map((node, index) => ({ name: clusterShortLabel(node, 44), node, indexes: [index], children: null, distance: 0 }));
+    const avgSim = (a, b) => {
+      let total = 0, count = 0;
+      a.indexes.forEach(i => b.indexes.forEach(j => { total += Number((matrix[i] || [])[j] || 0); count += 1; }));
+      return count ? total / count : 0;
+    };
+    while (groups.length > 1) {
+      let bestI = 0, bestJ = 1, best = -Infinity;
+      for (let i = 0; i < groups.length; i++) {
+        for (let j = i + 1; j < groups.length; j++) {
+          const sim = avgSim(groups[i], groups[j]);
+          if (sim > best) { best = sim; bestI = i; bestJ = j; }
+        }
+      }
+      const a = groups[bestI], b = groups[bestJ];
+      const merged = { name: `${a.name} + ${b.name}`, indexes: a.indexes.concat(b.indexes), children: [a, b], distance: 1 - best };
+      groups = groups.filter((_, i) => i !== bestI && i !== bestJ).concat([merged]);
+    }
+    return groups[0];
+  }
+
+  function renderParagraphDendrogram({ nodes, matrix }) {
+    const el = document.getElementById('audit-para-dendrogram');
+    el.innerHTML = '';
+    const width = Math.max(620, el.offsetWidth || 620);
+    const height = 460;
+    const margin = { top: 8, right: 190, bottom: 20, left: 28 };
+    const root = d3.hierarchy(paragraphHierarchy(nodes, matrix));
+    d3.cluster().size([height - margin.top - margin.bottom, width - margin.left - margin.right])(root);
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 10]);
+    const tooltip = relationTooltip();
+    const g = zoomLayer.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    g.selectAll('path').data(root.links()).join('path')
+      .attr('fill', 'none')
+      .attr('stroke', '#94a3b8')
+      .attr('stroke-width', 1)
+      .attr('d', d => `M${d.source.y},${d.source.x}C${(d.source.y + d.target.y) / 2},${d.source.x} ${(d.source.y + d.target.y) / 2},${d.target.x} ${d.target.y},${d.target.x}`);
+    const leaf = g.selectAll('g.leaf').data(root.leaves()).join('g')
+      .attr('transform', d => `translate(${d.y},${d.x})`)
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).select('circle').attr('stroke', '#0f172a').attr('stroke-width', 2);
+        showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d.data.node || d.data));
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-rel-detail', d.data.node || d.data, 'Dendrogram topic'))
+      .on('mouseout', function() {
+        d3.select(this).select('circle').attr('stroke', null).attr('stroke-width', null);
+        hideRelationTooltip(tooltip);
+      });
+    leaf.append('circle').attr('r', d => Math.max(3, Math.sqrt(Number((d.data.node || {}).paragraph_count || 1)))).attr('fill', '#2563eb').attr('fill-opacity', 0.75);
+    leaf.append('text').attr('x', 8).attr('y', 3).attr('font-size', 10).text(d => clusterShortLabel(d.data.node || d.data, 30));
+  }
+
+  function renderParagraphCentroidMap({ nodes }) {
+    const el = document.getElementById('audit-para-centroid-map');
+    el.innerHTML = '';
+    const points = ((state.paraScatter || {}).paragraphs || []);
+    const byCluster = new Map();
+    points.forEach(p => {
+      const id = String(p.cluster);
+      const b = byCluster.get(id) || { id, x: 0, y: 0, n: 0 };
+      b.x += Number(p.x || 0); b.y += Number(p.y || 0); b.n += 1;
+      byCluster.set(id, b);
+    });
+    const rows = nodes.map(n => {
+      const b = byCluster.get(String(n.cluster_id));
+      return b && b.n ? { ...n, x: b.x / b.n, y: b.y / b.n, sample_count: b.n } : null;
+    }).filter(Boolean);
+    if (!rows.length) { el.innerHTML = '<div class="text-gray-500 p-4">No paragraph scatter coordinates available.</div>'; return; }
+    const width = el.offsetWidth || 560;
+    const height = 420;
+    const margin = { top: 12, right: 18, bottom: 34, left: 42 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+    const xExt = d3.extent(rows, d => d.x), yExt = d3.extent(rows, d => d.y);
+    const xPad = (xExt[1] - xExt[0]) * 0.08 || 1, yPad = (yExt[1] - yExt[0]) * 0.08 || 1;
+    const x = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, innerW]);
+    const y = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([innerH, 0]);
+    const r = d3.scaleSqrt().domain([1, d3.max(rows, d => Number(d.paragraph_count || 1)) || 1]).range([5, 24]);
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 12]);
+    const tooltip = relationTooltip();
+    const g = zoomLayer.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    g.append('g').attr('transform', `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(5));
+    g.append('g').call(d3.axisLeft(y).ticks(5));
+    const dots = g.selectAll('circle').data(rows).join('circle')
+      .attr('cx', d => x(d.x)).attr('cy', d => y(d.y)).attr('r', d => r(Number(d.paragraph_count || 1)))
+      .attr('fill', '#0f766e').attr('fill-opacity', 0.68).attr('stroke', 'white').attr('stroke-width', 1)
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#0f172a').attr('stroke-width', 2.4);
+        showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d) + `<div class="mt-1">${Number(d.sample_count || 0).toLocaleString()} sampled paragraphs in map</div>`);
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => {
+        setParagraphDetail('audit-para-rel-detail', paragraphClusterDetailHtml(d, 'Centroid map topic') + `<div class="text-xs text-gray-600 mt-2">${Number(d.sample_count || 0).toLocaleString()} sampled paragraphs in this map.</div>`);
+        pinRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d) + `<div class="mt-1">${Number(d.sample_count || 0).toLocaleString()} sampled paragraphs in map</div>`);
+      })
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke', 'white').attr('stroke-width', 1);
+        hideRelationTooltip(tooltip);
+      });
+    g.selectAll('text.label').data(rows.filter(d => Number(d.paragraph_count || 0) >= 8)).join('text')
+      .attr('class', 'label').attr('x', d => x(d.x) + r(Number(d.paragraph_count || 1)) + 4).attr('y', d => y(d.y) + 3)
+      .attr('font-size', 10).attr('fill', '#334155').text(d => clusterShortLabel(d, 20));
+  }
+
+  function renderParagraphChord({ nodes, matrix }) {
+    const el = document.getElementById('audit-para-chord');
+    el.innerHTML = '';
+    const top = nodes.slice(0, 24);
+    const idx = top.map(n => n.index);
+    const threshold = 0.82;
+    const chordMatrix = idx.map(i => idx.map(j => i === j ? 0 : Math.max(0, Number((matrix[i] || [])[j] || 0) - threshold)));
+    if (!chordMatrix.some(row => row.some(v => v > 0))) { el.innerHTML = '<div class="text-gray-500 p-4">No strong cluster-to-cluster similarities above threshold.</div>'; return; }
+    const width = el.offsetWidth || 560;
+    const height = 420;
+    const outer = Math.min(width, height) * 0.39;
+    const inner = outer - 18;
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 10]);
+    const tooltip = relationTooltip();
+    const g = zoomLayer.append('g').attr('transform', `translate(${width / 2},${height / 2})`);
+    const color = d3.scaleOrdinal().domain(top.map(d => d.id)).range(d3.schemeTableau10.concat(d3.schemeSet3 || []));
+    const chords = d3.chord().padAngle(0.035).sortSubgroups(d3.descending)(chordMatrix);
+    const groupArc = d3.arc().innerRadius(inner).outerRadius(outer);
+    const groups = g.append('g').selectAll('path').data(chords.groups).join('path')
+      .attr('fill', d => color(top[d.index].id)).attr('stroke', '#fff')
+      .attr('d', groupArc)
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke', '#0f172a').attr('stroke-width', 2);
+        showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(top[d.index]));
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-rel-detail', top[d.index], 'Chord topic'))
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke', '#fff').attr('stroke-width', 1);
+        hideRelationTooltip(tooltip);
+      });
+    g.append('g').selectAll('text').data(chords.groups).join('text')
+      .attr('dy', '0.32em')
+      .attr('font-size', 10)
+      .attr('fill', '#334155')
+      .attr('text-anchor', d => ((d.startAngle + d.endAngle) / 2) > Math.PI ? 'end' : 'start')
+      .attr('transform', d => {
+        const a = (d.startAngle + d.endAngle) / 2;
+        const rotate = a * 180 / Math.PI - 90;
+        const flip = a > Math.PI ? 180 : 0;
+        return `rotate(${rotate}) translate(${outer + 8}) rotate(${flip})`;
+      })
+      .style('cursor', 'default')
+      .text(d => clusterShortLabel(top[d.index], 22))
+      .on('mouseover', (event, d) => showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(top[d.index])))
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-rel-detail', top[d.index], 'Chord topic'))
+      .on('mouseout', () => hideRelationTooltip(tooltip));
+    g.append('g').attr('fill-opacity', 0.62).selectAll('path').data(chords).join('path')
+      .attr('d', d3.ribbon().radius(inner))
+      .attr('fill', d => color(top[d.source.index].id))
+      .attr('stroke', '#fff')
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('fill-opacity', 0.9).attr('stroke', '#0f172a');
+        showRelationTooltip(tooltip, event, `
+          <div class="font-semibold mb-1">Chord relationship</div>
+          <div>${escapeHtml(top[d.source.index].label)} ↔ ${escapeHtml(top[d.target.index].label)}</div>
+          <div>similarity ${(d.source.value + threshold).toFixed(3)}</div>
+        `);
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphRelation(tooltip, event, 'audit-para-rel-detail', 'Chord relationship', top[d.source.index].label, top[d.target.index].label, 'similarity', (d.source.value + threshold).toFixed(3), `
+          <div class="font-semibold mb-1">Chord relationship</div>
+          <div>${escapeHtml(top[d.source.index].label)} ↔ ${escapeHtml(top[d.target.index].label)}</div>
+          <div>similarity ${(d.source.value + threshold).toFixed(3)}</div>
+        `))
+      .on('mouseout', function() {
+        d3.select(this).attr('fill-opacity', null).attr('stroke', '#fff');
+        hideRelationTooltip(tooltip);
+      });
+  }
+
+  function renderParagraphFlow({ nodes }) {
+    const el = document.getElementById('audit-para-flow');
+    el.innerHTML = '';
+    const points = ((state.paraScatter || {}).paragraphs || []);
+    if (!points.length) { el.innerHTML = '<div class="text-gray-500 p-4">No paragraph scatter sample available.</div>'; return; }
+    const nodeById = new Map(nodes.map(n => [String(n.cluster_id), n]));
+    const sectionCounts = new Map();
+    points.forEach(p => {
+      const parts = new URL(p.url, window.location.origin).pathname.split('/').filter(Boolean);
+      const section = parts[0] || 'root';
+      const cluster = String(p.cluster);
+      const key = `${section}|||${cluster}`;
+      const row = sectionCounts.get(key) || { section, cluster, count: 0 };
+      row.count += 1;
+      sectionCounts.set(key, row);
+    });
+    const flows = [...sectionCounts.values()].filter(f => nodeById.has(f.cluster)).sort((a, b) => b.count - a.count).slice(0, 80);
+    if (!flows.length) { el.innerHTML = '<div class="text-gray-500 p-4">No section-to-cluster flow data.</div>'; return; }
+    const sections = [...new Set(flows.map(f => f.section))];
+    const clusters = [...new Set(flows.map(f => f.cluster))].map(id => nodeById.get(id));
+    const width = Math.max(760, el.offsetWidth || 760);
+    const height = 420;
+    const margin = { top: 24, right: 260, bottom: 20, left: 170 };
+    const innerH = height - margin.top - margin.bottom;
+    const ySection = d3.scalePoint().domain(sections).range([20, innerH - 20]).padding(0.5);
+    const yCluster = d3.scalePoint().domain(clusters.map(c => String(c.cluster_id))).range([20, innerH - 20]).padding(0.5);
+    const stroke = d3.scaleSqrt().domain([1, d3.max(flows, f => f.count) || 1]).range([1, 18]);
+    const color = d3.scaleOrdinal().domain(clusters.map(c => String(c.cluster_id))).range(d3.schemeTableau10.concat(d3.schemeSet3 || []));
+    const svg = d3.select(el).append('svg').attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
+    const zoomLayer = svg.append('g');
+    enableChartZoom(svg, zoomLayer, [0.5, 10]);
+    const tooltip = relationTooltip();
+    const g = zoomLayer.append('g').attr('transform', `translate(0,${margin.top})`);
+    const x1 = margin.left, x2 = width - margin.right;
+    g.selectAll('path').data(flows).join('path')
+      .attr('d', d => `M${x1},${ySection(d.section)}C${x1 + 160},${ySection(d.section)} ${x2 - 160},${yCluster(d.cluster)} ${x2},${yCluster(d.cluster)}`)
+      .attr('fill', 'none').attr('stroke', d => color(d.cluster)).attr('stroke-opacity', 0.3).attr('stroke-width', d => stroke(d.count))
+      .style('cursor', 'default')
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('stroke-opacity', 0.72);
+        showRelationTooltip(tooltip, event, `
+          <div class="font-semibold mb-1">Section to topic flow</div>
+          <div>${escapeHtml(d.section)} → ${escapeHtml((nodeById.get(d.cluster) || {}).label || d.cluster)}</div>
+          <div>${Number(d.count || 0).toLocaleString()} sampled paragraphs</div>
+        `);
+      })
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphRelation(tooltip, event, 'audit-para-rel-detail', 'Section to topic flow', d.section, (nodeById.get(d.cluster) || {}).label || d.cluster, 'sampled paragraphs', Number(d.count || 0).toLocaleString(), `
+          <div class="font-semibold mb-1">Section to topic flow</div>
+          <div>${escapeHtml(d.section)} → ${escapeHtml((nodeById.get(d.cluster) || {}).label || d.cluster)}</div>
+          <div>${Number(d.count || 0).toLocaleString()} sampled paragraphs</div>
+        `))
+      .on('mouseout', function() {
+        d3.select(this).attr('stroke-opacity', 0.3);
+        hideRelationTooltip(tooltip);
+      });
+    g.selectAll('text.section').data(sections).join('text').attr('class', 'section')
+      .attr('x', x1 - 10).attr('y', d => ySection(d) + 4).attr('text-anchor', 'end').attr('font-size', 11).attr('fill', '#334155').text(d => d);
+    g.selectAll('text.cluster').data(clusters).join('text').attr('class', 'cluster')
+      .attr('x', x2 + 10).attr('y', d => yCluster(String(d.cluster_id)) + 4).attr('font-size', 11).attr('fill', '#334155')
+      .style('cursor', 'default')
+      .text(d => clusterShortLabel(d, 34))
+      .on('mouseover', (event, d) => showRelationTooltip(tooltip, event, paragraphClusterTooltipHtml(d)))
+      .on('mousemove', event => moveRelationTooltip(tooltip, event))
+      .on('click', (event, d) => inspectParagraphCluster(tooltip, event, 'audit-para-rel-detail', d, 'Flow target topic'))
+      .on('mouseout', () => hideRelationTooltip(tooltip));
+    g.append('text').attr('x', x1).attr('y', -6).attr('font-size', 11).attr('font-weight', 600).attr('fill', '#475569').text('Sections');
+    g.append('text').attr('x', x2).attr('y', -6).attr('font-size', 11).attr('font-weight', 600).attr('fill', '#475569').text('Paragraph clusters');
   }
 
   function renderFanout(filter) {

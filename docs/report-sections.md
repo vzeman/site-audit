@@ -367,6 +367,11 @@ Compares your target page with competitor URLs at structural and paragraph-topic
 
 Action: confirm the target page, add relevant missing topics, improve partial topics, ignore irrelevant competitor topics, and rerun. If auto mode was used, first inspect the auto-selected keyword table and reject any keyword that does not match the product strategy. See also [SERP Paragraph Gap Analysis](serp-paragraph-gap-analysis.md).
 
+For deeper page-level SERP research, use the separate `site-audit serp-gap`
+command. It analyzes selected URLs against live Google competitors, writes an
+independent report under `projects/<domain>/serp_gap/report/`, and keeps its
+cache under `projects/<domain>/cache/serp_gap/`. See [SERP Gap Command](serp-gap-command.md).
+
 <a id="hits-block"></a>
 ## HITS hubs and authorities
 

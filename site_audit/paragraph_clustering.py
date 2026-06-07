@@ -40,6 +40,7 @@ class ParagraphClusterSummary:
     site_alignment: float
     distinct_pages: int                # how many pages contribute paragraphs
     top_paragraphs: list[dict]         # [{url, page_title, excerpt, similarity}]
+    _centroid: np.ndarray | None = None
 
 
 def cluster_and_label(
@@ -131,6 +132,7 @@ def cluster_and_label(
             site_alignment=site_alignment,
             distinct_pages=distinct_pages,
             top_paragraphs=top_paragraphs_payload,
+            _centroid=centroid,
         ))
 
     summaries.sort(key=lambda s: (s.paragraph_count * s.cohesion, s.distinct_pages), reverse=True)
@@ -188,6 +190,30 @@ def to_summary_payload(summaries: list[ParagraphClusterSummary]) -> list[dict]:
         }
         for s in summaries
     ]
+
+
+def to_overlap_payload(summaries: list[ParagraphClusterSummary], limit: int = 80) -> dict:
+    """Return a centroid-similarity matrix for paragraph topic clusters."""
+    usable = [s for s in summaries if getattr(s, "_centroid", None) is not None]
+    usable.sort(key=lambda s: (s.paragraph_count, s.cohesion), reverse=True)
+    usable = usable[: max(0, limit)]
+    if not usable:
+        return {"clusters": [], "matrix": []}
+
+    centroids = np.stack([s._centroid for s in usable if s._centroid is not None]).astype(np.float32)
+    sim = np.clip(centroids @ centroids.T, -1.0, 1.0)
+    return {
+        "clusters": [
+            {
+                "cluster_id": s.cluster_id,
+                "label": ", ".join(k["keyword"] for k in s.keywords[:3]) or f"cluster {s.cluster_id}",
+                "paragraph_count": s.paragraph_count,
+                "distinct_pages": s.distinct_pages,
+            }
+            for s in usable
+        ],
+        "matrix": [[float(round(v, 4)) for v in row] for row in sim],
+    }
 
 
 def to_scatter_payload(

@@ -137,6 +137,42 @@ def test_run_parser_accepts_disabling_header_footer_stripping() -> None:
     assert args.strip_header_footer is False
 
 
+def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "serp-gap",
+            "example.com",
+            "--url",
+            "https://www.example.com/",
+            "--url-include",
+            "/features/*",
+            "--keyword",
+            "live chat software",
+            "--keyword",
+            "helpdesk software",
+            "--keywords-per-page",
+            "2",
+            "--results-per-keyword",
+            "10",
+            "--provider",
+            "dataforseo",
+            "--budget-usd",
+            "5",
+            "--dry-run",
+        ]
+    )
+
+    assert args.domain == "example.com"
+    assert args.url == ["https://www.example.com/"]
+    assert args.url_include == ["/features/*"]
+    assert args.keyword == ["live chat software", "helpdesk software"]
+    assert args.keywords_per_page == 2
+    assert args.results_per_keyword == 10
+    assert args.provider == "dataforseo"
+    assert args.budget_usd == 5
+    assert args.dry_run is True
+
+
 def test_history_parser_accepts_snapshot_and_compare_commands() -> None:
     snapshot_args = build_parser().parse_args(
         ["history", "snapshot", "example.com", "--projects-root", "/tmp/projects", "--id", "baseline", "--overwrite"]
