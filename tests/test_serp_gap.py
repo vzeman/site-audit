@@ -122,6 +122,11 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Semantic Scatterplot" in html
     assert "Semantic Clusters" in html
     assert "Topic Relations" in html
+    assert "Keyword and URL Semantic Map" in html
+    assert "All Keywords and URLs" in html
+    assert "overview_scatter" in html
+    assert "overview-section" in html
+    assert "nearest_keyword" in html
     assert "Wheel to zoom, drag to pan, double-click to reset" in html
     assert "pointTooltip" in html
     assert "scatter-tooltip" in html
@@ -132,6 +137,10 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "domainColor" in html
     assert "function markerSvg" in html
     assert "function pointSize" in html
+    assert "data-entity-filter" in html
+    assert "bindScatterFilters" in html
+    assert "topicChart" in html
+    assert "topic-chart" in html
     assert "data-detail" in html
     assert "tip-badge" in html
     assert "keyword_distance" in html

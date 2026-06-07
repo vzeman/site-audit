@@ -137,6 +137,10 @@ def run(config: SerpGapConfig) -> dict:
 
     page_results: list[dict] = []
     all_competitor_urls: set[str] = set()
+    overview_rows: list[dict] = []
+    overview_texts: list[str] = []
+    overview_keywords_seen: set[str] = set()
+    overview_urls_seen: set[str] = set()
     for page in selected_pages:
         page_keywords = [row for row in keyword_rows if _same_url(row["url"], page.url)]
         if not page_keywords:
@@ -146,8 +150,33 @@ def run(config: SerpGapConfig) -> dict:
             skipped_pages.append({"url": page.url, "reason": "own page fetch/extract failed"})
             continue
 
+        if page.url not in overview_urls_seen:
+            overview_urls_seen.add(page.url)
+            overview_rows.append({
+                "entity_type": "url",
+                "source": "ours",
+                "text": own_ext.title or own_ext.h1 or page.url,
+                "url": page.url,
+                "domain": urlparse(page.url).netloc,
+            })
+            overview_texts.append(" ".join([own_ext.title, own_ext.h1, page.url]).strip() or page.url)
+
         page_blocks: list[dict] = []
         for kw in page_keywords:
+            keyword_key = kw["keyword"].strip().lower()
+            if keyword_key and keyword_key not in overview_keywords_seen:
+                overview_keywords_seen.add(keyword_key)
+                overview_rows.append({
+                    "entity_type": "keyword",
+                    "source": "keyword",
+                    "text": kw["keyword"],
+                    "url": kw.get("url", page.url),
+                    "clicks": kw.get("clicks", 0),
+                    "impressions": kw.get("impressions", 0),
+                    "position": kw.get("position", ""),
+                })
+                overview_texts.append(kw["keyword"])
+
             serp = _fetch_serp(kw["keyword"], provider, cache_dir, config)
             serp_meta = serp.get("meta") or {}
             if serp_meta.get("status") != "ok":
@@ -174,6 +203,20 @@ def run(config: SerpGapConfig) -> dict:
                 _competitor_page(target, competitor_cache, embedder, config)
                 for target in targets
             ]
+            for competitor_page in competitor_pages:
+                competitor_url = competitor_page.target.competitor_url
+                if competitor_url in overview_urls_seen:
+                    continue
+                overview_urls_seen.add(competitor_url)
+                overview_rows.append({
+                    "entity_type": "url",
+                    "source": "competitor",
+                    "domain": urlparse(competitor_url).netloc,
+                    "url": competitor_url,
+                    "rank": competitor_page.target.rank,
+                    "text": competitor_page.title or competitor_url,
+                })
+                overview_texts.append(" ".join([competitor_page.title, competitor_url]).strip() or competitor_url)
             gap = _build_gap(page, kw, own_ext, competitor_pages, embedder, config)
             gap["serp"] = {
                 "provider": provider,
@@ -202,6 +245,7 @@ def run(config: SerpGapConfig) -> dict:
         "selected_keywords": keyword_rows,
         "skipped_pages": skipped_pages,
         "skipped_keywords": skipped_keywords,
+        "overview_scatter": _overview_scatter(overview_rows, overview_texts, embedder),
         "pages": page_results,
     }
     _write_outputs(payload, report_dir)
@@ -641,6 +685,41 @@ def _scatter(
     return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points)}
 
 
+def _overview_scatter(rows: list[dict], texts: list[str], embedder: Embedder) -> dict:
+    usable = [(row, text) for row, text in zip(rows, texts) if str(text or "").strip()]
+    if not usable:
+        return {"points": [], "shown": 0, "total": 0}
+    rows = [row for row, _ in usable]
+    texts = [text for _, text in usable]
+    matrix = embedder.encode(texts, batch_size=64).astype(np.float32)
+    labels, coords = project(matrix, num_clusters=min(30, max(2, len(matrix) // 3)))
+    keyword_indexes = [i for i, row in enumerate(rows) if row.get("entity_type") == "keyword"]
+    keyword_matrix = matrix[keyword_indexes] if keyword_indexes else np.zeros((0, matrix.shape[1]), dtype=np.float32)
+    keyword_labels = [str(rows[i].get("text") or "") for i in keyword_indexes]
+    points = []
+    for i, row in enumerate(rows):
+        nearest_keyword = ""
+        similarity = 0.0
+        if row.get("entity_type") == "keyword":
+            nearest_keyword = str(row.get("text") or "")
+            similarity = 1.0
+        elif len(keyword_matrix):
+            similarities = keyword_matrix @ matrix[i]
+            best = int(np.argmax(similarities))
+            similarity = float(np.clip(similarities[best], -1.0, 1.0))
+            nearest_keyword = keyword_labels[best]
+        points.append({
+            **row,
+            "x": round(float(coords[i, 0]), 5),
+            "y": round(float(coords[i, 1]), 5),
+            "cluster": int(labels[i]),
+            "nearest_keyword": nearest_keyword,
+            "keyword_similarity": round(similarity, 4),
+            "keyword_distance": round(1.0 - similarity, 4),
+        })
+    return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points)}
+
+
 def _summary(page_results: list[dict], selected_pages: list[PageInfo], keyword_rows: list[dict], plan: dict) -> dict:
     analyses = [a for p in page_results for a in p.get("analyses", [])]
     summaries = [a.get("summary") or {} for a in analyses if a.get("status") == "ok"]
@@ -781,6 +860,71 @@ def _html(payload: dict) -> str:
   .tip-head { background: var(--audit-accent-soft); border-color: var(--audit-line); }
   .tip-title { color: var(--audit-text); }
   .tip-text { border-left-color: var(--audit-accent); background: #fffdfa; color: var(--audit-text); }
+  .keyword-grid { display: block; }
+  .keyword-grid > .panel { width: 100%; }
+  .tables {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .scatter-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .scatter-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--audit-line);
+    border-radius: 999px;
+    background: #fffdfa;
+    color: var(--audit-muted);
+    cursor: pointer;
+    font-size: 0.76rem;
+    padding: 5px 9px;
+    user-select: none;
+  }
+  .scatter-filter input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: var(--audit-accent);
+  }
+  .topic-chart {
+    display: grid;
+    gap: 9px;
+    margin-bottom: 12px;
+  }
+  .topic-chart-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.9fr) minmax(220px, 1.5fr) 64px;
+    gap: 10px;
+    align-items: center;
+  }
+  .topic-chart-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+  }
+  .topic-chart-track {
+    height: 11px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #f2e7d9;
+  }
+  .topic-chart-bar {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+  }
+  .topic-chart-bar.coverage-missing { background: var(--audit-red); }
+  .topic-chart-bar.coverage-partial { background: var(--audit-accent); }
+  .topic-chart-bar.coverage-covered { background: var(--audit-green); }
   a { color: var(--audit-accent-dark); }
   button { transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease; }
   button:hover { transform: translateY(-1px); }
@@ -867,6 +1011,7 @@ def _html(payload: dict) -> str:
     .report-sidebar { position: static; width: auto; margin: 14px; }
     .wrap { margin-left: 0; padding: 14px; }
     #status { min-width: 0; text-align: left; white-space: normal; }
+    .tables, .topic-chart-row { grid-template-columns: 1fr; }
   }
 </style>
 <body>
@@ -880,11 +1025,13 @@ def _html(payload: dict) -> str:
 <div class="wrap">
   <div class="topbar"><div class="title"><h1>SERP Semantic Gap</h1><p>Semantic comparison of selected audited pages against live SERP competitors. Each page section contains keyword-level scatterplots, topic clusters, competitor relationships, and editorial gaps.</p></div><div class="url" id="status"></div></div>
   <div class="summary" id="summary"></div>
+  <div id="overview"></div>
   <div id="app"></div>
 </div>
 <script>
 const data = __DATA__;
 const app = document.getElementById('app');
+const overviewEl = document.getElementById('overview');
 const summaryEl = document.getElementById('summary');
 const statusEl = document.getElementById('status');
 const navEl = document.getElementById('report-nav');
@@ -899,27 +1046,34 @@ function sourceColor(p){if(p.entity_type==='keyword')return colors.keyword;if(p.
 function metrics(){const s=data.summary||{};return [['Pages',s.pages_analyzed||0],['Keywords',s.keywords_selected||0],['SERP calls',s.serp_api_calls_after_cache ?? s.serp_api_calls ?? 0],['Missing topics',s.missing_topics||0],['Partial topics',s.partial_topics||0],['Review paragraphs',s.off_intent_paragraphs||0]];}
 statusEl.textContent = `${data.domain || ''} · ${data.provider || ''} · ${data.status || ''}`;
 summaryEl.innerHTML = metrics().map(([label,value])=>`<div class="metric"><b>${n(value)}</b><span>${esc(label)}</span></div>`).join('');
-function pointLabel(d){if(d.type==='keyword')return 'Keyword';if(d.type==='title')return 'Page title';if(d.type==='h1')return 'H1 heading';if(d.type==='header')return 'Header';if(d.source==='ours')return 'Our paragraph';if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
-function pointDetail(p){const type=p.entity_type||'point';return{type,source:p.source||'',cluster:p.cluster??'',domain:p.domain||'',rank:p.rank||'',url:p.url||'',text:String(p.text||'').slice(0,520),keyword_similarity:p.keyword_similarity??'',keyword_distance:p.keyword_distance??''};}
+function pointLabel(d){if(d.type==='keyword')return 'Keyword';if(d.type==='url'&&d.source==='ours')return 'Our URL';if(d.type==='url'&&d.source==='competitor')return 'Competitor URL';if(d.type==='url')return 'URL';if(d.type==='title')return 'Page title';if(d.type==='h1')return 'H1 heading';if(d.type==='header')return 'Header';if(d.source==='ours')return 'Our paragraph';if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
+function pointDetail(p){const type=p.entity_type||'point';return{type,source:p.source||'',cluster:p.cluster??'',domain:p.domain||'',rank:p.rank||'',url:p.url||'',text:String(p.text||'').slice(0,520),nearest_keyword:p.nearest_keyword||'',keyword_similarity:p.keyword_similarity??'',keyword_distance:p.keyword_distance??''};}
 function pointTooltip(p){const d=pointDetail(p);return [pointLabel(d),d.text,d.keyword_distance!==''&&`Keyword distance: ${d.keyword_distance}`,d.keyword_similarity!==''&&`Keyword similarity: ${d.keyword_similarity}`,d.domain&&`Domain: ${d.domain}`,d.rank&&`SERP rank: ${d.rank}`,d.cluster!==''&&`Cluster: ${d.cluster}`].filter(Boolean).join('\\n');}
-function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source||d.type)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${esc(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
+function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source||d.type)}</span>`);if(d.nearest_keyword&&d.type!=='keyword')badges.push(`<span class="tip-badge">nearest ${esc(d.nearest_keyword)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${esc(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
 function clusterSummary(points){const groups=new Map();for(const p of points||[]){const id=p.cluster ?? 0;const g=groups.get(id)||{id,total:0,ours:0,competitor:0,keyword:0,headers:0,samples:[]};g.total++;if(p.entity_type==='keyword')g.keyword++;else if(p.source==='ours')g.ours++;else if(p.source==='competitor')g.competitor++;if(['h1','header','title'].includes(p.entity_type))g.headers++;if(g.samples.length<3 && p.text)g.samples.push(p.text);groups.set(id,g);}return [...groups.values()].sort((a,b)=>b.total-a.total).slice(0,8);}
-function pointSize(p){if(p.clicks)return Math.max(5,Math.min(14,4+Math.sqrt(Number(p.clicks)||0)));if(p.rank)return Math.max(4.5,12-Number(p.rank||10)*0.65);if(p.entity_type==='keyword')return 8;if(p.entity_type==='title'||p.entity_type==='h1')return 7;if(p.entity_type==='header')return 5.8;return 3.9;}
-function markerSvg(p, xRaw, yRaw, color, stroke, tip, detail){const x=Number(xRaw),y=Number(yRaw);const type=p.entity_type||'paragraph';const size=pointSize(p);const attrs=`class="scatter-point" tabindex="0" fill="${color}" stroke="${stroke}" stroke-width="1.2" opacity=".86" aria-label="${esc(tip)}" data-tooltip="${esc(tip)}" data-detail="${esc(detail)}"`;const title=`<title>${esc(tip)}</title>`;if(type==='keyword'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y} ${x},${y+size} ${x-size},${y}">${title}</polygon>`;}if(type==='title'||type==='h1'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y+size*.85} ${x-size},${y+size*.85}">${title}</polygon>`;}if(type==='header'){const s=size*1.7;return `<rect ${attrs} x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" rx="1.5">${title}</rect>`;}return `<circle ${attrs} cx="${x}" cy="${y}" r="${size}">${title}</circle>`;}
-function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const competitorDomains=[...new Set(points.filter(p=>p.source==='competitor'&&p.domain).map(p=>p.domain))].slice(0,8);const domainLegend=competitorDomains.map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');return `<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond</span><span>▲ title/H1</span><span>■ headers</span><span><i class="dot" style="background:${colors.ours}"></i>our content</span>${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
+function pointSize(p){if(p.clicks)return Math.max(5,Math.min(14,4+Math.sqrt(Number(p.clicks)||0)));if(p.rank)return Math.max(4.5,12-Number(p.rank||10)*0.65);if(p.entity_type==='keyword')return 8;if(p.entity_type==='url')return 8;if(p.entity_type==='title'||p.entity_type==='h1')return 7;if(p.entity_type==='header')return 5.8;return 3.9;}
+function markerSvg(p, xRaw, yRaw, color, stroke, tip, detail){const x=Number(xRaw),y=Number(yRaw);const type=p.entity_type||'paragraph';const size=pointSize(p);const attrs=`class="scatter-point" tabindex="0" fill="${color}" stroke="${stroke}" stroke-width="1.2" opacity=".86" aria-label="${esc(tip)}" data-tooltip="${esc(tip)}" data-detail="${esc(detail)}" data-entity="${esc(type)}"`;const title=`<title>${esc(tip)}</title>`;if(type==='keyword'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y} ${x},${y+size} ${x-size},${y}">${title}</polygon>`;}if(type==='title'||type==='h1'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y+size*.85} ${x-size},${y+size*.85}">${title}</polygon>`;}if(type==='header'){const s=size*1.7;return `<rect ${attrs} x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" rx="1.5">${title}</rect>`;}return `<circle ${attrs} cx="${x}" cy="${y}" r="${size}">${title}</circle>`;}
+function entityLabel(type){return ({keyword:'keywords',url:'URLs',title:'titles',h1:'H1s',header:'headers',paragraph:'paragraphs'}[type]||type);}
+function entityFilters(points){const order=['keyword','url','title','h1','header','paragraph'];const types=[...new Set((points||[]).map(p=>p.entity_type||'paragraph'))].sort((a,b)=>order.indexOf(a)-order.indexOf(b));return `<div class="scatter-filters" aria-label="Visible entity types">${types.map(type=>`<label class="scatter-filter"><input type="checkbox" data-entity-filter="${esc(type)}" checked> ${esc(entityLabel(type))}</label>`).join('')}</div>`;}
+function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const competitorDomains=[...new Set(points.filter(p=>p.source==='competitor'&&p.domain).map(p=>p.domain))].slice(0,8);const domainLegend=competitorDomains.map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');return `${entityFilters(points)}<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond</span><span>▲ title/H1</span><span>■ headers</span><span><i class="dot" style="background:${colors.ours}"></i>our content</span>${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
+function topicChart(topics){if(!topics||!topics.length)return '<div class="empty">No topic relation chart available.</div>';const maxSeen=Math.max(1,...topics.map(t=>Number(t.competitor_coverage||0)));return `<div class="topic-chart">${topics.slice(0,12).map(t=>{const seen=Number(t.competitor_coverage||0);const sim=Number(t.our_best_similarity||0);const width=Math.max(5,Math.min(100,Math.round((seen/maxSeen)*100)));return `<div class="topic-chart-row"><div class="topic-chart-label" title="${esc(t.label||'')}">${esc(t.label||'Untitled topic')}</div><div class="topic-chart-track" title="Seen on ${seen} competitor pages; own similarity ${sim.toFixed(2)}"><span class="topic-chart-bar coverage-${esc(t.coverage||'partial')}" style="width:${width}%"></span></div><div class="mini">${esc(t.coverage||'')}</div></div>`;}).join('')}</div>`;}
 function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td colspan="6" class="muted">No topics classified.</td></tr>';return topics.slice(0,limit).map(t=>{const ex=(t.examples||[])[0]||{};return `<tr><td class="coverage-${esc(t.coverage)}">${esc(t.coverage)}</td><td>${esc(t.priority)}</td><td><div class="topic-label">${esc(t.label)}</div><div class="mini">${esc(ex.paragraph||'')}</div></td><td>${esc(t.competitor_coverage)}/${esc(t.competitor_urls?.length||'')}</td><td>${esc(t.our_best_similarity)}</td><td>${esc(ex.url||'')}</td></tr>`}).join('');}
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">Own ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li><a href="${esc(c.url)}">${esc(c.title||c.url)}</a><div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return '<div class="empty">No own paragraphs were far from the SERP topic space.</div>';return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>Own sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>Own Paragraphs To Review</h4><div class="panel-body">${reviewList(a.off_intent_paragraphs)}</div></div></div></div>`;}
+function overviewSection(){const points=data.overview_scatter?.points||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and URL Semantic Map</h2><div class="mini">All selected keywords and every own or competitor URL processed in this report, projected in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>All Keywords and URLs</h4><div class="panel-body">${scatterSvg(points)}</div></div></div></section>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>Own sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>Own Paragraphs To Review</h4><div class="panel-body">${reviewList(a.off_intent_paragraphs)}</div></div></div></div>`;}
 function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${esc(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
-function buildNav(){if(!navEl)return;navEl.innerHTML=(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
+function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and URL map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
 function bindScatterInteractions(){document.querySelectorAll('.scatter-wrap').forEach(wrap=>{const svg=wrap.querySelector('svg.scatter');const tooltip=wrap.querySelector('.scatter-tooltip');if(!svg||!tooltip)return;const base=(svg.getAttribute('data-base-viewbox')||'0 0 820 390').split(/\\s+/).map(Number);let vb={x:base[0],y:base[1],w:base[2],h:base[3]};const setVb=()=>svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);function zoomAt(factor,cx=base[2]/2,cy=base[3]/2){const nx=cx-(cx-vb.x)*factor;const ny=cy-(cy-vb.y)*factor;vb={x:nx,y:ny,w:vb.w*factor,h:vb.h*factor};setVb();}function pointFromEvent(event){const rect=svg.getBoundingClientRect();return{x:vb.x+(event.clientX-rect.left)/Math.max(rect.width,1)*vb.w,y:vb.y+(event.clientY-rect.top)/Math.max(rect.height,1)*vb.h};}function show(point){let detail=null;try{detail=JSON.parse(point.getAttribute('data-detail')||'{}');}catch(_){detail={type:'point',explanation:point.getAttribute('data-tooltip')||point.getAttribute('aria-label')||''};}tooltip.innerHTML=pointDetailHtml(detail);tooltip.classList.add('open');tooltip.querySelector('.tip-close')?.addEventListener('click',event=>{event.stopPropagation();tooltip.classList.remove('open');});}wrap.querySelectorAll('.scatter-point').forEach(point=>{point.addEventListener('click',event=>{event.stopPropagation();show(point);});point.addEventListener('focus',()=>show(point));});svg.addEventListener('wheel',event=>{event.preventDefault();const p=pointFromEvent(event);zoomAt(event.deltaY<0?0.82:1.22,p.x,p.y);},{passive:false});let drag=null;svg.addEventListener('mousedown',event=>{if(event.target.classList?.contains('scatter-point'))return;drag={x:event.clientX,y:event.clientY,vx:vb.x,vy:vb.y};svg.classList.add('is-panning');});window.addEventListener('mousemove',event=>{if(!drag)return;const rect=svg.getBoundingClientRect();vb.x=drag.vx-(event.clientX-drag.x)/Math.max(rect.width,1)*vb.w;vb.y=drag.vy-(event.clientY-drag.y)/Math.max(rect.height,1)*vb.h;setVb();});window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('is-panning');});svg.addEventListener('dblclick',()=>{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();});wrap.querySelectorAll('[data-zoom]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const action=button.getAttribute('data-zoom');if(action==='in')zoomAt(0.78);else if(action==='out')zoomAt(1.28);else{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();}}));});document.addEventListener('click',event=>{const target=event.target;if(target?.closest?.('.scatter-tooltip')||target?.closest?.('.scatter-point'))return;document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});}
+function bindScatterFilters(){document.querySelectorAll('.panel-body').forEach(panel=>{const filters=[...panel.querySelectorAll('[data-entity-filter]')];const points=[...panel.querySelectorAll('.scatter-point')];const tooltip=panel.querySelector('.scatter-tooltip');if(!filters.length||!points.length)return;function apply(){const visible=new Set(filters.filter(input=>input.checked).map(input=>input.dataset.entityFilter));points.forEach(point=>{const show=visible.has(point.dataset.entity||'paragraph');point.style.display=show?'':'none';if(!show&&document.activeElement===point)point.blur();});tooltip?.classList.remove('open');}filters.forEach(input=>input.addEventListener('change',apply));apply();});}
+overviewEl.innerHTML = overviewSection();
 app.innerHTML = (data.pages||[]).map(pageSection).join('') || '<div class="empty">No analyzed pages in this report.</div>';
 buildNav();
 bindScatterInteractions();
+bindScatterFilters();
 </script>
 </body>
 </html>
