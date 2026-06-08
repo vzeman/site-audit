@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import numpy as np
+
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
@@ -8,12 +10,23 @@ from site_audit.serp_gap import (
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
     _keyword_metrics_lookup,
+    _overview_scatter,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
     run,
 )
 from site_audit.competitive_analysis import CompetitiveTarget
+
+
+class _StaticEmbedder:
+    def encode(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
+        vectors = {
+            "live chat software": [1.0, 0.0, 0.0],
+            "helpdesk software": [0.0, 1.0, 0.0],
+            "Live chat paragraph": [0.8, 0.2, 0.0],
+        }
+        return np.array([vectors.get(text, [0.0, 0.0, 1.0]) for text in texts], dtype=np.float32)
 
 
 def _write_base_report(root: Path) -> None:
@@ -222,6 +235,24 @@ def test_serp_gap_dedupes_duplicate_semantic_chart_items() -> None:
     assert [row["entity_type"] for row in deduped_rows] == ["h1", "title", "h1"]
 
 
+def test_overview_scatter_adds_demand_weighted_keyword_centroid() -> None:
+    rows = [
+        {"entity_type": "keyword", "source": "keyword", "text": "live chat software", "impressions": 100, "clicks": 5, "traffic": 2.5, "volume": 1000},
+        {"entity_type": "keyword", "source": "keyword", "text": "helpdesk software", "impressions": 300, "clicks": 8, "traffic": 4.0, "volume": 2000},
+        {"entity_type": "paragraph", "source": "ours", "text": "Live chat paragraph", "url": "https://example.com/live-chat"},
+    ]
+
+    scatter = _overview_scatter(rows, [row["text"] for row in rows], _StaticEmbedder())
+    centroid = next(point for point in scatter["points"] if point["entity_type"] == "keyword_centroid")
+
+    assert centroid["text"] == "Demand-weighted keyword centroid (2 keywords)"
+    assert centroid["keyword_count"] == 2
+    assert centroid["impressions"] == 400
+    assert centroid["clicks"] == 13
+    assert centroid["traffic"] == 6.5
+    assert centroid["volume"] == 3000
+
+
 def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:
     payload = {
         "meta": {"provider": "ahrefs"},
@@ -369,6 +400,13 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "serp-ranking-chart" in html
     assert "serpRankingList" in html
     assert "All Keywords, URLs, and Content" in html
+    assert "Aggregate Semantic Clusters" in html
+    assert "These clusters summarize the shared vector space above across all selected keywords" in html
+    assert "Topic Traffic Impact" in html
+    assert "clusterImpactChart" in html
+    assert "demand-weighted centroid of all selected keywords" in html
+    assert "keyword_centroid" in html
+    assert "keyword centroid" in html
     assert "h2:'H2s'" in html
     assert "h6:'H6s'" in html
     assert "H1-H6" in html
