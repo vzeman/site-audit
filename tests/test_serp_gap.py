@@ -305,7 +305,8 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "data-graph-edge" in html
     assert "has-active" in html
     assert "#c9c1b6" in html
-    assert "Traffic proxy" in html
+    assert "SERP-position proxy" in html
+    assert "Demand metrics unavailable" in html
     assert "impr" in html
     assert "serpRankingChart" in html
     assert "serp-ranking-chart" in html
