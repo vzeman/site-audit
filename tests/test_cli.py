@@ -158,6 +158,9 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
             "dataforseo",
             "--budget-usd",
             "5",
+            "--include-serp-keyword-suggestions",
+            "--max-serp-keyword-suggestions",
+            "4",
             "--dry-run",
         ]
     )
@@ -170,6 +173,8 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
     assert args.results_per_keyword == 10
     assert args.provider == "dataforseo"
     assert args.budget_usd == 5
+    assert args.include_serp_keyword_suggestions is True
+    assert args.max_serp_keyword_suggestions == 4
     assert args.dry_run is True
 
 

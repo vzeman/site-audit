@@ -4,6 +4,7 @@ from pathlib import Path
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
+    _extract_serp_keyword_suggestions,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
@@ -141,6 +142,66 @@ def test_serp_gap_serp_targets_skip_ignored_hosts_and_take_next_results() -> Non
     ]
 
 
+def test_serp_gap_extracts_serper_keyword_suggestions() -> None:
+    payload = {
+        "meta": {"provider": "serper"},
+        "raw": {
+            "peopleAlsoAsk": [
+                {"question": "What is live chat software?"},
+                {"title": "What is livechat software?"},
+            ],
+            "relatedSearches": [
+                {"query": "best live chat software"},
+                {"query": "What is live chat software?"},
+            ],
+        },
+    }
+
+    assert _extract_serp_keyword_suggestions(payload) == [
+        ("serp_people_also_ask", "What is live chat software?"),
+        ("serp_people_also_ask", "What is livechat software?"),
+        ("serp_people_also_search", "best live chat software"),
+    ]
+
+
+def test_serp_gap_extracts_dataforseo_keyword_suggestions() -> None:
+    payload = {
+        "meta": {"provider": "dataforseo"},
+        "raw": {
+            "tasks": [
+                {
+                    "result": [
+                        {
+                            "items": [
+                                {
+                                    "type": "people_also_ask",
+                                    "items": [
+                                        {"title": "How does live chat work?"},
+                                        {"title": "  How does live chat work?  "},
+                                    ],
+                                },
+                                {
+                                    "type": "people_also_search",
+                                    "items": [
+                                        {"title": "live chat for website"},
+                                        "free live chat software",
+                                    ],
+                                },
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+    }
+
+    assert _extract_serp_keyword_suggestions(payload) == [
+        ("serp_people_also_ask", "How does live chat work?"),
+        ("serp_people_also_search", "live chat for website"),
+        ("serp_people_also_search", "free live chat software"),
+    ]
+
+
 def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     rankings = {}
     _add_serp_url_rankings(
@@ -180,6 +241,9 @@ def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     assert rows[0]["url"] == "https://competitor-one.com/live-chat"
     assert rows[0]["top10_count"] == 2
     assert rows[0]["best_rank"] == 1
+    assert rows[0]["impressions"] == 0
+    assert rows[0]["clicks"] == 0
+    assert rows[0]["traffic"] == 0
     assert [row["url"] for row in rows] == [
         "https://competitor-one.com/live-chat",
         "https://competitor-two.com/chat",
@@ -223,12 +287,26 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Semantic Clusters" in html
     assert "Topic Relations" in html
     assert "Keyword and Content Semantic Map" in html
+    assert "Use this section to see which URLs repeatedly win across the selected keywords" in html
+    assert "Color identifies the domain, shape identifies the entity type" in html
+    assert "competitors cover more deeply" in html
+    assert "far from the target keyword and/or weakly connected to the SERP topic space" in html
+    assert "URLs downloaded" in html
+    assert "review_paragraphs" in html
     assert "Top-10 URLs Across Selected Keywords" in html
     assert "serp_url_rankings" in html
     assert "serpUrlGraph" in html
     assert "sharedKeywordNames" in html
     assert "serp-url-graph" in html
-    assert "URL co-ranking graph" in html
+    assert "Hierarchical edge bundling chart" in html
+    assert "bindSerpUrlGraphInteractions" in html
+    assert "graphTooltipHtml" in html
+    assert "data-graph-detail" in html
+    assert "data-graph-edge" in html
+    assert "has-active" in html
+    assert "#c9c1b6" in html
+    assert "Traffic proxy" in html
+    assert "impr" in html
     assert "serpRankingChart" in html
     assert "serp-ranking-chart" in html
     assert "serpRankingList" in html

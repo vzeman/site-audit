@@ -261,6 +261,8 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
         min_impressions=args.min_impressions,
         min_traffic=args.min_traffic,
         use_h1_keyword=args.use_h1_keyword,
+        include_serp_keyword_suggestions=args.include_serp_keyword_suggestions,
+        max_serp_keyword_suggestions=args.max_serp_keyword_suggestions,
         refresh_serp=args.refresh_serp,
         refresh_competitors=args.refresh_competitors,
         budget_usd=args.budget_usd,
@@ -282,7 +284,8 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
     print(f"  pages selected:      {summary.get('pages_selected', 0)}")
     print(f"  pages analyzed:      {summary.get('pages_analyzed', 0)}")
     print(f"  keywords selected:   {summary.get('keywords_selected', 0)}")
-    print(f"  SERP API calls:      {summary.get('serp_api_calls_after_cache', summary.get('serp_api_calls', 0))}")
+    print(f"  SERP API calls:      {summary.get('serp_api_calls', 0)} total / {summary.get('serp_api_calls_after_cache', 0)} uncached")
+    print(f"  URLs downloaded:     {summary.get('urls_downloaded', 0)}")
     print(f"  competitor URLs est: {summary.get('competitor_urls_estimated', 0)}")
     print(f"  missing topics:      {summary.get('missing_topics', 0)}")
     print(f"  report JSON:         {out_dir / 'serp_gap.json'}")
@@ -592,6 +595,10 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--min-traffic", type=float, default=0.0)
     serp_p.add_argument("--use-h1-keyword", action="store_true",
                         help="Also use the page title/H1 as a synthetic keyword candidate")
+    serp_p.add_argument("--include-serp-keyword-suggestions", action="store_true",
+                        help="Also analyze People Also Ask and People Also Search keyword suggestions from SERP payloads")
+    serp_p.add_argument("--max-serp-keyword-suggestions", type=int, default=8,
+                        help="Max SERP keyword suggestions to add per page when --include-serp-keyword-suggestions is enabled")
     serp_p.add_argument("--refresh-serp", action="store_true")
     serp_p.add_argument("--refresh-competitors", action="store_true")
     serp_p.add_argument("--budget-usd", type=float, default=None)
