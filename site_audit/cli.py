@@ -263,6 +263,13 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
         use_h1_keyword=args.use_h1_keyword,
         include_serp_keyword_suggestions=args.include_serp_keyword_suggestions,
         max_serp_keyword_suggestions=args.max_serp_keyword_suggestions,
+        use_ahrefs_metrics=args.use_ahrefs_metrics,
+        ahrefs_refresh=args.ahrefs_refresh,
+        ahrefs_date=args.ahrefs_date,
+        ahrefs_country=args.ahrefs_country,
+        ahrefs_mode=args.ahrefs_mode,
+        ahrefs_top_pages_limit=args.ahrefs_top_pages_limit,
+        ahrefs_keywords_limit=args.ahrefs_keywords_limit,
         refresh_serp=args.refresh_serp,
         refresh_competitors=args.refresh_competitors,
         budget_usd=args.budget_usd,
@@ -599,6 +606,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Also analyze People Also Ask and People Also Search keyword suggestions from SERP payloads")
     serp_p.add_argument("--max-serp-keyword-suggestions", type=int, default=8,
                         help="Max SERP keyword suggestions to add per page when --include-serp-keyword-suggestions is enabled")
+    serp_p.add_argument("--use-ahrefs-metrics", action="store_true",
+                        help="Fetch/reuse Ahrefs metrics and attach matching keyword traffic/volume to the SERP gap report")
+    serp_p.add_argument("--ahrefs-refresh", action="store_true",
+                        help="Ignore cached Ahrefs snapshots when --use-ahrefs-metrics is enabled")
+    serp_p.add_argument("--ahrefs-date", default=None,
+                        help="Ahrefs report date in YYYY-MM-DD. Default: reuse latest cache, otherwise today")
+    serp_p.add_argument("--ahrefs-country", default=None,
+                        help="Optional Ahrefs country code, e.g. US, GB, SK")
+    serp_p.add_argument("--ahrefs-mode", default="subdomains",
+                        choices=["exact", "prefix", "domain", "subdomains"],
+                        help="Ahrefs target mode (default: subdomains)")
+    serp_p.add_argument("--ahrefs-top-pages-limit", type=int, default=1000,
+                        help="Rows to request from Ahrefs top-pages (default: 1000)")
+    serp_p.add_argument("--ahrefs-keywords-limit", type=int, default=1000,
+                        help="Rows to request from Ahrefs organic-keywords (default: 1000)")
     serp_p.add_argument("--refresh-serp", action="store_true")
     serp_p.add_argument("--refresh-competitors", action="store_true")
     serp_p.add_argument("--budget-usd", type=float, default=None)

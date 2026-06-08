@@ -32,6 +32,7 @@ from .competitive_analysis import (
 )
 from .competitive_analysis import _fetch_dataforseo_serp as fetch_dataforseo_serp
 from .competitive_analysis import CompetitiveAutoConfig
+from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis, fetch_snapshot as fetch_ahrefs_snapshot
 from .embedder import DEFAULT_MODEL, Embedder
 from .extractor import ExtractedPage, extract
 from .scatter import project
@@ -81,6 +82,13 @@ class SerpGapConfig:
     use_h1_keyword: bool = False
     include_serp_keyword_suggestions: bool = False
     max_serp_keyword_suggestions: int = 8
+    use_ahrefs_metrics: bool = False
+    ahrefs_refresh: bool = False
+    ahrefs_date: str | None = None
+    ahrefs_country: str | None = None
+    ahrefs_mode: str = "subdomains"
+    ahrefs_top_pages_limit: int = 1000
+    ahrefs_keywords_limit: int = 1000
     refresh_serp: bool = False
     refresh_competitors: bool = False
     budget_usd: float | None = None
@@ -107,6 +115,11 @@ def run(config: SerpGapConfig) -> dict:
 
     selected_pages, skipped_pages = _select_pages(pages, config)
     search_payload = _load_search_payload(base_report_dir)
+    ahrefs_payload = {}
+    if (config.use_ahrefs_metrics or config.keyword_source == "ahrefs") and not config.dry_run:
+        ahrefs_payload = _load_or_fetch_ahrefs_payload(config.domain, project_dir, pages, config)
+        search_payload = _merge_search_payloads(search_payload, ahrefs_payload)
+    keyword_metrics = _keyword_metrics_lookup(search_payload, ahrefs_payload)
     manual_keywords = _load_manual_keywords(config)
     keyword_rows, skipped_keywords = _select_keywords(
         selected_pages,
@@ -114,6 +127,7 @@ def run(config: SerpGapConfig) -> dict:
         manual_keywords,
         config,
     )
+    _enrich_keyword_rows(keyword_rows, keyword_metrics)
     plan = _plan(keyword_rows, cache_dir, config)
     if plan.get("budget_status") == "over_budget":
         payload = {
@@ -242,6 +256,7 @@ def run(config: SerpGapConfig) -> dict:
                     suggestion_key = suggestion["keyword"].strip().lower()
                     if not suggestion_key or suggestion_key in page_keyword_keys:
                         continue
+                    _apply_keyword_metrics(suggestion, keyword_metrics)
                     page_keyword_keys.add(suggestion_key)
                     page_keywords.append(suggestion)
                     keyword_rows.append(suggestion)
@@ -358,6 +373,10 @@ def run(config: SerpGapConfig) -> dict:
         "selected_keywords": keyword_rows,
         "skipped_pages": skipped_pages,
         "skipped_keywords": skipped_keywords,
+        "ahrefs": {
+            "meta": ahrefs_payload.get("meta", {}) if ahrefs_payload else {},
+            "summary": ahrefs_payload.get("summary", {}) if ahrefs_payload else {},
+        },
         "serp_url_rankings": _serp_url_ranking_rows(serp_url_rankings),
         "overview_scatter": _overview_scatter(overview_rows, overview_texts, embedder),
         "pages": page_results,
@@ -442,10 +461,116 @@ def _load_search_payload(report_dir: Path) -> dict:
         path = report_dir / name
         if path.is_file():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if payload.get("organic_keywords") or payload.get("top_pages"):
+                    return payload
             except json.JSONDecodeError:
                 continue
     return {}
+
+
+def _load_or_fetch_ahrefs_payload(domain: str, project_dir: Path, pages: list[PageInfo], config: SerpGapConfig) -> dict:
+    snapshot = fetch_ahrefs_snapshot(
+        domain,
+        project_dir / "cache",
+        AhrefsConfig(
+            enabled=True,
+            date=config.ahrefs_date,
+            country=str(config.ahrefs_country or "").lower() or None,
+            mode=config.ahrefs_mode,
+            top_pages_limit=config.ahrefs_top_pages_limit,
+            keywords_limit=config.ahrefs_keywords_limit,
+            refresh=config.ahrefs_refresh,
+            semantic_sample_cap=0,
+        ),
+    )
+    analysis = build_ahrefs_analysis(
+        snapshot,
+        pages,
+        np.zeros((len(pages), 0), dtype=np.float32),
+        semantic_sample_cap=0,
+    )
+    return analysis.payload
+
+
+def _merge_search_payloads(*payloads: dict) -> dict:
+    rows = []
+    provider_payloads = []
+    for payload in payloads:
+        if not payload:
+            continue
+        provider = str((payload.get("meta") or {}).get("provider") or (payload.get("summary") or {}).get("provider") or "search")
+        for row in payload.get("organic_keywords") or []:
+            rows.append({**row, "provider": row.get("provider") or provider})
+        provider_payloads.append({
+            "provider": provider,
+            "meta": payload.get("meta", {}),
+            "summary": payload.get("summary", {}),
+        })
+    if not rows:
+        return next((p for p in payloads if p), {})
+    return {
+        "meta": {"provider": "combined", "provider_label": "Combined Search Metrics"},
+        "organic_keywords": rows,
+        "provider_payloads": provider_payloads,
+    }
+
+
+def _metric_url_key(url: str) -> str:
+    if not url:
+        return ""
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    path = (parsed.path or "/").rstrip("/") or "/"
+    return f"{parsed.netloc.lower().removeprefix('www.')}{path}"
+
+
+def _keyword_metrics_lookup(*payloads: dict) -> dict[tuple[str, str], dict]:
+    out: dict[tuple[str, str], dict] = {}
+    for payload in payloads:
+        if not payload:
+            continue
+        provider = str((payload.get("meta") or {}).get("provider") or (payload.get("summary") or {}).get("provider") or "search")
+        for row in payload.get("organic_keywords") or []:
+            keyword = str(row.get("keyword") or row.get("query") or "").strip().lower()
+            url = str(row.get("matched_url") or row.get("url") or "").strip()
+            if not keyword or not url:
+                continue
+            metrics = {
+                "position": _safe_float(row.get("position")),
+                "impressions": _safe_int(row.get("impressions")),
+                "clicks": _safe_int(row.get("clicks")),
+                "traffic": _safe_float(row.get("traffic")),
+                "volume": _safe_int(row.get("volume")),
+                "metrics_source": row.get("provider") or provider,
+                "metrics_url": url,
+            }
+            for key in ((_metric_url_key(url), keyword), ("", keyword)):
+                current = out.get(key)
+                if current is None or (
+                    _safe_float(metrics.get("traffic")) > _safe_float(current.get("traffic"))
+                    or _safe_int(metrics.get("impressions")) > _safe_int(current.get("impressions"))
+                ):
+                    out[key] = metrics
+    return out
+
+
+def _apply_keyword_metrics(row: dict, lookup: dict[tuple[str, str], dict]) -> None:
+    key = (_metric_url_key(str(row.get("url") or "")), str(row.get("keyword") or "").strip().lower())
+    metrics = lookup.get(key)
+    if not metrics:
+        metrics = lookup.get(("", str(row.get("keyword") or "").strip().lower()))
+    if not metrics:
+        return
+    for field in ("position", "impressions", "clicks", "traffic", "volume"):
+        if not row.get(field):
+            row[field] = metrics.get(field, row.get(field))
+    row["metrics_source"] = metrics.get("metrics_source", "")
+    row["metrics_url"] = metrics.get("metrics_url", "")
+
+
+def _enrich_keyword_rows(rows: list[dict], lookup: dict[tuple[str, str], dict]) -> None:
+    for row in rows:
+        _apply_keyword_metrics(row, lookup)
 
 
 def _load_manual_keywords(config: SerpGapConfig) -> dict[str, list[str]]:
@@ -764,6 +889,7 @@ def _add_serp_url_rankings(
             "impressions": 0,
             "clicks": 0,
             "traffic": 0.0,
+            "volume": 0,
             "keywords": [],
         })
         item["top10_count"] += 1
@@ -772,6 +898,7 @@ def _add_serp_url_rankings(
         item["impressions"] += _safe_int(keyword_metrics.get("impressions", 0))
         item["clicks"] += _safe_int(keyword_metrics.get("clicks", 0))
         item["traffic"] += _safe_float(keyword_metrics.get("traffic", 0.0))
+        item["volume"] += _safe_int(keyword_metrics.get("volume", 0))
         item["keywords"].append({
             "keyword": keyword_text,
             "rank": rank,
@@ -799,6 +926,7 @@ def _serp_url_ranking_rows(rankings: dict[str, dict]) -> list[dict]:
             "impressions": int(item.get("impressions") or 0),
             "clicks": int(item.get("clicks") or 0),
             "traffic": round(float(item.get("traffic") or 0.0), 4),
+            "volume": int(item.get("volume") or 0),
             "keywords": keywords,
         })
     return sorted(rows, key=lambda row: (
@@ -947,7 +1075,7 @@ def _build_gap(
         competitor_pages=competitor_pages,
     )
     gap["keyword"] = keyword
-    gap["scatter"] = _scatter(keyword["keyword"], own_ext, own_embeddings, competitor_pages, embedder)
+    gap["scatter"] = _scatter(keyword, own_ext, own_embeddings, competitor_pages, embedder)
     gap["competitor_pages"] = [
         {
             "url": cp.target.competitor_url,
@@ -962,7 +1090,7 @@ def _build_gap(
 
 
 def _scatter(
-    keyword: str,
+    keyword: dict,
     own_ext: ExtractedPage,
     own_para_embeddings: np.ndarray,
     competitor_pages: list[CompetitorPage],
@@ -978,7 +1106,16 @@ def _scatter(
         meta.append({**row, "text": text})
         texts.append(text)
 
-    add_text({"entity_type": "keyword", "source": "keyword", "url": own_ext.url}, keyword)
+    add_text({
+        "entity_type": "keyword",
+        "source": "keyword",
+        "url": own_ext.url,
+        "impressions": _safe_int(keyword.get("impressions")),
+        "clicks": _safe_int(keyword.get("clicks")),
+        "traffic": _safe_float(keyword.get("traffic")),
+        "volume": _safe_int(keyword.get("volume")),
+        "position": _safe_float(keyword.get("position")),
+    }, keyword.get("keyword", ""))
     add_text({"entity_type": "title", "source": "ours", "url": own_ext.url}, own_ext.title)
     add_text({"entity_type": "h1", "source": "ours", "url": own_ext.url}, own_ext.h1)
     for header in own_ext.headers_rich[:40]:
@@ -1649,16 +1786,16 @@ function metrics(){const s=data.summary||{};return [['Pages',s.pages_analyzed||0
 statusEl.textContent = `${data.domain || ''} · ${data.provider || ''} · ${data.status || ''}`;
 summaryEl.innerHTML = metrics().map(([label,value])=>`<div class="metric"><b>${n(value)}</b><span>${esc(label)}</span></div>`).join('');
 function pointLabel(d){if(d.type==='keyword')return 'Keyword';if(d.type==='url'&&d.source==='ours')return `${ownDomain} URL`;if(d.type==='url'&&d.source==='competitor')return 'Competitor URL';if(d.type==='url')return 'URL';if(d.type==='title')return 'Page title';if(/^h[1-6]$/.test(d.type||''))return `${String(d.type).toUpperCase()} heading`;if(d.type==='header')return 'Header';if(d.source==='ours')return `${ownDomain} paragraph`;if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
-function pointDetail(p){const type=p.entity_type||'point';return{type,source:p.source||'',cluster:p.cluster??'',domain:p.domain||'',rank:p.rank||'',url:p.url||'',text:String(p.text||'').slice(0,520),nearest_keyword:p.nearest_keyword||'',keyword_similarity:p.keyword_similarity??'',keyword_distance:p.keyword_distance??''};}
-function pointTooltip(p){const d=pointDetail(p);return [pointLabel(d),d.text,d.keyword_distance!==''&&`Keyword distance: ${d.keyword_distance}`,d.keyword_similarity!==''&&`Keyword similarity: ${d.keyword_similarity}`,d.domain&&`Domain: ${d.domain}`,d.rank&&`SERP rank: ${d.rank}`,d.cluster!==''&&`Cluster: ${d.cluster}`].filter(Boolean).join('\\n');}
-function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source==='ours'?ownDomain:(d.source||d.type))}</span>`);if(d.nearest_keyword&&d.type!=='keyword')badges.push(`<span class="tip-badge">nearest ${esc(d.nearest_keyword)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${urlLink(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
+function pointDetail(p){const type=p.entity_type||'point';return{type,source:p.source||'',cluster:p.cluster??'',domain:p.domain||'',rank:p.rank||'',url:p.url||'',text:String(p.text||'').slice(0,520),nearest_keyword:p.nearest_keyword||'',keyword_similarity:p.keyword_similarity??'',keyword_distance:p.keyword_distance??'',impressions:p.impressions??'',clicks:p.clicks??'',traffic:p.traffic??'',volume:p.volume??'',position:p.position??''};}
+function pointTooltip(p){const d=pointDetail(p);return [pointLabel(d),d.text,d.impressions!==''&&Number(d.impressions)>0&&`Impressions: ${d.impressions}`,d.clicks!==''&&Number(d.clicks)>0&&`Clicks: ${d.clicks}`,d.traffic!==''&&Number(d.traffic)>0&&`Traffic: ${d.traffic}`,d.keyword_distance!==''&&`Keyword distance: ${d.keyword_distance}`,d.keyword_similarity!==''&&`Keyword similarity: ${d.keyword_similarity}`,d.domain&&`Domain: ${d.domain}`,d.rank&&`SERP rank: ${d.rank}`,d.cluster!==''&&`Cluster: ${d.cluster}`].filter(Boolean).join('\\n');}
+function pointDetailHtml(d){const sourceClass=d.type==='keyword'?'keyword':d.source==='ours'?'ours':d.source==='competitor'?'competitor':'';const badges=[];badges.push(`<span class="tip-badge ${sourceClass}">${esc(d.source==='ours'?ownDomain:(d.source||d.type))}</span>`);if(Number(d.impressions||0)>0)badges.push(`<span class="tip-badge">${n(d.impressions)} impressions</span>`);if(Number(d.clicks||0)>0)badges.push(`<span class="tip-badge">${n(d.clicks)} clicks</span>`);if(Number(d.traffic||0)>0)badges.push(`<span class="tip-badge">${n(d.traffic)} traffic</span>`);if(Number(d.volume||0)>0)badges.push(`<span class="tip-badge">vol ${n(d.volume)}</span>`);if(d.nearest_keyword&&d.type!=='keyword')badges.push(`<span class="tip-badge">nearest ${esc(d.nearest_keyword)}</span>`);if(d.keyword_distance!==''&&d.keyword_distance!==undefined)badges.push(`<span class="tip-badge">distance ${esc(d.keyword_distance)}</span>`);if(d.keyword_similarity!==''&&d.keyword_similarity!==undefined)badges.push(`<span class="tip-badge">similarity ${esc(d.keyword_similarity)}</span>`);if(d.domain)badges.push(`<span class="tip-badge">${esc(d.domain)}</span>`);if(d.rank)badges.push(`<span class="tip-badge">rank ${esc(d.rank)}</span>`);if(d.cluster!==''&&d.cluster!==undefined)badges.push(`<span class="tip-badge">cluster ${esc(d.cluster)}</span>`);return `<div class="tip-head"><div><div class="tip-title">${esc(pointLabel(d))}</div>${d.url?`<div class="tip-sub">${urlLink(d.url)}</div>`:''}</div><button class="tip-close" type="button" aria-label="Close tooltip">x</button></div><div class="tip-body"><div class="tip-badges">${badges.join('')}</div><div class="tip-text">${esc(d.text||'(no text captured)')}</div></div>`;}
 function clusterSummary(points){const groups=new Map();for(const p of points||[]){const id=p.cluster ?? 0;const g=groups.get(id)||{id,total:0,ours:0,competitor:0,keyword:0,headers:0,samples:[]};g.total++;if(p.entity_type==='keyword')g.keyword++;else if(p.source==='ours')g.ours++;else if(p.source==='competitor')g.competitor++;if(['title','header'].includes(p.entity_type)||/^h[1-6]$/.test(p.entity_type||''))g.headers++;if(g.samples.length<3 && p.text)g.samples.push(p.text);groups.set(id,g);}return [...groups.values()].sort((a,b)=>b.total-a.total).slice(0,8);}
-function pointSize(p){if(p.clicks)return Math.max(5,Math.min(14,4+Math.sqrt(Number(p.clicks)||0)));if(p.rank)return Math.max(4.5,12-Number(p.rank||10)*0.65);if(p.entity_type==='keyword')return 8;if(p.entity_type==='url')return 8;if(p.entity_type==='title'||/^h[1-6]$/.test(p.entity_type||''))return 7;if(p.entity_type==='header')return 5.8;return 3.9;}
+function pointSize(p){if(p.entity_type==='keyword'){const demand=Number(p.impressions||0)||Number(p.volume||0);if(demand>0)return Math.max(8,Math.min(22,7+Math.sqrt(demand)/2.8));return 8;}if(p.clicks)return Math.max(5,Math.min(14,4+Math.sqrt(Number(p.clicks)||0)));if(p.rank)return Math.max(4.5,12-Number(p.rank||10)*0.65);if(p.entity_type==='url')return 8;if(p.entity_type==='title'||/^h[1-6]$/.test(p.entity_type||''))return 7;if(p.entity_type==='header')return 5.8;return 3.9;}
 function markerSvg(p, xRaw, yRaw, color, stroke, tip, detail){const x=Number(xRaw),y=Number(yRaw);const type=p.entity_type||'paragraph';const domain=pointDomain(p);const size=pointSize(p);const attrs=`class="scatter-point" tabindex="0" fill="${color}" stroke="${stroke}" stroke-width="1.2" opacity=".86" aria-label="${esc(tip)}" data-tooltip="${esc(tip)}" data-detail="${esc(detail)}" data-entity="${esc(type)}" data-domain="${esc(domain)}"`;const title=`<title>${esc(tip)}</title>`;if(type==='keyword'){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y} ${x},${y+size} ${x-size},${y}">${title}</polygon>`;}if(type==='title'||/^h[1-6]$/.test(type)){return `<polygon ${attrs} points="${x},${y-size} ${x+size},${y+size*.85} ${x-size},${y+size*.85}">${title}</polygon>`;}if(type==='header'){const s=size*1.7;return `<rect ${attrs} x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" rx="1.5">${title}</rect>`;}return `<circle ${attrs} cx="${x}" cy="${y}" r="${size}">${title}</circle>`;}
 function entityLabel(type){return ({keyword:'keywords',url:'URLs',title:'titles',h1:'H1s',h2:'H2s',h3:'H3s',h4:'H4s',h5:'H5s',h6:'H6s',header:'unclassified headings',paragraph:'paragraphs'}[type]||type);}
 function entityFilters(points){const order=['keyword','url','title','h1','h2','h3','h4','h5','h6','header','paragraph'];const orderIndex=type=>{const index=order.indexOf(type);return index<0?999:index;};const types=[...new Set((points||[]).map(p=>p.entity_type||'paragraph'))].sort((a,b)=>orderIndex(a)-orderIndex(b));return `<div class="scatter-filters" aria-label="Visible entity types">${types.map(type=>`<label class="scatter-filter"><input type="checkbox" data-entity-filter="${esc(type)}" checked> ${esc(entityLabel(type))}</label>`).join('')}</div>`;}
 function domainFilters(points){const domains=[...new Set((points||[]).map(pointDomain).filter(Boolean))].sort();if(!domains.length)return '';return `<div class="scatter-filter-group"><div class="mini">Domains</div><div class="scatter-filters" aria-label="Visible domains">${domains.map(domain=>`<label class="scatter-filter"><input type="checkbox" data-domain-filter="${esc(domain)}" checked> <i class="dot" style="background:${domainColor(domain)}"></i>${esc(domain)}</label>`).join('')}</div></div>`;}
-function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const domains=[...new Set(points.map(pointDomain).filter(Boolean))];const domainLegend=domains.slice(0,8).map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');const unclassifiedLegend=points.some(p=>p.entity_type==='header')?'<span>■ unclassified headings</span>':'';return `${entityFilters(points)}${domainFilters(points)}<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond</span><span>▲ title/H1-H6</span>${unclassifiedLegend}${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
+function scatterSvg(points){if(!points||!points.length)return '<div class="empty">No scatter data available for this keyword.</div>';const w=820,h=390,pad=26;const xs=points.map(p=>+p.x),ys=points.map(p=>+p.y);let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);if(minX===maxX){minX-=1;maxX+=1}if(minY===maxY){minY-=1;maxY+=1}const sx=x=>pad+(x-minX)/(maxX-minX)*(w-pad*2);const sy=y=>h-pad-(y-minY)/(maxY-minY)*(h-pad*2);const marks=points.map(p=>{const x=sx(+p.x).toFixed(1),y=sy(+p.y).toFixed(1);const stroke=p.source==='ours'?'#0b3d1e':'#fff';const tip=pointTooltip(p);const detail=JSON.stringify(pointDetail(p));return markerSvg(p,x,y,sourceColor(p),stroke,tip,detail);}).join('');const domains=[...new Set(points.map(pointDomain).filter(Boolean))];const domainLegend=domains.slice(0,8).map(d=>`<span><i class="dot" style="background:${domainColor(d)}"></i>${esc(d)}</span>`).join('');const unclassifiedLegend=points.some(p=>p.entity_type==='header')?'<span>■ unclassified headings</span>':'';return `${entityFilters(points)}${domainFilters(points)}<div class="scatter-wrap"><div class="scatter-controls" aria-label="Scatterplot zoom controls"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="reset" title="Reset zoom">Reset</button></div><svg class="scatter" viewBox="0 0 ${w} ${h}" data-base-viewbox="0 0 ${w} ${h}" role="img" aria-label="Semantic scatterplot. Wheel to zoom, drag to pan, double-click to reset, click or focus dots for point explanations."><rect x="0" y="0" width="${w}" height="${h}" fill="#fbfcfe"/><line x1="${pad}" x2="${w-pad}" y1="${h-pad}" y2="${h-pad}" stroke="#d7dee8"/><line x1="${pad}" x2="${pad}" y1="${pad}" y2="${h-pad}" stroke="#d7dee8"/>${marks}</svg><div class="scatter-tooltip" role="dialog" aria-live="polite" aria-label="Scatter point details"></div></div><div class="legend"><span><i class="dot" style="background:${colors.keyword};transform:rotate(45deg)"></i>keyword diamond size = impressions or Ahrefs volume</span><span>▲ title/H1-H6</span>${unclassifiedLegend}${domainLegend}<span class="muted">Wheel to zoom, drag to pan, double-click to reset, click a dot for details.</span></div>`;}
 function topicChart(topics){if(!topics||!topics.length)return '<div class="empty">No topic relation chart available.</div>';const maxSeen=Math.max(1,...topics.map(t=>Number(t.competitor_coverage||0)));return `<div class="topic-chart">${topics.slice(0,12).map(t=>{const seen=Number(t.competitor_coverage||0);const sim=Number(t.our_best_similarity||0);const width=Math.max(5,Math.min(100,Math.round((seen/maxSeen)*100)));return `<div class="topic-chart-row"><div class="topic-chart-label" title="${esc(t.label||'')}">${esc(t.label||'Untitled topic')}</div><div class="topic-chart-track" title="Seen on ${seen} competitor pages; ${esc(ownDomain)} similarity ${sim.toFixed(2)}"><span class="topic-chart-bar coverage-${esc(t.coverage||'partial')}" style="width:${width}%"></span></div><div class="mini">${esc(t.coverage||'')}</div></div>`;}).join('')}</div>`;}
 function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td colspan="6" class="muted">No topics classified.</td></tr>';return topics.slice(0,limit).map(t=>{const ex=(t.examples||[])[0]||{};return `<tr><td class="coverage-${esc(t.coverage)}">${esc(t.coverage)}</td><td>${esc(t.priority)}</td><td><div class="topic-label">${esc(t.label)}</div><div class="mini">${esc(ex.paragraph||'')}</div></td><td>${esc(t.competitor_coverage)}/${esc(t.competitor_urls?.length||'')}</td><td>${esc(t.our_best_similarity)}</td><td>${urlLink(ex.url)}</td></tr>`}).join('');}
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">${esc(ownDomain)} ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}</div><div class="bar"><span style="width:${Math.min(100,Math.round((c.competitor/Math.max(c.total,1))*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}

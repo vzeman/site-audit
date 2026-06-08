@@ -161,6 +161,18 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
             "--include-serp-keyword-suggestions",
             "--max-serp-keyword-suggestions",
             "4",
+            "--use-ahrefs-metrics",
+            "--ahrefs-refresh",
+            "--ahrefs-date",
+            "2026-06-01",
+            "--ahrefs-country",
+            "US",
+            "--ahrefs-mode",
+            "domain",
+            "--ahrefs-top-pages-limit",
+            "25",
+            "--ahrefs-keywords-limit",
+            "50",
             "--dry-run",
         ]
     )
@@ -175,6 +187,13 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
     assert args.budget_usd == 5
     assert args.include_serp_keyword_suggestions is True
     assert args.max_serp_keyword_suggestions == 4
+    assert args.use_ahrefs_metrics is True
+    assert args.ahrefs_refresh is True
+    assert args.ahrefs_date == "2026-06-01"
+    assert args.ahrefs_country == "US"
+    assert args.ahrefs_mode == "domain"
+    assert args.ahrefs_top_pages_limit == 25
+    assert args.ahrefs_keywords_limit == 50
     assert args.dry_run is True
 
 

@@ -6,6 +6,8 @@ from site_audit.serp_gap import (
     _add_serp_url_rankings,
     _dedupe_semantic_row_texts,
     _extract_serp_keyword_suggestions,
+    _enrich_keyword_rows,
+    _keyword_metrics_lookup,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
@@ -220,6 +222,42 @@ def test_serp_gap_dedupes_duplicate_semantic_chart_items() -> None:
     assert [row["entity_type"] for row in deduped_rows] == ["h1", "title", "h1"]
 
 
+def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:
+    payload = {
+        "meta": {"provider": "ahrefs"},
+        "organic_keywords": [
+            {
+                "keyword": "live chat software",
+                "matched_url": "https://www.example.com/features/live-chat/",
+                "provider": "ahrefs",
+                "position": 4,
+                "traffic": 25,
+                "volume": 1200,
+            }
+        ],
+    }
+    rows = [
+        {
+            "url": "https://example.com/different-page",
+            "keyword": "live chat software",
+            "source": "manual",
+            "position": 0,
+            "impressions": 0,
+            "clicks": 0,
+            "traffic": 0,
+            "volume": 0,
+        }
+    ]
+
+    _enrich_keyword_rows(rows, _keyword_metrics_lookup(payload))
+
+    assert rows[0]["position"] == 4
+    assert rows[0]["traffic"] == 25
+    assert rows[0]["volume"] == 1200
+    assert rows[0]["metrics_source"] == "ahrefs"
+    assert rows[0]["metrics_url"] == "https://www.example.com/features/live-chat/"
+
+
 def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     rankings = {}
     _add_serp_url_rankings(
@@ -262,6 +300,7 @@ def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     assert rows[0]["impressions"] == 0
     assert rows[0]["clicks"] == 0
     assert rows[0]["traffic"] == 0
+    assert rows[0]["volume"] == 0
     assert [row["url"] for row in rows] == [
         "https://competitor-one.com/live-chat",
         "https://competitor-two.com/chat",
@@ -349,6 +388,7 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "domainColor" in html
     assert "function markerSvg" in html
     assert "function pointSize" in html
+    assert "keyword diamond size = impressions or Ahrefs volume" in html
     assert "data-entity-filter" in html
     assert "data-domain-filter" in html
     assert "domainFilters" in html
