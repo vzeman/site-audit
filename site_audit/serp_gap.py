@@ -824,6 +824,54 @@ def _heading_entity_type(level) -> str:
     return "header"
 
 
+def _semantic_dedupe_key(row: dict, text: str | None = None) -> tuple[str, str, str, str]:
+    normalized_text = re.sub(
+        r"\s+",
+        " ",
+        str(text if text is not None else row.get("_dedupe_text") or row.get("text") or ""),
+    ).strip().lower()
+    return (
+        str(row.get("url") or ""),
+        str(row.get("source") or ""),
+        str(row.get("entity_type") or ""),
+        normalized_text,
+    )
+
+
+def _dedupe_semantic_row_texts(rows: list[dict], texts: list[str]) -> tuple[list[dict], list[str], int]:
+    seen = set()
+    deduped_rows: list[dict] = []
+    deduped_texts: list[str] = []
+    removed = 0
+    for row, text in zip(rows, texts):
+        key = _semantic_dedupe_key(row, text)
+        if key in seen:
+            removed += 1
+            continue
+        seen.add(key)
+        deduped_rows.append({k: v for k, v in row.items() if k != "_dedupe_text"})
+        deduped_texts.append(text)
+    return deduped_rows, deduped_texts, removed
+
+
+def _dedupe_semantic_matrix(meta: list[dict], matrix: np.ndarray) -> tuple[list[dict], np.ndarray, int]:
+    seen = set()
+    indexes: list[int] = []
+    deduped_meta: list[dict] = []
+    removed = 0
+    for i, row in enumerate(meta[:len(matrix)]):
+        key = _semantic_dedupe_key(row)
+        if key in seen:
+            removed += 1
+            continue
+        seen.add(key)
+        indexes.append(i)
+        deduped_meta.append({k: v for k, v in row.items() if k != "_dedupe_text"})
+    if not indexes:
+        return [], matrix[:0], removed
+    return deduped_meta, matrix[indexes], removed
+
+
 def _is_ignored_serp_url(url: str) -> bool:
     parsed = urlparse(url if "://" in url else f"https://{url}")
     host = parsed.netloc.lower().removeprefix("www.")
@@ -972,7 +1020,13 @@ def _scatter(
     for i, para in enumerate(own_ext.paragraphs or []):
         if i >= len(own_para_embeddings):
             break
-        meta.append({"entity_type": "paragraph", "source": "ours", "text": para[:300], "url": own_ext.url})
+        meta.append({
+            "entity_type": "paragraph",
+            "source": "ours",
+            "text": para[:300],
+            "_dedupe_text": para,
+            "url": own_ext.url,
+        })
     if len(own_para_embeddings):
         embs.append(own_para_embeddings[:len(own_ext.paragraphs or [])])
     for cp in competitor_pages:
@@ -988,6 +1042,7 @@ def _scatter(
                 "url": cp.target.competitor_url,
                 "rank": cp.target.rank,
                 "text": para[:300],
+                "_dedupe_text": para,
             })
         if len(cp.paragraph_embeddings):
             embs.append(cp.paragraph_embeddings[:60])
@@ -996,6 +1051,9 @@ def _scatter(
     matrix = np.vstack([e for e in embs if len(e)]).astype(np.float32)
     if len(matrix) != len(meta):
         meta = meta[:len(matrix)]
+    meta, matrix, duplicates_removed = _dedupe_semantic_matrix(meta, matrix)
+    if not len(matrix):
+        return {"points": [], "shown": 0, "total": 0, "duplicates_removed": duplicates_removed}
     keyword_vec = matrix[0] if len(matrix) else None
     labels, coords = project(matrix, num_clusters=min(30, max(2, len(matrix) // 4)))
     points = []
@@ -1009,7 +1067,7 @@ def _scatter(
             "keyword_similarity": round(similarity, 4),
             "keyword_distance": round(1.0 - similarity, 4),
         })
-    return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points)}
+    return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points), "duplicates_removed": duplicates_removed}
 
 
 def _overview_scatter(rows: list[dict], texts: list[str], embedder: Embedder) -> dict:
@@ -1018,6 +1076,9 @@ def _overview_scatter(rows: list[dict], texts: list[str], embedder: Embedder) ->
         return {"points": [], "shown": 0, "total": 0}
     rows = [row for row, _ in usable]
     texts = [text for _, text in usable]
+    rows, texts, duplicates_removed = _dedupe_semantic_row_texts(rows, texts)
+    if not rows:
+        return {"points": [], "shown": 0, "total": 0, "duplicates_removed": duplicates_removed}
     matrix = embedder.encode(texts, batch_size=64).astype(np.float32)
     labels, coords = project(matrix, num_clusters=min(30, max(2, len(matrix) // 3)))
     keyword_indexes = [i for i, row in enumerate(rows) if row.get("entity_type") == "keyword"]
@@ -1044,7 +1105,7 @@ def _overview_scatter(rows: list[dict], texts: list[str], embedder: Embedder) ->
             "keyword_similarity": round(similarity, 4),
             "keyword_distance": round(1.0 - similarity, 4),
         })
-    return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points)}
+    return {"points": points[:1600], "shown": min(len(points), 1600), "total": len(points), "duplicates_removed": duplicates_removed}
 
 
 def _summary(page_results: list[dict], selected_pages: list[PageInfo], keyword_rows: list[dict], plan: dict) -> dict:

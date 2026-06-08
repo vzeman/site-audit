@@ -4,6 +4,7 @@ from pathlib import Path
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
+    _dedupe_semantic_row_texts,
     _extract_serp_keyword_suggestions,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
@@ -200,6 +201,23 @@ def test_serp_gap_extracts_dataforseo_keyword_suggestions() -> None:
         ("serp_people_also_search", "live chat for website"),
         ("serp_people_also_search", "free live chat software"),
     ]
+
+
+def test_serp_gap_dedupes_duplicate_semantic_chart_items() -> None:
+    rows = [
+        {"url": "https://example.com/a", "source": "ours", "entity_type": "h1", "text": "Live Chat"},
+        {"url": "https://example.com/a", "source": "ours", "entity_type": "h1", "text": " Live   Chat "},
+        {"url": "https://example.com/a", "source": "ours", "entity_type": "title", "text": "Live Chat"},
+        {"url": "https://example.com/b", "source": "competitor", "entity_type": "h1", "text": "Live Chat"},
+    ]
+    texts = [row["text"] for row in rows]
+
+    deduped_rows, deduped_texts, removed = _dedupe_semantic_row_texts(rows, texts)
+
+    assert removed == 1
+    assert len(deduped_rows) == 3
+    assert deduped_texts == ["Live Chat", "Live Chat", "Live Chat"]
+    assert [row["entity_type"] for row in deduped_rows] == ["h1", "title", "h1"]
 
 
 def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
