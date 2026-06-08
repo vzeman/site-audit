@@ -419,6 +419,7 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Keyword Metrics From APIs" in html
     assert "keywordMetricsTable" in html
     assert "API metrics source" in html
+    assert "No API metric match" in html
     assert "SERP URLs" in html
     assert "urlKeywordTable" in html
     assert "url-keyword-table" in html
