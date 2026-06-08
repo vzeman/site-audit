@@ -852,7 +852,8 @@ titles/H1s, headers, and paragraphs, zoom/pan controls, click dialogs, topic
 clusters, and missing/partial topic tables. The aggregate section also shows
 top ranking URLs across selected keywords, keyword/API metrics, per-URL
 keyword ranking tables, a demand-weighted keyword centroid, weighted keyword
-frequency clouds, topic impact by traffic, and semantic clusters.
+frequency clouds, topic impact by traffic, semantic clusters, and a structured
+content action plan for AI agents or editors.
 
 Use `--use-ahrefs-metrics` to enrich matching keywords with Ahrefs position,
 traffic, and volume. Use `--include-serp-keyword-suggestions` to add People

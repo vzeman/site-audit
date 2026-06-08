@@ -214,6 +214,7 @@ all processed URLs. It includes:
 - URL co-ranking graph
 - table of every ranking URL, with one keyword row per ranking keyword
 - keyword metrics table from available APIs
+- content action plan for AI agents
 - all-keyword semantic scatterplot
 - keyword frequency analysis and weighted word cloud
 - topic traffic impact chart
@@ -222,6 +223,7 @@ all processed URLs. It includes:
 Each analyzed page has its own section. Inside each page, every keyword has:
 
 - SERP competitor list
+- keyword-specific content actions
 - semantic scatterplot
 - semantic cluster summary
 - topic relation table
@@ -236,6 +238,42 @@ missing  - competitors cover the topic and your page has no close match
 ```
 
 Treat the output as editorial evidence from the current SERP, not as proof of ranking causality.
+
+## Content Action Plan For AI Agents
+
+The report produces structured content actions in `serp_gap.json` for agents
+or editors that need direct instructions for improving the selected landing
+page. Read:
+
+```text
+action_points
+pages[].action_points
+pages[].analyses[].action_points
+```
+
+Actions are sorted by estimated priority and impact. Each action includes:
+
+```text
+type              add_topic, strengthen_topic, or review_paragraph
+priority          critical, high, medium, or low
+target_url        landing page to edit
+keyword           keyword or SERP-discovered question/search
+instruction       concrete editorial instruction
+rationale         why this change matters
+suggested_terms   terms to include naturally
+impact_score      directional score from traffic/impressions/rank evidence
+evidence          competitor examples, coverage, similarity, and ranking URLs
+```
+
+`add_topic` means competitors repeatedly cover a topic that is missing from
+the landing page. `strengthen_topic` means the page has related content, but
+the closest paragraph is semantically weaker than the ranking pages.
+`review_paragraph` means an existing paragraph is far from the keyword topic
+space and should be rewritten, expanded with relevant terms, moved, or removed.
+
+Agents should treat `instruction` as the primary task, use `suggested_terms`
+as vocabulary guidance, and use `evidence` to ground the rewrite in the
+current SERP. They should not copy competitor text verbatim.
 
 ## Keyword And URL Tables
 

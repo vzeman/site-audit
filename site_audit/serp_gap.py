@@ -366,6 +366,7 @@ def run(config: SerpGapConfig) -> dict:
             "analyses": page_blocks,
         })
 
+    aggregate_action_points = _attach_action_points(page_results)
     payload = {
         "status": "ok",
         "domain": config.domain,
@@ -381,6 +382,7 @@ def run(config: SerpGapConfig) -> dict:
         },
         "serp_url_rankings": _serp_url_ranking_rows(serp_url_rankings),
         "overview_scatter": _overview_scatter(overview_rows, overview_texts, embedder),
+        "action_points": aggregate_action_points,
         "pages": page_results,
     }
     _write_outputs(payload, report_dir)
@@ -1091,6 +1093,187 @@ def _build_gap(
     return gap
 
 
+def _topic_terms(label: str, limit: int = 6) -> list[str]:
+    stop = {
+        "the", "and", "for", "with", "from", "that", "this", "your", "you",
+        "are", "how", "what", "why", "when", "where", "which", "best", "page",
+        "about", "also", "can", "could", "has", "have", "into", "left", "more",
+        "right", "should", "than", "then", "their", "they", "was", "were", "will",
+    }
+    terms = []
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", str(label or "").lower()):
+        if token in stop or token in terms:
+            continue
+        terms.append(token)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
+def _clean_topic_label(label: str) -> str:
+    parts = []
+    for part in re.split(r"[,/]", str(label or "")):
+        cleaned = " ".join(_topic_terms(part, limit=4))
+        if cleaned and cleaned not in parts:
+            parts.append(cleaned)
+    return ", ".join(parts) or str(label or "SERP topic")
+
+
+def _action_priority_score(action: dict) -> tuple[int, float, int]:
+    priority_weight = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    return (
+        priority_weight.get(str(action.get("priority") or "medium"), 9),
+        -_safe_float(action.get("impact_score")),
+        _safe_int(action.get("order")),
+    )
+
+
+def _keyword_demand(analysis: dict) -> dict:
+    keyword = analysis.get("keyword") or {}
+    impressions = _safe_int(keyword.get("impressions"))
+    clicks = _safe_int(keyword.get("clicks"))
+    traffic = _safe_float(keyword.get("traffic"))
+    volume = _safe_int(keyword.get("volume"))
+    demand = max(impressions, volume, int(traffic * 20), clicks * 50)
+    return {
+        "impressions": impressions,
+        "clicks": clicks,
+        "traffic": round(traffic, 4),
+        "volume": volume,
+        "score": float(np.log1p(demand)) if demand > 0 else 0.0,
+    }
+
+
+def _topic_action(action_type: str, page: dict, analysis: dict, topic: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "")
+    demand = _keyword_demand(analysis)
+    examples = topic.get("examples") or []
+    example = examples[0] if examples else {}
+    competitor_urls = topic.get("competitor_urls") or []
+    coverage = str(topic.get("coverage") or "")
+    priority = str(topic.get("priority") or ("high" if coverage == "missing" else "medium"))
+    label = _clean_topic_label(str(topic.get("label") or "SERP topic"))
+    terms = _topic_terms(label)
+    if action_type == "add_topic":
+        action = "Add a new content block"
+        instruction = (
+            f"Add a concise section to {page.get('url')} for the keyword '{keyword}' covering: {label}. "
+            f"Include concrete details, user intent, and natural related terms: {', '.join(terms) if terms else label}."
+        )
+        rationale = "Competitor pages repeatedly cover this topic, but the selected page has no close paragraph-level match."
+    else:
+        action = "Strengthen an existing content block"
+        instruction = (
+            f"Expand or rewrite the closest existing paragraph for '{keyword}' so it directly covers: {label}. "
+            "Keep the useful existing point, but add clearer intent coverage and examples from the SERP topic."
+        )
+        rationale = "The selected page is related to this topic, but competitor coverage is semantically stronger or more direct."
+    return {
+        "id": f"{action_type}_{order}",
+        "order": order,
+        "type": action_type,
+        "priority": priority if priority in {"critical", "high", "medium", "low"} else "medium",
+        "action": action,
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "instruction": instruction,
+        "rationale": rationale,
+        "topic": label,
+        "coverage": coverage,
+        "suggested_terms": terms,
+        "impact_score": round(
+            _safe_float(topic.get("competitor_prevalence")) * 100
+            + max(0, 11 - _safe_int(topic.get("best_competitor_rank") or 11))
+            + demand["score"] * 10,
+            3,
+        ),
+        "evidence": {
+            "keyword_impressions": demand["impressions"],
+            "keyword_clicks": demand["clicks"],
+            "keyword_traffic": demand["traffic"],
+            "keyword_volume": demand["volume"],
+            "competitor_coverage": _safe_int(topic.get("competitor_coverage")),
+            "competitor_prevalence": topic.get("competitor_prevalence"),
+            "best_competitor_rank": topic.get("best_competitor_rank"),
+            "our_best_similarity": topic.get("our_best_similarity"),
+            "example_url": example.get("url", ""),
+            "example_rank": example.get("rank", ""),
+            "example_paragraph": example.get("paragraph", ""),
+            "competitor_urls": competitor_urls[:5],
+        },
+    }
+
+
+def _paragraph_action(page: dict, analysis: dict, row: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "")
+    demand = _keyword_demand(analysis)
+    similarity = _safe_float(row.get("similarity_to_serp_topics"))
+    return {
+        "id": f"review_paragraph_{order}",
+        "order": order,
+        "type": "review_paragraph",
+        "priority": "medium" if similarity >= 0.45 else "high",
+        "action": "Review or rewrite paragraph",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "paragraph_index": row.get("paragraph_index"),
+        "instruction": (
+            f"Review this paragraph for the keyword '{keyword}'. If it should support this landing page intent, "
+            "rewrite it with clearer context connected to the target keyword and nearby SERP topics. If it serves "
+            "a different intent, move it to a better page or reduce it."
+        ),
+        "rationale": "This paragraph is far from the SERP topic space for the keyword and may dilute topical focus.",
+        "impact_score": round(max(0.0, 1.0 - similarity) * 100 + demand["score"] * 10, 3),
+        "evidence": {
+            "keyword_impressions": demand["impressions"],
+            "keyword_clicks": demand["clicks"],
+            "keyword_traffic": demand["traffic"],
+            "keyword_volume": demand["volume"],
+            "similarity_to_serp_topics": row.get("similarity_to_serp_topics"),
+            "review_reason": row.get("review_reason", ""),
+            "paragraph": str(row.get("paragraph") or ""),
+        },
+    }
+
+
+def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
+    if analysis.get("status") != "ok":
+        return []
+    actions: list[dict] = []
+    order = 1
+    for topic in (analysis.get("missing_topics") or [])[:8]:
+        actions.append(_topic_action("add_topic", page, analysis, topic, order))
+        order += 1
+    for topic in (analysis.get("weak_topics") or [])[:6]:
+        actions.append(_topic_action("strengthen_topic", page, analysis, topic, order))
+        order += 1
+    review_rows = analysis.get("off_intent_paragraphs") or analysis.get("own_paragraphs_to_review") or []
+    for row in review_rows[:6]:
+        actions.append(_paragraph_action(page, analysis, row, order))
+        order += 1
+    actions.sort(key=_action_priority_score)
+    for index, action in enumerate(actions, start=1):
+        action["order"] = index
+    return actions
+
+
+def _attach_action_points(page_results: list[dict]) -> list[dict]:
+    aggregate: list[dict] = []
+    for page in page_results:
+        page_actions: list[dict] = []
+        for analysis in page.get("analyses") or []:
+            actions = _action_points_for_analysis(page, analysis)
+            analysis["action_points"] = actions
+            page_actions.extend(actions)
+        page["action_points"] = sorted(page_actions, key=_action_priority_score)[:30]
+        aggregate.extend(page["action_points"])
+    aggregate.sort(key=_action_priority_score)
+    out = aggregate[:80]
+    for index, action in enumerate(out, start=1):
+        action["global_order"] = index
+    return out
+
+
 def _scatter(
     keyword: dict,
     own_ext: ExtractedPage,
@@ -1309,6 +1492,7 @@ def _summary(page_results: list[dict], selected_pages: list[PageInfo], keyword_r
         "partial_topics": sum(int(s.get("partial", 0)) for s in summaries),
         "off_intent_paragraphs": sum(int(s.get("off_intent_paragraphs", 0)) for s in summaries),
         "review_paragraphs": review_paragraphs,
+        "action_points": sum(len(a.get("action_points") or []) for a in analyses if a.get("status") == "ok"),
     }
 
 
@@ -1356,7 +1540,7 @@ def _html(payload: dict) -> str:
 <title>SERP Semantic Gap</title>
 <style>
 :root{--ink:#17202a;--muted:#5d6d7e;--line:#d7dee8;--soft:#f5f7fa;--panel:#fff;--ours:#176a35;--comp:#2d5b9a;--kw:#8a4b00;--missing:#b42318;--partial:#9a6700;--covered:#176a35;--shadow:0 1px 3px rgba(22,34,51,.08)}
-*{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.45}a{color:#1b5dbf;text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1440px;margin:0 auto;padding:24px}.topbar{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.title h1{font-size:28px;line-height:1.1;margin:0 0 8px}.title p{margin:0;color:var(--muted);max-width:820px}.summary{display:grid;grid-template-columns:repeat(7,minmax(112px,1fr));gap:10px;margin:18px 0}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow)}.metric b{display:block;font-size:22px;line-height:1.1}.metric span{color:var(--muted);font-size:12px}.page-section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:18px 0 28px;box-shadow:var(--shadow);overflow:hidden}.page-head{padding:18px 20px;border-bottom:1px solid var(--line);background:#fff}.page-head h2{font-size:21px;margin:0 0 6px}.url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.keyword-card{padding:20px;border-top:1px solid var(--line)}.keyword-card:first-of-type{border-top:0}.keyword-grid{display:grid;grid-template-columns:minmax(460px,1.2fr) minmax(420px,.8fr);gap:18px;align-items:start}.keyword-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.keyword-head h3{font-size:19px;margin:0}.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:999px;padding:3px 8px;background:#fff;font-size:12px;color:var(--muted)}.chip.missing{color:var(--missing);border-color:#f1b4ad;background:#fff7f6}.chip.partial{color:var(--partial);border-color:#e8cf85;background:#fff9e8}.chip.covered{color:var(--covered);border-color:#a8d5b6;background:#f1faf4}.panel{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}.panel h4{margin:0;padding:11px 12px;border-bottom:1px solid var(--line);font-size:14px;background:var(--soft)}.panel-body{padding:12px}.scatter-wrap{position:relative}.scatter{width:100%;height:390px;display:block;background:#fbfcfe}.scatter-point{cursor:pointer}.scatter-point:focus{outline:none;stroke:#111;stroke-width:2.4}.scatter-tooltip{display:none;position:absolute;left:12px;right:12px;bottom:12px;max-height:250px;overflow:auto;background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid #b9c7d8;border-radius:10px;box-shadow:0 14px 34px rgba(22,34,51,.22);padding:0;z-index:2}.scatter-tooltip.open{display:block}.tip-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-bottom:1px solid #e3e9f2;background:#f4f7fb}.tip-title{font-weight:750;font-size:13px;color:#142033}.tip-sub{margin-top:2px;color:#637083;font-size:11px}.tip-close{border:0;background:#e7edf5;border-radius:6px;padding:2px 8px;cursor:pointer}.tip-body{padding:11px 12px}.tip-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.tip-badge{display:inline-flex;align-items:center;border:1px solid #d5deea;border-radius:999px;padding:3px 7px;background:#fff;font-size:11px;color:#405166}.tip-badge.ours{border-color:#9bd0ae;color:#176a35;background:#f1faf4}.tip-badge.competitor{border-color:#acc3e5;color:#2d5b9a;background:#f3f7ff}.tip-badge.keyword{border-color:#e7c889;color:#8a4b00;background:#fff9e8}.tip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:9px}.tip-field{border:1px solid #edf1f5;border-radius:7px;background:#fff;padding:6px 7px;min-width:0}.tip-field span{display:block;color:#768395;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tip-field strong{display:block;color:#1b2838;font-size:12px;overflow-wrap:anywhere}.tip-text{border-left:3px solid #8fb2df;background:#f7faff;border-radius:6px;padding:8px 9px;color:#263445;font-size:12px;line-height:1.45}.tip-explain{color:#637083;font-size:12px;margin-bottom:9px}.scatter-controls{position:absolute;top:10px;right:10px;display:flex;gap:5px;z-index:3}.scatter-controls button{border:1px solid #c9d3df;background:#fff;color:#263445;border-radius:6px;padding:3px 8px;font-size:12px;line-height:1;box-shadow:0 1px 3px rgba(22,34,51,.12);cursor:pointer}.scatter-controls button:hover{background:#f1f5f9}.scatter.is-panning{cursor:grabbing}.scatter{cursor:grab}.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.tables{display:grid;grid-template-columns:1fr;gap:14px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 9px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fbfcfe}.topic-label{font-weight:600}.coverage-missing{color:var(--missing);font-weight:700}.coverage-partial{color:var(--partial);font-weight:700}.coverage-covered{color:var(--covered);font-weight:700}.cluster-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.cluster{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.cluster strong{display:block;margin-bottom:5px}.bar{height:7px;background:#e9eef5;border-radius:999px;overflow:hidden;margin:8px 0}.bar span{display:block;height:100%;background:#5f8cc9}.muted{color:var(--muted)}.empty{padding:18px;color:var(--muted)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}.competitors li,.review li{margin:0 0 8px}.competitors,.review{padding-left:18px;margin:0}.mini{font-size:12px;color:var(--muted)}@media(max-width:980px){.wrap{padding:14px}.summary{grid-template-columns:repeat(2,1fr)}.keyword-grid,.two-col{grid-template-columns:1fr}.scatter{height:320px}.topbar{display:block}}
+*{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.45}a{color:#1b5dbf;text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1440px;margin:0 auto;padding:24px}.topbar{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.title h1{font-size:28px;line-height:1.1;margin:0 0 8px}.title p{margin:0;color:var(--muted);max-width:820px}.summary{display:grid;grid-template-columns:repeat(8,minmax(112px,1fr));gap:10px;margin:18px 0}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow)}.metric b{display:block;font-size:22px;line-height:1.1}.metric span{color:var(--muted);font-size:12px}.page-section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:18px 0 28px;box-shadow:var(--shadow);overflow:hidden}.page-head{padding:18px 20px;border-bottom:1px solid var(--line);background:#fff}.page-head h2{font-size:21px;margin:0 0 6px}.url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.keyword-card{padding:20px;border-top:1px solid var(--line)}.keyword-card:first-of-type{border-top:0}.keyword-grid{display:grid;grid-template-columns:minmax(460px,1.2fr) minmax(420px,.8fr);gap:18px;align-items:start}.keyword-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.keyword-head h3{font-size:19px;margin:0}.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:999px;padding:3px 8px;background:#fff;font-size:12px;color:var(--muted)}.chip.missing{color:var(--missing);border-color:#f1b4ad;background:#fff7f6}.chip.partial{color:var(--partial);border-color:#e8cf85;background:#fff9e8}.chip.covered{color:var(--covered);border-color:#a8d5b6;background:#f1faf4}.panel{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}.panel h4{margin:0;padding:11px 12px;border-bottom:1px solid var(--line);font-size:14px;background:var(--soft)}.panel-body{padding:12px}.scatter-wrap{position:relative}.scatter{width:100%;height:390px;display:block;background:#fbfcfe}.scatter-point{cursor:pointer}.scatter-point:focus{outline:none;stroke:#111;stroke-width:2.4}.scatter-tooltip{display:none;position:absolute;left:12px;right:12px;bottom:12px;max-height:250px;overflow:auto;background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid #b9c7d8;border-radius:10px;box-shadow:0 14px 34px rgba(22,34,51,.22);padding:0;z-index:2}.scatter-tooltip.open{display:block}.tip-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-bottom:1px solid #e3e9f2;background:#f4f7fb}.tip-title{font-weight:750;font-size:13px;color:#142033}.tip-sub{margin-top:2px;color:#637083;font-size:11px}.tip-close{border:0;background:#e7edf5;border-radius:6px;padding:2px 8px;cursor:pointer}.tip-body{padding:11px 12px}.tip-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.tip-badge{display:inline-flex;align-items:center;border:1px solid #d5deea;border-radius:999px;padding:3px 7px;background:#fff;font-size:11px;color:#405166}.tip-badge.ours{border-color:#9bd0ae;color:#176a35;background:#f1faf4}.tip-badge.competitor{border-color:#acc3e5;color:#2d5b9a;background:#f3f7ff}.tip-badge.keyword{border-color:#e7c889;color:#8a4b00;background:#fff9e8}.tip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:9px}.tip-field{border:1px solid #edf1f5;border-radius:7px;background:#fff;padding:6px 7px;min-width:0}.tip-field span{display:block;color:#768395;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tip-field strong{display:block;color:#1b2838;font-size:12px;overflow-wrap:anywhere}.tip-text{border-left:3px solid #8fb2df;background:#f7faff;border-radius:6px;padding:8px 9px;color:#263445;font-size:12px;line-height:1.45}.tip-explain{color:#637083;font-size:12px;margin-bottom:9px}.scatter-controls{position:absolute;top:10px;right:10px;display:flex;gap:5px;z-index:3}.scatter-controls button{border:1px solid #c9d3df;background:#fff;color:#263445;border-radius:6px;padding:3px 8px;font-size:12px;line-height:1;box-shadow:0 1px 3px rgba(22,34,51,.12);cursor:pointer}.scatter-controls button:hover{background:#f1f5f9}.scatter.is-panning{cursor:grabbing}.scatter{cursor:grab}.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.tables{display:grid;grid-template-columns:1fr;gap:14px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 9px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fbfcfe}.topic-label{font-weight:600}.coverage-missing{color:var(--missing);font-weight:700}.coverage-partial{color:var(--partial);font-weight:700}.coverage-covered{color:var(--covered);font-weight:700}.cluster-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.cluster{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.cluster strong{display:block;margin-bottom:5px}.bar{height:7px;background:#e9eef5;border-radius:999px;overflow:hidden;margin:8px 0}.bar span{display:block;height:100%;background:#5f8cc9}.muted{color:var(--muted)}.empty{padding:18px;color:var(--muted)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}.competitors li,.review li{margin:0 0 8px}.competitors,.review{padding-left:18px;margin:0}.mini{font-size:12px;color:var(--muted)}@media(max-width:980px){.wrap{padding:14px}.summary{grid-template-columns:repeat(2,1fr)}.keyword-grid,.two-col{grid-template-columns:1fr}.scatter{height:320px}.topbar{display:block}}
   :root {
     --audit-bg: #f5efe6;
     --audit-panel: #fffdfa;
@@ -1788,6 +1972,36 @@ def _html(payload: dict) -> str:
   .url-keyword-table tr:last-child td {
     border-bottom: 0;
   }
+  .action-list {
+    display: grid;
+    gap: 10px;
+  }
+  .action-card {
+    border: 1px solid var(--audit-line);
+    border-radius: 16px;
+    background: #fffdf9;
+    padding: 12px;
+  }
+  .action-card strong {
+    display: block;
+    color: var(--audit-text);
+    margin-bottom: 5px;
+  }
+  .action-card .instruction {
+    color: var(--audit-text);
+    line-height: 1.45;
+  }
+  .action-card .rationale {
+    margin-top: 7px;
+    color: var(--audit-muted);
+    font-size: 0.78rem;
+  }
+  .action-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+  }
   a { color: var(--audit-accent-dark); }
   button { transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease; }
   button:hover { transform: translateY(-1px); }
@@ -1911,7 +2125,7 @@ function domainColor(domain){return domainPalette[hashString(domain)%domainPalet
 function urlDomain(url){try{return new URL(url).hostname;}catch(_){return '';}}
 function pointDomain(p){return p.domain||urlDomain(p.url||'');}
 function sourceColor(p){if(p.entity_type==='keyword'||p.entity_type==='keyword_centroid')return colors.keyword;const domain=pointDomain(p);if(domain)return domainColor(domain);if(p.entity_type==='title')return colors.title;if(/^h[1-6]$/.test(p.entity_type||''))return colors.h1;if(p.entity_type==='header')return colors.header;return colors.competitor;}
-function metrics(){const s=data.summary||{};return [['Pages',s.pages_analyzed||0],['Keywords',s.keywords_selected||0],['SERP calls',s.serp_api_calls_after_cache ?? s.serp_api_calls ?? 0],['URLs downloaded',s.urls_downloaded||0],['Missing topics',s.missing_topics||0],['Partial topics',s.partial_topics||0],['Review paragraphs',s.review_paragraphs ?? s.off_intent_paragraphs ?? 0]];}
+function metrics(){const s=data.summary||{};return [['Pages',s.pages_analyzed||0],['Keywords',s.keywords_selected||0],['SERP calls',s.serp_api_calls_after_cache ?? s.serp_api_calls ?? 0],['URLs downloaded',s.urls_downloaded||0],['Missing topics',s.missing_topics||0],['Partial topics',s.partial_topics||0],['Review paragraphs',s.review_paragraphs ?? s.off_intent_paragraphs ?? 0],['Actions',s.action_points||0]];}
 statusEl.textContent = `${data.domain || ''} · ${data.provider || ''} · ${data.status || ''}`;
 summaryEl.innerHTML = metrics().map(([label,value])=>`<div class="metric"><b>${n(value)}</b><span>${esc(label)}</span></div>`).join('');
 function pointLabel(d){if(d.type==='keyword_centroid')return 'Keyword centroid';if(d.type==='keyword')return 'Keyword';if(d.type==='url'&&d.source==='ours')return `${ownDomain} URL`;if(d.type==='url'&&d.source==='competitor')return 'Competitor URL';if(d.type==='url')return 'URL';if(d.type==='title')return 'Page title';if(/^h[1-6]$/.test(d.type||''))return `${String(d.type).toUpperCase()} heading`;if(d.type==='header')return 'Header';if(d.source==='ours')return `${ownDomain} paragraph`;if(d.source==='competitor')return 'Competitor paragraph';return d.type||'Point';}
@@ -1944,6 +2158,9 @@ function keywordMetricRows(){const serp=keywordSerpSummary(data.serp_url_ranking
 function metricCell(value,decimals=0){const number=Number(value||0);return number?number.toLocaleString(undefined,{maximumFractionDigits:decimals,minimumFractionDigits:decimals&&number%1?decimals:0}):'';}
 function keywordMetricsTable(){const rows=keywordMetricRows();if(!rows.length)return '<div class="empty">No selected keywords available.</div>';return `<div class="keyword-metrics-table-wrap"><table class="keyword-metrics-table"><thead><tr><th>Keyword</th><th>Keyword source</th><th>API metrics source</th><th>Analyzed URL</th><th>Matched metrics URL</th><th class="metric-number">Source pos</th><th class="metric-number">Impr</th><th class="metric-number">Clicks</th><th class="metric-number">Traffic</th><th class="metric-number">Volume</th><th class="metric-number">SERP URLs</th><th class="metric-number">Best SERP</th><th>Best ranking URL</th></tr></thead><tbody>${rows.map(row=>{const apiSource=row.metrics_source||(hasDemandMetrics(row)?row.source:'No API metric match');return `<tr><td><strong>${esc(row.keyword)}</strong></td><td>${esc(row.source||'')}</td><td>${esc(apiSource)}</td><td>${urlLink(row.url,row.page_title||row.url)}</td><td>${urlLink(row.metrics_url,row.metrics_url?urlDomain(row.metrics_url)||row.metrics_url:'')}</td><td class="metric-number">${metricCell(row.position,1)}</td><td class="metric-number">${metricCell(row.impressions)}</td><td class="metric-number">${metricCell(row.clicks)}</td><td class="metric-number">${metricCell(row.traffic,2)}</td><td class="metric-number">${metricCell(row.volume)}</td><td class="metric-number">${metricCell(row.serp_top10_urls)}</td><td class="metric-number">${row.serp_best_rank?`#${esc(row.serp_best_rank)}`:''}</td><td>${urlLink(row.serp_best_url,row.serp_best_url?urlDomain(row.serp_best_url)||row.serp_best_url:'')}</td></tr>`;}).join('')}</tbody></table></div>`;}
 function keywordMetricsSection(){return `<div class="panel" style="margin-top:14px"><h4>Keyword Metrics From APIs</h4><div class="panel-body">${sectionNote('This table lists each selected keyword and every metric currently available from connected sources. Search Console-style data contributes impressions, clicks, and average position when present; Ahrefs contributes traffic and volume. If no demand metric matches a manual, People Also Ask, or People Also Search keyword, the API metrics source shows No API metric match and the SERP columns still show observed ranking positions from the live SERP fetch.')} ${keywordMetricsTable()}</div></div>`;}
+function actionPriorityClass(priority){return priority==='critical'||priority==='high'?'missing':priority==='medium'?'partial':'covered';}
+function actionList(rows,limit=12){if(!rows||!rows.length)return '<div class="empty">No content action points were generated. The analyzed page already covers the main detected SERP topics closely enough for these thresholds.</div>';return `<div class="action-list">${rows.slice(0,limit).map((row,index)=>{const ev=row.evidence||{};const terms=(row.suggested_terms||[]).map(term=>`<span class="chip">${esc(term)}</span>`).join('');const evidence=[ev.competitor_coverage&&`${n(ev.competitor_coverage)} competitor URLs`,ev.best_competitor_rank&&`best competitor #${esc(ev.best_competitor_rank)}`,ev.our_best_similarity!==undefined&&`selected page sim ${esc(ev.our_best_similarity)}`,ev.similarity_to_serp_topics!==undefined&&`SERP topic sim ${esc(ev.similarity_to_serp_topics)}`].filter(Boolean).join(' · ');return `<div class="action-card"><strong>${n(row.global_order||index+1)}. ${esc(row.action||row.type)} <span class="chip ${actionPriorityClass(row.priority)}">${esc(row.priority||'medium')}</span></strong><div class="mini">${esc(row.keyword||'')} · ${urlLink(row.target_url)}</div><div class="instruction">${esc(row.instruction||'')}</div><div class="action-meta">${terms}</div><div class="rationale">${esc(row.rationale||'')}${evidence?`<br>${esc(evidence)}`:''}${ev.example_url?`<br>Example: ${urlLink(ev.example_url)}${ev.example_paragraph?` - ${esc(ev.example_paragraph)}`:''}`:''}</div></div>`;}).join('')}</div>`;}
+function aggregateActionsSection(){return `<div class="panel" style="margin-top:14px"><h4>Content Action Plan For AI Agents</h4><div class="panel-body">${sectionNote('These are machine-readable editorial instructions generated from missing SERP topics, partial topic coverage, and low-alignment paragraphs. Use them as a prioritized brief for an AI agent that edits the target landing page for the selected keywords.')} ${actionList(data.action_points||[],18)}</div></div>`;}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No high-distance ${esc(ownDomain)} paragraphs were flagged for this keyword. This means the analyzed paragraphs stayed close enough to either the target keyword vector or the SERP topic space.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
 function sharedKeywordNames(a,b){const aKeywords=new Set((a.keywords||[]).map(k=>String(k.keyword||'')));return (b.keywords||[]).map(k=>String(k.keyword||'')).filter(k=>aKeywords.has(k));}
@@ -1963,8 +2180,8 @@ function serpUrlGraph(rows){if(!rows||rows.length<2)return '<div class="empty">N
 function urlKeywordTable(keywords){if(!keywords||!keywords.length)return '<div class="empty">No keyword rows for this URL.</div>';return `<table class="url-keyword-table"><thead><tr><th class="metric-number">Rank</th><th>Keyword</th><th class="metric-number">Impr</th><th class="metric-number">Clicks</th><th class="metric-number">Traffic</th><th class="metric-number">Volume</th><th class="metric-number">Source pos</th><th>Source</th></tr></thead><tbody>${keywords.map(k=>`<tr><td class="metric-number">#${esc(k.rank||'')}</td><td><strong>${esc(k.keyword||'')}</strong></td><td class="metric-number">${metricCell(k.impressions)}</td><td class="metric-number">${metricCell(k.clicks)}</td><td class="metric-number">${metricCell(k.traffic,2)}</td><td class="metric-number">${metricCell(k.volume)}</td><td class="metric-number">${metricCell(k.source_position,1)}</td><td>${esc(k.source||'')}</td></tr>`).join('')}</tbody></table>`;}
 function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const demandChips=hasDemandMetrics(row)?`${Number(row.impressions||0)>0?`<span class="chip">${n(row.impressions)} impr</span>`:''}${Number(row.clicks||0)>0?`<span class="chip">${n(row.clicks)} clicks</span>`:''}${Number(row.traffic||0)>0?`<span class="chip">${n(row.traffic)} traffic</span>`:''}${Number(row.volume||0)>0?`<span class="chip">vol ${n(row.volume)}</span>`:''}`:'<span class="chip">Demand metrics unavailable</span>';return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span>${demandChips}</div>${urlKeywordTable(row.keywords||[])}</div>`;}).join('')}</div>`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Use this section to see which URLs repeatedly win across the selected keywords. The graph connects URLs that rank for the same keyword; stronger connections usually mean those URLs compete for the same search intent. The table adds the available SERP, impression, click, traffic, and rank metrics for each URL.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('This map places every selected keyword, ranking URL, page title, H1-H6 heading, and paragraph into one semantic space. Color identifies the domain, shape identifies the entity type, and size reflects available clicks or SERP position. The hexagon is a demand-weighted centroid of all selected keywords. Points near it are aligned with the combined keyword demand center.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('This chart estimates which aggregate semantic clusters carry the most keyword demand. Clusters are sorted by available keyword traffic first, then impressions, volume, or clicks when traffic is unavailable. Treat it as directional: it shows which topic groups deserve more attention before editing page text.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('These clusters summarize the shared vector space above across all selected keywords and processed URLs. Use them to spot broad topic groups where competitors, headings, or selected-domain paragraphs dominate the aggregate map before drilling into individual keyword sections.')} ${clusterCards(points)}</div></div></div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${sectionNote('This chart compares the keyword with the analyzed title, headings, and paragraphs from each URL. Use it to spot whether the visible page structure clusters around the target keyword and whether competitor content covers nearby semantic territory that the selected domain does not.')} ${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters group nearby vectors into themes. A cluster with many competitor points and few selected-domain points usually indicates a topic area competitors cover more deeply.')} ${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('These are the ranking competitor pages fetched from the SERP for this keyword after ignored hosts such as social/video platforms are skipped. Review them when validating missing topics or unusual scatter positions.')} ${competitorList(a.competitor_pages)}</div></div></div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${sectionNote('Topic relations summarize competitor paragraph themes and compare them with the nearest selected-domain paragraph. Missing means competitors share a topic that was not found close enough on the selected domain; partial means the selected domain is related but weaker or thinner than the SERP set.')} ${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>${esc(ownDomain)} Paragraphs To Review</h4><div class="panel-body">${sectionNote('These paragraphs are review candidates because their vectors are far from the target keyword and/or weakly connected to the SERP topic space. Do not remove them automatically: first check whether each paragraph supports a different necessary intent. If it should support this keyword, add clearer keyword-related context, connect it to a missing/partial topic, or move unrelated information to a better page.')} ${reviewList(reviewRows)}</div></div></div></div>`;}
+function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];return `<section class="page-section" id="overview-section"><div class="page-head"><h2>Keyword and Content Semantic Map</h2><div class="mini">All selected keywords, processed URLs, titles, headings, and paragraphs in one shared vector space.</div></div><div class="keyword-card"><div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Use this section to see which URLs repeatedly win across the selected keywords. The graph connects URLs that rank for the same keyword; stronger connections usually mean those URLs compete for the same search intent. The table adds the available SERP, impression, click, traffic, and rank metrics for each URL.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}${aggregateActionsSection()}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('This map places every selected keyword, ranking URL, page title, H1-H6 heading, and paragraph into one semantic space. Color identifies the domain, shape identifies the entity type, and size reflects available clicks or SERP position. The hexagon is a demand-weighted centroid of all selected keywords. Points near it are aligned with the combined keyword demand center.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('This chart estimates which aggregate semantic clusters carry the most keyword demand. Clusters are sorted by available keyword traffic first, then impressions, volume, or clicks when traffic is unavailable. Treat it as directional: it shows which topic groups deserve more attention before editing page text.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('These clusters summarize the shared vector space above across all selected keywords and processed URLs. Use them to spot broad topic groups where competitors, headings, or selected-domain paragraphs dominate the aggregate map before drilling into individual keyword sections.')} ${clusterCards(points)}</div></div></div></section>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const points=a.scatter?.points||[];const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div><div class="keyword-grid"><div class="panel"><h4>Semantic Scatterplot</h4><div class="panel-body">${sectionNote('This chart compares the keyword with the analyzed title, headings, and paragraphs from each URL. Use it to spot whether the visible page structure clusters around the target keyword and whether competitor content covers nearby semantic territory that the selected domain does not.')} ${scatterSvg(points)}</div></div><div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters group nearby vectors into themes. A cluster with many competitor points and few selected-domain points usually indicates a topic area competitors cover more deeply.')} ${clusterCards(points)}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('These are the ranking competitor pages fetched from the SERP for this keyword after ignored hosts such as social/video platforms are skipped. Review them when validating missing topics or unusual scatter positions.')} ${competitorList(a.competitor_pages)}</div></div></div></div><div class="panel" style="margin-top:14px"><h4>Keyword Content Actions</h4><div class="panel-body">${sectionNote('Actionable instructions for improving the selected landing page for this keyword. These are generated from missing topics, partial topics, and low-alignment paragraphs.')} ${actionList(a.action_points||[],10)}</div></div><div class="two-col" style="margin-top:14px"><div class="panel"><h4>Topic Relations</h4><div class="panel-body">${sectionNote('Topic relations summarize competitor paragraph themes and compare them with the nearest selected-domain paragraph. Missing means competitors share a topic that was not found close enough on the selected domain; partial means the selected domain is related but weaker or thinner than the SERP set.')} ${topicChart(a.topics)}</div><table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table></div><div class="panel"><h4>${esc(ownDomain)} Paragraphs To Review</h4><div class="panel-body">${sectionNote('These paragraphs are review candidates because their vectors are far from the target keyword and/or weakly connected to the SERP topic space. Do not remove them automatically: first check whether each paragraph supports a different necessary intent. If it should support this keyword, add clearer keyword-related context, connect it to a missing/partial topic, or move unrelated information to a better page.')} ${reviewList(reviewRows)}</div></div></div></div>`;}
 function pageSection(page, index){return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Keyword and content map</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 

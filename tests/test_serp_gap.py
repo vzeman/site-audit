@@ -6,6 +6,7 @@ import numpy as np
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
+    _action_points_for_analysis,
     _dedupe_semantic_row_texts,
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
@@ -253,6 +254,53 @@ def test_overview_scatter_adds_demand_weighted_keyword_centroid() -> None:
     assert centroid["volume"] == 3000
 
 
+def test_serp_gap_builds_action_points_for_ai_content_agents() -> None:
+    page = {"url": "https://example.com/live-chat", "title": "Live Chat"}
+    analysis = {
+        "status": "ok",
+        "query": "live chat software",
+        "keyword": {"keyword": "live chat software", "impressions": 1200, "clicks": 40, "traffic": 8.5, "volume": 6000},
+        "missing_topics": [
+            {
+                "label": "pricing and implementation details",
+                "coverage": "missing",
+                "priority": "high",
+                "competitor_coverage": 3,
+                "competitor_prevalence": 0.75,
+                "best_competitor_rank": 2,
+                "our_best_similarity": 0.41,
+                "competitor_urls": ["https://competitor.example/pricing"],
+                "examples": [
+                    {
+                        "url": "https://competitor.example/pricing",
+                        "rank": 2,
+                        "paragraph": "Competitor explains pricing and setup.",
+                    }
+                ],
+            }
+        ],
+        "weak_topics": [],
+        "off_intent_paragraphs": [
+            {
+                "paragraph_index": 4,
+                "similarity_to_serp_topics": 0.39,
+                "paragraph": "Unrelated operational history.",
+                "review_reason": "below off-intent threshold",
+            }
+        ],
+    }
+
+    actions = _action_points_for_analysis(page, analysis)
+
+    assert actions[0]["type"] == "add_topic"
+    assert actions[0]["priority"] == "high"
+    assert "Add a concise section" in actions[0]["instruction"]
+    assert actions[0]["evidence"]["keyword_impressions"] == 1200
+    assert actions[0]["evidence"]["keyword_volume"] == 6000
+    assert actions[0]["evidence"]["example_url"] == "https://competitor.example/pricing"
+    assert any(action["type"] == "review_paragraph" for action in actions)
+
+
 def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:
     payload = {
         "meta": {"provider": "ahrefs"},
@@ -420,6 +468,11 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "keywordMetricsTable" in html
     assert "API metrics source" in html
     assert "No API metric match" in html
+    assert "Content Action Plan For AI Agents" in html
+    assert "Keyword Content Actions" in html
+    assert "action_points" in html
+    assert "actionList" in html
+    assert "machine-readable editorial instructions" in html
     assert "SERP URLs" in html
     assert "urlKeywordTable" in html
     assert "url-keyword-table" in html
