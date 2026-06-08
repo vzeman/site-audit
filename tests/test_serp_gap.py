@@ -416,6 +416,13 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "keywordFrequencySection" in html
     assert "frequencyTokens" in html
     assert "wordCloud" in html
+    assert "Keyword Metrics From APIs" in html
+    assert "keywordMetricsTable" in html
+    assert "API metrics source" in html
+    assert "SERP URLs" in html
+    assert "urlKeywordTable" in html
+    assert "url-keyword-table" in html
+    assert "Source pos" in html
     assert "h2:'H2s'" in html
     assert "h6:'H6s'" in html
     assert "H1-H6" in html
