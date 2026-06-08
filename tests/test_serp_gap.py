@@ -225,6 +225,10 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Keyword and Content Semantic Map" in html
     assert "Top-10 URLs Across Selected Keywords" in html
     assert "serp_url_rankings" in html
+    assert "serpUrlGraph" in html
+    assert "sharedKeywordNames" in html
+    assert "serp-url-graph" in html
+    assert "URL co-ranking graph" in html
     assert "serpRankingChart" in html
     assert "serp-ranking-chart" in html
     assert "serpRankingList" in html
