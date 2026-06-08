@@ -849,10 +849,20 @@ site-audit serp-gap www.liveagent.com \
 The report includes one section per analyzed page, keyword-level semantic
 scatterplots, domain-colored competitor points, distinct shapes for keywords,
 titles/H1s, headers, and paragraphs, zoom/pan controls, click dialogs, topic
-clusters, and missing/partial topic tables.
+clusters, and missing/partial topic tables. The aggregate section also shows
+top ranking URLs across selected keywords, keyword/API metrics, per-URL
+keyword ranking tables, a demand-weighted keyword centroid, weighted keyword
+frequency clouds, topic impact by traffic, and semantic clusters.
+
+Use `--use-ahrefs-metrics` to enrich matching keywords with Ahrefs position,
+traffic, and volume. Use `--include-serp-keyword-suggestions` to add People
+Also Ask and People Also Search keywords from the SERP payload; those rows may
+show `No API metric match` when no GSC/Ahrefs/DataForSEO/Google Ads demand row
+exists, while SERP rank evidence still appears.
 
 See [SERP Gap Command](docs/serp-gap-command.md) for the full workflow,
-budget controls, and a screenshot of the LiveAgent example report.
+budget controls, cache behavior, and a screenshot of the LiveAgent example
+report.
 
 ---
 
