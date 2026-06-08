@@ -407,6 +407,15 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "demand-weighted centroid of all selected keywords" in html
     assert "keyword_centroid" in html
     assert "keyword centroid" in html
+    assert "Keyword Frequency Analysis" in html
+    assert "Weighted Content Keyword Cloud" in html
+    assert "Title Keywords" in html
+    assert "H1 Keywords" in html
+    assert "H2-H6 Keywords" in html
+    assert "Paragraph Keywords" in html
+    assert "keywordFrequencySection" in html
+    assert "frequencyTokens" in html
+    assert "wordCloud" in html
     assert "h2:'H2s'" in html
     assert "h6:'H6s'" in html
     assert "H1-H6" in html
