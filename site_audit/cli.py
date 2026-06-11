@@ -11,9 +11,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shlex
+import shutil
 import sys
+import textwrap
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import __version__
 from .ai_agent import DEFAULT_OPENROUTER_MODEL, openrouter_model
@@ -376,36 +380,243 @@ def _resolved_ai_agent_model(value: str) -> str:
     return value
 
 
-def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
-    print("\nSERP Gap guided setup")
-    print("Answer the prompts below. Press Enter to keep the shown default.\n")
+_ANSI_RESET = "\033[0m"
+_ANSI_BOLD = "\033[1m"
+_ANSI_DIM = "\033[2m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_GREEN = "\033[32m"
+_ANSI_YELLOW = "\033[33m"
+_ANSI_REVERSE = "\033[7m"
 
-    args.domain = _menu_text(
-        "Audited domain",
-        "Domain with an existing projects/<domain>/report/pages.json. Run `site-audit run` first.",
-        args.domain or "",
-        required=True,
-    )
-    if not args.domain:
-        print("No domain selected.")
+
+def _color(text: str, code: str) -> str:
+    if os.getenv("NO_COLOR") or os.getenv("TERM") == "dumb":
+        return text
+    return f"{code}{text}{_ANSI_RESET}"
+
+
+def _menu_title(title: str, description: str = "") -> None:
+    print(f"\n{_color(title, _ANSI_BOLD + _ANSI_CYAN)}")
+    if description:
+        for line in textwrap.wrap(description, width=_terminal_width() - 4):
+            print(_color(f"  {line}", _ANSI_DIM))
+
+
+def _terminal_width() -> int:
+    return max(64, shutil.get_terminal_size((100, 24)).columns)
+
+
+def _can_use_keyboard_menu() -> bool:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return False
+    if os.getenv("SITE_AUDIT_SIMPLE_MENU"):
+        return False
+    try:
+        import termios
+        termios.tcgetattr(sys.stdin.fileno())
+    except Exception:
+        return False
+    return True
+
+
+def _read_menu_key() -> str:
+    import select
+
+    ch = sys.stdin.read(1)
+    if ch in {"\r", "\n"}:
+        return "enter"
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    if ch in {"\x04", "q", "Q"}:
+        return "cancel"
+    if ch in {"j", "J"}:
+        return "down"
+    if ch in {"k", "K"}:
+        return "up"
+    if ch == " ":
+        return "space"
+    if ch.isdigit():
+        return ch
+    if ch == "\x1b":
+        if not select.select([sys.stdin], [], [], 0.04)[0]:
+            return "cancel"
+        nxt = sys.stdin.read(1)
+        if nxt != "[":
+            return "cancel"
+        code = sys.stdin.read(1)
+        return {
+            "A": "up",
+            "B": "down",
+            "C": "right",
+            "D": "left",
+        }.get(code, "cancel")
+    return ch
+
+
+def _clear_rendered_lines(count: int) -> None:
+    if count <= 0:
+        return
+    sys.stdout.write(f"\033[{count}F")
+    for _ in range(count):
+        sys.stdout.write("\033[2K\n")
+    sys.stdout.write(f"\033[{count}F")
+
+
+def _render_keyboard_choice(
+    label: str,
+    description: str,
+    choices: list[tuple[str, str, str]],
+    default_index: int,
+    *,
+    cancel_index: int | None = None,
+) -> int | None:
+    if not _can_use_keyboard_menu():
+        return None
+
+    import termios
+    import tty
+
+    index = max(0, min(default_index, len(choices) - 1))
+    result_index = index
+    rendered_lines = 0
+    width = _terminal_width()
+
+    def lines_for() -> list[str]:
+        out = [
+            "",
+            _color(label, _ANSI_BOLD + _ANSI_CYAN),
+        ]
+        out.extend(_color(f"  {line}", _ANSI_DIM) for line in textwrap.wrap(description, width=width - 4))
+        out.append(_color("  Up/Down or j/k to move. Enter selects. Number keys also work. q/Esc cancels.", _ANSI_DIM))
+        for pos, (_, name, help_text) in enumerate(choices):
+            marker = ">" if pos == index else " "
+            number = f"{pos + 1}."
+            line = f"  {marker} {number} {name}"
+            if pos == index:
+                line = _color(line, _ANSI_REVERSE + _ANSI_BOLD)
+            out.append(line)
+            if pos == index and help_text:
+                for help_line in textwrap.wrap(help_text, width=width - 8):
+                    out.append(_color(f"      {help_line}", _ANSI_DIM))
+        return out
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    sys.stdout.write("\033[?25l")
+    try:
+        tty.setraw(fd)
+        while True:
+            if rendered_lines:
+                _clear_rendered_lines(rendered_lines)
+            current_lines = lines_for()
+            sys.stdout.write("\n".join(current_lines) + "\n")
+            sys.stdout.flush()
+            rendered_lines = len(current_lines)
+            key = _read_menu_key()
+            if key in {"up", "left"}:
+                index = (index - 1) % len(choices)
+            elif key in {"down", "right"}:
+                index = (index + 1) % len(choices)
+            elif key == "enter":
+                result_index = index
+                return index
+            elif key == "cancel":
+                result_index = cancel_index if cancel_index is not None else default_index
+                return result_index
+            elif key.isdigit():
+                number = int(key)
+                if 1 <= number <= len(choices):
+                    index = number - 1
+                    result_index = index
+                    return index
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        sys.stdout.write("\033[?25h")
+        if rendered_lines:
+            _clear_rendered_lines(rendered_lines)
+        selected = choices[result_index if 0 <= result_index < len(choices) else default_index][1]
+        sys.stdout.write(f"{_color(label, _ANSI_BOLD + _ANSI_CYAN)}\n")
+        sys.stdout.write(f"  {_color('Selected:', _ANSI_GREEN)} {selected}\n")
+        sys.stdout.flush()
+
+
+def _url_host(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    return (parsed.netloc or parsed.path.split("/", 1)[0]).lower().strip()
+
+
+def _report_exists_for_domain(domain: str, projects_root: Path) -> bool:
+    if not domain:
+        return False
+    return (projects_root / domain_slug(domain) / "report" / "pages.json").is_file()
+
+
+def _domain_from_target_url(url: str, projects_root: Path, current_domain: str | None = None) -> str:
+    host = _url_host(url)
+    candidates: list[str] = []
+    if current_domain:
+        candidates.append(current_domain)
+    if host:
+        candidates.append(host)
+        if host.startswith("www."):
+            candidates.append(host[4:])
+        else:
+            candidates.append(f"www.{host}")
+    seen: set[str] = set()
+    unique = [item for item in candidates if item and not (item in seen or seen.add(item))]
+    for candidate in unique:
+        if _report_exists_for_domain(candidate, projects_root):
+            return candidate
+    return host or (current_domain or "")
+
+
+def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
+    print()
+    print(_color("SERP Gap guided setup", _ANSI_BOLD + _ANSI_CYAN))
+    print(_color("Use arrows for menus. Press Enter to keep shown defaults in text fields.", _ANSI_DIM))
 
     scope = _menu_choice(
         "Target scope",
-        "Choose whether to analyze one exact URL or a group of audited URLs.",
+        "Choose whether to analyze one exact page URL or a group of URLs from an existing audit.",
         [
-            ("url", "Exact URL", "Best for page-level recommendations and URL-specific TODO markdown."),
+            ("url", "Exact page URL", "Best for page-level recommendations. The audited domain is derived from the URL host."),
             ("pattern", "URL pattern", "Use a path glob/regex such as /features/* to analyze multiple audited pages."),
         ],
         default="url" if not args.url_include else "pattern",
     )
     if scope == "url":
         url_default = args.url[0] if args.url else ""
-        url = _menu_text("Exact URL", "Full URL to analyze. The report directory is based on this path.", url_default, required=True)
+        url = _menu_text(
+            "Target page URL",
+            "Full URL to analyze. The audited project domain is derived from the URL host.",
+            url_default,
+            required=True,
+        )
         args.url = [url] if url else []
         args.url_include = []
         args.url_exclude = []
+        args.domain = _domain_from_target_url(url, Path(args.projects_root), args.domain)
+        if not args.domain:
+            args.domain = _menu_text(
+                "Audited domain",
+                "Could not derive a domain from the URL. Enter the domain used by `site-audit run`.",
+                args.domain or "",
+                required=True,
+            )
+        print(f"  {_color('Project domain:', _ANSI_GREEN)} {args.domain}")
     else:
+        args.domain = _menu_text(
+            "Audited domain",
+            "Domain with an existing projects/<domain>/report/pages.json. Run `site-audit run` first.",
+            args.domain or "",
+            required=True,
+        )
+        if not args.domain:
+            print("No domain selected.")
+            return False
         include_default = args.url_include[0] if args.url_include else ""
         exclude_default = args.url_exclude[0] if args.url_exclude else ""
         include = _menu_text("URL include pattern", "Path glob or regex, for example /features/*.", include_default, required=True)
@@ -553,14 +764,13 @@ def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
 
 
 def _menu_text(label: str, description: str, default: str = "", *, required: bool = False) -> str:
-    print(f"\n{label}")
-    print(f"  {description}")
+    _menu_title(label, description)
     while True:
         suffix = f" [{default}]" if default else ""
-        value = input(f"  Value{suffix}: ").strip() or default
+        value = input(f"  {_color('Value', _ANSI_YELLOW)}{suffix}: ").strip() or default
         if value or not required:
             return value
-        print("  This value is required.")
+        print(_color("  This value is required.", _ANSI_YELLOW))
 
 
 def _menu_list(label: str, description: str, default: list[str] | None = None, *, required: bool = False) -> list[str]:
@@ -569,15 +779,34 @@ def _menu_list(label: str, description: str, default: list[str] | None = None, *
     return [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
 
 
-def _menu_choice(label: str, description: str, choices: list[tuple[str, str, str]], *, default: str) -> str:
-    print(f"\n{label}")
-    print(f"  {description}")
+def _menu_choice(
+    label: str,
+    description: str,
+    choices: list[tuple[str, str, str]],
+    *,
+    default: str,
+    cancel_value: str | None = None,
+) -> str:
     default_index = next((i for i, item in enumerate(choices, start=1) if item[0] == default), 1)
+    cancel_index = None
+    if cancel_value is not None:
+        cancel_index = next((i for i, item in enumerate(choices) if item[0] == cancel_value), default_index - 1)
+    keyboard_index = _render_keyboard_choice(
+        label,
+        description,
+        choices,
+        default_index - 1,
+        cancel_index=cancel_index,
+    )
+    if keyboard_index is not None:
+        return choices[keyboard_index][0]
+
+    _menu_title(label, description)
     for index, (_, name, help_text) in enumerate(choices, start=1):
         marker = "*" if index == default_index else " "
-        print(f"  {index}. [{marker}] {name} - {help_text}")
+        print(f"  {index}. [{marker}] {_color(name, _ANSI_BOLD)} - {help_text}")
     while True:
-        raw = input(f"  Choose 1-{len(choices)} [{default_index}]: ").strip()
+        raw = input(f"  {_color('Choose', _ANSI_YELLOW)} 1-{len(choices)} [{default_index}]: ").strip()
         if not raw:
             return choices[default_index - 1][0]
         try:
@@ -586,13 +815,26 @@ def _menu_choice(label: str, description: str, choices: list[tuple[str, str, str
             index = 0
         if 1 <= index <= len(choices):
             return choices[index - 1][0]
-        print("  Enter a valid number.")
+        print(_color("  Enter a valid number.", _ANSI_YELLOW))
 
 
 def _menu_bool(label: str, description: str, default: bool) -> bool:
+    if _can_use_keyboard_menu():
+        value = _menu_choice(
+            label,
+            description,
+            [
+                ("true", "[x] Yes", "Enable this option."),
+                ("false", "[ ] No", "Keep this option disabled."),
+            ],
+            default="true" if default else "false",
+        )
+        return value == "true"
+
     state = "[x]" if default else "[ ]"
-    print(f"\n{state} {label}")
-    print(f"  {description}")
+    print(f"\n{_color(state + ' ' + label, _ANSI_BOLD + _ANSI_CYAN)}")
+    for line in textwrap.wrap(description, width=_terminal_width() - 4):
+        print(_color(f"  {line}", _ANSI_DIM))
     raw = input(f"  Enable? [{'Y/n' if default else 'y/N'}]: ").strip().lower()
     if not raw:
         return default
@@ -605,7 +847,7 @@ def _menu_int(label: str, description: str, default: int) -> int:
         try:
             return int(raw)
         except ValueError:
-            print("  Enter an integer.")
+            print(_color("  Enter an integer.", _ANSI_YELLOW))
 
 
 def _menu_float(label: str, description: str, default: float | None) -> float | None:
@@ -688,6 +930,7 @@ def _run_main_menu(parser: argparse.ArgumentParser) -> int:
             ("exit", "Exit", "Do nothing."),
         ],
         default="serp-gap",
+        cancel_value="exit",
     )
     if choice == "exit":
         return 0

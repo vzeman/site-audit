@@ -100,7 +100,9 @@ site-audit
 ```
 
 This opens the terminal main menu. Choose `SERP gap analysis`, `Run domain
-audit`, `Open report viewer`, or `Settings`.
+audit`, `Open report viewer`, or `Settings`. In an interactive terminal,
+menus support arrow keys, `j`/`k`, number shortcuts, Enter to select, and
+`q`/Esc to cancel.
 
 **Run an audit directly**
 
@@ -887,16 +889,19 @@ Prefer the guided CLI menu when you do not want to remember every flag:
 site-audit
 ```
 
-Choose `SERP gap analysis` from the main menu. To jump directly into the SERP
-gap wizard, run:
+Choose `SERP gap analysis` from the main menu. For a single-page gap report,
+paste the full target URL; the CLI derives the audited project domain from the
+URL host and prefers an existing `projects/<domain>/report/pages.json` match.
+To jump directly into the SERP gap wizard, run:
 
 ```bash
 site-audit serp-gap --menu
 ```
 
-The menus ask for the audited domain, target URL or URL pattern, keyword mode,
-SERP provider, country/language, dry-run choice, and optional advanced toggles.
-Each prompt includes a short description of what the feature does.
+The menus ask for the target URL or URL pattern, keyword mode, SERP provider,
+country/language, dry-run choice, and optional advanced toggles. Choices use
+arrow-key selectors and yes/no toggles; each prompt includes a short
+description of what the feature does.
 
 ### Common SERP gap examples
 

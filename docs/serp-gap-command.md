@@ -18,16 +18,20 @@ Then run SERP gap analysis for a page or URL pattern:
 site-audit
 ```
 
-Choose `SERP gap analysis` from the main menu. To jump directly into the SERP
-gap wizard, run:
+Choose `SERP gap analysis` from the main menu. For a single-page report, paste
+the full target URL; the CLI derives the audited project domain from the URL
+host and prefers an existing `projects/<domain>/report/pages.json` match. To
+jump directly into the SERP gap wizard, run:
 
 ```bash
 site-audit serp-gap --menu
 ```
 
-The guided CLI menus explain each option, ask for the audited domain, target
-URL or URL pattern, keyword mode, SERP provider, country/language, and optional
-advanced toggles, then print the equivalent command before executing it.
+The guided CLI menus explain each option, ask for the target URL or URL
+pattern, keyword mode, SERP provider, country/language, and optional advanced
+toggles, then print the equivalent command before executing it. In an
+interactive terminal, choices support arrow keys, `j`/`k`, number shortcuts,
+Enter to select, and `q`/Esc to cancel.
 
 Direct command example:
 

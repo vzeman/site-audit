@@ -1,6 +1,6 @@
 import sys
 
-from site_audit.cli import _run_serp_gap_menu, build_parser, main
+from site_audit.cli import _domain_from_target_url, _run_serp_gap_menu, build_parser, main
 
 
 def test_run_parser_accepts_crawl_filter_flags() -> None:
@@ -226,7 +226,6 @@ def test_serp_gap_parser_accepts_interactive_menu_without_domain() -> None:
 def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
     args = build_parser().parse_args(["serp-gap", "--menu"])
     answers = iter([
-        "example.com",
         "1",
         "https://www.example.com/blog/ai-support-paradox/",
         "1",
@@ -240,7 +239,7 @@ def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
     assert _run_serp_gap_menu(args) is True
-    assert args.domain == "example.com"
+    assert args.domain == "www.example.com"
     assert args.url == ["https://www.example.com/blog/ai-support-paradox/"]
     assert args.keyword_source == "auto"
     assert args.ai_agent is True
@@ -248,6 +247,16 @@ def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
     assert args.country == "2840"
     assert args.language == "en"
     assert args.dry_run is True
+
+
+def test_serp_gap_url_domain_prefers_existing_project(tmp_path) -> None:
+    report_dir = tmp_path / "example.com" / "report"
+    report_dir.mkdir(parents=True)
+    (report_dir / "pages.json").write_text("[]", encoding="utf-8")
+
+    domain = _domain_from_target_url("https://www.example.com/blog/test/", tmp_path)
+
+    assert domain == "example.com"
 
 
 def test_bare_site_audit_opens_main_menu(monkeypatch) -> None:
