@@ -353,6 +353,27 @@ Groups paragraphs across the site by topic.
 
 Action: identify duplicated themes, missing hubs, scattered topics, and paragraphs that should be consolidated.
 
+<a id="para-treemap-block"></a>
+## Paragraph topic mass treemap
+
+Shows which paragraph clusters take up the most content space.
+
+Action: inspect oversized or fragmented clusters and decide whether to consolidate, split, or strengthen those topic areas.
+
+<a id="para-heatmap-block"></a>
+## Paragraph topic overlap heatmap
+
+Compares semantic similarity between paragraph-cluster centroids.
+
+Action: merge or clarify clusters that are strongly overlapping, and keep clearly separated topics on distinct pages or sections.
+
+<a id="para-relations-block"></a>
+## Paragraph topic relation views
+
+Shows paragraph-cluster relationships as network, hierarchy, centroid, chord, and section-flow views.
+
+Action: use these views to find topic families, isolated themes, and site sections that carry the same paragraph-level topics.
+
 <a id="fanout-block"></a>
 ## Query to paragraph fanout
 

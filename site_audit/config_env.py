@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,8 @@ def env_names(command: str | None, dest: str) -> list[str]:
     key = dest.upper()
     names = []
     if command:
-        names.append(f"SITE_AUDIT_{command.upper()}_{key}")
+        command_key = re.sub(r"[^A-Z0-9]+", "_", command.upper()).strip("_")
+        names.append(f"SITE_AUDIT_{command_key}_{key}")
     names.append(f"SITE_AUDIT_{key}")
     return names
 

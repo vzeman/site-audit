@@ -840,6 +840,16 @@ Before running SERP gap analysis, run the normal audit once so
 site-audit run www.liveagent.com --search-provider all
 ```
 
+Prefer the guided CLI menu when you do not want to remember every flag:
+
+```bash
+site-audit serp-gap --menu
+```
+
+The menu asks for the audited domain, target URL or URL pattern, keyword mode,
+SERP provider, country/language, dry-run choice, and optional advanced toggles.
+Each prompt includes a short description of what the feature does.
+
 ### Common SERP gap examples
 
 Single URL with manual keywords:
@@ -895,6 +905,30 @@ site-audit serp-gap www.liveagent.com \
   --language en
 ```
 
+Run URL-only with the AI agent. The agent uses OpenRouter to infer target
+keywords from the page and then writes paragraph-level TODO markdown after the
+SERP gap analysis:
+
+`.env` content:
+
+```dotenv
+OPENROUTER_API_KEY="sk-or-v1-..."
+OPENROUTER_MODEL="deepseek/deepseek-v4-pro"
+```
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/blog/ai-support-paradox/ \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+Use `--no-ai-agent` to skip OpenRouter/Harnext calls, or
+`--ai-agent-refresh` to ignore cached AI prompts and completions. The AI agent
+is cache-first and stores prompts/completions under
+`projects/<domain>/cache/serp_gap/ai_agent/`.
+
 Enrich keyword demand with Ahrefs traffic and volume when configured:
 
 ```bash
@@ -935,6 +969,10 @@ projects/www.liveagent.com/serp_gap/report/blog-ai-support-paradox/index.html
 
 The report is action-first: it opens with page content briefs, prioritized
 content tasks, paragraph rules, acceptance criteria, and AI-agent prompts.
+When `OPENROUTER_API_KEY` is configured, it also includes an AI-authored TODO
+brief per analyzed URL with keep/rewrite/move/merge/remove decisions, missing
+sections to add, recommended paragraph order, draft copy, and acceptance
+criteria. The same brief is written to `serp_gap_todo.md`.
 The diagnostic evidence is still available behind expandable sections:
 keyword-level semantic scatterplots, domain-colored competitor points,
 topic clusters, missing/partial topic tables, top ranking URLs, keyword/API

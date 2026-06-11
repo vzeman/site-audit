@@ -37,6 +37,9 @@ dependencies = [
 dev = [
   "pytest>=8.0.0",
 ]
+agent = [
+  "harnext",
+]
 
 [project.urls]
 Homepage = "https://github.com/vzeman/site-audit"

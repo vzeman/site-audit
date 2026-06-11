@@ -15,6 +15,16 @@ site-audit run www.example.com --search-provider all
 Then run SERP gap analysis for a page or URL pattern:
 
 ```bash
+site-audit serp-gap --menu
+```
+
+The guided CLI menu explains each option, asks for the audited domain, target
+URL or URL pattern, keyword mode, SERP provider, country/language, and optional
+advanced toggles, then prints the equivalent command before executing it.
+
+Direct command example:
+
+```bash
 site-audit serp-gap www.example.com \
   --url https://www.example.com/live-chat-software/ \
   --keyword-source file \
@@ -118,6 +128,53 @@ file
 
 Use `--keyword-source file` when you pass `--keyword` or
 `--keywords-file` and want those explicit keywords to drive the run.
+
+### AI-Agent Keyword Selection And TODO Briefs
+
+By default, `serp-gap` enables an OpenRouter-backed AI-agent layer. Existing
+keyword sources still run first. If a selected URL has no usable keyword rows,
+the agent inspects the page title, H1, headings, paragraphs, and any existing
+search rows to infer target keywords before SERP analysis begins.
+
+Configure OpenRouter in `.env` or through `site-audit settings`:
+
+```bash
+OPENROUTER_API_KEY="sk-or-v1-..."
+OPENROUTER_MODEL="deepseek/deepseek-v4-pro"
+```
+
+The `.env` file is ignored by git. In an interactive terminal, `serp-gap` can
+also prompt for `OPENROUTER_API_KEY` on first execution and write it to `.env`.
+
+URL-only example:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/blog/ai-support-paradox/ \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+After analysis, the agent generates a page-specific markdown brief with:
+
+- exact keep, rewrite, move, merge, or remove decisions for weak paragraphs
+- missing sections to add when competitors consistently cover them
+- recommended content order based on semantic path evidence
+- original draft copy for new or rewritten sections
+- acceptance criteria for an editor or AI coding/content agent
+
+Prompts and completions are cached under:
+
+```text
+projects/<domain>/cache/serp_gap/ai_agent/
+```
+
+Use `--ai-agent-provider openrouter` to bypass the Harnext SDK wrapper,
+`--no-ai-agent` to disable AI calls, and `--ai-agent-refresh` to regenerate
+cached prompts/completions. If `OPENROUTER_API_KEY` is absent, the report states
+that the provider is missing and uses title/H1 fallback keywords instead of
+fabricating demand metrics.
 
 To expand explicit keywords with SERP-discovered related questions and
 searches, enable:

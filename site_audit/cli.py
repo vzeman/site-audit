@@ -11,10 +11,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shlex
 import sys
 from pathlib import Path
 
 from . import __version__
+from .ai_agent import DEFAULT_OPENROUTER_MODEL, openrouter_model
 from . import compare as _compare
 from .cache import domain_slug
 from .config_env import apply_env_defaults
@@ -235,9 +237,13 @@ def _compare_command(args: argparse.Namespace) -> int:
 
 
 def _serp_gap_command(args: argparse.Namespace) -> int:
+    if getattr(args, "menu", False):
+        if not _run_serp_gap_menu(args):
+            return 0
     if not args.domain:
         print("serp-gap needs a domain.")
         return 1
+    _maybe_prompt_openrouter_key(args)
     config = SerpGapConfig(
         domain=args.domain,
         projects_root=Path(args.projects_root),
@@ -274,6 +280,10 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
         refresh_competitors=args.refresh_competitors,
         budget_usd=args.budget_usd,
         dry_run=args.dry_run,
+        ai_agent=args.ai_agent,
+        ai_agent_provider=args.ai_agent_provider,
+        ai_agent_model=_resolved_ai_agent_model(args.ai_agent_model),
+        ai_agent_refresh=args.ai_agent_refresh,
     )
     payload = run_serp_gap(config)
     status = payload.get("status", "unknown")
@@ -295,7 +305,14 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
     print(f"  URLs downloaded:     {summary.get('urls_downloaded', 0)}")
     print(f"  competitor URLs est: {summary.get('competitor_urls_estimated', 0)}")
     print(f"  missing topics:      {summary.get('missing_topics', 0)}")
+    agent = payload.get("ai_agent") or {}
+    if agent.get("enabled"):
+        print(
+            f"  AI agent:            {agent.get('status', '')} · "
+            f"{agent.get('provider', '')} · {agent.get('editor_briefs', 0)} editor brief(s)"
+        )
     print(f"  report JSON:         {out_dir / 'serp_gap.json'}")
+    print(f"  TODO markdown:       {out_dir / 'serp_gap_todo.md'}")
     print(f"  HTML report:         {out_dir / 'index.html'}")
     return 0 if status in {"ok", "dry_run"} else 1
 
@@ -320,6 +337,341 @@ def _serve_command(args: argparse.Namespace) -> int:
         port=args.port,
     )
     return 0
+
+
+def _maybe_prompt_openrouter_key(args: argparse.Namespace) -> None:
+    if not getattr(args, "ai_agent", False) or getattr(args, "dry_run", False):
+        return
+    if not getattr(args, "ai_agent_interactive_setup", True):
+        return
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+    import getpass
+    import os
+
+    from .config_env import load_dotenv, update_env_file
+
+    load_dotenv()
+    if os.getenv("OPENROUTER_API_KEY", "").strip():
+        return
+    print("OPENROUTER_API_KEY is required for AI-authored serp-gap keyword selection and editor briefs.")
+    key = getpass.getpass("Paste OpenRouter API key (hidden, leave empty to skip AI calls): ").strip()
+    if not key:
+        return
+    env_file = Path(".env")
+    updates = {"OPENROUTER_API_KEY": key}
+    model = _resolved_ai_agent_model(getattr(args, "ai_agent_model", DEFAULT_OPENROUTER_MODEL))
+    if model:
+        updates["OPENROUTER_MODEL"] = model
+    update_env_file(env_file, updates)
+    os.environ["OPENROUTER_API_KEY"] = key
+    if updates.get("OPENROUTER_MODEL"):
+        os.environ["OPENROUTER_MODEL"] = updates["OPENROUTER_MODEL"]
+    print(f"Saved OpenRouter settings to {env_file}.")
+
+
+def _resolved_ai_agent_model(value: str) -> str:
+    if value == DEFAULT_OPENROUTER_MODEL:
+        return openrouter_model(DEFAULT_OPENROUTER_MODEL)
+    return value
+
+
+def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
+    print("\nSERP Gap guided setup")
+    print("Answer the prompts below. Press Enter to keep the shown default.\n")
+
+    args.domain = _menu_text(
+        "Audited domain",
+        "Domain with an existing projects/<domain>/report/pages.json. Run `site-audit run` first.",
+        args.domain or "",
+        required=True,
+    )
+    if not args.domain:
+        print("No domain selected.")
+        return False
+
+    scope = _menu_choice(
+        "Target scope",
+        "Choose whether to analyze one exact URL or a group of audited URLs.",
+        [
+            ("url", "Exact URL", "Best for page-level recommendations and URL-specific TODO markdown."),
+            ("pattern", "URL pattern", "Use a path glob/regex such as /features/* to analyze multiple audited pages."),
+        ],
+        default="url" if not args.url_include else "pattern",
+    )
+    if scope == "url":
+        url_default = args.url[0] if args.url else ""
+        url = _menu_text("Exact URL", "Full URL to analyze. The report directory is based on this path.", url_default, required=True)
+        args.url = [url] if url else []
+        args.url_include = []
+        args.url_exclude = []
+    else:
+        include_default = args.url_include[0] if args.url_include else ""
+        exclude_default = args.url_exclude[0] if args.url_exclude else ""
+        include = _menu_text("URL include pattern", "Path glob or regex, for example /features/*.", include_default, required=True)
+        exclude = _menu_text("URL exclude pattern", "Optional path glob/regex to skip unwanted URLs.", exclude_default)
+        args.url = []
+        args.url_include = [include] if include else []
+        args.url_exclude = [exclude] if exclude else []
+
+    keyword_mode = _menu_choice(
+        "Keyword selection",
+        "Controls which search terms drive SERP fetching and competitor comparison.",
+        [
+            ("ai", "AI auto keywords", "Recommended for URL-only runs. Uses page content/search rows, then OpenRouter agent if available."),
+            ("manual", "Manual keywords", "Use when you already know the exact terms the page should rank for."),
+            ("search", "Existing search data", "Use GSC/Ahrefs/DataForSEO/Google Ads rows from the base audit."),
+            ("h1", "Title/H1 only", "Cheap fallback using the page title or H1 as a synthetic keyword."),
+        ],
+        default="ai" if args.ai_agent else "search",
+    )
+    if keyword_mode == "ai":
+        args.keyword_source = "auto"
+        args.keyword = []
+        args.ai_agent = True
+    elif keyword_mode == "manual":
+        args.keyword_source = "file"
+        args.keyword = _menu_list(
+            "Manual keywords",
+            "Enter comma-separated keywords. Keep this focused; each keyword triggers SERP and competitor work.",
+            args.keyword,
+            required=True,
+        )
+    elif keyword_mode == "search":
+        args.keyword_source = _menu_choice(
+            "Search data source",
+            "Pick a specific source or keep auto to use the best available rows.",
+            [
+                ("auto", "Auto", "Use any available search rows."),
+                ("gsc", "Google Search Console", "Uses impressions/clicks/position from GSC exports."),
+                ("ahrefs", "Ahrefs", "Uses organic keyword rows when Ahrefs is configured."),
+                ("dataforseo", "DataForSEO", "Uses DataForSEO keyword rows from the base audit."),
+                ("google_ads", "Google Ads", "Uses paid query rows from the base audit."),
+            ],
+            default=args.keyword_source if args.keyword_source in {"auto", "gsc", "ahrefs", "dataforseo", "google_ads"} else "auto",
+        )
+        args.keyword = []
+    else:
+        args.keyword_source = "h1"
+        args.keyword = []
+        args.use_h1_keyword = True
+
+    args.provider = _menu_choice(
+        "SERP provider",
+        "Provider used to fetch live Google results for selected keywords.",
+        [
+            ("auto", "Auto", "Use Serper if configured, otherwise DataForSEO."),
+            ("dataforseo", "DataForSEO", "Best when you need country/location codes and reliable SERP payloads."),
+            ("serper", "Serper", "Simple Google SERP API when SERPER_API_KEY is configured."),
+        ],
+        default=args.provider,
+    )
+    args.country = _menu_text(
+        "Country / location",
+        "Optional. For DataForSEO use a location code such as 2840 for United States.",
+        args.country or ("2840" if args.provider == "dataforseo" else ""),
+    ) or None
+    args.language = _menu_text("Language", "Optional SERP language code, for example en.", args.language or "en") or None
+
+    args.dry_run = _menu_bool(
+        "Dry run",
+        "Writes selected pages/keywords and cost plan without calling SERP providers or fetching competitors.",
+        args.dry_run,
+    )
+
+    advanced = _menu_bool(
+        "Show advanced options",
+        "Enable this to tune limits, keyword expansion, Ahrefs metrics, cache refresh, and AI-provider settings.",
+        False,
+    )
+    if advanced:
+        args.keywords_per_page = _menu_int(
+            "Keywords per page",
+            "Caps analysis cost and keeps each page focused on the strongest target terms.",
+            args.keywords_per_page,
+        )
+        args.results_per_keyword = _menu_int(
+            "Results per keyword",
+            "How many top organic competitors to fetch and compare for each keyword.",
+            args.results_per_keyword,
+        )
+        args.max_pages = _menu_int(
+            "Max selected pages",
+            "Safety limit for URL pattern runs.",
+            args.max_pages,
+        )
+        args.max_competitor_pages = _menu_int(
+            "Max competitor pages",
+            "Global cap on external competitor pages downloaded in one run.",
+            args.max_competitor_pages,
+        )
+        args.include_serp_keyword_suggestions = _menu_bool(
+            "Add SERP keyword suggestions",
+            "Also analyze People Also Ask/Search suggestions. Useful for topic discovery, but increases cost.",
+            args.include_serp_keyword_suggestions,
+        )
+        args.use_ahrefs_metrics = _menu_bool(
+            "Use Ahrefs metrics",
+            "Attaches Ahrefs position, traffic, and volume when AHREFS_API_KEY is configured.",
+            args.use_ahrefs_metrics,
+        )
+        if args.use_ahrefs_metrics:
+            args.ahrefs_country = _menu_text("Ahrefs country", "Optional country database such as US, GB, or SK.", args.ahrefs_country or "") or None
+            args.ahrefs_refresh = _menu_bool("Refresh Ahrefs cache", "Fetch a fresh Ahrefs snapshot instead of reusing compatible cache.", args.ahrefs_refresh)
+        args.ai_agent = _menu_bool(
+            "Enable AI agent",
+            "Infers URL keywords and writes paragraph-level markdown TODO briefs with draft copy.",
+            args.ai_agent,
+        )
+        if args.ai_agent:
+            args.ai_agent_provider = _menu_choice(
+                "AI agent provider",
+                "Harnext uses the SDK wrapper; OpenRouter direct skips the wrapper. Both require OPENROUTER_API_KEY.",
+                [
+                    ("harnext", "Harnext", "Default orchestration wrapper with direct OpenRouter fallback."),
+                    ("openrouter", "OpenRouter direct", "Call OpenRouter chat completions directly."),
+                ],
+                default=args.ai_agent_provider,
+            )
+            args.ai_agent_model = _menu_text(
+                "AI agent model",
+                "OpenRouter model that writes keyword and paragraph-level recommendations.",
+                args.ai_agent_model or DEFAULT_OPENROUTER_MODEL,
+            )
+            args.ai_agent_refresh = _menu_bool(
+                "Refresh AI completions",
+                "Ignore cached agent completions and request new output from the provider.",
+                args.ai_agent_refresh,
+            )
+        args.refresh_serp = _menu_bool("Refresh SERP cache", "Call the SERP provider even when cached SERP payloads exist.", args.refresh_serp)
+        args.refresh_competitors = _menu_bool("Refresh competitor pages", "Refetch competitor HTML instead of reusing cached copies.", args.refresh_competitors)
+        args.budget_usd = _menu_float("Budget cap USD", "Optional estimated SERP API budget cap. Leave empty for no cap.", args.budget_usd)
+
+    print("\nEquivalent CLI command:")
+    print("  " + _serp_gap_command_preview(args))
+    return _menu_bool("Run now", "Executes the command with the settings above.", True)
+
+
+def _menu_text(label: str, description: str, default: str = "", *, required: bool = False) -> str:
+    print(f"\n{label}")
+    print(f"  {description}")
+    while True:
+        suffix = f" [{default}]" if default else ""
+        value = input(f"  Value{suffix}: ").strip() or default
+        if value or not required:
+            return value
+        print("  This value is required.")
+
+
+def _menu_list(label: str, description: str, default: list[str] | None = None, *, required: bool = False) -> list[str]:
+    current = ", ".join(default or [])
+    raw = _menu_text(label, description, current, required=required)
+    return [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
+
+
+def _menu_choice(label: str, description: str, choices: list[tuple[str, str, str]], *, default: str) -> str:
+    print(f"\n{label}")
+    print(f"  {description}")
+    default_index = next((i for i, item in enumerate(choices, start=1) if item[0] == default), 1)
+    for index, (_, name, help_text) in enumerate(choices, start=1):
+        marker = "*" if index == default_index else " "
+        print(f"  {index}. [{marker}] {name} - {help_text}")
+    while True:
+        raw = input(f"  Choose 1-{len(choices)} [{default_index}]: ").strip()
+        if not raw:
+            return choices[default_index - 1][0]
+        try:
+            index = int(raw)
+        except ValueError:
+            index = 0
+        if 1 <= index <= len(choices):
+            return choices[index - 1][0]
+        print("  Enter a valid number.")
+
+
+def _menu_bool(label: str, description: str, default: bool) -> bool:
+    state = "[x]" if default else "[ ]"
+    print(f"\n{state} {label}")
+    print(f"  {description}")
+    raw = input(f"  Enable? [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "y", "yes", "true", "on"}
+
+
+def _menu_int(label: str, description: str, default: int) -> int:
+    while True:
+        raw = _menu_text(label, description, str(default))
+        try:
+            return int(raw)
+        except ValueError:
+            print("  Enter an integer.")
+
+
+def _menu_float(label: str, description: str, default: float | None) -> float | None:
+    raw = _menu_text(label, description, "" if default is None else str(default))
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        print("  Invalid number; leaving budget cap empty.")
+        return None
+
+
+def _serp_gap_command_preview(args: argparse.Namespace) -> str:
+    parts = ["site-audit", "serp-gap", args.domain or ""]
+    for url in args.url or []:
+        parts.extend(["--url", url])
+    for pattern in args.url_include or []:
+        parts.extend(["--url-include", pattern])
+    for pattern in args.url_exclude or []:
+        parts.extend(["--url-exclude", pattern])
+    parts.extend(["--keyword-source", args.keyword_source])
+    for keyword in args.keyword or []:
+        parts.extend(["--keyword", keyword])
+    parts.extend(["--provider", args.provider])
+    if args.country:
+        parts.extend(["--country", args.country])
+    if args.language:
+        parts.extend(["--language", args.language])
+    if args.keywords_per_page != 3:
+        parts.extend(["--keywords-per-page", str(args.keywords_per_page)])
+    if args.results_per_keyword != 5:
+        parts.extend(["--results-per-keyword", str(args.results_per_keyword)])
+    if args.max_pages != 20:
+        parts.extend(["--max-pages", str(args.max_pages)])
+    if args.max_competitor_pages != 100:
+        parts.extend(["--max-competitor-pages", str(args.max_competitor_pages)])
+    if args.use_h1_keyword:
+        parts.append("--use-h1-keyword")
+    if args.use_ahrefs_metrics:
+        parts.append("--use-ahrefs-metrics")
+    if args.ahrefs_refresh:
+        parts.append("--ahrefs-refresh")
+    if args.ahrefs_country:
+        parts.extend(["--ahrefs-country", args.ahrefs_country])
+    if args.include_serp_keyword_suggestions:
+        parts.append("--include-serp-keyword-suggestions")
+        if args.max_serp_keyword_suggestions != 8:
+            parts.extend(["--max-serp-keyword-suggestions", str(args.max_serp_keyword_suggestions)])
+    if not args.ai_agent:
+        parts.append("--no-ai-agent")
+    elif args.ai_agent_provider != "harnext":
+        parts.extend(["--ai-agent-provider", args.ai_agent_provider])
+    if args.ai_agent and args.ai_agent_model != DEFAULT_OPENROUTER_MODEL:
+        parts.extend(["--ai-agent-model", args.ai_agent_model])
+    if args.dry_run:
+        parts.append("--dry-run")
+    if args.budget_usd is not None:
+        parts.extend(["--budget-usd", str(args.budget_usd)])
+    if args.refresh_serp:
+        parts.append("--refresh-serp")
+    if args.refresh_competitors:
+        parts.append("--refresh-competitors")
+    if args.ai_agent_refresh:
+        parts.append("--ai-agent-refresh")
+    return " ".join(shlex.quote(str(part)) for part in parts if str(part))
 
 
 def _settings_command(args: argparse.Namespace) -> int:
@@ -572,8 +924,10 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.set_defaults(func=_compare_command)
 
     serp_p = sub.add_parser("serp-gap", help="Analyze selected audited pages against live SERP competitors")
-    serp_p.add_argument("domain", help="Domain with an existing site-audit report")
+    serp_p.add_argument("domain", nargs="?", help="Domain with an existing site-audit report")
     serp_p.add_argument("--projects-root", default="projects")
+    serp_p.add_argument("--menu", action="store_true",
+                        help="Open an interactive terminal menu that explains and fills common SERP gap options")
     serp_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
     serp_p.add_argument("--url", action="append", default=[],
                         help="Exact page URL to analyze even if it was not in pages.json; repeat for multiple URLs")
@@ -626,6 +980,17 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--budget-usd", type=float, default=None)
     serp_p.add_argument("--dry-run", action="store_true",
                         help="Write a plan without calling SERP providers or fetching competitors")
+    serp_p.add_argument("--ai-agent", action=argparse.BooleanOptionalAction, default=True,
+                        help="Use the OpenRouter-backed AI agent for URL-only keyword inference and editor TODO briefs")
+    serp_p.add_argument("--ai-agent-provider", default="harnext", choices=["harnext", "openrouter"],
+                        help="AI agent provider wrapper (default: harnext, with direct OpenRouter fallback)")
+    serp_p.add_argument("--ai-agent-model", default=DEFAULT_OPENROUTER_MODEL,
+                        help=f"OpenRouter model for AI-agent tasks (default: {DEFAULT_OPENROUTER_MODEL})")
+    serp_p.add_argument("--ai-agent-refresh", action="store_true",
+                        help="Ignore cached AI-agent prompts/completions and call the provider again")
+    serp_p.add_argument("--no-ai-agent-interactive-setup", dest="ai_agent_interactive_setup", action="store_false",
+                        help="Do not prompt for OPENROUTER_API_KEY in interactive runs")
+    serp_p.set_defaults(ai_agent_interactive_setup=True)
     serp_p.set_defaults(func=_serp_gap_command)
 
     serve_p = sub.add_parser("serve", help="Serve the local viewer for a previously-generated report")
