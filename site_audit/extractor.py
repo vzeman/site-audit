@@ -76,6 +76,7 @@ class ExtractedPage:
     date_candidates: list[dict] = field(default_factory=list)
     stat_count: int = 0  # numbers with units / percentages
     paragraphs: list[str] = field(default_factory=list)  # body broken into clean paragraph blocks
+    content_sequence: list[dict] = field(default_factory=list)  # headings + body blocks in DOM order for order/path analysis
     paragraph_link_counts: list[tuple[int, int]] = field(default_factory=list)  # (internal, external) per paragraph, aligned with .paragraphs
     noindex: bool = False  # set when meta robots / X-Robots-Tag asks search engines not to index this URL
     noindex_source: str = ""  # "meta" | "header" | "" — diagnostic only
@@ -346,6 +347,51 @@ def _extract_paragraphs(
         blocks.append(text)
         counts.append((internal, external))
     return blocks, counts
+
+
+def _extract_content_sequence(
+    html_body: str,
+    *,
+    min_paragraph_chars: int = 80,
+    max_chars: int = 900,
+) -> list[dict]:
+    """Return heading and paragraph-like blocks in DOM order.
+
+    The paragraph extractor intentionally filters aggressively for quality.
+    SERP gap order analysis needs a broader but still clean sequence so it can
+    compare the semantic path of headings and body blocks across pages.
+    """
+    soup = BeautifulSoup(html_body, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe", "form"]):
+        tag.decompose()
+
+    sequence: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    order = 0
+    for el in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]):
+        text = _clean(el.get_text(" "))
+        if not text:
+            continue
+        tag_name = str(el.name or "").lower()
+        is_heading = tag_name in {"h1", "h2", "h3", "h4", "h5", "h6"}
+        if is_heading and len(text) > 220:
+            continue
+        if not is_heading and len(text) < min_paragraph_chars:
+            continue
+        text = text[:max_chars]
+        key = (tag_name, text[:180].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        level = int(tag_name[1]) if is_heading else 0
+        sequence.append({
+            "order": order,
+            "entity_type": tag_name if is_heading else "paragraph",
+            "level": level,
+            "text": text,
+        })
+        order += 1
+    return sequence
 
 
 def _schema_types_from_item(item) -> list[str]:
@@ -843,6 +889,7 @@ def extract(
     has_dates = bool(date_candidates)
     stat_count = len(_STAT_RE.findall(body_text))
     paragraphs, paragraph_link_counts = _extract_paragraphs(html_body, url)
+    content_sequence = _extract_content_sequence(html_body)
     link_quality, link_audit_rows = _link_quality(soup, url)
     media_items = _media_items(soup)
     conversion_signals = _conversion_signals(soup, url)
@@ -877,6 +924,7 @@ def extract(
         date_candidates=date_candidates,
         stat_count=stat_count,
         paragraphs=paragraphs,
+        content_sequence=content_sequence,
         paragraph_link_counts=paragraph_link_counts,
         noindex=is_noindex,
         noindex_source=noindex_source,

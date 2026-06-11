@@ -22,6 +22,7 @@ from .embedder import DEFAULT_MODEL
 from .history import compare_snapshots, list_snapshots, save_report_snapshot, write_history_html
 from .pipeline import PipelineConfig, project_paths, run
 from .server import serve
+from .serp_gap import SerpGapConfig, run as run_serp_gap
 from .settings_ui import serve_settings_ui
 
 
@@ -231,6 +232,72 @@ def _compare_command(args: argparse.Namespace) -> int:
     print(f"Wrote {package_path}")
 
     return 0
+
+
+def _serp_gap_command(args: argparse.Namespace) -> int:
+    if not args.domain:
+        print("serp-gap needs a domain.")
+        return 1
+    config = SerpGapConfig(
+        domain=args.domain,
+        projects_root=Path(args.projects_root),
+        model=args.model,
+        urls=args.url,
+        url_include_patterns=args.url_include,
+        url_exclude_patterns=args.url_exclude,
+        keyword_source=args.keyword_source,
+        keywords=args.keyword,
+        keywords_file=Path(args.keywords_file) if args.keywords_file else None,
+        keywords_per_page=args.keywords_per_page,
+        results_per_keyword=args.results_per_keyword,
+        max_pages=args.max_pages,
+        max_competitor_pages=args.max_competitor_pages,
+        max_paragraphs_per_page=args.max_paragraphs_per_page,
+        provider=args.provider,
+        country=args.country,
+        language=args.language,
+        min_ranking_position=args.min_ranking_position,
+        max_ranking_position=args.max_ranking_position,
+        min_impressions=args.min_impressions,
+        min_traffic=args.min_traffic,
+        use_h1_keyword=args.use_h1_keyword,
+        include_serp_keyword_suggestions=args.include_serp_keyword_suggestions,
+        max_serp_keyword_suggestions=args.max_serp_keyword_suggestions,
+        use_ahrefs_metrics=args.use_ahrefs_metrics,
+        ahrefs_refresh=args.ahrefs_refresh,
+        ahrefs_date=args.ahrefs_date,
+        ahrefs_country=args.ahrefs_country,
+        ahrefs_mode=args.ahrefs_mode,
+        ahrefs_top_pages_limit=args.ahrefs_top_pages_limit,
+        ahrefs_keywords_limit=args.ahrefs_keywords_limit,
+        refresh_serp=args.refresh_serp,
+        refresh_competitors=args.refresh_competitors,
+        budget_usd=args.budget_usd,
+        dry_run=args.dry_run,
+    )
+    payload = run_serp_gap(config)
+    status = payload.get("status", "unknown")
+    if status == "missing_base_report":
+        print(payload.get("message", "No existing audit report found."))
+        print(f"Run: site-audit run {args.domain} --search-provider all")
+        return 1
+    if status in {"missing_serper_api_key", "no_pages"}:
+        print(payload.get("message", status))
+        return 1
+
+    summary = payload.get("summary") or {}
+    out_dir = Path(summary.get("report_dir") or (Path(args.projects_root) / domain_slug(args.domain) / "serp_gap" / "report"))
+    print("\nSERP gap complete." if status == "ok" else f"\nSERP gap status: {status}")
+    print(f"  pages selected:      {summary.get('pages_selected', 0)}")
+    print(f"  pages analyzed:      {summary.get('pages_analyzed', 0)}")
+    print(f"  keywords selected:   {summary.get('keywords_selected', 0)}")
+    print(f"  SERP API calls:      {summary.get('serp_api_calls', 0)} total / {summary.get('serp_api_calls_after_cache', 0)} uncached")
+    print(f"  URLs downloaded:     {summary.get('urls_downloaded', 0)}")
+    print(f"  competitor URLs est: {summary.get('competitor_urls_estimated', 0)}")
+    print(f"  missing topics:      {summary.get('missing_topics', 0)}")
+    print(f"  report JSON:         {out_dir / 'serp_gap.json'}")
+    print(f"  HTML report:         {out_dir / 'index.html'}")
+    return 0 if status in {"ok", "dry_run"} else 1
 
 
 def _serve_command(args: argparse.Namespace) -> int:
@@ -503,6 +570,63 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--projects-root", default="projects")
     cmp_p.add_argument("--name", default="latest", help="Subdir under projects/_compare/ to write into (default: latest)")
     cmp_p.set_defaults(func=_compare_command)
+
+    serp_p = sub.add_parser("serp-gap", help="Analyze selected audited pages against live SERP competitors")
+    serp_p.add_argument("domain", help="Domain with an existing site-audit report")
+    serp_p.add_argument("--projects-root", default="projects")
+    serp_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
+    serp_p.add_argument("--url", action="append", default=[],
+                        help="Exact page URL to analyze even if it was not in pages.json; repeat for multiple URLs")
+    serp_p.add_argument("--url-include", "--include-url", action="append", default=[],
+                        help="URL/path glob or regex to include; repeat for OR matching")
+    serp_p.add_argument("--url-exclude", "--exclude-url", action="append", default=[],
+                        help="URL/path glob or regex to exclude; repeat for OR matching")
+    serp_p.add_argument("--keyword-source", default="auto",
+                        choices=["auto", "gsc", "ahrefs", "dataforseo", "google_ads", "h1", "file"],
+                        help="Ranking keyword source (default: auto)")
+    serp_p.add_argument("--keyword", action="append", default=[],
+                        help="Suggested keyword to analyze for every selected page; repeat for multiple keywords")
+    serp_p.add_argument("--keywords-file", default=None,
+                        help="Optional TSV with url<TAB>keyword rows, or one keyword per line")
+    serp_p.add_argument("--keywords-per-page", type=int, default=3)
+    serp_p.add_argument("--results-per-keyword", type=int, default=5)
+    serp_p.add_argument("--max-pages", type=int, default=20)
+    serp_p.add_argument("--max-competitor-pages", type=int, default=100)
+    serp_p.add_argument("--max-paragraphs-per-page", type=int, default=80)
+    serp_p.add_argument("--provider", default="auto", choices=["auto", "serper", "dataforseo"])
+    serp_p.add_argument("--country", default=None, help="SERP country code/name. For DataForSEO, numeric location code is also accepted.")
+    serp_p.add_argument("--language", default=None, help="SERP language code, e.g. en")
+    serp_p.add_argument("--min-ranking-position", type=int, default=1)
+    serp_p.add_argument("--max-ranking-position", type=int, default=30)
+    serp_p.add_argument("--min-impressions", type=int, default=0)
+    serp_p.add_argument("--min-traffic", type=float, default=0.0)
+    serp_p.add_argument("--use-h1-keyword", action="store_true",
+                        help="Also use the page title/H1 as a synthetic keyword candidate")
+    serp_p.add_argument("--include-serp-keyword-suggestions", action="store_true",
+                        help="Also analyze People Also Ask and People Also Search keyword suggestions from SERP payloads")
+    serp_p.add_argument("--max-serp-keyword-suggestions", type=int, default=8,
+                        help="Max SERP keyword suggestions to add per page when --include-serp-keyword-suggestions is enabled")
+    serp_p.add_argument("--use-ahrefs-metrics", action="store_true",
+                        help="Fetch/reuse Ahrefs metrics and attach matching keyword traffic/volume to the SERP gap report")
+    serp_p.add_argument("--ahrefs-refresh", action="store_true",
+                        help="Ignore cached Ahrefs snapshots when --use-ahrefs-metrics is enabled")
+    serp_p.add_argument("--ahrefs-date", default=None,
+                        help="Ahrefs report date in YYYY-MM-DD. Default: reuse latest cache, otherwise today")
+    serp_p.add_argument("--ahrefs-country", default=None,
+                        help="Optional Ahrefs country code, e.g. US, GB, SK")
+    serp_p.add_argument("--ahrefs-mode", default="subdomains",
+                        choices=["exact", "prefix", "domain", "subdomains"],
+                        help="Ahrefs target mode (default: subdomains)")
+    serp_p.add_argument("--ahrefs-top-pages-limit", type=int, default=1000,
+                        help="Rows to request from Ahrefs top-pages (default: 1000)")
+    serp_p.add_argument("--ahrefs-keywords-limit", type=int, default=1000,
+                        help="Rows to request from Ahrefs organic-keywords (default: 1000)")
+    serp_p.add_argument("--refresh-serp", action="store_true")
+    serp_p.add_argument("--refresh-competitors", action="store_true")
+    serp_p.add_argument("--budget-usd", type=float, default=None)
+    serp_p.add_argument("--dry-run", action="store_true",
+                        help="Write a plan without calling SERP providers or fetching competitors")
+    serp_p.set_defaults(func=_serp_gap_command)
 
     serve_p = sub.add_parser("serve", help="Serve the local viewer for a previously-generated report")
     serve_p.add_argument("domain", nargs="?", help="Domain whose report to serve")

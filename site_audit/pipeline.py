@@ -65,6 +65,7 @@ from .conversion_balance import build_conversion_balance
 from .paragraph_clustering import (
     cluster_and_label as cluster_paragraphs,
     project_paragraphs,
+    to_overlap_payload as paragraph_cluster_overlap_payload,
     to_scatter_payload as paragraph_scatter_payload,
     to_summary_payload as paragraph_clusters_payload,
 )
@@ -777,6 +778,7 @@ def run(config: PipelineConfig) -> dict:
 
     # 11b) Paragraph topic clustering + scatter
     paragraph_clusters_data: list = []
+    paragraph_cluster_overlap_data: dict = {}
     paragraph_scatter_data: dict = {}
     if config.enable_paragraph_clustering and paragraph_records and len(paragraph_records) >= 8:
         para_cluster_labels, para_cluster_summaries = cluster_paragraphs(
@@ -784,6 +786,7 @@ def run(config: PipelineConfig) -> dict:
             num_clusters=config.paragraph_num_clusters,
         )
         paragraph_clusters_data = paragraph_clusters_payload(para_cluster_summaries)
+        paragraph_cluster_overlap_data = paragraph_cluster_overlap_payload(para_cluster_summaries)
         cluster_label_lookup = {
             s.cluster_id: ", ".join(k["keyword"] for k in s.keywords[:3])
             for s in para_cluster_summaries
@@ -1688,6 +1691,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_link_recs=paragraph_recs_payload,
         cluster_overlap=cluster_overlap,
         paragraph_clusters=paragraph_clusters_data,
+        paragraph_cluster_overlap=paragraph_cluster_overlap_data,
         paragraph_scatter=paragraph_scatter_data,
         paragraph_fanout=paragraph_fanout_payload,
         paragraph_impact=paragraph_impact_data,
@@ -1751,6 +1755,7 @@ def run(config: PipelineConfig) -> dict:
             paragraph_link_recs=paragraph_recs_payload,
             cluster_overlap=cluster_overlap,
             paragraph_clusters=paragraph_clusters_data,
+            paragraph_cluster_overlap=paragraph_cluster_overlap_data,
             paragraph_scatter=paragraph_scatter_data,
             paragraph_fanout=paragraph_fanout_payload,
             paragraph_impact=paragraph_impact_data,

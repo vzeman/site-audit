@@ -200,6 +200,22 @@
     }
 
     .heat { background-color: var(--bg, #fff); }
+
+    .section-guide {
+      margin-top: 0.65rem;
+      color: var(--audit-muted);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      max-width: 58rem;
+    }
+
+    .chart-guide {
+      color: var(--audit-muted);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      margin: 0.25rem 0 0.5rem;
+      max-width: 44rem;
+    }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -270,6 +286,9 @@
             Metrics with the largest normalized distance between the leading and trailing domain.
             Use this as the fastest list of competitive advantages and weaknesses.
           </p>
+          <p class="section-guide">
+            How to read it: Leader and Trailing show the raw values in the metric's own unit. The Gap column is a relative spread used only for ranking this table; when one side is zero it can show 100%, so judge the row by the raw Leader/Trailing values and then open the linked report sections for page-level evidence.
+          </p>
         </div>
       </div>
       <div class="overflow-x-auto">
@@ -306,15 +325,20 @@
         <p class="text-xs text-gray-500 mt-1" id="performance-explainer-compare-meta">
           Cross-domain feature importance from local correlation models. These are estimates, not direct ranking factors.
         </p>
+        <p class="section-guide">
+          How to read it: each heatmap row is a factor the local model found useful when explaining traffic differences. Green cells are factors that correlate with stronger performance, red cells correlate with weaker performance, and darker cells matter more. Use this to form hypotheses, then validate them against the page table and individual reports before changing templates.
+        </p>
       </div>
       <div id="performance-explainer-domain-summary" class="grid md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5 text-xs"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-5">
         <div>
           <h3 class="text-sm font-semibold mb-1">Feature importance by domain</h3>
+          <p class="chart-guide">Rows are features such as content, link, schema, or performance signals. Compare across a row to see which domain's model relies most on that signal.</p>
           <div id="performance-explainer-feature-chart" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Section contribution patterns</h3>
+          <p class="chart-guide">Rows group feature effects by report section. Strong red sections are likely drag factors; strong green sections are likely patterns worth preserving or copying.</p>
           <div id="performance-explainer-cluster-chart" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
         </div>
       </div>
@@ -332,6 +356,9 @@
         <h2 class="text-xl font-semibold">Unified action board</h2>
         <p class="text-xs text-gray-500 mt-1" id="action-board-meta">
           Recommendations from every domain ranked by priority, impact, confidence, effort, and risk.
+        </p>
+        <p class="section-guide">
+          What this shows: every recommendation from every individual audit is converted into one delivery queue. The scatter plot is impact vs effort: upper-left actions are high-impact and lower-effort, upper-right actions are high-impact but heavier projects, and lower quadrants are lower-return cleanup. Bubble size is mapped traffic opportunity, color is action category, and a dark outline marks high-priority work. Use the filters to choose one domain or owner, then sort the table by priority for the next sprint or by effort for quick wins.
         </p>
       </div>
       <div id="action-board-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
@@ -357,6 +384,7 @@
         </select>
         <button id="compare-action-export" type="button" class="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50">Export CSV</button>
       </div>
+      <div class="chart-guide">X-axis = effort score; Y-axis = expected impact. Larger bubbles touch more mapped traffic. Hover a bubble for the exact action, then use the table below for implementation details.</div>
       <div id="compare-action-matrix" class="w-full mb-4" style="min-height: 320px;"></div>
       <div class="overflow-x-auto border border-gray-100 rounded">
         <table class="min-w-full text-xs" id="compare-action-table">
@@ -372,6 +400,9 @@
         <h2 class="text-xl font-semibold">Cross-domain SEO playbooks</h2>
         <p class="text-xs text-gray-500 mt-1" id="seo-playbooks-meta">
           Reusable execution patterns grouped from winning pages, template patterns, link rules, schema gaps, paragraph archetypes, and prioritized fixes.
+        </p>
+        <p class="section-guide">
+          How to use it: each playbook is a repeatable pattern, not a one-off page fix. Start with high expected-benefit playbooks that affect several targets, assign an owner, then use the target list and acceptance criteria as the implementation checklist.
         </p>
       </div>
       <div id="seo-playbooks-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
@@ -402,14 +433,19 @@
         <p class="text-xs text-gray-500 mt-1">
           Schema type coverage, invalid JSON-LD, and opportunity counts across compared domains and keyword clusters.
         </p>
+        <p class="section-guide">
+          How to read it: coverage charts show where a domain already uses schema types or where whole clusters lack schema support. Treat invalid JSON-LD as repair work first; treat missing schema on high-demand clusters as enhancement work only when the visible page content supports that schema type.
+        </p>
       </div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Schema type coverage</h3>
+          <p class="chart-guide">Rows are schema types and columns are domains. Darker cells mean more pages use that schema type; pale cells mean light usage; blank cells mean absent. Use this to spot schema types competitors use consistently that a target domain never emits.</p>
           <div id="schema-type-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster schema coverage</h3>
+          <p class="chart-guide">Rows are keyword/content clusters. Color strength reflects schema coverage and opportunity volume in that cluster: darker problem cells mean more pages or demand are affected. Start with clusters that combine low coverage with high-priority opportunities.</p>
           <div id="schema-cluster-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
         </div>
       </div>
@@ -428,10 +464,14 @@
         <p class="text-xs text-gray-500 mt-1">
           Visible trust, expertise, evidence, and proof signals compared by cluster and domain.
         </p>
+        <p class="section-guide">
+          How to read it: cluster scores summarize visible proof such as author, company, source, case-study, citation, and evidence signals. Low-scoring high-traffic clusters should get named evidence, not generic trust badges.
+        </p>
       </div>
       <div class="grid xl:grid-cols-2 gap-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster trust score</h3>
+          <p class="chart-guide">Rows are clusters, columns are domains, and cell strength reflects visible trust score. Darker green/stronger cells have better evidence signals; weaker cells need proof such as sources, author/company detail, case evidence, testimonials, stats, or citations.</p>
           <div id="trust-cluster-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
         </div>
         <div>
@@ -453,7 +493,11 @@
         <p class="text-xs text-gray-500 mt-1">
           Cluster-level conversion support for pages with search demand. Higher cells mean more traffic lands on pages with clear next steps.
         </p>
+        <p class="section-guide">
+          How to read it: the chart compares SEO support with conversion support for traffic-bearing clusters. Strong SEO with weak conversion means users can arrive but lack a clear next action; strong conversion with weak SEO means the page may need better discovery or internal support.
+        </p>
       </div>
+      <div class="chart-guide">Rows are clusters and columns are domains. Darker/high cells mean traffic-bearing pages in that cluster have clearer conversion support. Low or pale cells indicate search traffic landing on pages without enough next-step clarity.</div>
       <div id="conversion-balance-compare-chart" class="w-full overflow-x-auto mb-5" style="min-height: 340px;"></div>
       <div class="overflow-x-auto border border-gray-100 rounded">
         <table class="min-w-full text-xs" id="conversion-balance-risk-table">
@@ -470,17 +514,20 @@
         <p class="text-xs text-gray-500 mt-1">
           Cached Ahrefs estimates by domain, directory, and topic cluster. These charts show where each site has actual organic demand, not just content volume.
         </p>
+        <p class="section-guide">
+          How to use this section: start with traffic and keyword charts to identify where competitors already have demand, then use the semantic maps to see whether your visible content vocabulary overlaps with that demand. Dots that sit near competitor keywords but lack your domain color are likely content or naming gaps.
+        </p>
       </div>
       <div id="search-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Directory traffic</h3>
-          <p class="text-xs text-gray-500 mb-2">Top directories across all compared domains, ranked by estimated organic traffic.</p>
+          <p class="text-xs text-gray-500 mb-2">Top directories across all compared domains, ranked by estimated organic traffic. Bar length is traffic volume; color identifies the domain. Use this to see which URL areas carry demand, then compare whether the same directory pattern exists on weaker domains.</p>
           <div id="search-dir-chart" class="w-full" style="min-height: 420px;"></div>
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster traffic</h3>
-          <p class="text-xs text-gray-500 mb-2">Bubble size and y-axis use Ahrefs traffic; x-axis is matched page count in that cluster.</p>
+          <p class="text-xs text-gray-500 mb-2">Each dot is a domain/cluster combination. X-axis = matched ranking pages, Y-axis = estimated Ahrefs traffic, bubble size = the same traffic signal, and color = domain. Big high dots show clusters where a domain gets a lot of demand from relatively few pages; low wide clusters may indicate content volume without much traffic.</p>
           <div id="search-cluster-chart" class="w-full" style="min-height: 420px;"></div>
         </div>
       </div>
@@ -488,6 +535,7 @@
         <h3 class="text-sm font-semibold mb-1">Cross-domain keyword/content semantic map</h3>
         <p class="text-xs text-gray-500 mb-2">
           Keywords, page titles, pages, headers, paragraphs, and link titles from every domain projected in one vector space. Color = entity type, outline = domain, dot size = traffic or usage.
+          Distance means semantic similarity: nearby keywords and visible content are talking about similar concepts. If competitor keywords cluster away from your titles/headings/paragraphs, that is a vocabulary or content-coverage gap. Large keyword dots indicate higher traffic demand.
         </p>
         <div class="mb-2 flex flex-wrap items-center gap-3">
           <label for="ahrefs-semantic-compare-search" class="text-xs font-medium text-gray-600">Find dots</label>
@@ -502,22 +550,22 @@
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity-type alignment comparison</h3>
-        <p class="text-xs text-gray-500 mb-2">Average keyword alignment by visible entity type. Higher means titles, headings, paragraphs, and anchors reinforce ranking demand with similar vocabulary.</p>
+        <p class="text-xs text-gray-500 mb-2">Grouped bars compare entity types such as titles, headings, paragraphs, links, and keywords. Bar height is average semantic alignment to ranking demand on a 0-1 scale; color identifies the domain. The dashed red line is the mismatch threshold: bars below it mean that entity type is using vocabulary too far from the keywords/pages driving demand.</p>
         <div id="entity-alignment-compare" class="w-full" style="min-height:360px;"></div>
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Entity coverage heatmap</h3>
-        <p class="text-xs text-gray-500 mb-2">Expected topic entities by domain. Darker cells mean a domain uses that entity more strongly in its same-cluster pages.</p>
+        <p class="text-xs text-gray-500 mb-2">Rows are expected topic entities found across same-cluster pages, columns are domains. Cell color hue is the domain color; color strength/opacity is entity weight. Darker cells mean the entity appears more strongly or more often in that domain's relevant pages. Very pale or blank cells mean the entity is missing or weak, which is a candidate paragraph, heading, example, or FAQ addition if the entity is relevant to the target page.</p>
         <div id="entity-coverage-compare" class="w-full overflow-x-auto" style="min-height:360px;"></div>
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Information gain by domain and cluster</h3>
-        <p class="text-xs text-gray-500 mb-2">Originality score by cluster. Low cells indicate generic, duplicated, or evidence-light content compared with same-cluster pages.</p>
+        <p class="text-xs text-gray-500 mb-2">Rows are semantic clusters and columns are domains. The number is the average information-gain score for that domain inside the cluster. Color uses a red to yellow to green scale: red = low originality/evidence, yellow = middling, green = stronger unique value. Stronger green means pages are more differentiated from same-cluster content through specificity, examples, data, or useful detail; gray cells mean no usable score for that domain/cluster. Prioritize red or pale cells in high-traffic clusters.</p>
         <div id="information-gain-compare" class="w-full overflow-x-auto" style="min-height:320px;"></div>
       </div>
       <div class="mt-6">
         <h3 class="text-sm font-semibold mb-1">Answer-block coverage by domain and cluster</h3>
-        <p class="text-xs text-gray-500 mb-2">Share of top cluster queries with a strong snippet-ready answer block. Darker green means most target queries have extractable answers.</p>
+        <p class="text-xs text-gray-500 mb-2">Rows are clusters and columns are domains. Each cell shows the share of top queries in that cluster that have a strong, extractable answer block. Color uses red to yellow to green: red = few or no strong answer blocks, yellow = partial coverage, green = broad coverage. Blank/gray cells mean no query data for that domain/cluster. Red cells with many query opportunities are good targets for concise definitions, comparisons, steps, FAQs, or summary blocks.</p>
         <div id="answer-blocks-compare" class="w-full overflow-x-auto" style="min-height:320px;"></div>
       </div>
       <div class="mt-6">
@@ -535,14 +583,17 @@
         <p class="text-xs text-gray-500 mt-1">
           Normalized cluster strength across domains with raw traffic, keyword demand, page depth, freshness, conversion, entity coverage, and internal-link support preserved for drilldown.
         </p>
+        <p class="section-guide">
+          How to read it: this section asks who owns each topic cluster. Use the bubble view to see where clusters sit in semantic space, the matrix to compare domain strength for the same cluster, and the drilldown to inspect the pages and keywords behind the winning score.
+        </p>
       </div>
       <div id="strongest-cluster-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6 text-xs"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
-            <div>
-              <h3 class="text-sm font-semibold">Semantic cluster facets</h3>
-              <p class="text-xs text-gray-500">Each facet uses the same semantic coordinates; dot size is organic traffic.</p>
+          <div>
+            <h3 class="text-sm font-semibold">Semantic cluster facets</h3>
+              <p class="text-xs text-gray-500">Each facet uses the same semantic coordinates; dot size is organic traffic. Changing the selector recolors or ranks the same cluster map by another metric, so movement does not change, only interpretation does.</p>
             </div>
             <select id="strongest-cluster-metric" class="rounded border border-gray-300 px-2 py-1 text-xs"></select>
           </div>
@@ -550,7 +601,7 @@
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster strength matrix</h3>
-          <p class="text-xs text-gray-500 mb-2">Darker cells are stronger normalized ownership inside that domain. Cell labels keep the raw traffic visible.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows are shared clusters and columns are domains. Darker cells are stronger normalized ownership inside that domain, combining traffic, keyword footprint, support, and readiness signals. The cell label keeps raw traffic visible so a dark low-traffic niche is not confused with a high-demand winner.</p>
           <div id="strongest-cluster-matrix" class="w-full overflow-x-auto" style="min-height: 430px;"></div>
         </div>
       </div>
@@ -584,6 +635,9 @@
         <p class="text-xs text-gray-500 mt-1">
           Patterns from the strongest domain or cluster that are missing on weaker domains, grouped by content, links, schema, freshness, and conversion.
         </p>
+        <p class="section-guide">
+          How to use it: each card identifies a competitor pattern and the domains where that pattern is missing. Copy the underlying function of the pattern, not the exact wording: add the missing heading, proof, schema, answer block, freshness signal, or link support in a way that fits the target page.
+        </p>
       </div>
       <div id="winning-pattern-summary" class="grid md:grid-cols-2 xl:grid-cols-5 gap-4 mb-6 text-xs"></div>
       <div class="grid xl:grid-cols-2 gap-6">
@@ -594,7 +648,7 @@
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Coverage by domain</h3>
-          <p class="text-xs text-gray-500 mb-2">Source domains are covered; gap cells show where recommendations exist.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows are transferable patterns and columns are domains. Covered cells mean the pattern is already present or represented; gap cells mean a recommendation exists. Use darker or repeated gap rows to identify template-level work rather than isolated copy edits.</p>
           <div id="winning-pattern-coverage" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
         </div>
       </div>
@@ -605,6 +659,9 @@
         <h2 class="text-xl font-semibold">Keyword-to-content gap matrix</h2>
         <p class="text-xs text-gray-500 mt-1">
           Cluster support by domain across titles, headings, paragraphs, entities, schema, answer blocks, links, freshness, and conversion.
+        </p>
+        <p class="section-guide">
+          How to read it: each cell is a readiness score for one domain in one keyword cluster. Dark cells mean the domain has enough visible support for that cluster; pale or empty cells mean missing content elements. Click a weak cell to see exactly which headings, entities, paragraphs, schema, answer blocks, links, or conversion signals are missing.
         </p>
       </div>
       <div class="flex flex-wrap items-end gap-3 mb-4 text-xs">
@@ -624,7 +681,7 @@
       <div class="grid xl:grid-cols-2 gap-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Support heatmap</h3>
-          <p class="text-xs text-gray-500 mb-2">Click any cell to inspect missing elements and target recommendations.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows are keyword clusters and columns are domains. Color strength is the domain's content-readiness score for that cluster: darker means stronger support across titles, headings, paragraphs, entities, schema, links, freshness, and conversion. Click weak cells to inspect missing elements and target recommendations.</p>
           <div id="keyword-content-matrix" class="w-full overflow-x-auto" style="min-height: 430px;"></div>
         </div>
         <div>
@@ -641,6 +698,9 @@
         <p class="text-xs text-gray-500 mt-1">
           Section archetypes found in ranking pages, compared by keyword cluster and domain with missing-section recommendations.
         </p>
+        <p class="section-guide">
+          How to read it: rows are repeatable paragraph roles, such as definitions, comparison blocks, implementation steps, examples, or proof sections. Dark cells mean that domain already uses that section type for the cluster; empty cells are section gaps you can fill without guessing page structure from scratch.
+        </p>
       </div>
       <div class="flex flex-wrap items-end gap-3 mb-4 text-xs">
         <label class="block">
@@ -655,7 +715,7 @@
       <div class="grid xl:grid-cols-2 gap-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Archetype coverage matrix</h3>
-          <p class="text-xs text-gray-500 mb-2">Rows combine keyword cluster and section type; darker cells have more matching paragraph examples.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows combine keyword cluster and section type; columns are domains. Darker cells have more matching paragraph examples for that role. Empty cells mean the site may have the topic but lacks that section role, such as examples, steps, proof, comparison, or definition.</p>
           <div id="paragraph-archetype-matrix" class="w-full overflow-x-auto" style="min-height: 430px;"></div>
         </div>
         <div>
@@ -672,12 +732,15 @@
         <p class="text-xs text-gray-500 mt-1">
           Normalized architecture metrics by domain and cluster: orphan/dead-end rates, PageRank concentration, contextual share, money-page support, and high-demand low-link gaps.
         </p>
+        <p class="section-guide">
+          How to read it: this section checks whether internal links support important pages, not just whether pages exist. Prioritize clusters with high demand but low support, source-target opportunities with high expected benefit, and hub risks where too much authority depends on a small number of pages.
+        </p>
       </div>
       <div id="internal-architecture-scorecards" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Architecture scorecard</h3>
-          <p class="text-xs text-gray-500 mb-2">Higher scores combine crawlability, balanced authority, contextual links, demand support, resilience, and money-page support.</p>
+          <p class="text-xs text-gray-500 mb-2">Bars compare normalized architecture health by domain. Higher scores combine crawlability, balanced authority, contextual links, demand support, resilience, and money-page support. Use low bars to decide which domain needs architecture cleanup before adding more content.</p>
           <div id="internal-architecture-score-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
         <div>
@@ -689,7 +752,7 @@
       <div class="grid xl:grid-cols-2 gap-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster connectivity heatmap</h3>
-          <p class="text-xs text-gray-500 mb-2">Darker cells have stronger inbound/internal support after penalties for orphan pages and demand gaps.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows are clusters and columns are domains. Color uses a blue-green scale where darker cells have stronger inbound/internal support after penalties for orphan pages and demand gaps. Orange outlines mark cells with opportunity traffic, meaning the cluster has demand that is not fully supported by internal links.</p>
           <div id="cluster-connectivity-heatmap" class="w-full overflow-x-auto" style="min-height: 420px;"></div>
         </div>
         <div>
@@ -712,12 +775,15 @@
         <p class="text-xs text-gray-500 mt-1">
           Search-demand, SERP, internal-link, and page-readiness gaps derived from cached provider data plus the crawled audit signals.
         </p>
+        <p class="section-guide">
+          How to use it: start with keyword-cluster gaps to choose the topic, then use section diffs and keyword gaps to decide what to build, and finally use authority/link tables to decide where to link from. This is the bridge from competitor evidence to concrete page and internal-link work.
+        </p>
       </div>
       <div id="opportunity-summary" class="grid md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Keyword-cluster gap matrix</h3>
-          <p class="text-xs text-gray-500 mb-2">Coverage score by cluster and domain. Darker cells identify who owns a cluster; cell labels show score and traffic.</p>
+          <p class="text-xs text-gray-500 mb-2">Rows are keyword clusters and columns are domains. Color strength is coverage score: darker cells identify who owns a cluster, pale cells are under-covered, and blank cells usually mean no usable matching page. Cell labels show score and traffic so you can separate high-demand gaps from low-demand cleanup.</p>
           <div id="keyword-cluster-gap-chart" class="w-full overflow-x-auto" style="min-height: 390px;"></div>
         </div>
         <div>
@@ -754,26 +820,26 @@
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">SERP feature ownership</h3>
-          <p class="text-xs text-gray-500 mb-2">Stacked by estimated keyword traffic, so AI Overviews, questions, videos, and other SERP features are comparable by domain.</p>
+          <p class="text-xs text-gray-500 mb-2">Stacked bars group estimated keyword traffic by SERP feature and domain. Taller stacks mean more demand attached to that feature. If a competitor has traffic in AI Overview, question, video, or rich-result rows and your domain is absent, that feature may need a matching content format or schema pattern.</p>
           <div id="serp-feature-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
       </div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Cluster efficiency</h3>
-          <p class="text-xs text-gray-500 mb-2">Traffic per page by topic cluster. Dot size is total traffic.</p>
+          <p class="text-xs text-gray-500 mb-2">Each dot is a domain/cluster pair. X-axis is page count, Y-axis is traffic per page, dot size is total traffic, and color is domain. High dots with few pages are efficient winners; low dots with many pages indicate content sprawl or weak ranking performance.</p>
           <div id="cluster-efficiency-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-1">Directory efficiency</h3>
-          <p class="text-xs text-gray-500 mb-2">Traffic per page by directory. Dot size is total traffic.</p>
+          <p class="text-xs text-gray-500 mb-2">Each dot is a domain/directory pair. X-axis is page count, Y-axis is traffic per page, dot size is total traffic, and color is domain. Use this to find directories that produce demand efficiently and directories where many pages produce little organic value.</p>
           <div id="directory-efficiency-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
       </div>
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Authority vs search demand</h3>
-          <p class="text-xs text-gray-500 mb-2">Traffic percentile vs weighted PageRank percentile. Dot size is traffic; high upper-left dots need stronger internal authority.</p>
+          <p class="text-xs text-gray-500 mb-2">Each dot is a ranking page. X-axis = weighted PageRank/internal authority percentile, Y-axis = traffic percentile, dot size = traffic, and color = domain. Upper-left dots are important pages with weak internal authority; lower-right dots are pages receiving authority without matching demand.</p>
           <div id="authority-demand-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
         <div>
@@ -800,7 +866,7 @@
       <div class="grid xl:grid-cols-2 gap-6 mb-6">
         <div>
           <h3 class="text-sm font-semibold mb-1">Demand/support quadrant</h3>
-          <p class="text-xs text-gray-500 mb-2">Demand score vs internal support score. Dot size is traffic; red/orange dots need new contextual links.</p>
+          <p class="text-xs text-gray-500 mb-2">Each dot is a page or page opportunity. X-axis = internal support score, Y-axis = search demand score, dot size = traffic, and color indicates classification. Upper-left red/orange dots have high demand but weak internal support and should get contextual links from relevant hubs.</p>
           <div id="demand-support-compare-chart" class="w-full" style="min-height: 390px;"></div>
         </div>
         <div>
@@ -894,6 +960,9 @@
           One hierarchical edge-bundling view per domain. Edge thickness = number of internal links between selected pages,
           target dot size/color = organic traffic, so you can see whether link authority is flowing into pages with search demand.
         </p>
+        <p class="section-guide">
+          How to read it: bundled lines show link flow between selected pages, directories, or clusters. Dense bundles into high-traffic dots are useful support; dense bundles into low-demand pages may be wasted authority. Switch edge mode to contextual, traffic-weighted, or high-demand gaps to isolate the links that matter operationally.
+        </p>
       </div>
       <div class="flex flex-wrap gap-2 mb-4 text-xs">
         <select id="compare-linkflow-directory-filter" class="border border-gray-300 rounded px-2 py-1 bg-white"></select>
@@ -920,6 +989,9 @@
             an island far from the others is either covering a unique niche or has off-topic content.
             Use the chips on the right to toggle individual domains in / out.
           </p>
+          <p class="section-guide">
+            How to read it: each dot is a page, and distance means semantic similarity, not URL structure. Mixed-color neighborhoods show direct topic overlap; single-color islands show unique or isolated content. Search for a topic or page title, then inspect whether competitors have nearby pages you do not.
+          </p>
         </div>
         <div class="flex gap-2 text-xs" id="sc-domain-toggles" role="group"></div>
       </div>
@@ -940,6 +1012,9 @@
           Same shared page UMAP as the combined semantic scatter. Fill color = freshness bucket, dot size = organic traffic,
           stroke color = domain. This shows whether high-traffic content clusters are fresh, aging, stale, or missing date signals.
         </p>
+        <p class="section-guide">
+          How to read it: large orange, red, or gray dots are the priority because they combine traffic with stale or missing date evidence. Clusters of stale dots usually indicate a template or editorial-maintenance issue, while isolated stale dots are page-level refresh candidates.
+        </p>
       </div>
       <div id="freshness-scatter" class="w-full" style="min-height: 620px;"></div>
       <div class="mt-2 flex flex-wrap items-center gap-3">
@@ -959,6 +1034,9 @@
           <p class="text-xs text-gray-500 mt-1">
             Stacked bars show each domain's freshness buckets as a share of analyzed pages. Missing dates are included because pages without dates cannot be trusted as fresh.
           </p>
+          <p class="section-guide">
+            How to read it: compare the mix of fresh, aging, stale, very stale, and missing-date pages across domains. A high missing-date share may be a markup/template issue; a high stale share is an editorial refresh backlog.
+          </p>
         </div>
       </div>
       <div id="freshness-compare-chart" class="w-full" style="min-height: 380px;"></div>
@@ -971,6 +1049,9 @@
         <p class="text-xs text-gray-500 mt-1">
           Traffic-weighted section freshness risk by semantic cluster and domain. Darker cells mean stale or missing-update evidence on important content sections.
         </p>
+        <p class="section-guide">
+          How to read it: darker cells are where freshness problems affect more important content. Prioritize dark cells tied to traffic-bearing clusters before refreshing low-demand pages.
+        </p>
       </div>
       <div id="freshness-impact-compare" class="w-full overflow-x-auto" style="min-height: 360px;"></div>
     </section>
@@ -980,6 +1061,9 @@
         <h2 class="text-xl font-semibold">Cannibalization by domain</h2>
         <p class="text-xs text-gray-500 mt-1">
           Intent conflict classes and traffic at risk. Localized and product variants are separated so actionable merge/canonical candidates stay visible.
+        </p>
+        <p class="section-guide">
+          How to read it: cells show where multiple pages appear to compete for the same intent. Rows with traffic at risk should be reviewed for consolidation, canonical cleanup, internal-link clarification, or clearer page targeting.
         </p>
       </div>
       <div id="cannibalization-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
@@ -991,6 +1075,9 @@
         <p class="text-xs text-gray-500 mt-1">
           Repeated fragment classes across domains, split into reusable patterns and low-value boilerplate.
         </p>
+        <p class="section-guide">
+          How to read it: reusable patterns can be promoted into templates, but harmful boilerplate should be reduced because it weakens page uniqueness. Compare domains to see whether duplication is a site-wide template issue or isolated copy reuse.
+        </p>
       </div>
       <div id="duplicate-fragments-compare" class="w-full overflow-x-auto" style="min-height: 320px;"></div>
     </section>
@@ -1000,6 +1087,9 @@
         <h2 class="text-xl font-semibold">Template success patterns by domain</h2>
         <p class="text-xs text-gray-500 mt-1">
           Structural features that repeatedly appear on high-performing pages, with lift and recommendations by domain.
+        </p>
+        <p class="section-guide">
+          How to read it: patterns are page or template features associated with stronger pages inside each domain. Use high-confidence patterns as design/content QA checks; low-confidence patterns are prompts for manual review, not automatic rules.
         </p>
       </div>
       <div id="template-patterns-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
@@ -1011,6 +1101,9 @@
         <p class="text-xs text-gray-500 mt-1">
           Repeatable source-type to target-type link rules mined from high-performing pages, with missing-pattern recommendations by domain.
         </p>
+        <p class="section-guide">
+          How to read it: this shows recurring internal-link structures, such as hub-to-service or blog-to-product support. Missing-pattern recommendations are useful when the target domain has similar pages but lacks the same support path.
+        </p>
       </div>
       <div id="internal-link-patterns-compare" class="w-full overflow-x-auto" style="min-height: 340px;"></div>
     </section>
@@ -1020,6 +1113,9 @@
         <h2 class="text-xl font-semibold">Pattern transplant recommendations</h2>
         <p class="text-xs text-gray-500 mt-1">
           Proven template and internal-link patterns matched to similar pages on domains where the same pattern is missing.
+        </p>
+        <p class="section-guide">
+          How to use it: treat each card as a transplant candidate. The source side explains why the pattern appears valuable; the target side lists pages where adding the same type of element or link rule is likely to help.
         </p>
       </div>
       <div id="pattern-transplant-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
@@ -1033,15 +1129,20 @@
         <p class="text-xs text-gray-500 mt-1" id="best-page-engineering-meta">
           Top-performing pages compared by cluster. Explanations separate observed correlation from causation and turn winner patterns into copy/avoid recommendations.
         </p>
+        <p class="section-guide">
+          How to read it: pick a cluster winner in the matrix, then compare its page structure, evidence, links, and conversion support against weaker pages. Transfer recommendations are patterns to adapt, while avoid notes flag overused or harmful structures.
+        </p>
       </div>
       <div id="best-page-engineering-summary" class="grid md:grid-cols-4 gap-3 mb-4 text-xs"></div>
       <div class="grid xl:grid-cols-2 gap-5 mb-5">
         <div>
           <h3 class="text-sm font-semibold mb-2">Cluster winner matrix</h3>
+          <p class="chart-guide">Rows are keyword/content clusters. The strongest cell identifies the current best page pattern to inspect for that cluster.</p>
           <div id="best-page-cluster-matrix" class="overflow-x-auto" style="min-height: 360px;"></div>
         </div>
         <div>
           <h3 class="text-sm font-semibold mb-2">Winning pages</h3>
+          <p class="chart-guide">Cards summarize the pages that supply the strongest evidence for transferable patterns.</p>
           <div id="best-page-compare-cards" class="grid md:grid-cols-2 gap-3 text-xs max-h-[34rem] overflow-y-auto"></div>
         </div>
       </div>
@@ -1062,11 +1163,14 @@
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div>
           <h2 class="text-xl font-semibold">Distribution overlays</h2>
-          <p class="text-xs text-gray-500 mt-1">
-            Each line is one domain's distribution of the chosen metric across its pages, normalised to <em>share of pages</em>
-            so different-sized sites can be compared honestly. The y-axis is "what share of pages had this value".
-          </p>
-        </div>
+        <p class="text-xs text-gray-500 mt-1">
+          Each line is one domain's distribution of the chosen metric across its pages, normalised to <em>share of pages</em>
+          so different-sized sites can be compared honestly. The y-axis is "what share of pages had this value".
+        </p>
+        <p class="section-guide">
+          How to read it: choose a metric, then compare curve shape rather than total count. A curve shifted right means more pages have higher values; a tall narrow spike means the site is consistent; a long tail means a minority of pages have extreme values worth inspecting.
+        </p>
+      </div>
         <div class="flex gap-2 text-xs flex-wrap" id="dist-buttons" role="group">
           <button data-dist="in_degree"     class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Inbound links / page</button>
           <button data-dist="out_degree"    class="dist-btn px-2 py-1 rounded border border-gray-300 bg-white">Outbound links / page</button>

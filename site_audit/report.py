@@ -531,6 +531,7 @@ def write_all(
     paragraph_link_recs: Optional[list] = None,
     cluster_overlap: Optional[dict] = None,
     paragraph_clusters: Optional[list] = None,
+    paragraph_cluster_overlap: Optional[dict] = None,
     paragraph_scatter: Optional[dict] = None,
     paragraph_fanout: Optional[list] = None,
     paragraph_impact: Optional[dict] = None,
@@ -600,6 +601,8 @@ def write_all(
         _write_json(output_dir / "cluster_overlap.json", cluster_overlap)
     if paragraph_clusters is not None:
         _write_json(output_dir / "paragraph_clusters.json", paragraph_clusters)
+    if paragraph_cluster_overlap is not None:
+        _write_json(output_dir / "paragraph_cluster_overlap.json", paragraph_cluster_overlap)
     if paragraph_scatter is not None:
         _write_json(output_dir / "paragraph_scatter.json", paragraph_scatter)
     if paragraph_fanout is not None:

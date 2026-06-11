@@ -224,7 +224,7 @@ def _cache_params(domain: str, config: AhrefsConfig, request_date: str | None = 
         "mode": config.mode,
         "protocol": config.protocol,
         "volume_mode": config.volume_mode,
-        "country": (config.country or "").upper(),
+        "country": (config.country or "").lower(),
         "top_pages_limit": int(config.top_pages_limit),
         "keywords_limit": int(config.keywords_limit),
         "top_pages_select": TOP_PAGES_SELECT,

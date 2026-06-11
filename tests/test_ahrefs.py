@@ -21,12 +21,13 @@ def test_ahrefs_client_reuses_latest_cached_snapshot_without_api_key(tmp_path: P
             return {"pages": {"range100_pages": 1, "range100_traffic": 10}}
         return {}
 
-    cfg = AhrefsConfig(api_key="secret", date="2026-05-08", top_pages_limit=10, keywords_limit=10)
+    cfg = AhrefsConfig(api_key="secret", date="2026-05-08", country="US", top_pages_limit=10, keywords_limit=10)
     first = AhrefsClient("secret", tmp_path, requester=requester).load_or_fetch("example.com", cfg)
     assert first["meta"]["status"] == "ok"
     assert len(calls) == 4
+    assert all(params.get("country") == "us" for _, params in calls)
 
-    latest_cfg = AhrefsConfig(api_key=None, date=None, top_pages_limit=10, keywords_limit=10)
+    latest_cfg = AhrefsConfig(api_key=None, date=None, country="US", top_pages_limit=10, keywords_limit=10)
     second = AhrefsClient("", tmp_path, requester=requester).load_or_fetch("example.com", latest_cfg)
     assert second["meta"]["status"] == "ok"
     assert second["meta"]["cache_status"] == "hit"
