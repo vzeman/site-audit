@@ -968,7 +968,7 @@ site-audit serp-gap www.liveagent.com \
 ```
 
 Run URL-only with the AI agent. By default, the agent uses Harnext with
-OpenRouter to infer target keywords from the page and then writes
+OpenRouter to detect the page language, infer target keywords from the page, and then writes
 paragraph-level TODO markdown plus a final article draft after the SERP gap
 analysis:
 
@@ -990,8 +990,7 @@ harnext --version
 site-audit serp-gap www.liveagent.com \
   --url https://www.liveagent.com/blog/ai-support-paradox/ \
   --provider dataforseo \
-  --country 2840 \
-  --language en
+  --country 2840
 ```
 
 Use `--ai-agent-provider openrouter` to bypass Harnext and call OpenRouter
@@ -999,6 +998,7 @@ directly, `--no-ai-agent` to skip AI calls, or `--ai-agent-refresh` to ignore
 cached AI prompts and completions. The AI agent is cache-first and stores
 prompts/completions under
 `projects/<domain>/cache/serp_gap/ai_agent/`.
+Pass `--language en` only when you want to override the detected SERP language.
 
 Enrich keyword demand with Ahrefs traffic and volume when configured:
 

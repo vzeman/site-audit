@@ -344,6 +344,11 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
     print(f"  URLs downloaded:     {summary.get('urls_downloaded', 0)}")
     print(f"  competitor URLs est: {summary.get('competitor_urls_estimated', 0)}")
     print(f"  missing topics:      {summary.get('missing_topics', 0)}")
+    language_info = payload.get("language_detection") or {}
+    if language_info:
+        language = language_info.get("language") or "provider default"
+        source = language_info.get("source") or language_info.get("status") or ""
+        print(f"  SERP language:       {language}" + (f" · {source}" if source else ""))
     agent = payload.get("ai_agent") or {}
     if agent.get("enabled"):
         print(
@@ -757,7 +762,11 @@ def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
         "Optional. For DataForSEO use a location code such as 2840 for United States.",
         args.country or ("2840" if args.provider == "dataforseo" else ""),
     ) or None
-    args.language = _menu_text("Language", "Optional SERP language code, for example en.", args.language or "en") or None
+    args.language = _menu_text(
+        "Language",
+        "Optional SERP language code, for example en. Leave empty to let the AI agent detect it from the page.",
+        args.language or "",
+    ) or None
 
     args.dry_run = _menu_bool(
         "Dry run",
@@ -1332,7 +1341,7 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--max-paragraphs-per-page", type=int, default=80)
     serp_p.add_argument("--provider", default="auto", choices=["auto", "serper", "dataforseo"])
     serp_p.add_argument("--country", default=None, help="SERP country code/name. For DataForSEO, numeric location code is also accepted.")
-    serp_p.add_argument("--language", default=None, help="SERP language code, e.g. en")
+    serp_p.add_argument("--language", default=None, help="SERP language code, e.g. en. Omit to auto-detect with the AI agent/page language.")
     serp_p.add_argument("--min-ranking-position", type=int, default=1)
     serp_p.add_argument("--max-ranking-position", type=int, default=30)
     serp_p.add_argument("--min-impressions", type=int, default=0)

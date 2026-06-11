@@ -323,6 +323,57 @@ def build_keyword_messages(page: dict, *, max_keywords: int = 5) -> list[dict[st
     ]
 
 
+def build_language_detection_messages(evidence: dict) -> list[dict[str, str]]:
+    page_payload = {
+        "pages": (evidence.get("pages") or [])[:5],
+        "existing_language_codes": (evidence.get("existing_language_codes") or [])[:8],
+        "search_rows": (evidence.get("search_rows") or [])[:20],
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You detect the dominant natural language for SERP gap analysis. "
+                "Use only supplied page evidence. Prefer the language readers see in the main content, "
+                "not boilerplate, brand names, URLs, or code. Return compact JSON only."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Detect the best Google SERP language code for these selected page(s). "
+                "Return exactly this JSON shape: "
+                '{"language_code":"en","language_name":"English","confidence":0.0,"reason":"short evidence"}\n\n'
+                "Use a lowercase ISO-style language code suitable for Google SERP APIs, for example en, sk, cs, de, es, fr, pl. "
+                "If evidence is mixed, choose the dominant main-content language and explain briefly.\n\n"
+                f"Evidence:\n{json.dumps(page_payload, ensure_ascii=False, indent=2)}"
+            ),
+        },
+    ]
+
+
+def parse_language_detection(text: str) -> dict[str, Any]:
+    payload = _extract_json(text)
+    if isinstance(payload, list) and payload:
+        payload = payload[0]
+    if not isinstance(payload, dict):
+        return {}
+    code = _normalize_language_code(
+        payload.get("language_code")
+        or payload.get("language")
+        or payload.get("code")
+        or payload.get("hl")
+    )
+    if not code:
+        return {}
+    return {
+        "language_code": code,
+        "language_name": str(payload.get("language_name") or payload.get("name") or "").strip(),
+        "confidence": _safe_confidence(payload.get("confidence")),
+        "reason": str(payload.get("reason") or payload.get("evidence") or "").strip(),
+    }
+
+
 def parse_keyword_candidates(text: str, *, limit: int = 5) -> list[str]:
     candidates: list[str] = []
     payload = _extract_json(text)
@@ -524,6 +575,27 @@ def _append_keyword_candidate(out: list[str], value: str, limit: int) -> None:
     out.append(normalized)
     if len(out) > limit:
         del out[limit:]
+
+
+def _normalize_language_code(value: Any) -> str:
+    code = re.sub(r"[^a-zA-Z0-9_-]+", "", str(value or "").strip()).replace("_", "-").lower()
+    if not code:
+        return ""
+    if "-" in code:
+        parts = [part for part in code.split("-") if part]
+        if not parts:
+            return ""
+        code = parts[0]
+    if not re.fullmatch(r"[a-z]{2,3}", code):
+        return ""
+    return code
+
+
+def _safe_confidence(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _completion_text(result: Any) -> str:

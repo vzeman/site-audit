@@ -245,7 +245,7 @@ def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
     assert args.ai_agent is True
     assert args.provider == "dataforseo"
     assert args.country == "2840"
-    assert args.language == "en"
+    assert args.language is None
     assert args.dry_run is True
 
 

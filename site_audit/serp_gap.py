@@ -28,10 +28,12 @@ from .ai_agent import (
     build_agent_client,
     build_editor_brief_messages,
     build_keyword_messages,
+    build_language_detection_messages,
     cached_completion,
     fallback_keyword_candidates,
     harnext_status,
     openrouter_api_key,
+    parse_language_detection,
     parse_keyword_candidates,
 )
 from .analyzer import PageInfo, section_for_url
@@ -138,6 +140,14 @@ def run(config: SerpGapConfig) -> dict:
     if (config.use_ahrefs_metrics or config.keyword_source == "ahrefs") and not config.dry_run:
         ahrefs_payload = _load_or_fetch_ahrefs_payload(config.domain, project_dir, pages, config)
         search_payload = _merge_search_payloads(search_payload, ahrefs_payload)
+    language_info = _resolve_serp_language(
+        selected_pages,
+        search_payload,
+        own_cache,
+        cache_dir,
+        config,
+        ai_agent,
+    )
     keyword_metrics = _keyword_metrics_lookup(search_payload, ahrefs_payload)
     manual_keywords = _load_manual_keywords(config)
     keyword_rows, skipped_keywords = _select_keywords(
@@ -177,6 +187,7 @@ def run(config: SerpGapConfig) -> dict:
             "selected_keywords": keyword_rows,
             "skipped_pages": skipped_pages,
             "skipped_keywords": skipped_keywords,
+            "language_detection": language_info,
             "ai_agent": _ai_agent_payload(ai_agent, []),
         }
         _write_outputs(payload, report_dir)
@@ -190,6 +201,7 @@ def run(config: SerpGapConfig) -> dict:
             "selected_keywords": keyword_rows,
             "skipped_pages": skipped_pages,
             "skipped_keywords": skipped_keywords,
+            "language_detection": language_info,
             "ai_agent": _ai_agent_payload(ai_agent, []),
         }
         _write_outputs(payload, report_dir)
@@ -417,6 +429,7 @@ def run(config: SerpGapConfig) -> dict:
         "selected_keywords": keyword_rows,
         "skipped_pages": skipped_pages,
         "skipped_keywords": skipped_keywords,
+        "language_detection": language_info,
         "ai_agent": _ai_agent_payload(ai_agent, page_results),
         "ahrefs": {
             "meta": ahrefs_payload.get("meta", {}) if ahrefs_payload else {},
@@ -673,10 +686,12 @@ def _ai_agent_state(config: SerpGapConfig) -> dict:
         "provider": config.ai_agent_provider,
         "model": config.ai_agent_model,
         "status": "disabled",
+        "language_prompts": 0,
         "keyword_prompts": 0,
         "keyword_fallbacks": 0,
         "editor_briefs": 0,
         "cache_hits": 0,
+        "detected_language": "",
         "notes": [],
         "errors": [],
     }
@@ -706,6 +721,155 @@ def _ai_agent_payload(state: dict, page_results: list[dict]) -> dict:
     payload["editor_briefs"] = sum(1 for page in page_results if (page.get("ai_editor_brief") or {}).get("status") == "ok")
     payload["editor_brief_errors"] = sum(1 for page in page_results if (page.get("ai_editor_brief") or {}).get("status") == "error")
     return payload
+
+
+def _resolve_serp_language(
+    pages: list[PageInfo],
+    search_payload: dict,
+    own_cache: HttpCache,
+    cache_dir: Path,
+    config: SerpGapConfig,
+    state: dict,
+) -> dict:
+    explicit = _normalize_serp_language(config.language)
+    if explicit:
+        config.language = explicit
+        state["detected_language"] = explicit
+        return {
+            "status": "explicit",
+            "language": explicit,
+            "source": "user",
+            "message": "SERP language was provided by the user.",
+        }
+    config.language = None
+    evidence = _language_detection_evidence(
+        pages,
+        list(search_payload.get("organic_keywords") or []),
+        own_cache,
+        fetch_pages=not config.dry_run,
+    )
+    fallback = _fallback_language_from_evidence(evidence)
+    if config.ai_agent and state.get("status") == "ready":
+        try:
+            client = build_agent_client(config.ai_agent_provider)
+            completion = cached_completion(
+                cache_dir,
+                kind=f"language-detection-{_language_detection_key(pages)}",
+                messages=build_language_detection_messages(evidence),
+                client=client,
+                model=config.ai_agent_model,
+                refresh=config.ai_agent_refresh,
+                temperature=0.0,
+                timeout=90,
+            )
+            state["language_prompts"] += 1
+            if completion.cache_status == "hit":
+                state["cache_hits"] += 1
+            detected = parse_language_detection(completion.text)
+            language = _normalize_serp_language(detected.get("language_code"))
+            if language:
+                config.language = language
+                state["detected_language"] = language
+                return {
+                    "status": "detected",
+                    "language": language,
+                    "language_name": detected.get("language_name", ""),
+                    "confidence": detected.get("confidence", 0.0),
+                    "reason": detected.get("reason", ""),
+                    "source": completion.provider,
+                    "cache_status": completion.cache_status,
+                    "fallback_language": fallback,
+                }
+            state.setdefault("errors", []).append("Language detection returned no valid language code.")
+        except MissingOpenRouterKey:
+            state["status"] = "missing_openrouter_api_key"
+            state.setdefault("notes", []).append("Language detection skipped: missing OpenRouter key.")
+        except Exception as exc:
+            state.setdefault("errors", []).append(f"Language detection failed: {exc}")
+
+    if fallback:
+        config.language = fallback
+        state["detected_language"] = fallback
+        return {
+            "status": "fallback",
+            "language": fallback,
+            "source": "page_html_lang",
+            "message": "AI language detection was unavailable; used the audited or extracted page language.",
+        }
+    return {
+        "status": "not_detected",
+        "language": "",
+        "source": "",
+        "message": "No SERP language was provided or detected; provider defaults apply.",
+    }
+
+
+def _language_detection_evidence(
+    pages: list[PageInfo],
+    search_rows: list[dict],
+    own_cache: HttpCache,
+    *,
+    fetch_pages: bool = True,
+) -> dict:
+    evidence_pages = []
+    existing_language_codes: list[str] = []
+    compact_search_rows = []
+    for page in pages[:5]:
+        extracted = _fetch_and_extract(page.url, own_cache, refresh=False) if fetch_pages else None
+        evidence = _agent_page_evidence(page, search_rows, extracted)
+        language = _normalize_serp_language(evidence.get("language"))
+        if language and language not in existing_language_codes:
+            existing_language_codes.append(language)
+        evidence_pages.append({
+            "url": evidence.get("url", ""),
+            "title": evidence.get("title", ""),
+            "h1": evidence.get("h1", ""),
+            "description": evidence.get("description", ""),
+            "language": language,
+            "headers": (evidence.get("headers") or [])[:12],
+            "paragraphs": (evidence.get("paragraphs") or [])[:8],
+        })
+        compact_search_rows.extend((evidence.get("search_rows") or [])[:8])
+    return {
+        "pages": evidence_pages,
+        "existing_language_codes": existing_language_codes,
+        "search_rows": compact_search_rows[:20],
+    }
+
+
+def _fallback_language_from_evidence(evidence: dict) -> str:
+    counts: dict[str, int] = {}
+    for code in evidence.get("existing_language_codes") or []:
+        language = _normalize_serp_language(code)
+        if language:
+            counts[language] = counts.get(language, 0) + 2
+    for page in evidence.get("pages") or []:
+        language = _normalize_serp_language((page or {}).get("language"))
+        if language:
+            counts[language] = counts.get(language, 0) + 1
+    if not counts:
+        return ""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def _language_detection_key(pages: list[PageInfo]) -> str:
+    seed = "\n".join(page.url for page in pages[:10] if page.url) or "selection"
+    if len(pages) == 1:
+        return _url_report_slug(pages[0].url)
+    return content_hash(seed)[:12]
+
+
+def _normalize_serp_language(value) -> str:
+    code = re.sub(r"[^a-zA-Z0-9_-]+", "", str(value or "").strip()).replace("_", "-").lower()
+    if not code:
+        return ""
+    parts = [part for part in code.split("-") if part]
+    if not parts:
+        return ""
+    code = parts[0]
+    if not re.fullmatch(r"[a-z]{2,3}", code):
+        return ""
+    return code
 
 
 def _ai_agent_keyword_rows(
@@ -805,6 +969,7 @@ def _agent_page_evidence(page: PageInfo, search_rows: list[dict], extracted: Ext
             "h1": "",
             "description": page.description,
             "section": page.section,
+            "language": _normalize_serp_language(page.language),
             "headers": [],
             "paragraphs": [],
             "search_rows": matched_rows,
@@ -820,6 +985,7 @@ def _agent_page_evidence(page: PageInfo, search_rows: list[dict], extracted: Ext
         "h1": extracted.h1,
         "description": extracted.description or page.description,
         "section": page.section,
+        "language": _normalize_serp_language(extracted.language or page.language),
         "headers": headers,
         "paragraphs": [p for p in extracted.paragraphs[:18] if str(p).strip()],
         "search_rows": matched_rows,
@@ -1016,14 +1182,15 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
                 auto_config.location_code = int(config.country)
             else:
                 auto_config.location_name = config.country
-        if config.language:
-            auto_config.language_code = config.language
+        language = _normalize_serp_language(config.language)
+        if language:
+            auto_config.language_code = language
         return fetch_dataforseo_serp(keyword, cache_dir / "serp_dataforseo", auto_config)
     if provider != "serper":
         return {"meta": {"status": "unsupported_provider", "message": provider}, "raw": {}}
     key = content_hash(keyword.lower())
     country = config.country or "us"
-    language = config.language or "en"
+    language = _normalize_serp_language(config.language) or "auto"
     path = cache_dir / "serp" / "serper" / country / language / f"{key}.json"
     if path.is_file() and not config.refresh_serp:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1035,13 +1202,16 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
     resp = requests.post(
         "https://google.serper.dev/search",
         headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
-        json={"q": keyword, "gl": country, "hl": language, "num": max(config.results_per_keyword * 3, config.results_per_keyword + 10)},
+        json={
+            **{"q": keyword, "gl": country, "num": max(config.results_per_keyword * 3, config.results_per_keyword + 10)},
+            **({"hl": language} if language != "auto" else {}),
+        },
         timeout=60,
     )
     if resp.status_code >= 400:
         return {"meta": {"status": "error", "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}, "raw": {}}
     raw = resp.json()
-    payload = {"meta": {"status": "ok", "cache_status": "miss", "provider": "serper", "fetched_at": time.time()}, "raw": raw}
+    payload = {"meta": {"status": "ok", "cache_status": "miss", "provider": "serper", "language": language, "fetched_at": time.time()}, "raw": raw}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
@@ -4320,7 +4490,7 @@ function actionEvidenceHtml(row){const ev=row.evidence||{};const profile=ev.qual
 function actionList(rows,limit=12){if(!rows||!rows.length)return '<div class="empty">No content action points were generated. The analyzed page already covers the main detected SERP topics closely enough for these thresholds.</div>';return `<div class="action-list">${rows.slice(0,limit).map((row,index)=>{const brief=row.content_brief||{};const terms=(row.suggested_terms||[]).map(term=>`<span class="chip">${esc(term)}</span>`).join('');const plan=brief.paragraph_plan||brief.paragraph_rules||[];const acceptance=row.acceptance_criteria||brief.acceptance_criteria||[];return `<div class="action-card"><strong>${n(row.global_order||index+1)}. ${esc(row.task_summary||row.action||row.type)} <span class="chip ${actionPriorityClass(row.priority)}">${esc(row.priority||'medium')}</span></strong><div class="mini">${esc(row.keyword||'')} · ${urlLink(row.target_url)}</div><div class="instruction">${esc(row.instruction||'')}</div>${row.placement?`<div class="brief-label">Placement</div><div class="mini">${esc(row.placement)}</div>`:''}${terms?`<div class="action-meta">${terms}</div>`:''}${plan.length?`<div class="brief-label">Paragraph plan</div>${listHtml(plan,'ol')}`:''}${acceptance.length?`<div class="brief-label">Acceptance criteria</div>${listHtml(acceptance)}`:''}${promptBox(row.ai_agent_prompt||brief.ai_agent_prompt)}${actionEvidenceHtml(row)}</div>`;}).join('')}</div>`;}
 function pageBriefCard(brief,index){const actions=brief.next_actions||[];const keywords=(brief.primary_keywords||[]).map(k=>`<span class="chip">${esc(k)}</span>`).join('');return `<div class="brief-card"><h5>${index+1}. ${esc(brief.title||brief.target_url||'Page brief')}</h5><div class="mini">${urlLink(brief.target_url)}</div><div class="action-meta"><span class="chip missing">${n(brief.high_priority_actions||0)} high priority</span><span class="chip">${n(brief.total_actions||0)} tasks</span><span class="chip">score ${esc(brief.priority_score||0)}</span></div>${keywords?`<div class="action-meta">${keywords}</div>`:''}<div class="brief-label">Next tasks</div>${actions.length?`<ol>${actions.slice(0,5).map(a=>`<li><b>${esc(a.priority||'')}</b> ${esc(a.task_summary||a.type||'Task')} ${a.keyword?`<span class="mini">(${esc(a.keyword)})</span>`:''}</li>`).join('')}</ol>`:'<div class="mini">No page-level tasks generated.</div>'}${promptBox(brief.ai_agent_prompt)}</div>`;}
 function contentBriefsSection(){const rows=data.content_briefs||[];if(!rows.length)return '';return collapsiblePanel('Page Content Briefs',`${sectionNote('The shortest path from analysis to work: each page brief groups priority tasks, target keywords, paragraph rules, and an AI-agent prompt.')}<div class="brief-grid">${rows.map(pageBriefCard).join('')}</div>`,{meta:`${n(rows.length)} brief${rows.length===1?'':'s'}`});}
-function aiAgentStatusSection(){const agent=data.ai_agent||{};if(!agent.enabled)return '';const notes=(agent.notes||[]).concat(agent.errors||[]);const statusRows=[['Status',agent.status||''],['Provider',agent.provider||''],['Model',agent.model||''],['Keyword prompts',agent.keyword_prompts||0],['Keyword fallbacks',agent.keyword_fallbacks||0],['Editor briefs',agent.editor_briefs||0],['Cache hits',agent.cache_hits||0]];return collapsiblePanel('AI Agent Status',`${sectionNote('Harnext/OpenRouter agent layer for keyword inference, paragraph-level editor briefs, and final article drafts. Missing prerequisites are reported here; metrics are never fabricated.')}<table><tbody>${statusRows.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>${notes.length?`<div class="brief-label">Notes</div>${listHtml(notes)}`:''}`,{meta:agent.status||'',open:agent.status&&agent.status!=='ready'&&agent.status!=='disabled'});}
+function aiAgentStatusSection(){const agent=data.ai_agent||{};if(!agent.enabled)return '';const notes=(agent.notes||[]).concat(agent.errors||[]);const statusRows=[['Status',agent.status||''],['Provider',agent.provider||''],['Model',agent.model||''],['Detected language',agent.detected_language||''],['Language prompts',agent.language_prompts||0],['Keyword prompts',agent.keyword_prompts||0],['Keyword fallbacks',agent.keyword_fallbacks||0],['Editor briefs',agent.editor_briefs||0],['Cache hits',agent.cache_hits||0]];return collapsiblePanel('AI Agent Status',`${sectionNote('Harnext/OpenRouter agent layer for language detection, keyword inference, paragraph-level editor briefs, and final article drafts. Missing prerequisites are reported here; metrics are never fabricated.')}<table><tbody>${statusRows.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>${notes.length?`<div class="brief-label">Notes</div>${listHtml(notes)}`:''}`,{meta:agent.status||'',open:agent.status&&agent.status!=='ready'&&agent.status!=='disabled'});}
 function aiEditorBriefSection(page){const brief=page.ai_editor_brief||{};if(!brief.status)return '';if(brief.status==='ok'){const meta=[brief.provider,brief.cache_status].filter(Boolean).join(' · ');return collapsiblePanel('AI Agent TODO',`${sectionNote('Generated markdown instructions for an AI coding/content agent. It should be treated as the implementation brief; deterministic task cards remain below as supporting evidence.')}<div class="prompt-box">${esc(brief.markdown||'')}</div>`,{meta,open:false});}return collapsiblePanel('AI Agent TODO',`<div class="empty">${esc(brief.message||'AI editor brief was not generated.')}</div>`,{meta:brief.status||'not generated',open:false});}
 function paragraphRulesSection(){const rules=(data.editorial_guidelines||{}).paragraph_rules||[];if(!rules.length)return '';return collapsiblePanel('AI Paragraph Rules',listHtml(rules),{meta:`${n(rules.length)} rule${rules.length===1?'':'s'}`});}
 function aggregateActionsSection(){const rows=data.action_points||[];return collapsiblePanel('Content Action Plan For AI Agents',`${sectionNote('Prioritized instructions for editors or an AI agent. Each card includes what to change, where to place it, how paragraphs should be structured, and when the task is done.')} ${actionList(rows,18)}`,{meta:`${n(rows.length)} task${rows.length===1?'':'s'}`});}

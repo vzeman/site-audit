@@ -146,6 +146,10 @@ By default, `serp-gap` enables a Harnext AI-agent layer backed by OpenRouter.
 Existing keyword sources still run first. If a selected URL has no usable
 keyword rows, the agent inspects the page title, H1, headings, paragraphs, and
 any existing search rows to infer target keywords before SERP analysis begins.
+When `--language` is omitted, the same agent first detects the dominant page
+language and uses that language code for SERP fetching. If the agent is not
+available, `serp-gap` falls back to the audited/extracted page `html lang`
+value when present.
 
 Configure OpenRouter in `.env` or through `site-audit settings`:
 
@@ -170,9 +174,11 @@ URL-only example:
 site-audit serp-gap www.liveagent.com \
   --url https://www.liveagent.com/blog/ai-support-paradox/ \
   --provider dataforseo \
-  --country 2840 \
-  --language en
+  --country 2840
 ```
+
+Pass `--language en` only when you want to override automatic language
+detection for the SERP request.
 
 After analysis, the agent generates a page-specific markdown brief with:
 

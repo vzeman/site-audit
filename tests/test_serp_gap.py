@@ -3,7 +3,14 @@ from pathlib import Path
 
 import numpy as np
 
-from site_audit.ai_agent import build_editor_brief_messages, harnext_status, parse_keyword_candidates
+from site_audit.ai_agent import (
+    AgentCompletion,
+    build_editor_brief_messages,
+    harnext_status,
+    parse_keyword_candidates,
+    parse_language_detection,
+)
+from site_audit.cache import HttpCache
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
@@ -20,6 +27,7 @@ from site_audit.serp_gap import (
     _keyword_metrics_lookup,
     _overview_scatter,
     _paragraph_match_heatmap,
+    _resolve_serp_language,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
@@ -811,6 +819,106 @@ def test_ai_agent_keyword_parser_reads_fenced_json_without_code_tokens() -> None
     assert "json" not in keywords
     assert "{" not in keywords
     assert "[" not in keywords
+
+
+def test_ai_agent_language_parser_reads_fenced_json() -> None:
+    detected = parse_language_detection(
+        """```json
+{"language_code":"sk","language_name":"Slovak","confidence":0.93,"reason":"Main paragraphs are Slovak."}
+```"""
+    )
+
+    assert detected["language_code"] == "sk"
+    assert detected["language_name"] == "Slovak"
+    assert detected["confidence"] == 0.93
+
+
+def test_serp_gap_uses_ai_agent_to_detect_missing_language(tmp_path: Path, monkeypatch) -> None:
+    class _Client:
+        provider = "harnext"
+
+    def fake_cached_completion(cache_dir, *, kind, messages, client, model, refresh, temperature, timeout):
+        prompt = "\n".join(message["content"] for message in messages)
+        assert "Detect the best Google SERP language code" in prompt
+        return AgentCompletion(
+            text='{"language_code":"sk","language_name":"Slovak","confidence":0.91,"reason":"Visible body copy is Slovak."}',
+            provider="harnext",
+            model=model,
+            cache_status="miss",
+        )
+
+    monkeypatch.setattr("site_audit.serp_gap.build_agent_client", lambda _provider: _Client())
+    monkeypatch.setattr("site_audit.serp_gap.cached_completion", fake_cached_completion)
+
+    def fake_fetch_sk(_url, _cache, refresh=False):
+        return ExtractedPage(
+            url="https://www.example.com/sk/podpora/",
+            title="Podpora pre zákazníkov",
+            description="",
+            body="Ako nastaviť podporu pre zákazníkov.",
+            word_count=80,
+            language="sk",
+            h1="Podpora",
+            paragraphs=["Ako nastaviť podporu pre zákazníkov."],
+        )
+
+    monkeypatch.setattr("site_audit.serp_gap._fetch_and_extract", fake_fetch_sk)
+    config = SerpGapConfig(domain="example.com", language=None, ai_agent=True, ai_agent_model="test-model")
+    state = {
+        "status": "ready",
+        "language_prompts": 0,
+        "cache_hits": 0,
+        "detected_language": "",
+        "errors": [],
+        "notes": [],
+    }
+
+    info = _resolve_serp_language(
+        [PageInfo("https://www.example.com/sk/podpora/", "Podpora", "", "sk", 80, None)],
+        {},
+        HttpCache(tmp_path / "http.sqlite"),
+        tmp_path,
+        config,
+        state,
+    )
+
+    assert info["status"] == "detected"
+    assert info["language"] == "sk"
+    assert info["source"] == "harnext"
+    assert config.language == "sk"
+    assert state["language_prompts"] == 1
+    assert state["detected_language"] == "sk"
+
+
+def test_serp_gap_language_detection_falls_back_to_page_language(tmp_path: Path, monkeypatch) -> None:
+    def fake_fetch_cs(_url, _cache, refresh=False):
+        return ExtractedPage(
+            url="https://www.example.com/cs/podpora/",
+            title="Zákaznická podpora",
+            description="",
+            body="Jak nastavit podporu.",
+            word_count=80,
+            language="cs-CZ",
+            h1="Podpora",
+            paragraphs=["Jak nastavit podporu."],
+        )
+
+    monkeypatch.setattr("site_audit.serp_gap._fetch_and_extract", fake_fetch_cs)
+    config = SerpGapConfig(domain="example.com", language=None, ai_agent=True)
+    state = {"status": "missing_harnext", "detected_language": "", "errors": [], "notes": []}
+
+    info = _resolve_serp_language(
+        [PageInfo("https://www.example.com/cs/podpora/", "Podpora", "", "cs", 80, "cs-CZ")],
+        {},
+        HttpCache(tmp_path / "http.sqlite"),
+        tmp_path,
+        config,
+        state,
+    )
+
+    assert info["status"] == "fallback"
+    assert info["language"] == "cs"
+    assert config.language == "cs"
 
 
 def test_harnext_status_reports_missing_cli(monkeypatch) -> None:
