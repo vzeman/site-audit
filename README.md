@@ -48,20 +48,61 @@ open projects/example.com/report/index.html
 
 **Install**
 
+Recommended on macOS with Homebrew Python:
+
 ```bash
 git clone https://github.com/vzeman/site-audit.git
 cd site-audit
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+
+/opt/homebrew/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install -U pip
+python -m pip install -e .
 ```
 
-The `pip install` pulls the heavy ML deps
+If you are not on Homebrew Python, use any working Python 3.10+:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e .
+```
+
+Verify that the command is installed inside the virtualenv:
+
+```bash
+which python
+python -V
+which site-audit
+site-audit --help
+```
+
+For every new terminal session, activate the virtualenv first:
+
+```bash
+cd site-audit
+source .venv/bin/activate
+site-audit
+```
+
+The `pip install -e .` command pulls the heavy ML deps
 (`sentence-transformers`, `faiss-cpu`, `umap-learn`, `scikit-learn`).
 The first audit run also downloads the default embedding model
 (`Alibaba-NLP/gte-multilingual-base`, ~ 600 MB) into
 `~/.cache/huggingface/` — subsequent runs use the cached weights.
 
-**Run an audit**
+**Start the CLI app**
+
+```bash
+site-audit
+```
+
+This opens the terminal main menu. Choose `SERP gap analysis`, `Run domain
+audit`, `Open report viewer`, or `Settings`.
+
+**Run an audit directly**
 
 ```bash
 site-audit run example.com
@@ -1281,6 +1322,37 @@ print(to_payload(recs)["by_priority"])
 **The first run takes forever.** First run downloads the
 ~ 600 MB embedding model. After that, both the model and the
 per-domain caches make re-runs much faster.
+
+**`site-audit: command not found`.** The package is not installed in
+the active shell. From the repo root, run:
+
+```bash
+source .venv/bin/activate
+python -m pip install -e .
+which site-audit
+```
+
+If `which site-audit` still prints nothing, recreate the virtualenv
+with a working Python interpreter and reinstall.
+
+**Virtualenv crashes with `ModuleNotFoundError: No module named
+'encodings'`.** The virtualenv was created from a broken Python
+installation. On macOS/Homebrew, rebuild it with Homebrew Python:
+
+```bash
+cd /path/to/site-audit
+deactivate 2>/dev/null || true
+rm -rf .venv
+
+/opt/homebrew/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install -U pip
+python -m pip install -e .
+```
+
+Do not reuse the old `.venv`; check `which python` after activation
+and make sure it points inside the project `.venv`.
 
 **Every page got filtered out / "No usable pages".**
 Check that the site renders content server-side. Single-page apps
