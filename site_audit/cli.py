@@ -674,6 +674,74 @@ def _serp_gap_command_preview(args: argparse.Namespace) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts if str(part))
 
 
+def _run_main_menu(parser: argparse.ArgumentParser) -> int:
+    print("\nSite Audit")
+    print("Choose a workflow. Each guided path explains the main options before it runs.\n")
+    choice = _menu_choice(
+        "Main menu",
+        "Pick what you want to do now.",
+        [
+            ("serp-gap", "SERP gap analysis", "Analyze one URL against SERP competitors and generate AI-agent TODO tasks."),
+            ("run", "Run domain audit", "Crawl a domain and create the base report required by SERP gap."),
+            ("serve", "Open report viewer", "Serve an existing report in the local browser UI."),
+            ("settings", "Settings", "Open the local .env editor for API keys and defaults."),
+            ("exit", "Exit", "Do nothing."),
+        ],
+        default="serp-gap",
+    )
+    if choice == "exit":
+        return 0
+    args = parser.parse_args([choice, "--menu"] if choice == "serp-gap" else [choice])
+    apply_env_defaults(args, parser, [choice, "--menu"] if choice == "serp-gap" else [choice])
+    if choice == "run":
+        if not _configure_run_menu(args):
+            return 0
+    elif choice == "serve":
+        if not _configure_serve_menu(args):
+            return 0
+    _setup_logging(getattr(args, "verbose", False))
+    return args.func(args)
+
+
+def _configure_run_menu(args: argparse.Namespace) -> bool:
+    args.domain = _menu_text(
+        "Domain to audit",
+        "Domain or full URL to crawl and analyze, for example www.example.com.",
+        args.domain or "",
+        required=True,
+    )
+    args.max_pages = _menu_int(
+        "Max pages",
+        "Safety limit for crawl size. Use a smaller number for a quick first audit.",
+        args.max_pages,
+    )
+    args.search_provider = _menu_choice(
+        "Search data provider",
+        "Adds keyword/search-demand overlays to the base report when credentials are configured.",
+        [
+            ("auto", "Auto", "Use GSC first, then other configured providers as fallback."),
+            ("all", "All", "Combine all configured search providers."),
+            ("gsc", "Google Search Console", "Use GSC clicks, impressions, and average position."),
+            ("ahrefs", "Ahrefs", "Use Ahrefs traffic and volume data."),
+            ("dataforseo", "DataForSEO", "Use DataForSEO keyword data."),
+            ("none", "None", "Skip search-demand enrichment."),
+        ],
+        default=args.search_provider,
+    )
+    args.no_search_data = args.search_provider == "none"
+    return _menu_bool("Run audit now", "Starts crawling and report generation with these settings.", True)
+
+
+def _configure_serve_menu(args: argparse.Namespace) -> bool:
+    args.domain = _menu_text(
+        "Domain report to serve",
+        "Domain slug under projects/<domain>/report. Use the same domain passed to `site-audit run`.",
+        args.domain or "",
+        required=True,
+    )
+    return _menu_bool("Start local viewer now", "Starts the report server and keeps running until interrupted.", True)
+
+
 def _settings_command(args: argparse.Namespace) -> int:
     parser = build_parser()
     serve_settings_ui(
@@ -1040,6 +1108,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
+    if not raw_argv:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return _run_main_menu(parser)
+        parser.print_help()
+        return 0
     args = parser.parse_args(raw_argv)
     apply_env_defaults(args, parser, raw_argv)
     _setup_logging(args.verbose)

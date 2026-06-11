@@ -215,6 +215,53 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
 # --- combined scatter -----------------------------------------------------
 
 
+def _project_compare_embeddings(matrix: np.ndarray, *, seed: int, min_umap_points: int) -> np.ndarray:
+    n = len(matrix)
+    if n == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    if n < min_umap_points:
+        coords = np.zeros((n, 2), dtype=np.float32)
+        for i in range(n):
+            coords[i, 0] = float(i)
+        return coords
+    try:
+        import umap  # type: ignore
+
+        reducer = umap.UMAP(
+            n_components=2,
+            n_neighbors=max(2, min(15, n - 1)),
+            min_dist=0.1,
+            metric="cosine",
+            random_state=seed,
+        )
+        return reducer.fit_transform(matrix.astype(np.float32)).astype(np.float32)
+    except ModuleNotFoundError:
+        LOG.warning("  umap-learn is not installed; using deterministic PCA projection")
+    except Exception as exc:
+        LOG.warning("  UMAP projection failed (%s); using deterministic PCA projection", exc)
+    return _pca_projection_2d(matrix)
+
+
+def _pca_projection_2d(matrix: np.ndarray) -> np.ndarray:
+    arr = np.asarray(matrix, dtype=np.float32)
+    n = len(arr)
+    if n == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    arr = arr / np.where(norms == 0, 1.0, norms)
+    arr = arr - arr.mean(axis=0, keepdims=True)
+    try:
+        u, s, _ = np.linalg.svd(arr, full_matrices=False)
+        coords = (u[:, :2] * s[:2]).astype(np.float32)
+    except np.linalg.LinAlgError:
+        coords = np.zeros((n, 2), dtype=np.float32)
+        coords[:, 0] = np.arange(n, dtype=np.float32)
+        return coords
+    if coords.shape[1] < 2:
+        coords = np.pad(coords, ((0, 0), (0, 2 - coords.shape[1])), mode="constant")
+    return coords.astype(np.float32)
+
+
 def _combined_umap(
     projects: list[_Project],
     sample_per_domain: int = 1500,
@@ -253,21 +300,7 @@ def _combined_umap(
     big = np.vstack([c[1] for c in chunks])
     n_total = len(big)
 
-    if n_total < 4:
-        coords = np.zeros((n_total, 2), dtype=np.float32)
-        for i in range(n_total):
-            coords[i, 0] = float(i)
-    else:
-        import umap  # type: ignore
-        n_neighbors = max(2, min(15, n_total - 1))
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=seed,
-        )
-        coords = reducer.fit_transform(big.astype(np.float32)).astype(np.float32)
+    coords = _project_compare_embeddings(big.astype(np.float32), seed=seed, min_umap_points=4)
 
     rows: list[dict] = []
     cursor = 0
@@ -337,20 +370,7 @@ def _combined_ahrefs_semantic_umap(
         return [], 0
 
     big = np.vstack([chunk[1] for chunk in chunks]).astype(np.float32)
-    if len(big) < 5:
-        coords = np.zeros((len(big), 2), dtype=np.float32)
-        for i in range(len(big)):
-            coords[i, 0] = float(i)
-    else:
-        import umap  # type: ignore
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=max(2, min(15, len(big) - 1)),
-            min_dist=0.1,
-            metric="cosine",
-            random_state=seed,
-        )
-        coords = reducer.fit_transform(big).astype(np.float32)
+    coords = _project_compare_embeddings(big, seed=seed, min_umap_points=5)
 
     out: list[dict] = []
     cursor = 0

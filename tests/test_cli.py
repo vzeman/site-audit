@@ -1,4 +1,6 @@
-from site_audit.cli import _run_serp_gap_menu, build_parser
+import sys
+
+from site_audit.cli import _run_serp_gap_menu, build_parser, main
 
 
 def test_run_parser_accepts_crawl_filter_flags() -> None:
@@ -246,6 +248,14 @@ def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
     assert args.country == "2840"
     assert args.language == "en"
     assert args.dry_run is True
+
+
+def test_bare_site_audit_opens_main_menu(monkeypatch) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "5")
+
+    assert main([]) == 0
 
 
 def test_history_parser_accepts_snapshot_and_compare_commands() -> None:

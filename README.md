@@ -843,10 +843,17 @@ site-audit run www.liveagent.com --search-provider all
 Prefer the guided CLI menu when you do not want to remember every flag:
 
 ```bash
+site-audit
+```
+
+Choose `SERP gap analysis` from the main menu. To jump directly into the SERP
+gap wizard, run:
+
+```bash
 site-audit serp-gap --menu
 ```
 
-The menu asks for the audited domain, target URL or URL pattern, keyword mode,
+The menus ask for the audited domain, target URL or URL pattern, keyword mode,
 SERP provider, country/language, dry-run choice, and optional advanced toggles.
 Each prompt includes a short description of what the feature does.
 

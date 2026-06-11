@@ -1,10 +1,11 @@
 from pathlib import Path
+import builtins
 import json
 import zipfile
 
 import numpy as np
 
-from site_audit.compare import build_payload, package_comparison
+from site_audit.compare import _project_compare_embeddings, build_payload, package_comparison
 
 
 def _write_report(
@@ -28,6 +29,32 @@ def _write_report(
     (report_dir / "pages.json").write_text(json.dumps(pages or []), encoding="utf-8")
     for name, payload in extras.items():
         (report_dir / name).write_text(payload, encoding="utf-8")
+
+
+def test_compare_projection_falls_back_without_umap(monkeypatch) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "umap":
+            raise ModuleNotFoundError("No module named 'umap'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    matrix = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.8, 0.2, 0.0],
+            [0.1, 0.7, 0.2],
+        ],
+        dtype=np.float32,
+    )
+
+    coords = _project_compare_embeddings(matrix, seed=42, min_umap_points=1)
+
+    assert coords.shape == (5, 2)
+    assert np.isfinite(coords).all()
 
 
 def _write_semantic_cache(root: Path, domain: str) -> None:

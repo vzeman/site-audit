@@ -15,12 +15,19 @@ site-audit run www.example.com --search-provider all
 Then run SERP gap analysis for a page or URL pattern:
 
 ```bash
+site-audit
+```
+
+Choose `SERP gap analysis` from the main menu. To jump directly into the SERP
+gap wizard, run:
+
+```bash
 site-audit serp-gap --menu
 ```
 
-The guided CLI menu explains each option, asks for the audited domain, target
+The guided CLI menus explain each option, ask for the audited domain, target
 URL or URL pattern, keyword mode, SERP provider, country/language, and optional
-advanced toggles, then prints the equivalent command before executing it.
+advanced toggles, then print the equivalent command before executing it.
 
 Direct command example:
 
