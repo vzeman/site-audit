@@ -386,24 +386,77 @@ _ANSI_DIM = "\033[2m"
 _ANSI_CYAN = "\033[36m"
 _ANSI_GREEN = "\033[32m"
 _ANSI_YELLOW = "\033[33m"
-_ANSI_REVERSE = "\033[7m"
+_ANSI_SELECTED = "\033[1;36m"
 
 
 def _color(text: str, code: str) -> str:
-    if os.getenv("NO_COLOR") or os.getenv("TERM") == "dumb":
+    if not sys.stdout.isatty() or os.getenv("NO_COLOR") or os.getenv("TERM") == "dumb":
         return text
     return f"{code}{text}{_ANSI_RESET}"
 
 
 def _menu_title(title: str, description: str = "") -> None:
-    print(f"\n{_color(title, _ANSI_BOLD + _ANSI_CYAN)}")
-    if description:
-        for line in textwrap.wrap(description, width=_terminal_width() - 4):
-            print(_color(f"  {line}", _ANSI_DIM))
+    print()
+    for line in _box_lines(title, description):
+        print(line)
 
 
 def _terminal_width() -> int:
     return max(64, shutil.get_terminal_size((100, 24)).columns)
+
+
+def _menu_box_width() -> int:
+    return min(92, max(64, _terminal_width() - 4))
+
+
+def _frame_line(text: str, width: int) -> str:
+    inner_width = width - 4
+    clipped = text[:inner_width]
+    return f"| {clipped.ljust(inner_width)} |"
+
+
+def _box_lines(title: str, description: str = "", *, footer: str = "") -> list[str]:
+    width = _menu_box_width()
+    border = "+" + "-" * (width - 2) + "+"
+    lines = [_color(border, _ANSI_DIM), _color(_frame_line(title, width), _ANSI_BOLD + _ANSI_CYAN), _color(border, _ANSI_DIM)]
+    if description:
+        for wrapped in textwrap.wrap(description, width=width - 4):
+            lines.append(_frame_line(wrapped, width))
+    if footer:
+        lines.append(_color(border, _ANSI_DIM))
+        for wrapped in textwrap.wrap(footer, width=width - 4):
+            lines.append(_frame_line(wrapped, width))
+    lines.append(_color(border, _ANSI_DIM))
+    return lines
+
+
+def _choice_lines(
+    label: str,
+    description: str,
+    choices: list[tuple[str, str, str]],
+    index: int,
+) -> list[str]:
+    width = _menu_box_width()
+    border = "+" + "-" * (width - 2) + "+"
+    lines = [
+        _color(border, _ANSI_DIM),
+        _color(_frame_line(label, width), _ANSI_BOLD + _ANSI_CYAN),
+        _color(border, _ANSI_DIM),
+    ]
+    for wrapped in textwrap.wrap(description, width=width - 4):
+        lines.append(_frame_line(wrapped, width))
+    lines.append(_frame_line("", width))
+    for pos, (_, name, help_text) in enumerate(choices):
+        marker = ">" if pos == index else " "
+        row = _frame_line(f"{marker} {pos + 1}. {name}", width)
+        lines.append(_color(row, _ANSI_SELECTED) if pos == index else row)
+        if pos == index and help_text:
+            for help_line in textwrap.wrap(help_text, width=width - 8):
+                lines.append(_color(_frame_line(f"    {help_line}", width), _ANSI_DIM))
+    lines.append(_frame_line("", width))
+    lines.append(_frame_line("Keys: Up/Down or j/k move | Enter select | number jumps | q/Esc cancel", width))
+    lines.append(_color(border, _ANSI_DIM))
+    return lines
 
 
 def _can_use_keyboard_menu() -> bool:
@@ -479,26 +532,9 @@ def _render_keyboard_choice(
     index = max(0, min(default_index, len(choices) - 1))
     result_index = index
     rendered_lines = 0
-    width = _terminal_width()
 
     def lines_for() -> list[str]:
-        out = [
-            "",
-            _color(label, _ANSI_BOLD + _ANSI_CYAN),
-        ]
-        out.extend(_color(f"  {line}", _ANSI_DIM) for line in textwrap.wrap(description, width=width - 4))
-        out.append(_color("  Up/Down or j/k to move. Enter selects. Number keys also work. q/Esc cancels.", _ANSI_DIM))
-        for pos, (_, name, help_text) in enumerate(choices):
-            marker = ">" if pos == index else " "
-            number = f"{pos + 1}."
-            line = f"  {marker} {number} {name}"
-            if pos == index:
-                line = _color(line, _ANSI_REVERSE + _ANSI_BOLD)
-            out.append(line)
-            if pos == index and help_text:
-                for help_line in textwrap.wrap(help_text, width=width - 8):
-                    out.append(_color(f"      {help_line}", _ANSI_DIM))
-        return out
+        return ["", *_choice_lines(label, description, choices, index)]
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -575,8 +611,12 @@ def _domain_from_target_url(url: str, projects_root: Path, current_domain: str |
 
 def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
     print()
-    print(_color("SERP Gap guided setup", _ANSI_BOLD + _ANSI_CYAN))
-    print(_color("Use arrows for menus. Press Enter to keep shown defaults in text fields.", _ANSI_DIM))
+    for line in _box_lines(
+        "SERP Gap guided setup",
+        "Paste a URL, choose keyword and SERP settings, then run the page-level competitor gap analysis.",
+        footer="Menus support arrows, j/k, number shortcuts, Enter, and q/Esc.",
+    ):
+        print(line)
 
     scope = _menu_choice(
         "Target scope",
@@ -758,8 +798,9 @@ def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
         args.refresh_competitors = _menu_bool("Refresh competitor pages", "Refetch competitor HTML instead of reusing cached copies.", args.refresh_competitors)
         args.budget_usd = _menu_float("Budget cap USD", "Optional estimated SERP API budget cap. Leave empty for no cap.", args.budget_usd)
 
-    print("\nEquivalent CLI command:")
-    print("  " + _serp_gap_command_preview(args))
+    print()
+    for line in _box_lines("Equivalent CLI command", _serp_gap_command_preview(args)):
+        print(line)
     return _menu_bool("Run now", "Executes the command with the settings above.", True)
 
 
@@ -832,9 +873,7 @@ def _menu_bool(label: str, description: str, default: bool) -> bool:
         return value == "true"
 
     state = "[x]" if default else "[ ]"
-    print(f"\n{_color(state + ' ' + label, _ANSI_BOLD + _ANSI_CYAN)}")
-    for line in textwrap.wrap(description, width=_terminal_width() - 4):
-        print(_color(f"  {line}", _ANSI_DIM))
+    _menu_title(f"{state} {label}", description)
     raw = input(f"  Enable? [{'Y/n' if default else 'y/N'}]: ").strip().lower()
     if not raw:
         return default
@@ -917,11 +956,9 @@ def _serp_gap_command_preview(args: argparse.Namespace) -> str:
 
 
 def _run_main_menu(parser: argparse.ArgumentParser) -> int:
-    print("\nSite Audit")
-    print("Choose a workflow. Each guided path explains the main options before it runs.\n")
     choice = _menu_choice(
-        "Main menu",
-        "Pick what you want to do now.",
+        "Site Audit",
+        "Choose a workflow. Each guided path explains the main options before it runs.",
         [
             ("serp-gap", "SERP gap analysis", "Analyze one URL against SERP competitors and generate AI-agent TODO tasks."),
             ("run", "Run domain audit", "Crawl a domain and create the base report required by SERP gap."),
