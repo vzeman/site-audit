@@ -286,7 +286,7 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
         return 1
 
     summary = payload.get("summary") or {}
-    out_dir = Path(args.projects_root) / domain_slug(args.domain) / "serp_gap" / "report"
+    out_dir = Path(summary.get("report_dir") or (Path(args.projects_root) / domain_slug(args.domain) / "serp_gap" / "report"))
     print("\nSERP gap complete." if status == "ok" else f"\nSERP gap status: {status}")
     print(f"  pages selected:      {summary.get('pages_selected', 0)}")
     print(f"  pages analyzed:      {summary.get('pages_analyzed', 0)}")

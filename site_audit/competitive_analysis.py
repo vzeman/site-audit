@@ -95,6 +95,7 @@ class CompetitorPage:
     error: Optional[str] = None
     h1: str = ""
     headers_rich: list[dict] = field(default_factory=list)
+    content_sequence: list[dict] = field(default_factory=list)
 
 
 @dataclass

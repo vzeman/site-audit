@@ -6,18 +6,28 @@ import numpy as np
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
+    _attach_action_points,
+    _action_csv_rows,
     _action_points_for_analysis,
+    _content_comparison,
+    _content_order_path,
     _dedupe_semantic_row_texts,
+    _editorial_guidelines,
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
     _keyword_metrics_lookup,
     _overview_scatter,
+    _paragraph_match_heatmap,
     _select_targets_with_budget,
     _serp_url_ranking_rows,
     _targets_from_serp,
+    _todo_markdown,
+    _topic_coverage_matrix,
     run,
 )
-from site_audit.competitive_analysis import CompetitiveTarget
+from site_audit.analyzer import PageInfo
+from site_audit.competitive_analysis import CompetitiveTarget, CompetitorPage
+from site_audit.extractor import ExtractedPage
 
 
 class _StaticEmbedder:
@@ -87,9 +97,48 @@ def test_serp_gap_dry_run_selects_pattern_pages_and_keywords(tmp_path: Path) -> 
     assert payload["summary"]["pages_selected"] == 1
     assert payload["summary"]["keywords_selected"] == 1
     assert payload["selected_keywords"][0]["keyword"] == "live chat software"
-    assert (tmp_path / "example.com" / "serp_gap" / "report" / "serp_gap.json").is_file()
+    report_dir = Path(payload["summary"]["report_dir"])
+    assert report_dir.parent == tmp_path / "example.com" / "serp_gap" / "report"
+    assert report_dir.name == "features-live-chat"
+    assert (report_dir / "serp_gap.json").is_file()
+    assert (report_dir / "serp_gap_actions.csv").is_file()
+    assert (report_dir / "serp_gap_todo.md").is_file()
+    assert not (tmp_path / "example.com" / "serp_gap" / "report" / "index.html").exists()
     assert (tmp_path / "example.com" / "cache" / "serp_gap").is_dir()
     assert not (tmp_path / "example.com" / "serp_gap" / "cache").exists()
+
+
+def test_serp_gap_writes_url_specific_report_directories(tmp_path: Path) -> None:
+    _write_base_report(tmp_path)
+
+    feature_payload = run(
+        SerpGapConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            urls=["https://www.example.com/features/live-chat/"],
+            keyword_source="file",
+            keywords=["live chat software"],
+            dry_run=True,
+        )
+    )
+    home_payload = run(
+        SerpGapConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            urls=["https://www.example.com/"],
+            keyword_source="file",
+            keywords=["helpdesk software"],
+            dry_run=True,
+        )
+    )
+
+    feature_dir = Path(feature_payload["summary"]["report_dir"])
+    home_dir = Path(home_payload["summary"]["report_dir"])
+    assert feature_dir != home_dir
+    assert feature_dir.name == "features-live-chat"
+    assert home_dir.name == "home"
+    assert (feature_dir / "index.html").is_file()
+    assert (home_dir / "index.html").is_file()
 
 
 def test_serp_gap_manual_keywords_can_target_homepage(tmp_path: Path) -> None:
@@ -252,6 +301,10 @@ def test_overview_scatter_adds_demand_weighted_keyword_centroid() -> None:
     assert centroid["clicks"] == 13
     assert centroid["traffic"] == 6.5
     assert centroid["volume"] == 3000
+    ridges = scatter["keyword_url_ridges"]
+    assert [row["keyword"] for row in ridges["keywords"]] == ["live chat software", "helpdesk software"]
+    assert ridges["rows"][0]["url"] == "https://example.com/live-chat"
+    assert ridges["rows"][0]["cells"][0]["max_similarity"] > ridges["rows"][0]["cells"][1]["max_similarity"]
 
 
 def test_serp_gap_builds_action_points_for_ai_content_agents() -> None:
@@ -295,10 +348,340 @@ def test_serp_gap_builds_action_points_for_ai_content_agents() -> None:
     assert actions[0]["type"] == "add_topic"
     assert actions[0]["priority"] == "high"
     assert "Add a concise section" in actions[0]["instruction"]
+    assert actions[0]["content_brief"]["recommended_format"] == "answer block plus comparison table"
+    assert actions[0]["placement"]
+    assert actions[0]["acceptance_criteria"]
+    assert "direct answer" in " ".join(actions[0]["content_brief"]["paragraph_plan"])
+    assert "AI" not in actions[0]["content_brief"]["paragraph_plan"][0]
+    assert "Use the SERP evidence to infer intent" in actions[0]["ai_agent_prompt"]
     assert actions[0]["evidence"]["keyword_impressions"] == 1200
     assert actions[0]["evidence"]["keyword_volume"] == 6000
     assert actions[0]["evidence"]["example_url"] == "https://competitor.example/pricing"
-    assert any(action["type"] == "review_paragraph" for action in actions)
+    review_action = next(action for action in actions if action["type"] == "review_paragraph")
+    assert "keep, rewrite, move, merge, or remove" in review_action["ai_agent_prompt"]
+    assert review_action["content_brief"]["quality_profile"]["word_count"] == 3
+
+
+def test_serp_gap_attaches_page_content_briefs() -> None:
+    page = {"url": "https://example.com/live-chat", "title": "Live Chat"}
+    analysis = {
+        "status": "ok",
+        "query": "live chat software",
+        "keyword": {"keyword": "live chat software", "impressions": 1200},
+        "missing_topics": [
+            {
+                "label": "implementation checklist",
+                "coverage": "missing",
+                "priority": "critical",
+                "competitor_coverage": 4,
+                "competitor_prevalence": 0.8,
+                "best_competitor_rank": 1,
+                "our_best_similarity": 0.3,
+                "examples": [{"url": "https://competitor.example/setup", "rank": 1, "paragraph": "Setup details."}],
+            }
+        ],
+        "weak_topics": [],
+        "off_intent_paragraphs": [],
+    }
+    pages = [{**page, "analyses": [analysis]}]
+
+    aggregate = _attach_action_points(pages)
+
+    assert aggregate
+    assert pages[0]["content_brief"]["target_url"] == page["url"]
+    assert pages[0]["content_brief"]["primary_keywords"] == ["live chat software"]
+    assert pages[0]["content_brief"]["paragraph_rules"] == _editorial_guidelines()["paragraph_rules"]
+    assert pages[0]["content_brief"]["next_actions"][0]["task_summary"] == "Create a focused section about implementation checklist."
+
+
+def test_serp_gap_action_csv_rows_include_editorial_brief_fields() -> None:
+    page = {"url": "https://example.com/live-chat", "title": "Live Chat"}
+    analysis = {
+        "status": "ok",
+        "query": "live chat software",
+        "keyword": {"keyword": "live chat software", "impressions": 1200},
+        "missing_topics": [
+            {
+                "label": "pricing details",
+                "coverage": "missing",
+                "priority": "high",
+                "competitor_coverage": 3,
+                "competitor_prevalence": 0.75,
+                "best_competitor_rank": 2,
+                "our_best_similarity": 0.41,
+                "examples": [{"url": "https://competitor.example/pricing", "rank": 2, "paragraph": "Pricing details."}],
+            }
+        ],
+        "weak_topics": [],
+        "off_intent_paragraphs": [],
+    }
+    pages = [{**page, "analyses": [analysis]}]
+    actions = _attach_action_points(pages)
+
+    rows = _action_csv_rows({"action_points": actions})
+
+    assert rows[0]["target_url"] == page["url"]
+    assert rows[0]["recommended_format"] == "answer block plus comparison table"
+    assert "direct answer" in rows[0]["paragraph_plan"]
+    assert "The section clearly covers" in rows[0]["acceptance_criteria"]
+    assert rows[0]["ai_agent_prompt"]
+
+
+def test_serp_gap_builds_page_difference_visual_payload() -> None:
+    page = PageInfo(
+        url="https://example.com/live-chat",
+        title="Live Chat",
+        description="",
+        section="/",
+        word_count=320,
+        language="en",
+    )
+    own_ext = ExtractedPage(
+        url=page.url,
+        title="Live Chat",
+        description="",
+        body="",
+        word_count=320,
+        language="en",
+        h1="Live Chat",
+        headers_rich=[
+            {"level": 1, "text": "Live Chat"},
+            {"level": 2, "text": "Support workflows"},
+        ],
+        paragraphs=["Live chat overview.", "Support workflow details."],
+        content_sequence=[
+            {"order": 0, "entity_type": "h1", "level": 1, "text": "Live Chat"},
+            {"order": 1, "entity_type": "paragraph", "level": 0, "text": "Live chat overview."},
+            {"order": 2, "entity_type": "h2", "level": 2, "text": "Support workflows"},
+            {"order": 3, "entity_type": "paragraph", "level": 0, "text": "Support workflow details."},
+        ],
+    )
+    competitor_one = CompetitorPage(
+        target=CompetitiveTarget("live chat software", "https://competitor.example/live-chat", rank=1),
+        title="Competitor Live Chat",
+        paragraphs=["Pricing details", "Implementation checklist", "Routing rules"],
+        paragraph_embeddings=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        ),
+        structural_gaps=[],
+        answerability=0.0,
+        paragraph_count=3,
+        h1="Competitor Live Chat",
+        headers_rich=[
+            {"level": 1, "text": "Competitor Live Chat"},
+            {"level": 2, "text": "Pricing"},
+            {"level": 2, "text": "Implementation"},
+        ],
+        content_sequence=[
+            {"order": 0, "entity_type": "h1", "level": 1, "text": "Competitor Live Chat"},
+            {"order": 1, "entity_type": "h2", "level": 2, "text": "Pricing"},
+            {"order": 2, "entity_type": "paragraph", "level": 0, "text": "Pricing details"},
+            {"order": 3, "entity_type": "h2", "level": 2, "text": "Implementation"},
+            {"order": 4, "entity_type": "paragraph", "level": 0, "text": "Implementation checklist"},
+        ],
+    )
+    competitor_two = CompetitorPage(
+        target=CompetitiveTarget("live chat software", "https://another.example/chat", rank=2),
+        title="Another Chat",
+        paragraphs=["Automation routing", "Reporting"],
+        paragraph_embeddings=np.array(
+            [
+                [0.0, 1.0, 0.0],
+                [0.2, 0.0, 0.98],
+            ],
+            dtype=np.float32,
+        ),
+        structural_gaps=[],
+        answerability=0.0,
+        paragraph_count=2,
+        h1="Another Chat",
+        headers_rich=[{"level": 2, "text": "Automation"}],
+        content_sequence=[
+            {"order": 0, "entity_type": "h2", "level": 2, "text": "Automation"},
+            {"order": 1, "entity_type": "paragraph", "level": 0, "text": "Automation routing"},
+            {"order": 2, "entity_type": "paragraph", "level": 0, "text": "Reporting"},
+        ],
+    )
+    topics = [
+        {
+            "label": "pricing and implementation details",
+            "coverage": "missing",
+            "priority": "high",
+            "competitor_urls": [competitor_one.target.competitor_url],
+            "competitor_coverage": 1,
+            "competitor_prevalence": 0.5,
+            "best_competitor_rank": 1,
+            "competitor_paragraphs": 3,
+            "our_best_similarity": 0.31,
+            "examples": [
+                {
+                    "url": competitor_one.target.competitor_url,
+                    "rank": 1,
+                    "paragraph": "Pricing details and implementation checklist",
+                }
+            ],
+        },
+        {
+            "label": "routing workflow",
+            "coverage": "partial",
+            "priority": "high",
+            "competitor_urls": [competitor_one.target.competitor_url, competitor_two.target.competitor_url],
+            "competitor_coverage": 2,
+            "competitor_prevalence": 1.0,
+            "best_competitor_rank": 1,
+            "competitor_paragraphs": 4,
+            "our_best_similarity": 0.67,
+            "examples": [
+                {
+                    "url": competitor_one.target.competitor_url,
+                    "rank": 1,
+                    "paragraph": "Routing rules",
+                },
+                {
+                    "url": competitor_two.target.competitor_url,
+                    "rank": 2,
+                    "paragraph": "Automation routing",
+                },
+            ],
+        },
+        {
+            "label": "live chat overview",
+            "coverage": "covered",
+            "priority": "covered",
+            "competitor_urls": [competitor_two.target.competitor_url],
+            "competitor_coverage": 1,
+            "competitor_prevalence": 0.5,
+            "best_competitor_rank": 2,
+            "competitor_paragraphs": 1,
+            "our_best_similarity": 0.84,
+        },
+    ]
+
+    comparison = _content_comparison(page, own_ext, own_ext.paragraphs, [competitor_one, competitor_two], topics)
+    matrix = _topic_coverage_matrix(page.url, [competitor_one, competitor_two], topics)
+    paragraph_heatmap = _paragraph_match_heatmap(
+        own_ext.paragraphs,
+        np.array([[1.0, 0.0, 0.0], [0.0, 0.2, 0.98]], dtype=np.float32),
+        [competitor_one, competitor_two],
+    )
+    content_path = _content_order_path(
+        "live chat software",
+        own_ext,
+        [competitor_one, competitor_two],
+        _StaticEmbedder(),
+        max_competitors=1,
+        max_items_per_page=1,
+    )
+
+    assert comparison["summary"]["missing_topics"] == 1
+    assert comparison["ours"]["topic_count"] == 1
+    assert comparison["ours"]["partial_topics"] == 1
+    assert comparison["competitors"][0]["domain"] == "competitor.example"
+    assert comparison["competitors"][0]["missing_topics_covered"] == 1
+    assert matrix["columns"][0]["source"] == "ours"
+    assert len(matrix["columns"]) == 3
+    assert matrix["rows"][0]["label"] == "routing workflow"
+    assert matrix["rows"][0]["cells"][0]["status"] == "partial"
+    assert matrix["rows"][0]["cells"][1]["status"] == "covered"
+    assert matrix["rows"][0]["examples"][0]["paragraph"] == "Routing rules"
+    assert matrix["rows"][0]["examples"][0]["domain"] == "competitor.example"
+    assert len(paragraph_heatmap["columns"]) == 2
+    assert paragraph_heatmap["rows"][0]["cells"][0]["status"] == "strong"
+    assert paragraph_heatmap["rows"][0]["cells"][0]["rank_impact"] == 1.0
+    assert paragraph_heatmap["rows"][0]["max_rank_impact"] == 1.0
+    assert paragraph_heatmap["rows"][1]["cells"][0]["paragraph"] == "Routing rules"
+    assert content_path["summary"]["page_count"] == 2
+    assert content_path["summary"]["item_count"] == 2
+    assert content_path["items"][0]["source"] == "ours"
+    assert "cluster" in content_path["items"][0]
+    assert isinstance(content_path["unmatched_clusters_by_url"], list)
+
+
+def test_serp_gap_todo_markdown_is_actionable_and_deduped() -> None:
+    payload = {
+        "status": "ok",
+        "domain": "example.com",
+        "summary": {"pages_analyzed": 1, "keywords_selected": 1, "action_points": 2},
+        "editorial_guidelines": {
+            "paragraph_rules": [
+                "One paragraph should answer one concrete question or make one concrete point.",
+                "Every paragraph should contain at least one useful detail.",
+            ]
+        },
+        "pages": [
+            {
+                "url": "https://example.com/live-chat",
+                "title": "Live Chat",
+                "action_points": [
+                    {
+                        "priority": "high",
+                        "type": "add_topic",
+                        "keyword": "live chat software",
+                        "topic": "pricing details",
+                        "task_summary": "Create a focused pricing section.",
+                        "instruction": "Add a direct answer about pricing details.",
+                        "placement": "Add near pricing heading.",
+                        "acceptance_criteria": ["The section clearly covers pricing details."],
+                        "evidence": {
+                            "competitor_coverage": 3,
+                            "best_competitor_rank": 2,
+                            "our_best_similarity": 0.41,
+                            "example_url": "https://competitor.example/pricing",
+                        },
+                    },
+                    {
+                        "priority": "high",
+                        "type": "add_topic",
+                        "keyword": "live chat software",
+                        "topic": "pricing details",
+                        "task_summary": "Create a focused pricing section.",
+                        "instruction": "Add a direct answer about pricing details.",
+                        "placement": "Add near pricing heading.",
+                        "acceptance_criteria": ["The section clearly covers pricing details."],
+                        "evidence": {"competitor_coverage": 3},
+                    },
+                    {
+                        "priority": "medium",
+                        "type": "review_paragraph",
+                        "keyword": "live chat software",
+                        "task_summary": "Review paragraph 4 for intent drift or filler.",
+                        "instruction": "Rewrite or remove paragraph 4.",
+                    },
+                ],
+                "analyses": [
+                    {
+                        "query": "live chat software",
+                        "keyword": {"keyword": "live chat software"},
+                        "visual_summary": ["1 SERP topic group is absent from the target page."],
+                        "paragraph_match_heatmap": {
+                            "rows": [
+                                {
+                                    "paragraph_index": 0,
+                                    "paragraph": "Generic intro paragraph.",
+                                    "max_similarity": 0.5,
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    markdown = _todo_markdown(payload)
+
+    assert "# SERP Gap TODO" in markdown
+    assert "- Scope: 1 page(s), 1 keyword(s), 1 content task(s)" in markdown
+    assert "### Ordered Content Tasks" in markdown
+    assert markdown.count("Create a focused pricing section.") == 1
+    assert "Review paragraph 4 for intent drift or filler." not in markdown
+    assert "P1 (0.50 best SERP paragraph match" in markdown
+    assert "Do not copy competitor wording." in markdown
 
 
 def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:
@@ -408,7 +791,7 @@ def test_serp_gap_reuses_known_competitors_for_overlapping_keywords() -> None:
 def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> None:
     _write_base_report(tmp_path)
 
-    run(
+    payload = run(
         SerpGapConfig(
             domain="example.com",
             projects_root=tmp_path,
@@ -417,17 +800,89 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
         )
     )
 
-    html = (tmp_path / "example.com" / "serp_gap" / "report" / "index.html").read_text(encoding="utf-8")
+    html = (Path(payload["summary"]["report_dir"]) / "index.html").read_text(encoding="utf-8")
 
     assert "Semantic Scatterplot" in html
     assert "Semantic Clusters" in html
     assert "Topic Relations" in html
-    assert "Keyword and Content Semantic Map" in html
-    assert "Use this section to see which URLs repeatedly win across the selected keywords" in html
-    assert "Color identifies the domain, shape identifies the entity type" in html
-    assert "competitors cover more deeply" in html
-    assert "far from the target keyword and/or weakly connected to the SERP topic space" in html
-    assert "URLs downloaded" in html
+    assert "SERP Content Task Board" in html
+    assert "Page Content Briefs" in html
+    assert "AI Paragraph Rules" in html
+    assert "Content briefs" in html
+    assert "contentBriefsSection" in html
+    assert "pageBriefCard" in html
+    assert "diagnostic-details" in html
+    assert "Raw semantic evidence for this keyword" in html
+    assert "Why These Edits Matter" in html
+    assert "Top ranking page differences" in html
+    assert "SERP rank vs content coverage" in html
+    assert "Topic coverage heatmap" in html
+    assert "content-comparison" in html
+    assert "coverage-heatmap" in html
+    assert "contentComparisonRows" in html
+    assert "topicCoverageHeatmap" in html
+    assert "topicExamplesForRow" in html
+    assert "topicEvidenceHtml" in html
+    assert "Ranking paragraphs missing or weak" in html
+    assert "topic-evidence" in html
+    assert "topic-snippet" in html
+    assert "paragraphMatchHeatmap" in html
+    assert "Content order semantic path" in html
+    assert "contentOrderPathSection" in html
+    assert "contentPathSvg" in html
+    assert "contentPathParallelCoordinates" in html
+    assert "contentPathUnmatchedClusters" in html
+    assert "content-path-chart" in html
+    assert "content-path-parallel" in html
+    assert "parallel-topic-line" in html
+    assert "data-path-cluster" in html
+    assert "bindContentPathInteractions" in html
+    assert "content-path-wrap.has-active" in html
+    assert "Hover, focus, or click a line or node" in html
+    assert "content_order_path" in html
+    assert "unmatched_clusters_by_url" in html
+    assert "path-unmatched-card" in html
+    assert "Parallel coordinates compare the order of similar topic clusters" in html
+    assert "Axes are ordered by top-10 SERP position" in html
+    assert "URL axes are ordered by SERP top-10 position" in html
+    assert "URL-only clusters" in html
+    assert "unique clusters not matched with other URLs" in html
+    assert "collapsiblePanel" in html
+    assert "collapsible-panel" in html
+    assert "Keyword Content Actions" in html
+    assert "collapsible-state" in html
+    assert "orderedPathPages" in html
+    assert "ordered by SERP top-10 position" in html
+    assert "Keyword-to-Paragraph Coverage by URL" in html
+    assert "keywordParagraphRidgeline" in html
+    assert "keyword_url_ridges" in html
+    assert "keyword-ridge-chart" in html
+    assert "URL Demand Metrics" in html
+    assert "urlDemandMetricsSection" in html
+    assert "url-demand-table" in html
+    assert "rank impact proxy" in html
+    assert "semanticScatterSection" in html
+    assert "keywordChartsSection" in html
+    assert "visualComparisonSection" in html
+    assert "visual_summary" in html
+    assert "topic_coverage_matrix" in html
+    assert "content_comparison" in html
+    assert "paragraph_match_heatmap" in html
+    assert "heatmap-cell" in html
+    assert "paragraph-heatmap" in html
+    assert "paragraph-row" in html
+    assert "comparison-row" in html
+    assert "Acceptance criteria" in html
+    assert "AI agent prompt" in html
+    assert "what to change, where to place it, how paragraphs should be structured" in html
+    assert "Use filters to isolate entity types and domains" in html
+    assert "Repeated winners show which URLs and intents Google currently rewards" in html
+    assert "Vector-space chart for keywords" in html
+    assert "Vector space for keyword, target page, competitor titles, headings, and paragraphs" in html
+    assert "Edit these after reviewing the charts" in html
+    assert "competitors cover nearby themes more deeply" in html
+    assert "Review candidates for intent drift, thinness, or filler" in html
+    assert "Charts first, then tasks" in html
     assert "review_paragraphs" in html
     assert "Top-10 URLs Across Selected Keywords" in html
     assert "serp_url_rankings" in html
@@ -449,10 +904,10 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "serpRankingList" in html
     assert "All Keywords, URLs, and Content" in html
     assert "Aggregate Semantic Clusters" in html
-    assert "These clusters summarize the shared vector space above across all selected keywords" in html
+    assert "Broad topic groups across selected keywords and processed URLs" in html
     assert "Topic Traffic Impact" in html
     assert "clusterImpactChart" in html
-    assert "demand-weighted centroid of all selected keywords" in html
+    assert "demand-weighted keyword centroid" in html
     assert "keyword_centroid" in html
     assert "keyword centroid" in html
     assert "Keyword Frequency Analysis" in html
@@ -472,7 +927,7 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Keyword Content Actions" in html
     assert "action_points" in html
     assert "actionList" in html
-    assert "machine-readable editorial instructions" in html
+    assert "Prioritized instructions for editors or an AI agent" in html
     assert "SERP URLs" in html
     assert "urlKeywordTable" in html
     assert "url-keyword-table" in html

@@ -32,10 +32,18 @@ Output is written to:
 
 ```text
 projects/<domain>/serp_gap/report/
-  index.html
-  serp_gap.json
-  serp_gap.csv
+  <url-path-slug>/
+    index.html
+    serp_gap.json
+    serp_gap.csv
+    serp_gap_actions.csv
+    serp_gap_todo.md
 ```
+
+Each single-URL execution writes to a stable URL-specific directory, so rerunning
+the same URL updates the same report while different URLs stay separate. For
+homepage runs the directory is `home`; for multi-URL selections it starts with
+`multi-url-`.
 
 Cache is kept with the rest of the domain cache:
 
@@ -207,27 +215,24 @@ If `--budget-usd` is provided and the estimated uncached SERP cost exceeds it, t
 
 ## Report Interpretation
 
-The top of the report is the aggregate section for all selected keywords and
-all processed URLs. It includes:
+The top of the report is an action-first task board. Start there before
+opening the diagnostic charts. It includes:
 
-- Top-10 URLs across selected keywords
-- URL co-ranking graph
-- table of every ranking URL, with one keyword row per ranking keyword
-- keyword metrics table from available APIs
-- content action plan for AI agents
-- all-keyword semantic scatterplot
-- keyword frequency analysis and weighted word cloud
-- topic traffic impact chart
-- aggregate semantic clusters
+- page content briefs with priority score, target keywords, next tasks, and an AI-agent prompt
+- prioritized content action cards for missing topics, partial topics, and low-alignment paragraphs
+- paragraph rules and acceptance criteria for writing concise, useful sections
+- expandable SERP URL, keyword metric, semantic scatterplot, frequency, impact, and cluster evidence
+
+`serp_gap_actions.csv` contains the same tasks in a spreadsheet-friendly
+format: target URL, keyword, topic, priority, instruction, placement,
+paragraph plan, acceptance criteria, prompt, and SERP evidence.
 
 Each analyzed page has its own section. Inside each page, every keyword has:
 
-- SERP competitor list
 - keyword-specific content actions
-- semantic scatterplot
-- semantic cluster summary
 - topic relation table
 - paragraphs from your page to review
+- expandable SERP competitor list, semantic scatterplot, and semantic cluster summary
 
 Topic coverage labels:
 
@@ -238,6 +243,25 @@ missing  - competitors cover the topic and your page has no close match
 ```
 
 Treat the output as editorial evidence from the current SERP, not as proof of ranking causality.
+
+## AI Agent Paragraph Instructions
+
+When using the report to edit a page with an AI agent or human writer, use the
+task cards as the source of truth:
+
+- add or strengthen the highest-priority missing and partial topics first
+- place each topic under a matching H2/H3 instead of appending unrelated text
+- start important sections with a 1-2 sentence direct answer
+- write 2-4 short paragraphs, each with one concrete point
+- include practical details such as conditions, examples, steps, comparisons,
+  limitations, pricing constraints, integrations, proof, or decision criteria
+- move, merge, rewrite, or remove paragraphs that serve a different intent
+- avoid broad introductions, generic adjectives, keyword stuffing, and copied
+  competitor phrasing
+
+The goal is not more text. The goal is denser information that directly
+answers the search intent, demonstrates original experience or expertise, and
+gives readers enough detail to make a decision.
 
 ## Content Action Plan For AI Agents
 

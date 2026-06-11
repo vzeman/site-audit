@@ -833,11 +833,21 @@ research. It starts from an existing domain audit, selects one URL or URL
 pattern, fetches live Google competitors for chosen or discovered keywords,
 and writes an independent semantic gap report.
 
-Example:
+Before running SERP gap analysis, run the normal audit once so
+`projects/<domain>/report/pages.json` and any search metric exports exist:
+
+```bash
+site-audit run www.liveagent.com --search-provider all
+```
+
+### Common SERP gap examples
+
+Single URL with manual keywords:
 
 ```bash
 site-audit serp-gap www.liveagent.com \
   --url https://www.liveagent.com/live-chat-software/ \
+  --keyword-source file \
   --keyword "live chat software" \
   --keyword "livechat software" \
   --keyword "livechat" \
@@ -846,14 +856,92 @@ site-audit serp-gap www.liveagent.com \
   --language en
 ```
 
-The report includes one section per analyzed page, keyword-level semantic
-scatterplots, domain-colored competitor points, distinct shapes for keywords,
-titles/H1s, headers, and paragraphs, zoom/pan controls, click dialogs, topic
-clusters, and missing/partial topic tables. The aggregate section also shows
-top ranking URLs across selected keywords, keyword/API metrics, per-URL
-keyword ranking tables, a demand-weighted keyword centroid, weighted keyword
-frequency clouds, topic impact by traffic, semantic clusters, and a structured
-content action plan for AI agents or editors.
+Run another URL without overwriting the first report:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/blog/ai-support-paradox/ \
+  --keyword-source file \
+  --keyword "ai to human handoff" \
+  --keyword "chatbot to human handoff" \
+  --keyword "ai customer support human handoff" \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+Use existing Search Console / search export keywords for a URL pattern:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url-include "/features/*" \
+  --keywords-per-page 5 \
+  --results-per-keyword 5 \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+Add SERP keyword suggestions from People Also Ask / People Also Search:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/help-desk-software/ \
+  --keyword "help desk software" \
+  --include-serp-keyword-suggestions \
+  --max-serp-keyword-suggestions 10 \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+Enrich keyword demand with Ahrefs traffic and volume when configured:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/live-chat-software/ \
+  --keyword-source ahrefs \
+  --use-ahrefs-metrics \
+  --keywords-per-page 8 \
+  --provider dataforseo \
+  --country 2840 \
+  --language en
+```
+
+Estimate the run before spending SERP/API budget:
+
+```bash
+site-audit serp-gap www.liveagent.com \
+  --url https://www.liveagent.com/live-chat-software/ \
+  --keyword "live chat software" \
+  --dry-run
+```
+
+Each single-URL SERP gap execution writes under
+`projects/<domain>/serp_gap/report/<url-path-slug>/`, so rerunning the same URL
+updates the same HTML, JSON, CSV, and markdown TODO reports while different URLs
+stay separate.
+
+Example output paths:
+
+```text
+projects/www.liveagent.com/serp_gap/report/live-chat-software/index.html
+projects/www.liveagent.com/serp_gap/report/live-chat-software/serp_gap.json
+projects/www.liveagent.com/serp_gap/report/live-chat-software/serp_gap_actions.csv
+projects/www.liveagent.com/serp_gap/report/live-chat-software/serp_gap_todo.md
+
+projects/www.liveagent.com/serp_gap/report/blog-ai-support-paradox/index.html
+```
+
+The report is action-first: it opens with page content briefs, prioritized
+content tasks, paragraph rules, acceptance criteria, and AI-agent prompts.
+The diagnostic evidence is still available behind expandable sections:
+keyword-level semantic scatterplots, domain-colored competitor points,
+topic clusters, missing/partial topic tables, top ranking URLs, keyword/API
+metrics, per-URL keyword ranking tables, a demand-weighted keyword centroid,
+weighted keyword frequency clouds, and topic impact by traffic. The command
+also writes `serp_gap_actions.csv` for handing concrete tasks to writers or
+automation.
 
 Use `--use-ahrefs-metrics` to enrich matching keywords with Ahrefs position,
 traffic, and volume. Use `--include-serp-keyword-suggestions` to add People
