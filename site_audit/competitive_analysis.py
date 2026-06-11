@@ -699,7 +699,14 @@ def _missing_topics(
     k = max(2, min(n_clusters, len(theirs_para_embs) // 3))
     try:
         import faiss  # type: ignore
-        kmeans = faiss.Kmeans(d=theirs_para_embs.shape[1], k=k, niter=30, verbose=False, seed=42)
+        kmeans = faiss.Kmeans(
+            d=theirs_para_embs.shape[1],
+            k=k,
+            niter=30,
+            verbose=False,
+            seed=42,
+            min_points_per_centroid=1,
+        )
         kmeans.train(theirs_para_embs.astype(np.float32))
         _, labels = kmeans.index.search(theirs_para_embs.astype(np.float32), 1)
         labels = labels.flatten().astype(int)
@@ -823,7 +830,14 @@ def _cluster_paragraphs(embeddings: np.ndarray, max_clusters: int = 12) -> np.nd
     k = max(2, min(max_clusters, len(embeddings) // 3))
     try:
         import faiss  # type: ignore
-        kmeans = faiss.Kmeans(d=embeddings.shape[1], k=k, niter=35, verbose=False, seed=42)
+        kmeans = faiss.Kmeans(
+            d=embeddings.shape[1],
+            k=k,
+            niter=35,
+            verbose=False,
+            seed=42,
+            min_points_per_centroid=1,
+        )
         kmeans.train(embeddings.astype(np.float32))
         _, labels = kmeans.index.search(embeddings.astype(np.float32), 1)
         return labels.flatten().astype(np.int32)

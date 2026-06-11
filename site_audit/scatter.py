@@ -36,7 +36,14 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
 
     k = max(2, min(num_clusters, max(2, n // 2)))
     emb_f32 = embeddings.astype(np.float32)
-    kmeans = faiss.Kmeans(d=d, k=k, niter=50, verbose=False, seed=42)
+    kmeans = faiss.Kmeans(
+        d=d,
+        k=k,
+        niter=50,
+        verbose=False,
+        seed=42,
+        min_points_per_centroid=1,
+    )
     kmeans.train(emb_f32)
     _, labels = kmeans.index.search(emb_f32, 1)
     cluster_labels = labels.flatten().astype(int)

@@ -16,6 +16,7 @@ import shlex
 import shutil
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -39,6 +40,40 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    if verbose:
+        return
+    for logger_name in (
+        "httpx",
+        "httpcore",
+        "sentence_transformers",
+        "transformers",
+        "huggingface_hub",
+        "faiss",
+        "faiss.loader",
+        "urllib3",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+    warnings.filterwarnings(
+        "ignore",
+        message=r"n_jobs value 1 overridden to 1 by setting random_state.*",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*get_extended_attention_mask.*deprecated.*",
+        category=UserWarning,
+    )
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    try:
+        from transformers.utils import logging as transformers_logging  # type: ignore
+        transformers_logging.set_verbosity_error()
+    except Exception:
+        pass
+    try:
+        from huggingface_hub.utils import logging as hub_logging  # type: ignore
+        hub_logging.set_verbosity_error()
+    except Exception:
+        pass
 
 
 def _run_command(args: argparse.Namespace) -> int:

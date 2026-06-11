@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import ExitStack, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from io import StringIO
 from typing import Iterable, List
 
 import numpy as np
@@ -25,6 +27,17 @@ from .cache import EmbeddingCache, content_hash
 LOG = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Alibaba-NLP/gte-multilingual-base"
+
+
+def _quiet_model_load():
+    if os.environ.get("SITE_AUDIT_MODEL_LOAD_LOGS"):
+        return nullcontext()
+    if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+        return nullcontext()
+    stack = ExitStack()
+    stack.enter_context(redirect_stdout(StringIO()))
+    stack.enter_context(redirect_stderr(StringIO()))
+    return stack
 
 
 @dataclass
@@ -52,9 +65,10 @@ class Embedder:
         from sentence_transformers import SentenceTransformer  # lazy
 
         device = os.environ.get("SITE_AUDIT_DEVICE") or None
-        self._model = SentenceTransformer(
-            self.model_name, trust_remote_code=True, device=device
-        )
+        with _quiet_model_load():
+            self._model = SentenceTransformer(
+                self.model_name, trust_remote_code=True, device=device
+            )
         # On macOS (Apple Silicon), the gte-multilingual-base model's
         # position_ids buffer (persistent=False) appears to contain garbage
         # memory after loading rather than the expected arange values.

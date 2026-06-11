@@ -61,7 +61,14 @@ def cluster_and_label(
 
     import faiss  # type: ignore
 
-    kmeans = faiss.Kmeans(d=embs.shape[1], k=k, niter=50, verbose=False, seed=42)
+    kmeans = faiss.Kmeans(
+        d=embs.shape[1],
+        k=k,
+        niter=50,
+        verbose=False,
+        seed=42,
+        min_points_per_centroid=1,
+    )
     kmeans.train(embs)
     _, labels = kmeans.index.search(embs, 1)
     cluster_labels = labels.flatten().astype(int)
