@@ -1,4 +1,4 @@
-from site_audit.cli import build_parser
+from site_audit.cli import _run_serp_gap_menu, build_parser
 
 
 def test_run_parser_accepts_crawl_filter_flags() -> None:
@@ -173,6 +173,12 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
             "25",
             "--ahrefs-keywords-limit",
             "50",
+            "--ai-agent-provider",
+            "openrouter",
+            "--ai-agent-model",
+            "deepseek/deepseek-v4-pro",
+            "--ai-agent-refresh",
+            "--no-ai-agent-interactive-setup",
             "--dry-run",
         ]
     )
@@ -194,6 +200,51 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
     assert args.ahrefs_mode == "domain"
     assert args.ahrefs_top_pages_limit == 25
     assert args.ahrefs_keywords_limit == 50
+    assert args.ai_agent is True
+    assert args.ai_agent_provider == "openrouter"
+    assert args.ai_agent_model == "deepseek/deepseek-v4-pro"
+    assert args.ai_agent_refresh is True
+    assert args.ai_agent_interactive_setup is False
+    assert args.dry_run is True
+
+
+def test_serp_gap_parser_can_disable_ai_agent() -> None:
+    args = build_parser().parse_args(["serp-gap", "example.com", "--no-ai-agent"])
+
+    assert args.ai_agent is False
+
+
+def test_serp_gap_parser_accepts_interactive_menu_without_domain() -> None:
+    args = build_parser().parse_args(["serp-gap", "--menu"])
+
+    assert args.menu is True
+    assert args.domain is None
+
+
+def test_serp_gap_menu_fills_common_options(monkeypatch) -> None:
+    args = build_parser().parse_args(["serp-gap", "--menu"])
+    answers = iter([
+        "example.com",
+        "1",
+        "https://www.example.com/blog/ai-support-paradox/",
+        "1",
+        "2",
+        "2840",
+        "",
+        "y",
+        "n",
+        "y",
+    ])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    assert _run_serp_gap_menu(args) is True
+    assert args.domain == "example.com"
+    assert args.url == ["https://www.example.com/blog/ai-support-paradox/"]
+    assert args.keyword_source == "auto"
+    assert args.ai_agent is True
+    assert args.provider == "dataforseo"
+    assert args.country == "2840"
+    assert args.language == "en"
     assert args.dry_run is True
 
 

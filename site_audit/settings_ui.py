@@ -128,6 +128,24 @@ FIELD_DETAILS = {
         "format": "Secret token.",
         "example": "ahrefs_xxx",
     },
+    "OPENROUTER_API_KEY": {
+        "what": "OpenRouter API key.",
+        "why": "Enables AI-agent keyword inference and paragraph-level SERP gap TODO briefs.",
+        "format": "Secret token stored in local .env, which is ignored by git.",
+        "example": "sk-or-v1-...",
+    },
+    "OPENROUTER_MODEL": {
+        "what": "Default OpenRouter model for AI-agent work.",
+        "why": "Controls which model writes keyword recommendations and editor briefs.",
+        "format": "OpenRouter model id.",
+        "example": "deepseek/deepseek-v4-pro",
+    },
+    "HARNEXT_API_KEY": {
+        "what": "Optional Harnext API key.",
+        "why": "Reserved for Harnext SDK workflows when a Harnext account requires its own key.",
+        "format": "Secret token, if required by the SDK/account.",
+        "example": "harnext_xxx",
+    },
     "DATAFORSEO_LOGIN": {
         "what": "DataForSEO API login.",
         "why": "Required for DataForSEO keyword and SERP requests.",
@@ -191,6 +209,9 @@ EXTRA_SETTINGS = [
     {"command": "credentials", "env_key": "GOOGLE_ADS_REFRESH_TOKEN", "flag": "Google Ads refresh token", "default": "", "help": "Refresh token with the adwords OAuth scope.", "choices": [], "kind": "secret"},
     {"command": "credentials", "env_key": "GOOGLE_ADS_CUSTOMER_ID", "flag": "Google Ads customer ID", "default": "", "help": "Client account ID to query.", "choices": [], "kind": "text"},
     {"command": "credentials", "env_key": "GOOGLE_ADS_LOGIN_CUSTOMER_ID", "flag": "Google Ads manager ID", "default": "", "help": "Optional manager account ID for login-customer-id.", "choices": [], "kind": "text"},
+    {"command": "credentials", "env_key": "OPENROUTER_API_KEY", "flag": "OpenRouter API key", "default": "", "help": "Required for AI-agent keyword inference and editor TODO briefs.", "choices": [], "kind": "secret"},
+    {"command": "credentials", "env_key": "OPENROUTER_MODEL", "flag": "OpenRouter model", "default": "deepseek/deepseek-v4-pro", "help": "Default model for AI-agent tasks.", "choices": [], "kind": "text"},
+    {"command": "credentials", "env_key": "HARNEXT_API_KEY", "flag": "Harnext API key", "default": "", "help": "Optional Harnext SDK account key if your setup requires one.", "choices": [], "kind": "secret"},
 ]
 
 

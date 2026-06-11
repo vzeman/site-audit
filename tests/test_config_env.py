@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from site_audit.cli import build_parser
-from site_audit.config_env import apply_env_defaults, update_env_file
+from site_audit.config_env import apply_env_defaults, env_names, update_env_file
 from site_audit.settings_ui import _render_home, _render_reports_page, _schema
 
 
@@ -29,6 +29,13 @@ def test_env_defaults_apply_to_boolean_optional_run_options(monkeypatch) -> None
     apply_env_defaults(args, parser, ["run", "example.com"])
 
     assert args.strip_header_footer is False
+
+
+def test_env_names_normalize_hyphenated_commands() -> None:
+    assert env_names("serp-gap", "ai_agent") == [
+        "SITE_AUDIT_SERP_GAP_AI_AGENT",
+        "SITE_AUDIT_AI_AGENT",
+    ]
 
 
 def test_cli_options_override_env_defaults(monkeypatch) -> None:
@@ -72,8 +79,11 @@ def test_settings_schema_includes_cli_and_provider_credentials() -> None:
 
     assert "SITE_AUDIT_RUN_MAX_PAGES" in keys
     assert "SITE_AUDIT_RUN_GOOGLE_ADS_CUSTOMER_ID" in keys
+    assert "SITE_AUDIT_SERP_GAP_AI_AGENT" in keys
     assert "GOOGLE_ADS_REFRESH_TOKEN" in keys
     assert "AHREFS_API_KEY" in keys
+    assert "OPENROUTER_API_KEY" in keys
+    assert "OPENROUTER_MODEL" in keys
 
 
 def test_settings_schema_includes_field_explanations() -> None:
@@ -83,11 +93,13 @@ def test_settings_schema_includes_field_explanations() -> None:
     domain = by_key["SITE_AUDIT_RUN_DOMAIN"]["details"]
     seed = by_key["SITE_AUDIT_RUN_COMPETITIVE_AUTO_PRODUCT_SEED"]["details"]
     ads = by_key["GOOGLE_ADS_REFRESH_TOKEN"]["details"]
+    openrouter = by_key["OPENROUTER_API_KEY"]["details"]
     fallback = by_key["SITE_AUDIT_RUN_DUPLICATE_THRESHOLD"]["details"]
 
     assert "site to crawl" in domain["what"]
     assert "Comma-separated" in seed["format"]
     assert "without logging in" in ads["why"]
+    assert "AI-agent" in openrouter["why"]
     assert fallback["what"]
     assert fallback["example"]
 

@@ -3,12 +3,14 @@ from pathlib import Path
 
 import numpy as np
 
+from site_audit.ai_agent import build_editor_brief_messages, parse_keyword_candidates
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
     _attach_action_points,
     _action_csv_rows,
     _action_points_for_analysis,
+    _ai_agent_state,
     _content_comparison,
     _content_order_path,
     _dedupe_semantic_row_texts,
@@ -162,6 +164,34 @@ def test_serp_gap_manual_keywords_can_target_homepage(tmp_path: Path) -> None:
         "call center software",
     ]
     assert all(row["source"] == "manual" for row in payload["selected_keywords"])
+
+
+def test_serp_gap_url_only_dry_run_uses_ai_keyword_fallback(tmp_path: Path) -> None:
+    _write_base_report(tmp_path)
+
+    payload = run(
+        SerpGapConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            urls=["https://www.example.com/"],
+            dry_run=True,
+        )
+    )
+
+    assert payload["status"] == "dry_run"
+    assert payload["ai_agent"]["status"] == "dry_run"
+    assert payload["selected_keywords"][0]["keyword"] == "Example Home"
+    assert payload["selected_keywords"][0]["source"] == "ai_agent_fallback"
+    assert "no API demand metric match" in payload["selected_keywords"][0]["metrics_source"]
+
+
+def test_serp_gap_ai_agent_state_reports_missing_openrouter_key(monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.serp_gap.openrouter_api_key", lambda: "")
+
+    state = _ai_agent_state(SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True))
+
+    assert state["status"] == "missing_openrouter_api_key"
+    assert "OPENROUTER_API_KEY" in state["notes"][0]
 
 
 def test_serp_gap_budget_cap_stops_before_paid_work(tmp_path: Path) -> None:
@@ -682,6 +712,70 @@ def test_serp_gap_todo_markdown_is_actionable_and_deduped() -> None:
     assert "Review paragraph 4 for intent drift or filler." not in markdown
     assert "P1 (0.50 best SERP paragraph match" in markdown
     assert "Do not copy competitor wording." in markdown
+
+
+def test_serp_gap_todo_markdown_embeds_ai_editor_brief_without_duplicate_lines() -> None:
+    payload = {
+        "status": "ok",
+        "domain": "example.com",
+        "summary": {"pages_analyzed": 1, "keywords_selected": 1, "action_points": 0},
+        "pages": [
+            {
+                "url": "https://example.com/support",
+                "title": "Support",
+                "ai_editor_brief": {
+                    "status": "ok",
+                    "provider": "openrouter",
+                    "model": "deepseek/deepseek-v4-pro",
+                    "cache_status": "miss",
+                    "markdown": "\n".join([
+                        "# AI Agent TODO",
+                        "## Evidence",
+                        "- Demand metrics absent; do not estimate search volume.",
+                        "- Demand metrics absent; do not estimate search volume.",
+                        "## Paragraph Decisions",
+                        "- P1: rewrite to answer the user intent directly.",
+                    ]),
+                },
+                "analyses": [],
+            }
+        ],
+    }
+
+    markdown = _todo_markdown(payload)
+
+    assert "### AI Agent TODO" in markdown
+    assert "provider: openrouter" in markdown
+    assert markdown.count("Demand metrics absent; do not estimate search volume.") == 1
+    assert "- P1: rewrite to answer the user intent directly." in markdown
+
+
+def test_ai_agent_keyword_parser_and_editor_prompt_are_specific() -> None:
+    keywords = parse_keyword_candidates(
+        '{"keywords":[{"keyword":"ai customer support paradox","intent":"matches article"},'
+        '{"keyword":"ai support handoff","priority":2}]}'
+    )
+    messages = build_editor_brief_messages({
+        "url": "https://example.com/blog/ai-support-paradox/",
+        "title": "AI Support Paradox",
+        "keywords": [{"keyword": "ai customer support paradox", "impressions": 0}],
+        "action_points": [
+            {
+                "priority": "high",
+                "type": "add_topic",
+                "keyword": "ai customer support paradox",
+                "topic": "human handoff",
+                "task_summary": "Add handoff section.",
+            }
+        ],
+        "analyses": [],
+    })
+
+    assert keywords == ["ai customer support paradox", "ai support handoff"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "keep, rewrite, move, merge, or remove" in prompt
+    assert "Do not copy competitor wording" in prompt
+    assert "demand metrics absent" in prompt
 
 
 def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:
