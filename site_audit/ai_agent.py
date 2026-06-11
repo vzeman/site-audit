@@ -1,13 +1,15 @@
 """AI-agent helpers for report-to-edit workflows.
 
 The module keeps provider details outside the analysis pipeline. OpenRouter is
-the required runtime provider; Harnext is attempted as an optional orchestration
-SDK when selected, with a direct OpenRouter fallback so existing installs keep
-working before the optional package is installed.
+available as a direct chat-completions client. Harnext is available as a
+separate coding-agent provider through ``harnext_sdk`` and the ``harnext`` CLI.
+When Harnext is selected, failures are reported explicitly instead of silently
+falling back to direct OpenRouter.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -116,19 +118,9 @@ class HarnextOpenRouterClient:
     ) -> AgentCompletion:
         if not self.api_key:
             raise MissingOpenRouterKey("Set OPENROUTER_API_KEY in .env or the environment.")
-        try:
-            completion = self._complete_with_harnext(messages, model=model, temperature=temperature, timeout=timeout)
-            completion.provider = self.provider
-            return completion
-        except Exception as exc:
-            fallback = OpenRouterClient(api_key=self.api_key).complete(
-                messages,
-                model=model,
-                temperature=temperature,
-                timeout=timeout,
-            )
-            fallback.fallback_from = f"harnext: {exc.__class__.__name__}"
-            return fallback
+        completion = self._complete_with_harnext(messages, model=model, temperature=temperature, timeout=timeout)
+        completion.provider = self.provider
+        return completion
 
     def _complete_with_harnext(
         self,
@@ -138,21 +130,73 @@ class HarnextOpenRouterClient:
         temperature: float,
         timeout: int,
     ) -> AgentCompletion:
-        from harnext import Harnext  # type: ignore
+        from harnext_sdk import HarnextAgentOptions, query  # type: ignore
+        from harnext_sdk.types import AssistantMessage, ResultMessage, TextBlock  # type: ignore
 
         prompt = messages_to_prompt(messages)
-        agent = Harnext(
+        env = {
+            "OPENROUTER_API_KEY": self.api_key,
+            "OPENROUTER_MODEL": model,
+        }
+        options = HarnextAgentOptions(
             provider="openrouter",
             model=model,
-            api_key=self.api_key,
-            temperature=temperature,
-            timeout=timeout,
+            max_turns=1,
+            env=env,
+            auto_update_cli=True,
         )
-        result = agent.run(prompt)
-        text = _completion_text(result)
+        text_parts: list[str] = []
+        result_payload: dict[str, Any] = {}
+
+        async def _run() -> None:
+            async for message in query(prompt=prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock) and block.text:
+                            text_parts.append(block.text)
+                elif isinstance(message, ResultMessage):
+                    result_payload.update(
+                        {
+                            "subtype": message.subtype,
+                            "is_error": message.is_error,
+                            "result": message.result,
+                            "session_id": message.session_id,
+                            "num_turns": message.num_turns,
+                            "duration_ms": message.duration_ms,
+                            "total_cost_usd": message.total_cost_usd,
+                            "usage": message.usage,
+                        }
+                    )
+                    if message.result:
+                        text_parts.append(message.result)
+                    if message.is_error:
+                        raise RuntimeError(message.result or "Harnext returned an error result.")
+
+        _run_async(_run())
+        text = "\n".join(part.strip() for part in text_parts if part and part.strip()).strip()
         if not text:
             raise RuntimeError("Harnext returned an empty completion.")
-        return AgentCompletion(text=text, provider=self.provider, model=model, raw={"result": text})
+        return AgentCompletion(text=text, provider=self.provider, model=model, raw=result_payload or {"result": text})
+
+
+def _run_async(coro: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    raise RuntimeError("Harnext agent cannot run inside an already running asyncio loop.")
+
+
+def harnext_status() -> tuple[bool, str]:
+    try:
+        from harnext_sdk import resolve_cli_invocation  # type: ignore
+    except Exception as exc:
+        return False, f"Install the Python SDK with `python -m pip install harnext` or `python -m pip install -e '.[agent]'` ({exc.__class__.__name__})."
+    try:
+        command = resolve_cli_invocation(None)
+    except Exception as exc:
+        return False, f"Install the Harnext CLI with `npm install -g harnext`, or set HARNEXT_CLI_PATH ({exc})."
+    return True, " ".join(command)
 
 
 def openrouter_api_key() -> str:
@@ -328,13 +372,14 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
             "content": (
                 "You are a senior SEO editor writing implementation instructions for one analyzed URL. "
                 "Be precise, evidence-led, and URL-specific. No generic SEO advice, no ballast, no duplicate tasks, "
-                "and no copied competitor wording. Do not copy competitor wording. Separate evidence, actions, and draft copy."
+                "and no copied competitor wording. Do not copy competitor wording. Separate evidence, actions, draft copy, "
+                "and a final article draft that can be handed to an implementation agent."
             ),
         },
         {
             "role": "user",
             "content": (
-                "Create a markdown TODO brief for an AI coding/content agent. "
+                "Create a markdown TODO brief for the Harnext AI coding/content agent. "
                 "Use this exact structure and keep each bullet actionable:\n"
                 "# AI Agent TODO\n"
                 "## Evidence\n"
@@ -342,9 +387,12 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "## Sections To Add Or Expand\n"
                 "## Recommended Content Order\n"
                 "## Draft Copy\n"
+                "## Final Article Draft\n"
                 "## Acceptance Criteria\n\n"
                 "For existing paragraphs, say keep, rewrite, move, merge, or remove. "
                 "For missing competitor-covered topics, write the actual original draft copy that should be added. "
+                "In Final Article Draft, assemble the full recommended article in final reading order, including headings, "
+                "replacement paragraphs, new paragraphs, and clear remove/merge omissions. "
                 "If impressions, clicks, traffic, or volume are absent, say demand metrics absent instead of guessing. "
                 "Do not repeat the same instruction in multiple sections.\n\n"
                 f"Evidence JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"

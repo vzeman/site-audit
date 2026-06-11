@@ -812,9 +812,9 @@ def _run_serp_gap_menu(args: argparse.Namespace) -> bool:
         if args.ai_agent:
             args.ai_agent_provider = _menu_choice(
                 "AI agent provider",
-                "Harnext uses the SDK wrapper; OpenRouter direct skips the wrapper. Both require OPENROUTER_API_KEY.",
+                "Harnext runs the coding-agent CLI; OpenRouter direct uses chat completions only. Both require OPENROUTER_API_KEY.",
                 [
-                    ("harnext", "Harnext", "Default orchestration wrapper with direct OpenRouter fallback."),
+                    ("harnext", "Harnext", "Default coding-agent workflow. Requires the harnext Python SDK and CLI."),
                     ("openrouter", "OpenRouter direct", "Call OpenRouter chat completions directly."),
                 ],
                 default=args.ai_agent_provider,
@@ -1364,9 +1364,9 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--dry-run", action="store_true",
                         help="Write a plan without calling SERP providers or fetching competitors")
     serp_p.add_argument("--ai-agent", action=argparse.BooleanOptionalAction, default=True,
-                        help="Use the OpenRouter-backed AI agent for URL-only keyword inference and editor TODO briefs")
+                        help="Use the Harnext/OpenRouter AI agent for URL-only keyword inference, editor TODO briefs, and final article drafts")
     serp_p.add_argument("--ai-agent-provider", default="harnext", choices=["harnext", "openrouter"],
-                        help="AI agent provider wrapper (default: harnext, with direct OpenRouter fallback)")
+                        help="AI agent provider (default: harnext; use openrouter to bypass the Harnext coding-agent CLI)")
     serp_p.add_argument("--ai-agent-model", default=DEFAULT_OPENROUTER_MODEL,
                         help=f"OpenRouter model for AI-agent tasks (default: {DEFAULT_OPENROUTER_MODEL})")
     serp_p.add_argument("--ai-agent-refresh", action="store_true",

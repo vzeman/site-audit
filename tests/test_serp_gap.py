@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from site_audit.ai_agent import build_editor_brief_messages, parse_keyword_candidates
+from site_audit.ai_agent import build_editor_brief_messages, harnext_status, parse_keyword_candidates
 from site_audit.serp_gap import (
     SerpGapConfig,
     _add_serp_url_rankings,
@@ -192,6 +192,16 @@ def test_serp_gap_ai_agent_state_reports_missing_openrouter_key(monkeypatch) -> 
 
     assert state["status"] == "missing_openrouter_api_key"
     assert "OPENROUTER_API_KEY" in state["notes"][0]
+
+
+def test_serp_gap_ai_agent_state_reports_missing_harnext(monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.serp_gap.openrouter_api_key", lambda: "sk-test")
+    monkeypatch.setattr("site_audit.serp_gap.harnext_status", lambda: (False, "Install Harnext CLI"))
+
+    state = _ai_agent_state(SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True))
+
+    assert state["status"] == "missing_harnext"
+    assert "Install Harnext CLI" in state["notes"][0]
 
 
 def test_serp_gap_budget_cap_stops_before_paid_work(tmp_path: Path) -> None:
@@ -776,6 +786,22 @@ def test_ai_agent_keyword_parser_and_editor_prompt_are_specific() -> None:
     assert "keep, rewrite, move, merge, or remove" in prompt
     assert "Do not copy competitor wording" in prompt
     assert "demand metrics absent" in prompt
+    assert "## Final Article Draft" in prompt
+    assert "Harnext AI coding/content agent" in prompt
+
+
+def test_harnext_status_reports_missing_cli(monkeypatch) -> None:
+    import harnext_sdk
+
+    def fail(_path):
+        raise RuntimeError("missing cli")
+
+    monkeypatch.setattr(harnext_sdk, "resolve_cli_invocation", fail)
+
+    ok, detail = harnext_status()
+
+    assert ok is False
+    assert "npm install -g harnext" in detail
 
 
 def test_serp_gap_enriches_manual_keywords_from_ahrefs_metrics() -> None:

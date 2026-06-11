@@ -42,6 +42,7 @@ open projects/example.com/report/index.html
 **Requirements**
 
 - Python 3.10+
+- Node.js/npm when you want the default Harnext AI agent for SERP gap drafts
 - ~ 1.5 GB free disk for the embedding model (downloaded once on first run)
 - macOS / Linux (Apple Silicon supported; we set the libomp env vars
   needed for faiss + PyTorch coexistence automatically)
@@ -59,6 +60,14 @@ source .venv/bin/activate
 
 python -m pip install -U pip
 python -m pip install -e .
+```
+
+Install the Harnext CLI if you want the default SERP gap AI agent to generate
+implementation-ready TODOs and final article drafts:
+
+```bash
+npm install -g harnext
+harnext --version
 ```
 
 If you are not on Homebrew Python, use any working Python 3.10+:
@@ -958,15 +967,23 @@ site-audit serp-gap www.liveagent.com \
   --language en
 ```
 
-Run URL-only with the AI agent. The agent uses OpenRouter to infer target
-keywords from the page and then writes paragraph-level TODO markdown after the
-SERP gap analysis:
+Run URL-only with the AI agent. By default, the agent uses Harnext with
+OpenRouter to infer target keywords from the page and then writes
+paragraph-level TODO markdown plus a final article draft after the SERP gap
+analysis:
 
 `.env` content:
 
 ```dotenv
 OPENROUTER_API_KEY="sk-or-v1-..."
 OPENROUTER_MODEL="deepseek/deepseek-v4-pro"
+```
+
+Install and verify the Harnext CLI:
+
+```bash
+npm install -g harnext
+harnext --version
 ```
 
 ```bash
@@ -977,9 +994,10 @@ site-audit serp-gap www.liveagent.com \
   --language en
 ```
 
-Use `--no-ai-agent` to skip OpenRouter/Harnext calls, or
-`--ai-agent-refresh` to ignore cached AI prompts and completions. The AI agent
-is cache-first and stores prompts/completions under
+Use `--ai-agent-provider openrouter` to bypass Harnext and call OpenRouter
+directly, `--no-ai-agent` to skip AI calls, or `--ai-agent-refresh` to ignore
+cached AI prompts and completions. The AI agent is cache-first and stores
+prompts/completions under
 `projects/<domain>/cache/serp_gap/ai_agent/`.
 
 Enrich keyword demand with Ahrefs traffic and volume when configured:

@@ -142,16 +142,23 @@ Use `--keyword-source file` when you pass `--keyword` or
 
 ### AI-Agent Keyword Selection And TODO Briefs
 
-By default, `serp-gap` enables an OpenRouter-backed AI-agent layer. Existing
-keyword sources still run first. If a selected URL has no usable keyword rows,
-the agent inspects the page title, H1, headings, paragraphs, and any existing
-search rows to infer target keywords before SERP analysis begins.
+By default, `serp-gap` enables a Harnext AI-agent layer backed by OpenRouter.
+Existing keyword sources still run first. If a selected URL has no usable
+keyword rows, the agent inspects the page title, H1, headings, paragraphs, and
+any existing search rows to infer target keywords before SERP analysis begins.
 
 Configure OpenRouter in `.env` or through `site-audit settings`:
 
 ```bash
 OPENROUTER_API_KEY="sk-or-v1-..."
 OPENROUTER_MODEL="deepseek/deepseek-v4-pro"
+```
+
+Harnext also needs its CLI on `PATH`:
+
+```bash
+npm install -g harnext
+harnext --version
 ```
 
 The `.env` file is ignored by git. In an interactive terminal, `serp-gap` can
@@ -173,6 +180,8 @@ After analysis, the agent generates a page-specific markdown brief with:
 - missing sections to add when competitors consistently cover them
 - recommended content order based on semantic path evidence
 - original draft copy for new or rewritten sections
+- a `Final Article Draft` section that assembles the recommended article in
+  final reading order
 - acceptance criteria for an editor or AI coding/content agent
 
 Prompts and completions are cached under:
@@ -181,11 +190,12 @@ Prompts and completions are cached under:
 projects/<domain>/cache/serp_gap/ai_agent/
 ```
 
-Use `--ai-agent-provider openrouter` to bypass the Harnext SDK wrapper,
-`--no-ai-agent` to disable AI calls, and `--ai-agent-refresh` to regenerate
-cached prompts/completions. If `OPENROUTER_API_KEY` is absent, the report states
-that the provider is missing and uses title/H1 fallback keywords instead of
-fabricating demand metrics.
+Use `--ai-agent-provider openrouter` to bypass the Harnext coding-agent CLI and
+call OpenRouter chat completions directly. Use `--no-ai-agent` to disable AI
+calls, and `--ai-agent-refresh` to regenerate cached prompts/completions. If
+`OPENROUTER_API_KEY`, the Harnext Python SDK, or the Harnext CLI is absent, the
+report states exactly what is missing and uses title/H1 fallback keywords
+instead of fabricating demand metrics.
 
 To expand explicit keywords with SERP-discovered related questions and
 searches, enable:

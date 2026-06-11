@@ -31,6 +31,7 @@ dependencies = [
   "sentence-transformers>=2.6.0",
   "faiss-cpu>=1.7.4",
   "umap-learn>=0.5.5",
+  "harnext>=1.7.1",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,7 @@ dev = [
   "pytest>=8.0.0",
 ]
 agent = [
-  "harnext",
+  "harnext>=1.7.1",
 ]
 
 [project.urls]
