@@ -4200,7 +4200,7 @@ def _html(payload: dict) -> str:
   .report-nav-button {
     width: 100%;
     border: 0;
-    border-radius: 14px;
+    border-radius: 8px;
     background: transparent;
     color: var(--audit-muted);
     cursor: pointer;
@@ -4221,11 +4221,11 @@ def _html(payload: dict) -> str:
   }
   .report-nav-label {
     display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    white-space: normal;
     font-size: 0.84rem;
-    line-height: 1.15;
+    line-height: 1.25;
   }
   .report-nav-button.nav-keyword {
     margin-left: 10px;
@@ -4234,6 +4234,7 @@ def _html(payload: dict) -> str:
   }
   .report-nav-button.nav-keyword .report-nav-label {
     font-size: 0.78rem;
+    line-height: 1.25;
   }
   @media(max-width:1180px) {
     .report-sidebar { position: static; width: auto; margin: 14px; }

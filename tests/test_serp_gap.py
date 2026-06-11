@@ -790,6 +790,29 @@ def test_ai_agent_keyword_parser_and_editor_prompt_are_specific() -> None:
     assert "Harnext AI coding/content agent" in prompt
 
 
+def test_ai_agent_keyword_parser_reads_fenced_json_without_code_tokens() -> None:
+    text = """```json
+{
+  "keywords": [
+    {"keyword": "agent ticket scope", "priority": 1},
+    {"keyword": "what is agent ticket scope", "priority": 2},
+    {"keyword": "ticket access control for support agents", "priority": 3}
+  ]
+}
+```"""
+
+    keywords = parse_keyword_candidates(text, limit=3)
+
+    assert keywords == [
+        "agent ticket scope",
+        "what is agent ticket scope",
+        "ticket access control for support agents",
+    ]
+    assert "json" not in keywords
+    assert "{" not in keywords
+    assert "[" not in keywords
+
+
 def test_harnext_status_reports_missing_cli(monkeypatch) -> None:
     import harnext_sdk
 

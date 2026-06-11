@@ -141,19 +141,21 @@ class HarnextOpenRouterClient:
         options = HarnextAgentOptions(
             provider="openrouter",
             model=model,
-            max_turns=1,
+            max_turns=3,
             env=env,
             auto_update_cli=True,
         )
-        text_parts: list[str] = []
+        assistant_parts: list[str] = []
+        result_text = ""
         result_payload: dict[str, Any] = {}
 
         async def _run() -> None:
+            nonlocal result_text
             async for message in query(prompt=prompt, options=options):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock) and block.text:
-                            text_parts.append(block.text)
+                            assistant_parts.append(block.text)
                 elif isinstance(message, ResultMessage):
                     result_payload.update(
                         {
@@ -168,12 +170,12 @@ class HarnextOpenRouterClient:
                         }
                     )
                     if message.result:
-                        text_parts.append(message.result)
+                        result_text = message.result
                     if message.is_error:
                         raise RuntimeError(message.result or "Harnext returned an error result.")
 
         _run_async(_run())
-        text = "\n".join(part.strip() for part in text_parts if part and part.strip()).strip()
+        text = (result_text or "\n".join(part.strip() for part in assistant_parts if part and part.strip())).strip()
         if not text:
             raise RuntimeError("Harnext returned an empty completion.")
         return AgentCompletion(text=text, provider=self.provider, model=model, raw=result_payload or {"result": text})
@@ -339,6 +341,8 @@ def parse_keyword_candidates(text: str, *, limit: int = 5) -> list[str]:
     if not candidates:
         for line in str(text or "").splitlines():
             stripped = re.sub(r"^\s*[-*0-9.)]+\s*", "", line).strip()
+            if stripped.startswith("```") or stripped in {"{", "}", "[", "]", "},", "],"}:
+                continue
             if ":" in stripped:
                 stripped = stripped.split(":", 1)[-1].strip()
             _append_keyword_candidate(candidates, stripped, limit)
@@ -373,13 +377,15 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "You are a senior SEO editor writing implementation instructions for one analyzed URL. "
                 "Be precise, evidence-led, and URL-specific. No generic SEO advice, no ballast, no duplicate tasks, "
                 "and no copied competitor wording. Do not copy competitor wording. Separate evidence, actions, draft copy, "
-                "and a final article draft that can be handed to an implementation agent."
+                "and a final article draft that can be handed to an implementation agent. Use only the Evidence JSON supplied "
+                "in the user message. Do not inspect files, browse, run commands, or ask for more context."
             ),
         },
         {
             "role": "user",
             "content": (
                 "Create a markdown TODO brief for the Harnext AI coding/content agent. "
+                "Do not use tools and do not read files; all required evidence is below. "
                 "Use this exact structure and keep each bullet actionable:\n"
                 "# AI Agent TODO\n"
                 "## Evidence\n"
@@ -472,11 +478,24 @@ def _extract_json(text: str) -> Any:
     raw = str(text or "").strip()
     if not raw:
         return None
-    for candidate in [raw, _slice_between(raw, "{", "}"), _slice_between(raw, "[", "]")]:
+    fenced = re.findall(r"```(?:json)?\s*(.*?)```", raw, flags=re.IGNORECASE | re.DOTALL)
+    candidates = [raw, *fenced, _slice_between(raw, "{", "}"), _slice_between(raw, "[", "]")]
+    for candidate in candidates:
         if not candidate:
             continue
         try:
             return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        except TypeError:
+            continue
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(raw):
+        if char not in "{[":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(raw[index:])
+            return payload
         except json.JSONDecodeError:
             continue
     return None
@@ -493,6 +512,8 @@ def _slice_between(text: str, start: str, end: str) -> str:
 def _append_keyword_candidate(out: list[str], value: str, limit: int) -> None:
     normalized = re.sub(r"\s+", " ", value).strip().strip("\"'`.,;:")
     normalized = re.sub(r"\s+-\s+.*$", "", normalized).strip()
+    if not re.search(r"[A-Za-z0-9]", normalized):
+        return
     if not normalized or "://" in normalized or len(normalized) > 90:
         return
     if len(normalized.split()) > 9:
