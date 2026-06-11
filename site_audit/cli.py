@@ -540,7 +540,7 @@ def _render_keyboard_choice(
     old_settings = termios.tcgetattr(fd)
     sys.stdout.write("\033[?25l")
     try:
-        tty.setraw(fd)
+        tty.setcbreak(fd)
         while True:
             if rendered_lines:
                 _clear_rendered_lines(rendered_lines)
