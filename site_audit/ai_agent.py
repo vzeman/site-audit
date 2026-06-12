@@ -446,16 +446,49 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "## Draft Copy\n"
                 "## Final Article Draft\n"
                 "## Acceptance Criteria\n\n"
-                "For existing paragraphs, say keep, rewrite, move, merge, or remove. "
+                "Our page's complete content is in own_page (headings in order, paragraphs numbered by index). "
+                "In Paragraph Decisions, give a decision (keep, rewrite, move, merge, or remove) for every paragraph listed "
+                "in paragraph_review, referencing paragraphs as [P<index>]. For paragraphs not listed, only mention them if "
+                "they conflict with a new section. "
                 "For missing competitor-covered topics, write the actual original draft copy that should be added. "
-                "In Final Article Draft, assemble the full recommended article in final reading order, including headings, "
-                "replacement paragraphs, new paragraphs, and clear remove/merge omissions. "
+                "In Final Article Draft, assemble the full recommended article from own_page order: reuse kept paragraphs by "
+                "reference ([P<index>] plus the first 6 words), include rewritten and new paragraphs in full, and mark "
+                "remove/merge omissions explicitly. Use benchmark (median competitor paragraphs/headings) as the size target. "
+                "Cover every missing-status question from serp_features.people_also_ask either in a section or a FAQ block. "
+                "Respect structural_patterns advice (tables, question-form headings, statistics, schema). "
+                "Do not duplicate topics listed in covered_topics. "
                 "If impressions, clicks, traffic, or volume are absent, say demand metrics absent instead of guessing. "
                 "Do not repeat the same instruction in multiple sections.\n\n"
                 f"Evidence JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
             ),
         },
     ]
+
+
+def _pick(d: dict, keys: list[str]) -> dict:
+    source = d if isinstance(d, dict) else {}
+    return {key: source.get(key) for key in keys if key in source}
+
+
+def _best_cell(row: dict) -> dict:
+    best: dict = {}
+    best_similarity = -1.0
+    for cell in row.get("cells") or []:
+        try:
+            similarity = float(cell.get("similarity") or 0.0)
+        except (TypeError, ValueError):
+            similarity = 0.0
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best = cell
+    if not best:
+        return {}
+    return {
+        "url": best.get("url", ""),
+        "rank": best.get("rank"),
+        "similarity": best.get("similarity"),
+        "paragraph": str(best.get("paragraph") or "")[:320],
+    }
 
 
 def _editor_prompt_payload(page: dict) -> dict:
@@ -470,20 +503,26 @@ def _editor_prompt_payload(page: dict) -> dict:
                 "priority": topic.get("priority"),
                 "competitor_coverage": topic.get("competitor_coverage"),
                 "our_best_similarity": topic.get("our_best_similarity"),
+                "our_best_paragraph_index": topic.get("our_best_paragraph_index"),
                 "example_url": ((topic.get("examples") or [{}])[0]).get("url", ""),
                 "example_paragraph": ((topic.get("examples") or [{}])[0]).get("paragraph", "")[:320],
             }
             for topic in (analysis.get("topics") or [])[:12]
         ]
+        heatmap_rows = list((analysis.get("paragraph_match_heatmap") or {}).get("rows") or [])
+        heatmap_rows.sort(key=lambda row: float(row.get("max_similarity") or 0.0))
         paragraph_rows = []
-        for row in (analysis.get("paragraph_match_heatmap") or {}).get("rows") or []:
+        for row in heatmap_rows[:25]:
             paragraph_rows.append({
                 "paragraph_index": row.get("paragraph_index"),
-                "best_similarity": row.get("max_similarity"),
-                "paragraph": str(row.get("paragraph") or "")[:320],
-                "best_competitor_url": row.get("best_competitor_url", ""),
-                "best_competitor_paragraph": str(row.get("best_competitor_paragraph") or "")[:320],
+                "status": row.get("status"),
+                "max_similarity": row.get("max_similarity"),
+                "max_rank_impact": row.get("max_rank_impact"),
+                "word_count": row.get("word_count"),
+                "paragraph": str(row.get("paragraph") or "")[:400],
+                "best_competitor": _best_cell(row),
             })
+        content_order_path = analysis.get("content_order_path") or {}
         analyses.append({
             "keyword": keyword.get("keyword") or analysis.get("query", ""),
             "keyword_metrics": {
@@ -495,17 +534,55 @@ def _editor_prompt_payload(page: dict) -> dict:
                 "volume": keyword.get("volume", 0),
                 "metrics_source": keyword.get("metrics_source", ""),
             },
-            "visual_summary": analysis.get("visual_summary") or [],
             "summary": analysis.get("summary") or {},
+            "benchmark": (analysis.get("content_comparison") or {}).get("benchmark") or {},
+            "our_profile": _pick(
+                (analysis.get("content_comparison") or {}).get("ours") or {},
+                ["paragraph_count", "word_count", "heading_count", "h2_h3_count", "coverage_ratio"],
+            ),
+            "structural_patterns": (analysis.get("structural_patterns") or [])[:8],
+            "serp_features": {
+                "people_also_ask": [
+                    {
+                        "question": row.get("question"),
+                        "status": row.get("status"),
+                        "best_similarity": row.get("best_similarity"),
+                    }
+                    for row in (analysis.get("paa_coverage") or [])[:10]
+                ],
+                "related_searches": (analysis.get("serp_features") or {}).get("related_searches") or [],
+            },
             "topics": topics,
-            "content_order_path": (analysis.get("content_order_path") or {}).get("summary", {}),
-            "paragraph_review": paragraph_rows[:10],
+            "covered_topics": [
+                str(topic.get("label") or "") for topic in analysis.get("covered_topics") or []
+            ][:12],
+            "content_order": {
+                "summary": content_order_path.get("summary") or {},
+                "missing_clusters": [
+                    {
+                        "label": cluster.get("label"),
+                        "competitor_pages": cluster.get("competitor_pages"),
+                        "sample_text": str(cluster.get("sample_text") or "")[:200],
+                    }
+                    for cluster in content_order_path.get("missing_clusters") or []
+                ][:8],
+                "order_deviations": [
+                    {
+                        "label": cluster.get("label"),
+                        "direction": cluster.get("direction"),
+                        "delta": cluster.get("delta"),
+                    }
+                    for cluster in content_order_path.get("deviations") or []
+                ][:8],
+            },
+            "paragraph_review": paragraph_rows,
         })
-    return {
+    payload = {
         "url": page.get("url", ""),
         "title": page.get("title", ""),
         "h1": page.get("h1", ""),
         "keywords": page.get("keywords") or [],
+        "own_page": page.get("own_content") or {},
         "content_brief": page.get("content_brief") or {},
         "actions": [
             {
@@ -523,6 +600,54 @@ def _editor_prompt_payload(page: dict) -> dict:
         ],
         "analyses": analyses,
     }
+    return _shrink_editor_payload(payload)
+
+
+def _shrink_editor_payload(payload: dict, max_chars: int = 120_000) -> dict:
+    def size() -> int:
+        return len(json.dumps(payload, ensure_ascii=False))
+
+    if size() <= max_chars:
+        return payload
+    for paragraph in (payload.get("own_page") or {}).get("paragraphs") or []:
+        paragraph["text"] = str(paragraph.get("text") or "")[:240]
+    if size() <= max_chars:
+        return payload
+    for analysis in payload.get("analyses") or []:
+        analysis["paragraph_review"] = (analysis.get("paragraph_review") or [])[:15]
+    if size() <= max_chars:
+        return payload
+    for analysis in payload.get("analyses") or []:
+        for topic in analysis.get("topics") or []:
+            topic["example_paragraph"] = str(topic.get("example_paragraph") or "")[:160]
+        for row in analysis.get("paragraph_review") or []:
+            best = row.get("best_competitor") or {}
+            if best.get("paragraph"):
+                best["paragraph"] = str(best["paragraph"])[:160]
+    if size() <= max_chars:
+        return payload
+    for analysis in payload.get("analyses") or []:
+        for cluster in (analysis.get("content_order") or {}).get("missing_clusters") or []:
+            cluster["sample_text"] = ""
+    if size() <= max_chars:
+        return payload
+
+    def truncate_strings(node, limit: int):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, str) and len(value) > limit:
+                    node[key] = value[:limit]
+                else:
+                    truncate_strings(value, limit)
+        elif isinstance(node, list):
+            for item in node:
+                truncate_strings(item, limit)
+
+    for limit in (160, 80, 40):
+        truncate_strings(payload, limit)
+        if size() <= max_chars:
+            return payload
+    return payload
 
 
 def _extract_json(text: str) -> Any:

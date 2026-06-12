@@ -1324,3 +1324,76 @@ def test_paa_coverage_without_own_paragraphs_marks_missing() -> None:
         embedder=None,
     )
     assert rows == [{"question": "Anything?", "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}]
+
+
+def test_editor_payload_sorts_paragraph_review_by_weakness() -> None:
+    from site_audit.ai_agent import _editor_prompt_payload
+
+    page = {
+        "url": "https://ours.example/page",
+        "title": "T",
+        "h1": "H",
+        "own_content": {"headings": [], "paragraphs": [], "word_count": 10},
+        "analyses": [{
+            "keyword": {"keyword": "kw"},
+            "paragraph_match_heatmap": {"rows": [
+                {"paragraph_index": 0, "max_similarity": 0.9, "status": "strong", "paragraph": "a",
+                 "cells": [{"url": "https://c1", "similarity": 0.9, "rank": 1, "paragraph": "cp1"}]},
+                {"paragraph_index": 1, "max_similarity": 0.2, "status": "weak", "paragraph": "b",
+                 "cells": [{"url": "https://c2", "similarity": 0.2, "rank": 2, "paragraph": "cp2"},
+                           {"url": "https://c3", "similarity": 0.1, "rank": 3, "paragraph": "cp3"}]},
+                {"paragraph_index": 2, "max_similarity": 0.5, "status": "weak", "paragraph": "c",
+                 "cells": []},
+            ]},
+        }],
+    }
+    payload = _editor_prompt_payload(page)
+    review = payload["analyses"][0]["paragraph_review"]
+    assert [row["paragraph_index"] for row in review] == [1, 2, 0]
+    assert review[0]["best_competitor"]["url"] == "https://c2"
+    assert review[1]["best_competitor"] == {}
+
+
+def test_editor_payload_includes_new_evidence_keys() -> None:
+    from site_audit.ai_agent import _editor_prompt_payload
+
+    page = {
+        "url": "https://ours.example/page",
+        "own_content": {"headings": [{"order": 0, "level": 2, "text": "H2"}], "paragraphs": [{"index": 0, "word_count": 3, "text": "x y z"}], "word_count": 3},
+        "analyses": [{
+            "keyword": {"keyword": "kw"},
+            "content_comparison": {"benchmark": {"median_competitor_paragraphs": 20}, "ours": {"paragraph_count": 5, "word_count": 100, "heading_count": 2, "h2_h3_count": 2, "coverage_ratio": 0.4}},
+            "structural_patterns": [{"signal": "s", "competitors": 3, "advice": "a"}],
+            "paa_coverage": [{"question": "Q?", "status": "missing", "best_similarity": 0.1}],
+            "serp_features": {"related_searches": ["alt"]},
+            "covered_topics": [{"label": "done topic"}],
+            "content_order_path": {"summary": {"order_score": 1.0}, "missing_clusters": [{"label": "m", "competitor_pages": 2, "sample_text": "s"}], "deviations": []},
+        }],
+    }
+    payload = _editor_prompt_payload(page)
+    assert payload["own_page"]["paragraphs"][0]["text"] == "x y z"
+    analysis = payload["analyses"][0]
+    assert analysis["benchmark"]["median_competitor_paragraphs"] == 20
+    assert analysis["our_profile"]["paragraph_count"] == 5
+    assert analysis["structural_patterns"][0]["signal"] == "s"
+    assert analysis["serp_features"]["people_also_ask"][0]["question"] == "Q?"
+    assert analysis["serp_features"]["related_searches"] == ["alt"]
+    assert analysis["covered_topics"] == ["done topic"]
+    assert analysis["content_order"]["missing_clusters"][0]["label"] == "m"
+
+
+def test_shrink_editor_payload_respects_budget() -> None:
+    from site_audit.ai_agent import _shrink_editor_payload
+    import json as _json
+
+    payload = {
+        "own_page": {"paragraphs": [{"index": i, "text": "word " * 200} for i in range(60)]},
+        "analyses": [{
+            "paragraph_review": [{"paragraph_index": i, "paragraph": "x" * 400, "best_competitor": {"paragraph": "y" * 320}} for i in range(25)],
+            "topics": [{"example_paragraph": "z" * 320} for _ in range(12)],
+            "content_order": {"missing_clusters": [{"sample_text": "s" * 200} for _ in range(8)]},
+        }],
+    }
+    out = _shrink_editor_payload(payload, max_chars=20_000)
+    assert len(_json.dumps(out, ensure_ascii=False)) <= 20_000
+    assert len(out["analyses"][0]["paragraph_review"]) <= 15

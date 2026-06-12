@@ -435,6 +435,18 @@ def run(config: SerpGapConfig) -> dict:
             "title": page.title,
             "h1": own_ext.h1,
             "keywords": page_keywords,
+            "own_content": {
+                "headings": [
+                    {"order": i, "level": _safe_int(h.get("level")), "text": str(h.get("text") or "").strip()}
+                    for i, h in enumerate(own_ext.headers_rich or [])
+                    if str(h.get("text") or "").strip()
+                ][:60],
+                "paragraphs": [
+                    {"index": i, "word_count": len(p.split()), "text": p[:500]}
+                    for i, p in enumerate(own_paragraphs_for_page)
+                ],
+                "word_count": own_ext.word_count,
+            },
             "analyses": page_blocks,
         })
 
