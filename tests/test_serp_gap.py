@@ -1580,5 +1580,51 @@ def test_html_renders_with_minimal_payload() -> None:
     assert "People Also Ask Coverage" in html
     assert "Recommended Section Order" in html
     assert "AI Page Recommendation" in html
+    assert "replace(/\\r\\n/g,'\\n').split('\\n')" in html
+    assert "trimmed.match(/^(#{1,4})\\s+(.*)$/)" in html
+    assert "trimmed.match(/^(#{1,4})\n" not in html
     # centroids must be stripped from the HTML payload
     assert '"centroid"' not in html
+
+
+def test_recommended_article_markdown_assembles_full_page() -> None:
+    from site_audit.serp_gap import _recommended_article_markdown
+
+    page = {"url": "https://ours.example/p", "title": "Old", "h1": "Old H1"}
+    paragraphs = ["Intro text.", "Weak text.", "Setup step one."]
+    rec = {
+        "title": {"recommended": "New Title", "reason": "keyword alignment"},
+        "meta_description": {"recommended": "New meta."},
+        "h1": {"recommended": "New H1"},
+        "page_assessment": {"is_right_target_page": True, "reason": "right page"},
+        "outline": [
+            {"level": 2, "heading": "Setup", "status": "keep", "source_paragraphs": [2]},
+        ],
+        "paragraph_decisions": [
+            {"index": 0, "decision": "keep", "reason": "good"},
+            {"index": 1, "decision": "rewrite", "reason": "filler", "rewrite": "Strong rewritten text."},
+            {"index": 2, "decision": "keep", "reason": "essential setup"},
+        ],
+        "new_sections": [
+            {"heading": "Pricing", "placement_after_paragraph": 0, "topic": "pricing",
+             "format": "paragraphs", "draft": "Original pricing copy.", "covers_paa": ["How much does it cost?"]},
+        ],
+        "structured_data": [{"type": "FAQPage", "reason": "competitors carry it"}],
+        "internal_links": [],
+    }
+    verification = {"summary": {"missing_before": 2, "missing_after": 0, "partial_before": 1, "partial_after": 0,
+                                "paa_missing_before": 1, "paa_missing_after": 0, "unresolved_critical": []}}
+    md = _recommended_article_markdown(page, rec, paragraphs, verification)
+
+    assert "**Title:** New Title" in md
+    assert "**H1:** New H1" in md
+    # reading order: intro, new pricing section, rewritten paragraph, heading + setup step
+    assert md.index("Intro text.") < md.index("## Pricing") < md.index("Strong rewritten text.") < md.index("## Setup") < md.index("Setup step one.")
+    assert "Original pricing copy." in md
+    assert "answers PAA: How much does it cost?" in md
+    assert "Why this version should rank better" in md
+    assert "missing 2 -> 0" in md
+    assert "FAQPage" in md
+    assert "**Title change:** keyword alignment" in md
+    # removed paragraphs do not appear
+    assert "Weak text." not in md

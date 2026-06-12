@@ -210,6 +210,29 @@ def test_serp_gap_parser_accepts_budget_and_keyword_options() -> None:
     assert args.dry_run is True
 
 
+def test_serp_gap_parser_accepts_keywords_alias_with_multiple_values() -> None:
+    args = build_parser().parse_args(
+        [
+            "serp-gap",
+            "www.liveagent.com",
+            "--urls",
+            "https://www.liveagent.com/features/ai-answer-improver/",
+            "--keywords",
+            "ai answer improver",
+            "ai reply assistant for customer support",
+            "--results-per-keyword",
+            "5",
+            "--budget-usd",
+            "2",
+        ]
+    )
+
+    assert args.url == ["https://www.liveagent.com/features/ai-answer-improver/"]
+    assert args.keyword == ["ai answer improver", "ai reply assistant for customer support"]
+    assert args.results_per_keyword == 5
+    assert args.budget_usd == 2
+
+
 def test_serp_gap_parser_can_disable_ai_agent() -> None:
     args = build_parser().parse_args(["serp-gap", "example.com", "--no-ai-agent"])
 

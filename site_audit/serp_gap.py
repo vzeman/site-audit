@@ -3128,6 +3128,124 @@ def _attach_ai_editor_briefs(
             page["ai_recommendation"] = {"status": "error", "errors": [str(exc)], "data": {}}
 
 
+def _recommended_article_markdown(
+    page: dict,
+    recommendation: dict,
+    own_paragraphs: list[str],
+    verification: dict | None = None,
+) -> str:
+    """Assemble the full recommended article in final reading order, with the
+    evidence for why this version should outperform the current page."""
+    if not recommendation:
+        return ""
+    blocks = assemble_recommended_blocks(own_paragraphs, recommendation)
+    title = (recommendation.get("title") or {}).get("recommended") or page.get("title") or ""
+    h1 = (recommendation.get("h1") or {}).get("recommended") or page.get("h1") or title
+    meta = (recommendation.get("meta_description") or {}).get("recommended") or ""
+
+    heading_before: dict[int, dict] = {}
+    for row in recommendation.get("outline") or []:
+        if not isinstance(row, dict) or str(row.get("status") or "") == "remove":
+            continue
+        sources = [s for s in row.get("source_paragraphs") or [] if isinstance(s, int) and not isinstance(s, bool)]
+        if not sources:
+            continue
+        first = min(sources)
+        if first not in heading_before:
+            heading_before[first] = row
+
+    new_sections = recommendation.get("new_sections") or []
+    decisions = {
+        row.get("index"): row
+        for row in recommendation.get("paragraph_decisions") or []
+        if isinstance(row, dict)
+    }
+
+    lines: list[str] = [
+        f"# Recommended article: {page.get('url', '')}",
+        "",
+        f"- **Title:** {title}",
+        f"- **Meta description:** {meta}" if meta else "",
+        f"- **H1:** {h1}",
+        "",
+        "---",
+        "",
+    ]
+    for block in blocks:
+        ref = str(block.get("ref") or "")
+        source = str(block.get("source") or "")
+        if source == "new":
+            try:
+                section = new_sections[int(ref[1:])]
+            except (ValueError, IndexError, TypeError):
+                section = {}
+            heading = str(section.get("heading") or "").strip()
+            draft = str(section.get("draft") or "").strip()
+            covers = ", ".join(section.get("covers_paa") or [])
+            topic = str(section.get("topic") or "").strip()
+            why_bits = [bit for bit in (f"topic: {topic}" if topic else "", f"answers PAA: {covers}" if covers else "") if bit]
+            lines.append(f"## {heading}" if heading else "")
+            lines.append("")
+            if why_bits:
+                lines.append(f"*[new section — {'; '.join(why_bits)}]*")
+                lines.append("")
+            lines.append(draft)
+            lines.append("")
+            continue
+        index = _safe_int(ref[1:]) if ref.startswith("P") else None
+        if index is not None and index in heading_before:
+            row = heading_before[index]
+            level = min(max(_safe_int(row.get("level")) or 2, 2), 4)
+            lines.append(f"{'#' * level} {str(row.get('heading') or '').strip()}")
+            lines.append("")
+        annotation = "rewritten" if source == "rewrite" else ""
+        if annotation:
+            reason = str((decisions.get(index) or {}).get("reason") or "").strip()
+            lines.append(f"*[{annotation}{': ' + reason if reason else ''}]*")
+            lines.append("")
+        lines.append(str(block.get("text") or "").strip())
+        lines.append("")
+
+    removed = [
+        f"[P{row.get('index')}] {str(row.get('reason') or '').strip()}"
+        for row in recommendation.get("paragraph_decisions") or []
+        if isinstance(row, dict) and str(row.get("decision") or "") in {"remove", "move", "merge"}
+    ]
+    lines.extend(["---", "", "## Why this version should rank better", ""])
+    assessment = (recommendation.get("page_assessment") or {}).get("reason") or ""
+    if assessment:
+        lines.extend([f"- **Target page:** {assessment}", ""])
+    summary = (verification or {}).get("summary") or {}
+    if summary:
+        lines.append(
+            "- **Verified topic coverage (re-scored with the same embeddings used for the gap analysis):** "
+            f"missing {summary.get('missing_before', 0)} -> {summary.get('missing_after', 0)}, "
+            f"partial {summary.get('partial_before', 0)} -> {summary.get('partial_after', 0)}, "
+            f"People Also Ask missing {summary.get('paa_missing_before', 0)} -> {summary.get('paa_missing_after', 0)}."
+        )
+        unresolved = summary.get("unresolved_critical") or []
+        if unresolved:
+            lines.append(f"- **Still uncovered critical/high topics:** {'; '.join(str(x) for x in unresolved[:10])}")
+        lines.append("")
+    for section in new_sections:
+        heading = str(section.get("heading") or "").strip()
+        covers = ", ".join(section.get("covers_paa") or [])
+        if heading:
+            lines.append(f"- **New section '{heading}'**{f' answers: {covers}' if covers else ''}.")
+    schema_rows = recommendation.get("structured_data") or []
+    if schema_rows:
+        lines.append(
+            "- **Structured data to add:** "
+            + "; ".join(f"{row.get('type')} ({str(row.get('reason') or '')[:120]})" for row in schema_rows if isinstance(row, dict))
+        )
+    if removed:
+        lines.append("- **Removed/merged content:** " + " · ".join(removed[:8]))
+    title_reason = str((recommendation.get("title") or {}).get("reason") or "").strip()
+    if title_reason:
+        lines.append(f"- **Title change:** {title_reason}")
+    return "\n".join(line for line in lines if line is not None).strip() + "\n"
+
+
 def _verification_for(
     page: dict,
     recommendation: dict,
@@ -3247,14 +3365,19 @@ def _attach_workspace_brief(
         "cache_status": payload.get("cache_status", "miss"),
         "markdown": _clean_ai_markdown(str(payload.get("brief") or "")),
     }
+    rec_data = payload.get("recommendation") or {}
     page["ai_recommendation"] = {
         "status": "ok" if not errors else "invalid_recommendation",
         "errors": errors,
-        "data": payload.get("recommendation") or {},
+        "data": rec_data,
         "repair_attempted": bool(payload.get("repair_attempted")),
         "verification": payload.get("verification") or {},
         "verification_repair_attempted": bool(payload.get("verification_repair_attempted")),
         "workspace": str(Path(payload.get("workspace") or workspace)),
+        "article_markdown": (
+            _recommended_article_markdown(page, rec_data, own_paragraphs, payload.get("verification") or {})
+            if not errors else ""
+        ),
     }
     state["editor_briefs"] += 1
 
@@ -3311,6 +3434,10 @@ def _attach_chat_brief(
         "verification": verification,
         "verification_repair_attempted": False,
         "workspace": "",
+        "article_markdown": (
+            _recommended_article_markdown(page, recommendation, own_paragraphs or [], verification)
+            if not errors else ""
+        ),
     }
     state["editor_briefs"] += 1
 
@@ -3663,6 +3790,11 @@ def _write_outputs(payload: dict, report_dir: Path) -> None:
     _write_csv(report_dir / "serp_gap.csv", _csv_rows(payload))
     _write_csv(report_dir / "serp_gap_actions.csv", _action_csv_rows(payload))
     (report_dir / "serp_gap_todo.md").write_text(_todo_markdown(payload), encoding="utf-8")
+    for page in payload.get("pages") or []:
+        article = (page.get("ai_recommendation") or {}).get("article_markdown") or ""
+        if article.strip():
+            slug = _url_report_slug(str(page.get("url") or ""))
+            (report_dir / f"recommended-article-{slug}.md").write_text(article, encoding="utf-8")
     (report_dir / "index.html").write_text(_html(payload), encoding="utf-8")
 
 
@@ -3999,7 +4131,7 @@ def _strip_centroids(node):
 def _html(payload: dict) -> str:
     payload = _strip_centroids(copy.deepcopy(payload))
     data = json.dumps(payload, ensure_ascii=False)
-    template = """<!doctype html>
+    template = r"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -5353,6 +5485,7 @@ if(sections.length){parts.push(`<h4 style="margin:14px 0 6px">New sections</h4><
 const schema=d.structured_data||[];const links=d.internal_links||[];
 if(schema.length)parts.push(`<div class="mini" style="margin-top:10px"><b>Structured data:</b> ${schema.map(r=>`${esc(r.type||'')} — ${esc(r.reason||'')}`).join(' · ')}</div>`);
 if(links.length)parts.push(`<div class="mini" style="margin-top:6px"><b>Internal links:</b> ${links.map(r=>`"${esc(r.anchor||'')}" (${esc(r.from_hint||'')})`).join(' · ')}</div>`);
+if(rec.article_markdown){parts.push(`<details style="margin-top:14px" open><summary><b>Final Recommended Article</b> <span class="mini">(full page in final reading order: kept paragraphs, rewrites, new sections — plus why it should rank better; also saved as recommended-article-*.md next to this report)</span></summary>${mdToHtml(rec.article_markdown)}</details>`);}
 if(!parts.length)return '';
 return collapsiblePanel('AI Page Recommendation',`${sectionNote('Structured, validated recommendation produced by the AI agent from the full computed evidence.')}${parts.join('')}`,{meta:rec.status==='ok'?'validated':'validation errors',open:true});}
 function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);const aiRec=recommendationSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiRec?`<div class="keyword-card">${aiRec}</div>`:''}${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
