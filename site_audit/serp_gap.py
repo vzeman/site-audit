@@ -275,6 +275,12 @@ def run(config: SerpGapConfig) -> dict:
                 })
                 overview_texts.append(para)
 
+        own_paragraphs_for_page = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+        own_embeddings_for_page = (
+            embedder.encode(own_paragraphs_for_page, batch_size=64).astype(np.float32)
+            if own_paragraphs_for_page
+            else np.zeros((0, 0), dtype=np.float32)
+        )
         page_blocks: list[dict] = []
         page_keyword_keys = {row["keyword"].strip().lower() for row in page_keywords}
         keyword_index = 0
@@ -401,7 +407,19 @@ def run(config: SerpGapConfig) -> dict:
                         "text": para[:300],
                     })
                     overview_texts.append(para)
-            gap = _build_gap(page, kw, own_ext, competitor_pages, embedder, config)
+            gap = _build_gap(
+                page,
+                kw,
+                own_ext,
+                competitor_pages,
+                embedder,
+                config,
+                own_paragraphs=own_paragraphs_for_page,
+                own_embeddings=own_embeddings_for_page,
+            )
+            features = _serp_features(serp)
+            gap["serp_features"] = features
+            gap["paa_coverage"] = _paa_coverage(features, own_paragraphs_for_page, own_embeddings_for_page, embedder)
             gap["serp"] = {
                 "provider": provider,
                 "cache_status": serp_meta.get("cache_status", ""),
@@ -1268,6 +1286,118 @@ def _serp_result_rows(payload: dict) -> list[dict]:
     return rows
 
 
+def _serp_features(payload: dict) -> dict:
+    """Extract People Also Ask, related searches, and answer box from a SERP payload."""
+    features: dict = {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+    raw = payload.get("raw") or {}
+    provider = (payload.get("meta") or {}).get("provider") or ""
+    if provider == "serper" or "organic" in raw:
+        for item in (raw.get("peopleAlsoAsk") or [])[:10]:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()
+            if not question:
+                continue
+            features["people_also_ask"].append({
+                "question": question,
+                "snippet": str(item.get("snippet") or "").strip(),
+                "url": str(item.get("link") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+            })
+        for item in (raw.get("relatedSearches") or [])[:10]:
+            query = str((item.get("query") if isinstance(item, dict) else item) or "").strip()
+            if query:
+                features["related_searches"].append(query)
+        answer_box = raw.get("answerBox")
+        if isinstance(answer_box, dict):
+            answer = str(answer_box.get("answer") or answer_box.get("snippet") or "").strip()
+            if answer:
+                features["answer_box"] = {
+                    "title": str(answer_box.get("title") or "").strip(),
+                    "answer": answer,
+                    "url": str(answer_box.get("link") or "").strip(),
+                }
+        return features
+    for item in _serp_items(payload):
+        item_type = str(item.get("type") or "")
+        if item_type == "people_also_ask":
+            for element in (item.get("items") or [])[:10]:
+                if not isinstance(element, dict):
+                    continue
+                question = str(element.get("title") or "").strip()
+                if not question:
+                    continue
+                snippet = ""
+                url = ""
+                for expanded in element.get("expanded_element") or []:
+                    if isinstance(expanded, dict):
+                        snippet = str(expanded.get("description") or "").strip()
+                        url = str(expanded.get("url") or "").strip()
+                        break
+                if len(features["people_also_ask"]) < 10:
+                    features["people_also_ask"].append({
+                        "question": question,
+                        "snippet": snippet,
+                        "url": url,
+                        "title": "",
+                    })
+        elif item_type == "related_searches":
+            for element in item.get("items") or []:
+                query = str(element or "").strip() if not isinstance(element, dict) else str(element.get("title") or "").strip()
+                if query and len(features["related_searches"]) < 10:
+                    features["related_searches"].append(query)
+        elif item_type == "featured_snippet" and not features["answer_box"]:
+            answer = str(item.get("description") or "").strip()
+            if answer:
+                features["answer_box"] = {
+                    "title": str(item.get("title") or "").strip(),
+                    "answer": answer,
+                    "url": str(item.get("url") or "").strip(),
+                }
+    return features
+
+
+def _paa_coverage(
+    features: dict,
+    own_paragraphs: list[str],
+    own_embeddings: np.ndarray,
+    embedder: Embedder,
+) -> list[dict]:
+    """Score each People Also Ask question against our paragraphs."""
+    questions = [row.get("question") or "" for row in features.get("people_also_ask") or []]
+    questions = [q for q in questions if q.strip()]
+    if not questions:
+        return []
+    rows: list[dict] = []
+    if not own_paragraphs or not len(own_embeddings):
+        return [
+            {"question": q, "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}
+            for q in questions
+        ]
+    try:
+        question_embeddings = embedder.encode(questions, batch_size=32).astype(np.float32)
+    except Exception:
+        return []
+    for q, q_emb in zip(questions, question_embeddings):
+        sims = own_embeddings @ q_emb
+        best_i = int(np.argmax(sims))
+        best = float(np.clip(sims[best_i], -1.0, 1.0))
+        if best >= 0.78:
+            status = "covered"
+        elif best >= 0.62:
+            status = "partial"
+        else:
+            status = "missing"
+        rows.append({
+            "question": q,
+            "status": status,
+            "best_similarity": round(best, 4),
+            "best_paragraph_index": best_i,
+            "best_paragraph": str(own_paragraphs[best_i] or "")[:240],
+        })
+    return rows
+
+
 def _add_serp_url_rankings(
     rankings: dict[str, dict],
     domain: str,
@@ -1482,9 +1612,13 @@ def _build_gap(
     competitor_pages: list[CompetitorPage],
     embedder: Embedder,
     config: SerpGapConfig,
+    own_paragraphs: list[str] | None = None,
+    own_embeddings: np.ndarray | None = None,
 ) -> dict:
-    own_paragraphs = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
-    own_embeddings = embedder.encode(own_paragraphs, batch_size=64).astype(np.float32) if own_paragraphs else np.zeros((0, 0), dtype=np.float32)
+    if own_paragraphs is None:
+        own_paragraphs = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+    if own_embeddings is None:
+        own_embeddings = embedder.encode(own_paragraphs, batch_size=64).astype(np.float32) if own_paragraphs else np.zeros((0, 0), dtype=np.float32)
     gap = build_serp_paragraph_gap(
         query=keyword["keyword"],
         cluster=keyword["keyword"],
@@ -3239,6 +3373,19 @@ def _todo_markdown(payload: dict) -> str:
                     _append_unique(lines, task_seen, f"- Example URL: {evidence.get('example_url')}")
                 _append_unique(lines, seen)
 
+        paa_lines: list[str] = []
+        for analysis in page.get("analyses") or []:
+            keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+            for row in analysis.get("paa_coverage") or []:
+                if row.get("status") in {"missing", "partial"}:
+                    suffix = f" (keyword: {keyword})" if keyword else ""
+                    paa_lines.append(f"- [{row.get('status')}] {row.get('question')}{suffix}")
+        if paa_lines:
+            _append_unique(lines, seen, "### People Also Ask")
+            for line in paa_lines:
+                _append_unique(lines, seen, line)
+            _append_unique(lines, seen)
+
         paragraph_rows = _paragraph_todo_rows(page)
         if paragraph_rows:
             _append_unique(lines, seen, "### Paragraph Review")
@@ -4575,7 +4722,7 @@ function visualComparisonSection(a){const hasComparison=a.content_comparison||a.
 function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
 function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Task board</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 

@@ -1224,3 +1224,103 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "--audit-accent" in html
     assert "buildNav" in html
     assert 'target="_blank" rel="noopener noreferrer"' in html
+
+
+def _norm_rows(rows):
+    import numpy as np
+    arr = np.asarray(rows, dtype=np.float32)
+    denom = np.linalg.norm(arr, axis=1, keepdims=True)
+    denom[denom == 0] = 1.0
+    return arr / denom
+
+
+def test_serp_features_parses_serper_payload() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "serper", "status": "ok"},
+        "raw": {
+            "peopleAlsoAsk": [
+                {"question": "How much does X cost?", "snippet": "s", "title": "t", "link": "https://a"},
+            ],
+            "relatedSearches": [{"query": "x pricing"}],
+            "answerBox": {"title": "t", "answer": "a", "link": "https://b"},
+        },
+    }
+    features = _serp_features(payload)
+    assert features["people_also_ask"] == [
+        {"question": "How much does X cost?", "snippet": "s", "url": "https://a", "title": "t"}
+    ]
+    assert features["related_searches"] == ["x pricing"]
+    assert features["answer_box"] == {"title": "t", "answer": "a", "url": "https://b"}
+
+
+def test_serp_features_handles_missing_blocks() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    features = _serp_features({"meta": {"provider": "serper"}, "raw": {}})
+    assert features == {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+
+
+def test_serp_features_parses_dataforseo_payload() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "dataforseo", "status": "ok"},
+        "raw": {
+            "tasks": [{"result": [{"items": [
+                {"type": "people_also_ask", "items": [
+                    {"title": "What is X?", "expanded_element": [{"description": "d", "url": "https://c"}]},
+                ]},
+                {"type": "related_searches", "items": ["x alternatives"]},
+                {"type": "featured_snippet", "title": "ft", "description": "fd", "url": "https://d"},
+            ]}]}],
+        },
+    }
+    features = _serp_features(payload)
+    assert features["people_also_ask"][0]["question"] == "What is X?"
+    assert features["people_also_ask"][0]["snippet"] == "d"
+    assert features["related_searches"] == ["x alternatives"]
+    assert features["answer_box"]["answer"] == "fd"
+
+
+def test_paa_coverage_classifies_thresholds() -> None:
+    import numpy as np
+    from site_audit.serp_gap import _paa_coverage
+
+    class StubEmbedder:
+        def encode(self, texts, batch_size=32, show_progress=False):
+            vectors = []
+            for text in texts:
+                if "covered" in text.lower():
+                    vectors.append([1.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0])
+            return _norm_rows(vectors)
+
+    own_paragraphs = ["This paragraph is about the covered topic in detail."]
+    own_embeddings = _norm_rows([[1.0, 0.0]])
+    features = {
+        "people_also_ask": [
+            {"question": "Is the covered topic explained?"},
+            {"question": "Something entirely different?"},
+        ]
+    }
+    rows = _paa_coverage(features, own_paragraphs, own_embeddings, StubEmbedder())
+    assert rows[0]["status"] == "covered"
+    assert rows[0]["best_paragraph_index"] == 0
+    assert rows[1]["status"] == "missing"
+    assert 0.0 <= rows[1]["best_similarity"] <= 1.0
+
+
+def test_paa_coverage_without_own_paragraphs_marks_missing() -> None:
+    import numpy as np
+    from site_audit.serp_gap import _paa_coverage
+
+    rows = _paa_coverage(
+        {"people_also_ask": [{"question": "Anything?"}]},
+        [],
+        np.zeros((0, 0), dtype=np.float32),
+        embedder=None,
+    )
+    assert rows == [{"question": "Anything?", "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}]
