@@ -965,6 +965,7 @@ def build_serp_paragraph_gap(
             })
         topics.append({
             "label": _topic_label(texts, labels, cid),
+            "centroid": [round(float(x), 5) for x in centroid.tolist()],
             "coverage": coverage,
             "priority": priority,
             "competitor_paragraphs": len(idxs),

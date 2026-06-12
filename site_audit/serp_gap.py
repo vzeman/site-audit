@@ -8,6 +8,7 @@ independent report under ``projects/<domain>/serp_gap/report``.
 
 from __future__ import annotations
 
+import copy
 import csv
 import fnmatch
 import json
@@ -44,6 +45,7 @@ from .ai_agent import (
 )
 from .analyzer import PageInfo, section_for_url
 from .cache import HttpCache, content_hash, domain_slug
+from .draft_verification import assemble_recommended_blocks, verify_recommendation
 from .answerability import score_page
 from .competitive_analysis import (
     CompetitiveTarget,
@@ -2788,20 +2790,37 @@ def _attach_ai_editor_briefs(
     for page in page_results:
         url = page.get("url", "")
         paragraph_count = len((page.get("own_content") or {}).get("paragraphs") or [])
+        own_ext = own_exts.get(url)
+        own_paragraphs = (
+            list(own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+            if own_ext is not None
+            else [str(row.get("text") or "") for row in (page.get("own_content") or {}).get("paragraphs") or []]
+        )
         try:
-            if use_workspace and url in own_exts:
+            if use_workspace and own_ext is not None:
                 _attach_workspace_brief(
                     page,
                     cache_dir,
                     config,
                     state,
-                    own_ext=own_exts[url],
+                    own_ext=own_ext,
                     competitor_content=page_competitor_content.get(url, {}),
                     report_dir=report_dir,
                     paragraph_count=paragraph_count,
+                    own_paragraphs=own_paragraphs,
+                    embedder=embedder,
                 )
             else:
-                _attach_chat_brief(page, cache_dir, config, state, client=client, paragraph_count=paragraph_count)
+                _attach_chat_brief(
+                    page,
+                    cache_dir,
+                    config,
+                    state,
+                    client=client,
+                    paragraph_count=paragraph_count,
+                    own_paragraphs=own_paragraphs,
+                    embedder=embedder,
+                )
         except MissingOpenRouterKey:
             state["status"] = "missing_openrouter_api_key"
             message = "Set OPENROUTER_API_KEY in .env to generate the AI editor brief."
@@ -2811,6 +2830,25 @@ def _attach_ai_editor_briefs(
             state.setdefault("errors", []).append(f"Editor brief failed for {url}: {exc}")
             page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
             page["ai_recommendation"] = {"status": "error", "errors": [str(exc)], "data": {}}
+
+
+def _verification_for(
+    page: dict,
+    recommendation: dict,
+    own_paragraphs: list[str],
+    embedder: Embedder | None,
+) -> dict:
+    if embedder is None or not recommendation:
+        return {}
+    try:
+        blocks = assemble_recommended_blocks(own_paragraphs, recommendation)
+        return verify_recommendation(
+            blocks,
+            page.get("analyses") or [],
+            embed_fn=lambda texts: embedder.encode(texts, batch_size=64).astype(np.float32),
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
 
 
 def _attach_workspace_brief(
@@ -2823,8 +2861,11 @@ def _attach_workspace_brief(
     competitor_content: dict,
     report_dir: Path,
     paragraph_count: int,
+    own_paragraphs: list[str] | None = None,
+    embedder: Embedder | None = None,
 ) -> None:
     url = page.get("url", "")
+    own_paragraphs = own_paragraphs or []
     workspace = write_agent_workspace(
         report_dir,
         page,
@@ -2837,12 +2878,16 @@ def _attach_workspace_brief(
         json.dumps({"evidence": content_hash(evidence_text), "model": config.ai_agent_model}, sort_keys=True)
     )
 
-    def _run() -> dict:
-        completion = run_harnext_workspace_session(
+    def _session(extra_prompt: str = "", max_turns: int | None = None):
+        return run_harnext_workspace_session(
             workspace,
             model=config.ai_agent_model,
-            max_turns=config.ai_agent_max_turns,
+            max_turns=max_turns or config.ai_agent_max_turns,
+            extra_prompt=extra_prompt,
         )
+
+    def _run() -> dict:
+        completion = _session()
         recommendation = (completion.raw or {}).get("recommendation") or {}
         errors = validate_recommendation(recommendation, paragraph_count)
         repair_attempted = False
@@ -2853,19 +2898,37 @@ def _attach_workspace_brief(
                 + "\n- ".join(errors[:20])
                 + "\nFix recommendation.json only so it satisfies the contract in TASK.md."
             )
-            completion = run_harnext_workspace_session(
-                workspace,
-                model=config.ai_agent_model,
-                max_turns=max(6, config.ai_agent_max_turns // 2),
-                extra_prompt=repair_prompt,
-            )
+            completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
             recommendation = (completion.raw or {}).get("recommendation") or {}
             errors = validate_recommendation(recommendation, paragraph_count)
+        verification = {}
+        verification_repair_attempted = False
+        if not errors:
+            verification = _verification_for(page, recommendation, own_paragraphs, embedder)
+            unresolved = (verification.get("summary") or {}).get("unresolved_critical") or []
+            if unresolved:
+                verification_repair_attempted = True
+                repair_prompt = (
+                    "Verification: these critical/high SERP topics are still not covered by your recommendation: "
+                    + "; ".join(str(label) for label in unresolved[:10])
+                    + ". Update recommendation.json (add or strengthen sections) to cover them. "
+                    "Modify recommendation.json and brief.md only."
+                )
+                completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
+                candidate = (completion.raw or {}).get("recommendation") or {}
+                candidate_errors = validate_recommendation(candidate, paragraph_count)
+                if not candidate_errors:
+                    recommendation = candidate
+                    verification = _verification_for(page, recommendation, own_paragraphs, embedder)
+                else:
+                    errors = candidate_errors
         return {
             "brief": completion.text,
             "recommendation": recommendation,
             "errors": errors,
             "repair_attempted": repair_attempted,
+            "verification": verification,
+            "verification_repair_attempted": verification_repair_attempted,
             "provider": completion.provider,
             "model": completion.model,
             "workspace": str(workspace),
@@ -2893,6 +2956,8 @@ def _attach_workspace_brief(
         "errors": errors,
         "data": payload.get("recommendation") or {},
         "repair_attempted": bool(payload.get("repair_attempted")),
+        "verification": payload.get("verification") or {},
+        "verification_repair_attempted": bool(payload.get("verification_repair_attempted")),
         "workspace": str(Path(payload.get("workspace") or workspace)),
     }
     state["editor_briefs"] += 1
@@ -2906,6 +2971,8 @@ def _attach_chat_brief(
     *,
     client,
     paragraph_count: int,
+    own_paragraphs: list[str] | None = None,
+    embedder: Embedder | None = None,
 ) -> None:
     messages = build_editor_brief_messages(page)
     completion = cached_completion(
@@ -2937,11 +3004,16 @@ def _attach_chat_brief(
         "fallback_from": completion.fallback_from,
         "markdown": _clean_ai_markdown(brief_markdown),
     }
+    verification = {}
+    if not errors:
+        verification = _verification_for(page, recommendation, own_paragraphs or [], embedder)
     page["ai_recommendation"] = {
         "status": "ok" if not errors else "invalid_recommendation",
         "errors": errors,
         "data": recommendation,
         "repair_attempted": False,
+        "verification": verification,
+        "verification_repair_attempted": False,
         "workspace": "",
     }
     state["editor_briefs"] += 1
@@ -3409,10 +3481,27 @@ def _paragraph_todo_rows(page: dict, limit: int = 10) -> list[dict]:
     return rows[:limit]
 
 
-def _append_ai_editor_brief_markdown(lines: list[str], seen: set[str], brief: dict) -> None:
+def _append_ai_editor_brief_markdown(lines: list[str], seen: set[str], brief: dict, recommendation: dict | None = None) -> None:
     if not brief:
         return
     _append_unique(lines, seen, "### AI Agent TODO")
+    verification_summary = ((recommendation or {}).get("verification") or {}).get("summary") or {}
+    if verification_summary:
+        _append_unique(
+            lines,
+            seen,
+            "- Coverage check: missing {mb} -> {ma}, partial {pb} -> {pa}, PAA missing {qb} -> {qa}".format(
+                mb=verification_summary.get("missing_before", 0),
+                ma=verification_summary.get("missing_after", 0),
+                pb=verification_summary.get("partial_before", 0),
+                pa=verification_summary.get("partial_after", 0),
+                qb=verification_summary.get("paa_missing_before", 0),
+                qa=verification_summary.get("paa_missing_after", 0),
+            ),
+        )
+        unresolved = verification_summary.get("unresolved_critical") or []
+        if unresolved:
+            _append_unique(lines, seen, f"- Still uncovered critical/high topics: {'; '.join(unresolved[:10])}")
     status = brief.get("status", "")
     if status == "ok" and brief.get("markdown"):
         meta = [
@@ -3482,7 +3571,7 @@ def _todo_markdown(payload: dict) -> str:
             _append_unique(lines, seen, f"- Target keywords: {', '.join(keywords[:12])}")
         _append_unique(lines, seen)
 
-        _append_ai_editor_brief_markdown(lines, seen, page.get("ai_editor_brief") or {})
+        _append_ai_editor_brief_markdown(lines, seen, page.get("ai_editor_brief") or {}, page.get("ai_recommendation") or {})
 
         if rules:
             _append_unique(lines, seen, "### Writing Rules")
@@ -3599,7 +3688,20 @@ def _todo_markdown(payload: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _strip_centroids(node):
+    """Remove bulky embedding vectors from a payload copy used for HTML rendering."""
+    if isinstance(node, dict):
+        node.pop("centroid", None)
+        for value in node.values():
+            _strip_centroids(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_centroids(item)
+    return node
+
+
 def _html(payload: dict) -> str:
+    payload = _strip_centroids(copy.deepcopy(payload))
     data = json.dumps(payload, ensure_ascii=False)
     template = """<!doctype html>
 <html lang="en">
@@ -4908,6 +5010,8 @@ function decisionChipClass(decision){if(decision==='keep')return 'covered';if(de
 function recommendationSection(page){const rec=page.ai_recommendation||{};if(!rec.status)return '';if(rec.status!=='ok'&&rec.status!=='invalid_recommendation'){return '';}
 const d=rec.data||{};const parts=[];
 if(rec.status==='invalid_recommendation'&&(rec.errors||[]).length){parts.push(`<div class="mini" style="color:var(--missing);margin-bottom:8px">Recommendation failed validation: ${rec.errors.slice(0,6).map(e=>esc(e)).join('; ')}</div>`);}
+const verif=rec.verification||{};const vs=verif.summary||{};
+if((verif.topics||[]).length){const unresolved=vs.unresolved_critical||[];parts.push(`<div style="margin-bottom:10px"><div class="chips" style="margin-bottom:6px"><span class="chip ${vs.missing_after>0?'missing':'covered'}">Missing ${n(vs.missing_before)} → ${n(vs.missing_after)}</span><span class="chip ${vs.partial_after>0?'partial':'covered'}">Partial ${n(vs.partial_before)} → ${n(vs.partial_after)}</span><span class="chip ${vs.paa_missing_after>0?'missing':'covered'}">PAA missing ${n(vs.paa_missing_before)} → ${n(vs.paa_missing_after)}</span></div>${unresolved.length?`<div class="mini" style="color:var(--missing)">Still uncovered critical/high topics: ${unresolved.map(t=>esc(t)).join('; ')}</div>`:''}<details><summary class="mini">Coverage check details</summary><table><thead><tr><th>Keyword</th><th>Topic</th><th>Priority</th><th>Before → After</th><th>Best similarity</th></tr></thead><tbody>${verif.topics.map(r=>`<tr><td>${esc(r.keyword||'')}</td><td>${esc(r.label||'')}</td><td>${esc(r.priority||'')}</td><td><span class="chip ${esc(r.before)}">${esc(r.before)}</span> → <span class="chip ${esc(r.after)}">${esc(r.after)}</span></td><td>${esc(String(r.best_similarity??''))}</td></tr>`).join('')}</tbody></table></details></div>`);}
 const titleRec=d.title||{};const h1Rec=d.h1||{};const metaRec=d.meta_description||{};const assessment=d.page_assessment||{};
 const headParts=[];
 if(assessment.reason)headParts.push(`<div class="mini" style="margin-bottom:6px">Target page check: <b>${assessment.is_right_target_page===false?'wrong target page':'right target page'}</b> — ${esc(assessment.reason||'')}</div>`);
