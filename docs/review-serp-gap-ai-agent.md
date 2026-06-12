@@ -2,6 +2,8 @@
 
 Date: 2026-06-12. Scope: `serp_gap.py`, `ai_agent.py`, `competitive_analysis.py`, serp-gap report HTML.
 
+> **Implementation status (2026-06-12):** sessions 01–07 implemented on branch `serp-gap-ai-agent` (B1–B6 fixed; agent workspace + recommendation.json + verification loop + specialist actions + report polish). `visual_summary` was kept in the report (still useful as a "why" list and covered by tests) but removed from the agent payload. Session 08 (LiveAgent e2e test) requires API keys and the Harnext CLI on the host machine.
+
 ## Verdict
 
 The deterministic pipeline computes rich evidence (~40 metrics per paragraph/topic), but the "AI agent" sees maybe 15% of it, and Harnext is used as a plain one-shot chat completion — not as an agent. The biggest single bug: the GEO structural diff is never computed in the serp-gap flow, so `structural_patterns` is always empty.

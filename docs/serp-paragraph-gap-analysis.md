@@ -282,3 +282,7 @@ For a developer building automation:
 5. Generate paragraph gap recommendations.
 6. Save ignored topics so they do not reappear every run.
 ```
+
+## Coverage Verification And The AI Recommendation
+
+When the AI agent is enabled, each analyzed page gets a structured recommendation (title/H1, outline, per-paragraph keep/rewrite/move/merge/remove decisions, and drafted new sections) plus a coverage check strip showing topic coverage before and after applying the recommendation (for example `missing 6 -> 0`). Read the recommendation tables first; the deterministic task cards below them remain the supporting evidence. If the strip still shows uncovered critical topics, the drafts need another editing pass before publishing.

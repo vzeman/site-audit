@@ -1131,7 +1131,10 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Vector-space chart for keywords" in html
     assert "Vector space for keyword, target page, competitor titles, headings, and paragraphs" in html
     assert "Edit these after reviewing the charts" in html
-    assert "competitors cover nearby themes more deeply" in html
+    # The per-keyword cluster panel was removed (one cluster view lives in the overview);
+    # the overview aggregate cluster section must remain.
+    assert "competitors cover nearby themes more deeply" not in html
+    assert "Aggregate Semantic Clusters" in html
     assert "Review candidates for intent drift, thinness, or filler" in html
     assert "Charts first, then tasks" in html
     assert "review_paragraphs" in html
@@ -1513,3 +1516,66 @@ def test_recommended_outline_orders_have_and_add() -> None:
     assert [r["label"] for r in rows] == ["intro", "pricing", "setup"]
     assert [r["status"] for r in rows] == ["have", "add", "add"]
     assert [r["position"] for r in rows] == [1, 2, 3]
+
+
+def test_html_renders_with_minimal_payload() -> None:
+    from site_audit.serp_gap import _html
+
+    payload = {
+        "status": "ok",
+        "domain": "ours.example",
+        "summary": {},
+        "selected_pages": [],
+        "selected_keywords": [],
+        "skipped_pages": [],
+        "skipped_keywords": [],
+        "editorial_guidelines": {"paragraph_rules": ["One idea per paragraph."], "avoid": ["No filler."]},
+        "pages": [{
+            "url": "https://ours.example/p",
+            "title": "T",
+            "h1": "H",
+            "own_content": {"headings": [], "paragraphs": [{"index": 0, "word_count": 3, "text": "a b c"}], "word_count": 3},
+            "ai_editor_brief": {"status": "ok", "provider": "harnext", "cache_status": "miss", "markdown": "# Brief\n\n- do this <script>alert(1)</script>"},
+            "ai_recommendation": {
+                "status": "ok",
+                "errors": [],
+                "data": {
+                    "page_assessment": {"is_right_target_page": True, "reason": "ok"},
+                    "title": {"current": "T", "recommended": "T2", "reason": "kw"},
+                    "meta_description": {"recommended": "m"},
+                    "h1": {"recommended": "H"},
+                    "outline": [{"level": 2, "heading": "X", "status": "new", "maps_to_topic": "x"}],
+                    "paragraph_decisions": [{"index": 0, "decision": "keep", "reason": "fine"}],
+                    "new_sections": [{"heading": "S", "placement_after_paragraph": -1, "format": "faq", "draft": "d", "covers_paa": ["q"]}],
+                    "structured_data": [],
+                    "internal_links": [],
+                },
+                "verification": {
+                    "topics": [{"keyword": "kw", "label": "x", "priority": "high", "before": "missing", "after": "covered", "best_similarity": 0.9}],
+                    "paa": [],
+                    "summary": {"missing_before": 1, "missing_after": 0, "partial_before": 0, "partial_after": 0, "paa_missing_before": 0, "paa_missing_after": 0, "unresolved_critical": []},
+                },
+            },
+            "analyses": [{
+                "status": "ok",
+                "query": "kw",
+                "keyword": {"keyword": "kw"},
+                "summary": {"missing": 1, "partial": 0, "covered": 0},
+                "topics": [{"label": "x", "coverage": "missing", "priority": "high", "centroid": [1.0, 0.0]}],
+                "structural_patterns": [{"signal": "Comparison / data tables", "competitors": 3, "advice": "Add a table.", "ours": 0, "max_theirs": 2}],
+                "paa_coverage": [{"question": "Q?", "status": "missing", "best_similarity": 0.1, "best_paragraph": ""}],
+                "serp_features": {"related_searches": ["alt"], "people_also_ask": [], "answer_box": {}},
+                "recommended_outline": [{"position": 1, "label": "x", "status": "add", "competitor_pages": 3, "sample_text": "s"}],
+                "competitor_pages": [],
+                "action_points": [],
+            }],
+        }],
+    }
+    html = _html(payload)
+    assert "mdToHtml" in html
+    assert "Structural / GEO Gaps" in html
+    assert "People Also Ask Coverage" in html
+    assert "Recommended Section Order" in html
+    assert "AI Page Recommendation" in html
+    # centroids must be stripped from the HTML payload
+    assert '"centroid"' not in html
