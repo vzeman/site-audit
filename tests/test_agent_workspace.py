@@ -134,3 +134,26 @@ def test_run_harnext_workspace_session_reads_files(tmp_path: Path) -> None:
     assert completion.text.startswith("# Editorial brief")
     assert completion.raw["recommendation"]["h1"]["recommended"] == "Widget"
     assert completion.raw["session"]["num_turns"] == 7
+
+
+def test_validate_recommendation_enforces_serp_length_limits() -> None:
+    payload = _valid_recommendation()
+    payload["title"]["recommended"] = "AI Answer Improver & Reply Assistant for Customer Support | LiveAgent X"
+    payload["meta_description"]["recommended"] = "x" * 200
+    errors = validate_recommendation(payload, paragraph_count=1)
+    assert any("title.recommended is" in e and "maximum is 65" in e for e in errors)
+    assert any("meta_description.recommended is" in e and "maximum is 165" in e for e in errors)
+
+    payload["title"]["recommended"] = "AI Answer Improver for Customer Support | LiveAgent"
+    payload["meta_description"]["recommended"] = "Refine, extend, or simplify support replies instantly with LiveAgent's AI Answer Improver. Start a free trial."
+    assert validate_recommendation(payload, paragraph_count=1) == []
+
+
+def test_task_markdown_contains_anti_hallucination_rules(tmp_path) -> None:
+    workspace = write_agent_workspace(tmp_path, _page(), _own_ext(), {}, schema_doc=RECOMMENDATION_SCHEMA_DOC)
+    task = (workspace / "TASK.md").read_text(encoding="utf-8")
+    assert "NEVER invent statistics" in task
+    assert "not facts" in task            # PAA questions are asks, not facts
+    assert "ignored (off-intent)" in task
+    assert "never" in task.lower() and "0.78" in task  # similarity interpretation bands
+    assert "65 characters" in task and "165 characters" in task
