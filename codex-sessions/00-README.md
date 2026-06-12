@@ -1,5 +1,7 @@
 # Codex implementation sessions — SERP gap AI agent upgrade
 
+> **STATUS: Sessions 01–07 are already implemented and committed on branch `serp-gap-ai-agent`** (one commit per session, full test suite green). Do NOT re-run them with Codex. Only `session-08-e2e-test-liveagent.md` remains — it must run on a machine with SERPER/OPENROUTER keys and the Harnext CLI. The briefs below are kept as the implementation record.
+
 Source review: `docs/review-serp-gap-ai-agent.md`. Seven sessions, run in order. Each session file is a complete, self-contained brief for one Codex run — Codex has no memory of previous sessions, so every brief restates needed context.
 
 ## How to run each session
