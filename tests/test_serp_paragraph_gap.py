@@ -186,3 +186,72 @@ def test_select_competitive_auto_keywords_filters_noise_and_caps_clusters() -> N
     rejected_keywords = {row["keyword"] for row in selection["rejected"]}
     assert "شات جي بي تي" in rejected_keywords
     assert "free image generator" in rejected_keywords
+
+
+def test_structural_patterns_aggregate_from_competitor_pages() -> None:
+    def cp(url: str, rank: int, theirs: int) -> CompetitorPage:
+        return CompetitorPage(
+            target=CompetitiveTarget("kw", url, "kw", rank),
+            title=f"T{rank}",
+            paragraphs=["AI workflow automation routes leads and updates CRM records."],
+            paragraph_embeddings=_norm([[1.0, 0.0, 0.0]]),
+            structural_gaps=[{
+                "signal": "Comparison / data tables",
+                "ours": 0,
+                "theirs": theirs,
+                "advice": "Add a comparison table.",
+            }],
+            answerability=50,
+            paragraph_count=1,
+        )
+
+    result = build_serp_paragraph_gap(
+        query="kw",
+        cluster="kw",
+        our_url="https://ours.example/page",
+        our_title="Ours",
+        our_paragraphs=["Totally unrelated text about lyrics."],
+        our_paragraph_embeddings=_norm([[0.0, 0.0, 1.0]]),
+        competitor_pages=[cp("https://a.example/1", 1, 2), cp("https://b.example/2", 2, 5)],
+    )
+
+    patterns = result["structural_patterns"]
+    assert len(patterns) == 1
+    assert patterns[0]["signal"] == "Comparison / data tables"
+    assert patterns[0]["competitors"] == 2
+    assert patterns[0]["max_theirs"] == 5
+    assert patterns[0]["ours"] == 0
+
+
+def test_competitor_page_computes_structural_gaps(monkeypatch) -> None:
+    from site_audit import serp_gap as sg
+    from site_audit.extractor import ExtractedPage
+
+    def make_ext(url: str, table_count: int) -> ExtractedPage:
+        return ExtractedPage(
+            url=url,
+            title="T",
+            description="",
+            body="text",
+            word_count=100,
+            language="en",
+            table_count=table_count,
+            paragraphs=["One paragraph of real content for the comparison."],
+        )
+
+    own = make_ext("https://ours.example/page", 0)
+    theirs = make_ext("https://comp.example/page", 3)
+    monkeypatch.setattr(sg, "_fetch_and_extract", lambda url, cache, refresh: theirs)
+
+    class StubEmbedder:
+        def encode(self, texts, batch_size=32, show_progress=False):
+            return _norm([[1.0, 0.0] for _ in texts])
+
+    target = CompetitiveTarget("kw", "https://comp.example/page", "kw", 1)
+    config = sg.SerpGapConfig(domain="ours.example")
+    page = sg._competitor_page(target, cache=None, embedder=StubEmbedder(), config=config, own_ext=own)
+
+    signals = {gap["signal"] for gap in page.structural_gaps}
+    assert "Comparison / data tables" in signals
+    assert page.error is None
+    assert page.answerability >= 0.0

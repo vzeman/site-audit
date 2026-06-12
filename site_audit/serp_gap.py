@@ -38,11 +38,13 @@ from .ai_agent import (
 )
 from .analyzer import PageInfo, section_for_url
 from .cache import HttpCache, content_hash, domain_slug
+from .answerability import score_page
 from .competitive_analysis import (
     CompetitiveTarget,
     CompetitorPage,
     _serp_items,
     build_serp_paragraph_gap,
+    structural_diff,
 )
 from .competitive_analysis import _fetch_dataforseo_serp as fetch_dataforseo_serp
 from .competitive_analysis import CompetitiveAutoConfig
@@ -336,7 +338,7 @@ def run(config: SerpGapConfig) -> dict:
             for target in targets:
                 all_competitor_urls.add(target.competitor_url)
             competitor_pages = [
-                _competitor_page(target, competitor_cache, embedder, config)
+                _competitor_page(target, competitor_cache, embedder, config, own_ext=own_ext)
                 for target in targets
             ]
             for competitor_page in competitor_pages:
@@ -1417,6 +1419,7 @@ def _competitor_page(
     cache: HttpCache,
     embedder: Embedder,
     config: SerpGapConfig,
+    own_ext: ExtractedPage | None = None,
 ) -> CompetitorPage:
     ext = _fetch_and_extract(target.competitor_url, cache, refresh=config.refresh_competitors)
     if ext is None:
@@ -1430,6 +1433,16 @@ def _competitor_page(
             paragraph_count=0,
             error="competitor fetch/extract failed",
         )
+    structural_gaps: list[dict] = []
+    if own_ext is not None:
+        try:
+            structural_gaps = structural_diff(own_ext, ext)
+        except Exception:
+            structural_gaps = []
+    try:
+        answerability = float(score_page(ext).score)
+    except Exception:
+        answerability = 0.0
     paragraphs = (ext.paragraphs or [])[:config.max_paragraphs_per_page]
     embs = embedder.encode(paragraphs, batch_size=64).astype(np.float32) if paragraphs else np.zeros((0, 0), dtype=np.float32)
     return CompetitorPage(
@@ -1437,8 +1450,8 @@ def _competitor_page(
         title=ext.title or target.competitor_url,
         paragraphs=paragraphs,
         paragraph_embeddings=embs,
-        structural_gaps=[],
-        answerability=0.0,
+        structural_gaps=structural_gaps,
+        answerability=answerability,
         paragraph_count=len(paragraphs),
         h1=ext.h1,
         headers_rich=ext.headers_rich,
@@ -4562,7 +4575,7 @@ function visualComparisonSection(a){const hasComparison=a.content_comparison||a.
 function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
 function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Task board</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
