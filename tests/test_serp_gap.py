@@ -1397,3 +1397,119 @@ def test_shrink_editor_payload_respects_budget() -> None:
     out = _shrink_editor_payload(payload, max_chars=20_000)
     assert len(_json.dumps(out, ensure_ascii=False)) <= 20_000
     assert len(out["analyses"][0]["paragraph_review"]) <= 15
+
+
+def _analysis_base(keyword="widget tool"):
+    return {
+        "status": "ok",
+        "keyword": {"keyword": keyword, "impressions": 100},
+        "competitor_pages": [],
+        "missing_topics": [],
+        "weak_topics": [],
+        "off_intent_paragraphs": [],
+        "own_paragraphs_to_review": [],
+    }
+
+
+def test_title_gap_action_triggers_on_missing_keyword() -> None:
+    from site_audit.serp_gap import _title_gap_action
+
+    page = {"url": "https://ours.example/p", "title": "Our Generic Landing Page Headline", "h1": "Hello"}
+    analysis = _analysis_base()
+    analysis["competitor_pages"] = [
+        {"rank": i, "title": f"Best widget tool option {i}", "error": ""} for i in range(1, 6)
+    ]
+    action = _title_gap_action(page, analysis, 1)
+    assert action is not None
+    assert action["type"] == "rewrite_title"
+    assert action["priority"] == "high"
+    assert len(action["evidence"]["competitor_titles"]) == 5
+
+    page_with_keyword = {"url": "https://ours.example/p", "title": "The Widget Tool for Everyone Everywhere", "h1": "Hello"}
+    assert _title_gap_action(page_with_keyword, analysis, 1) is None
+
+
+def test_depth_action_uses_benchmark() -> None:
+    from site_audit.serp_gap import _depth_action
+
+    page = {"url": "https://ours.example/p"}
+    analysis = _analysis_base()
+    analysis["content_comparison"] = {
+        "ours": {"paragraph_count": 5, "heading_count": 2},
+        "benchmark": {"median_competitor_paragraphs": 20, "median_competitor_headings": 9},
+    }
+    action = _depth_action(page, analysis, 1)
+    assert action is not None
+    assert action["type"] == "expand_depth"
+    assert "15" in action["instruction"]
+
+    analysis["content_comparison"]["ours"]["paragraph_count"] = 18
+    assert _depth_action(page, analysis, 1) is None
+
+
+def test_structural_and_paa_actions_emitted() -> None:
+    from site_audit.serp_gap import _action_points_for_analysis
+
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    analysis = _analysis_base()
+    analysis["structural_patterns"] = [
+        {"signal": "Comparison / data tables", "competitors": 4, "advice": "Add a table.", "ours": 0, "max_theirs": 3},
+        {"signal": "only one competitor", "competitors": 1, "advice": "x", "ours": 0, "max_theirs": 1},
+    ]
+    analysis["serp_features"] = {"people_also_ask": [{"question": "What is a widget tool?"}]}
+    analysis["paa_coverage"] = [
+        {"question": "What is a widget tool?", "status": "missing", "best_similarity": 0.2},
+        {"question": "Covered question?", "status": "covered", "best_similarity": 0.9},
+    ]
+    actions = _action_points_for_analysis(page, analysis)
+    types = {a["type"] for a in actions}
+    assert "structural" in types
+    assert "answer_paa" in types
+    structural = next(a for a in actions if a["type"] == "structural")
+    assert structural["priority"] == "high"
+    assert all(a["topic"] != "only one competitor" for a in actions if a["type"] == "structural")
+    paa = next(a for a in actions if a["type"] == "answer_paa")
+    assert paa["priority"] == "high"
+
+
+def test_action_dedupe_across_keywords() -> None:
+    from site_audit.serp_gap import _attach_action_points
+
+    def topic(label):
+        return {
+            "label": label, "coverage": "missing", "priority": "high",
+            "competitor_prevalence": 0.9, "best_competitor_rank": 1,
+            "competitor_coverage": 4, "competitor_urls": [], "examples": [],
+        }
+
+    page = {
+        "url": "https://ours.example/p", "title": "T", "h1": "H",
+        "analyses": [
+            {**_analysis_base("kw one"), "missing_topics": [topic("pricing, free plan")]},
+            {**_analysis_base("kw two"), "missing_topics": [topic("pricing free plan")]},
+        ],
+    }
+    out = _attach_action_points([page])
+    add_topic_actions = [a for a in out if a["type"] == "add_topic"]
+    assert len(add_topic_actions) == 1
+    assert add_topic_actions[0].get("merged_duplicates") == 1
+
+
+def test_recommended_outline_orders_have_and_add() -> None:
+    from site_audit.serp_gap import _recommended_outline
+
+    analysis = {
+        "content_order_path": {
+            "clusters": [
+                {"label": "intro", "ours_mean_order": 0.05, "competitor_mean_order": 0.1, "competitor_pages": 5, "sample_text": "s"},
+                {"label": "setup", "ours_mean_order": None, "competitor_mean_order": 0.5, "competitor_pages": 4, "sample_text": "s"},
+            ],
+            "missing_clusters": [
+                {"label": "pricing", "competitor_mean_order": 0.3, "competitor_pages": 3, "sample_text": "s"},
+            ],
+        },
+    }
+    rows = _recommended_outline(analysis)
+    assert [r["label"] for r in rows] == ["intro", "pricing", "setup"]
+    assert [r["status"] for r in rows] == ["have", "add", "add"]
+    assert [r["position"] for r in rows] == [1, 2, 3]

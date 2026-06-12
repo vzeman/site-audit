@@ -1679,6 +1679,7 @@ def _build_gap(
     gap["topic_coverage_matrix"] = _topic_coverage_matrix(page.url, competitor_pages, gap.get("topics") or [])
     gap["paragraph_match_heatmap"] = _paragraph_match_heatmap(own_paragraphs, own_embeddings, competitor_pages)
     gap["content_order_path"] = _content_order_path(keyword["keyword"], own_ext, competitor_pages, embedder)
+    gap["recommended_outline"] = _recommended_outline(gap)
     gap["visual_summary"] = _visual_summary(gap["content_comparison"], gap["topic_coverage_matrix"])
     return gap
 
@@ -2674,6 +2675,226 @@ def _paragraph_action(page: dict, analysis: dict, row: dict, order: int) -> dict
     }
 
 
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    keyword_norm = re.sub(r"\s+", " ", str(keyword or "")).strip().lower()
+    text_norm = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not keyword_norm or not text_norm:
+        return False
+    if keyword_norm in text_norm:
+        return True
+    keyword_tokens = {t for t in re.split(r"\W+", keyword_norm) if len(t) > 2}
+    if not keyword_tokens:
+        return False
+    text_tokens = {t for t in re.split(r"\W+", text_norm) if t}
+    overlap = len(keyword_tokens & text_tokens) / len(keyword_tokens)
+    return overlap >= 0.6
+
+
+def _title_gap_action(page: dict, analysis: dict, order: int) -> dict | None:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    our_title = str(page.get("title") or "").strip()
+    our_h1 = str(page.get("h1") or "").strip()
+    competitors = [
+        row for row in analysis.get("competitor_pages") or []
+        if not row.get("error") and str(row.get("title") or "").strip()
+    ]
+    competitors.sort(key=lambda row: _safe_int(row.get("rank")) or 999)
+    top_titles = [{"rank": row.get("rank"), "title": row.get("title", "")} for row in competitors[:5]]
+    competitor_keyword_hits = sum(1 for row in top_titles if _keyword_in_text(keyword, row["title"]))
+    keyword_missing = (
+        bool(keyword)
+        and not _keyword_in_text(keyword, our_title)
+        and competitor_keyword_hits >= 3
+    )
+    title_too_short = bool(our_title) and len(our_title) < 30
+    h1_empty = not our_h1
+    if not (keyword_missing or title_too_short or h1_empty):
+        return None
+    demand = _keyword_demand(analysis)
+    problems = []
+    if keyword_missing:
+        problems.append(
+            f"Title '{our_title}' does not contain '{keyword}' while {competitor_keyword_hits}/{len(top_titles)} top competitor titles do"
+        )
+    if title_too_short:
+        problems.append(f"Title is only {len(our_title)} characters")
+    if h1_empty:
+        problems.append("H1 is empty")
+    instruction = (
+        f"{'; '.join(problems)}. Rewrite the title (<=60 chars) to lead with the primary keyword intent; "
+        "align the H1 with the title without duplicating it verbatim."
+    )
+    return {
+        "id": f"rewrite_title_{order}",
+        "order": order,
+        "type": "rewrite_title",
+        "priority": "high" if keyword_missing else "medium",
+        "action": "Rewrite title and H1",
+        "task_summary": f"Rewrite the title/H1 to match the intent behind '{keyword}'.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "title and H1",
+        "instruction": instruction,
+        "rationale": "Title and H1 are the strongest on-page relevance and CTR signals; top-ranking competitors align them with the query.",
+        "placement": "Page <title> tag and the main H1.",
+        "acceptance_criteria": [
+            f"The title contains the primary intent behind '{keyword}' within the first 60 characters.",
+            "The H1 matches the title intent without duplicating it word for word.",
+        ],
+        "ai_agent_prompt": (
+            f"Rewrite the title and H1 of {page.get('url', '')} for the keyword '{keyword}'. "
+            "Lead with the keyword intent, keep the title under 60 characters, keep the brand suffix if present."
+        ),
+        "impact_score": round(60 + demand["score"] * 10, 3),
+        "evidence": {
+            "our_title": our_title,
+            "our_h1": our_h1,
+            "keyword": keyword,
+            "competitor_titles": top_titles,
+            "keyword_impressions": demand["impressions"],
+            "keyword_volume": demand["volume"],
+        },
+    }
+
+
+def _depth_action(page: dict, analysis: dict, order: int) -> dict | None:
+    comparison = analysis.get("content_comparison") or {}
+    ours = comparison.get("ours") or {}
+    bench = comparison.get("benchmark") or {}
+    our_paragraphs = _safe_int(ours.get("paragraph_count"))
+    median_paragraphs = _safe_float(bench.get("median_competitor_paragraphs"))
+    if not (median_paragraphs >= 8 and our_paragraphs < 0.6 * median_paragraphs):
+        return None
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    median_headings = _safe_float(bench.get("median_competitor_headings"))
+    delta = max(0, int(round(median_paragraphs - our_paragraphs)))
+    instruction = (
+        f"Page has {our_paragraphs} paragraphs / {_safe_int(ours.get('heading_count'))} headings; "
+        f"top-5 competitor median is {median_paragraphs:g} paragraphs / {median_headings:g} headings. "
+        f"Add roughly {delta} paragraphs by implementing the missing-topic tasks rather than padding existing sections."
+    )
+    return {
+        "id": f"expand_depth_{order}",
+        "order": order,
+        "type": "expand_depth",
+        "priority": "medium",
+        "action": "Expand page depth",
+        "task_summary": "Bring page depth closer to the competitor median via missing-topic sections.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "page depth",
+        "instruction": instruction,
+        "rationale": "The page is much thinner than what currently ranks; depth should come from the detected missing topics, not filler.",
+        "placement": "New sections from the missing-topic tasks.",
+        "acceptance_criteria": [
+            "New content comes from missing/partial topic tasks, not generic padding.",
+            f"Paragraph count moves toward the competitor median ({median_paragraphs:g}).",
+        ],
+        "ai_agent_prompt": (
+            f"Expand {page.get('url', '')} toward the competitor median depth by implementing the missing-topic sections "
+            f"for '{keyword}'. Do not pad existing sections with filler."
+        ),
+        "impact_score": round(30 + demand["score"] * 8, 3),
+        "evidence": {"ours": ours, "benchmark": bench},
+    }
+
+
+def _structural_action(page: dict, analysis: dict, pattern: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    competitors = _safe_int(pattern.get("competitors"))
+    signal = str(pattern.get("signal") or "structure")
+    advice = str(pattern.get("advice") or "")
+    instruction = (
+        f"{advice} (ours: {pattern.get('ours')}, strongest competitor: {pattern.get('max_theirs')}, "
+        f"seen on {competitors} competitor page(s))."
+    )
+    return {
+        "id": f"structural_{order}",
+        "order": order,
+        "type": "structural",
+        "priority": "high" if competitors >= 4 else "medium",
+        "action": "Close a structural/GEO gap",
+        "task_summary": f"Close the structural gap: {signal}.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": signal,
+        "instruction": instruction,
+        "rationale": "Ranking competitors consistently use this page structure signal; AI answer engines and rich results favor it.",
+        "placement": "Page structure (markup, headings, or content blocks) as described.",
+        "acceptance_criteria": [f"The page matches or beats the competitor pattern for: {signal}."],
+        "ai_agent_prompt": f"On {page.get('url', '')}: {advice}",
+        "impact_score": round(20 + competitors * 8 + demand["score"] * 5, 3),
+        "evidence": dict(pattern),
+    }
+
+
+def _paa_action(page: dict, analysis: dict, row: dict, order: int, *, top_question: bool) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    question = str(row.get("question") or "").strip()
+    return {
+        "id": f"answer_paa_{order}",
+        "order": order,
+        "type": "answer_paa",
+        "priority": "high" if top_question else "medium",
+        "action": "Answer a People Also Ask question",
+        "task_summary": f"Answer the PAA question: {question}",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": question,
+        "instruction": (
+            f"Add a question-form H3 '{question}' with a 40-60 word direct answer first, detail after. "
+            "Candidate placement: FAQ block or the nearest related section."
+        ),
+        "rationale": "Google shows this question for the target keyword and the page has no close answer paragraph.",
+        "placement": "FAQ block or nearest related section.",
+        "acceptance_criteria": [
+            "The first sentence after the heading answers the question completely on its own.",
+            "The answer adds at least one concrete fact, condition, step, or example.",
+        ],
+        "ai_agent_prompt": (
+            f"On {page.get('url', '')}, add a question-form section answering '{question}' for the keyword '{keyword}'. "
+            "Direct answer first (40-60 words), supporting detail after."
+        ),
+        "impact_score": round(40 + demand["score"] * 10, 3),
+        "evidence": dict(row),
+    }
+
+
+def _recommended_outline(analysis: dict) -> list[dict]:
+    path = analysis.get("content_order_path") or {}
+    rows: list[dict] = []
+    for cluster in path.get("clusters") or []:
+        rows.append({
+            "label": cluster.get("label", ""),
+            "status": "have" if cluster.get("ours_mean_order") is not None else "add",
+            "competitor_pages": _safe_int(cluster.get("competitor_pages")),
+            "competitor_mean_order": cluster.get("competitor_mean_order"),
+            "sample_text": str(cluster.get("sample_text") or "")[:200],
+        })
+    have_labels = {row["label"] for row in rows}
+    for cluster in path.get("missing_clusters") or []:
+        if cluster.get("label") in have_labels:
+            continue
+        rows.append({
+            "label": cluster.get("label", ""),
+            "status": "add",
+            "competitor_pages": _safe_int(cluster.get("competitor_pages")),
+            "competitor_mean_order": cluster.get("competitor_mean_order"),
+            "sample_text": str(cluster.get("sample_text") or "")[:200],
+        })
+    rows.sort(key=lambda row: (
+        row.get("competitor_mean_order") is None,
+        _safe_float(row.get("competitor_mean_order")),
+        -_safe_int(row.get("competitor_pages")),
+    ))
+    for position, row in enumerate(rows, start=1):
+        row["position"] = position
+    return rows
+
+
 def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
     if analysis.get("status") != "ok":
         return []
@@ -2688,6 +2909,22 @@ def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
     review_rows = analysis.get("off_intent_paragraphs") or analysis.get("own_paragraphs_to_review") or []
     for row in review_rows[:6]:
         actions.append(_paragraph_action(page, analysis, row, order))
+        order += 1
+    structural_rows = [
+        pattern for pattern in analysis.get("structural_patterns") or []
+        if _safe_int(pattern.get("competitors")) >= 2
+    ]
+    for pattern in structural_rows[:4]:
+        actions.append(_structural_action(page, analysis, pattern, order))
+        order += 1
+    top_questions = {
+        str(row.get("question") or "").strip()
+        for row in ((analysis.get("serp_features") or {}).get("people_also_ask") or [])[:4]
+    }
+    missing_paa = [row for row in analysis.get("paa_coverage") or [] if row.get("status") == "missing"]
+    for row in missing_paa[:4]:
+        question = str(row.get("question") or "").strip()
+        actions.append(_paa_action(page, analysis, row, order, top_question=question in top_questions))
         order += 1
     actions.sort(key=_action_priority_score)
     for index, action in enumerate(actions, start=1):
@@ -2731,16 +2968,77 @@ def _page_content_brief(page: dict) -> dict:
     }
 
 
+def _action_dedupe_key(action: dict) -> tuple[str, str, str]:
+    topic = action.get("topic")
+    if topic is None or str(topic).strip() == "":
+        topic = action.get("paragraph_index")
+    normalized = re.sub(r"\W+", " ", str(topic if topic is not None else "")).strip().lower()
+    return (str(action.get("target_url") or ""), str(action.get("type") or ""), normalized)
+
+
+def _dedupe_actions(actions: list[dict]) -> list[dict]:
+    import difflib
+
+    by_key: dict[tuple[str, str], dict] = {}
+    dropped: dict[int, int] = {}
+    ordered: list[dict] = []
+    for action in sorted(actions, key=lambda a: -_safe_float(a.get("impact_score"))):
+        key = _action_dedupe_key(action)
+        if key in by_key:
+            dropped[id(by_key[key])] = dropped.get(id(by_key[key]), 0) + 1
+            continue
+        by_key[key] = action
+        ordered.append(action)
+    deduped: list[dict] = []
+    for action in ordered:
+        duplicate_of = None
+        if action.get("type") in {"add_topic", "strengthen_topic"}:
+            label = _action_dedupe_key(action)[2]
+            for kept in deduped:
+                if kept.get("type") not in {"add_topic", "strengthen_topic"}:
+                    continue
+                if str(kept.get("target_url") or "") != str(action.get("target_url") or ""):
+                    continue
+                kept_label = _action_dedupe_key(kept)[2]
+                if label and kept_label and difflib.SequenceMatcher(None, label, kept_label).ratio() >= 0.85:
+                    duplicate_of = kept
+                    break
+        if duplicate_of is not None:
+            dropped[id(duplicate_of)] = dropped.get(id(duplicate_of), 0) + 1
+            continue
+        deduped.append(action)
+    for action in deduped:
+        merged = dropped.get(id(action), 0)
+        if merged:
+            action["merged_duplicates"] = merged
+    return deduped
+
+
 def _attach_action_points(page_results: list[dict]) -> list[dict]:
     aggregate: list[dict] = []
     for page in page_results:
         page_actions: list[dict] = []
+        title_added = False
+        depth_added = False
         for analysis in page.get("analyses") or []:
             actions = _action_points_for_analysis(page, analysis)
             analysis["action_points"] = actions
             page_actions.extend(actions)
+            if analysis.get("status") == "ok":
+                if not title_added:
+                    title_action = _title_gap_action(page, analysis, len(page_actions) + 1)
+                    if title_action is not None:
+                        page_actions.append(title_action)
+                        title_added = True
+                if not depth_added:
+                    depth_action = _depth_action(page, analysis, len(page_actions) + 1)
+                    if depth_action is not None:
+                        page_actions.append(depth_action)
+                        depth_added = True
+        page_actions = _dedupe_actions(page_actions)
         page["action_points"] = sorted(page_actions, key=_action_priority_score)[:30]
         aggregate.extend(page["action_points"])
+    aggregate = _dedupe_actions(aggregate)
     aggregate.sort(key=_action_priority_score)
     out = aggregate[:80]
     for index, action in enumerate(out, start=1):
@@ -5005,7 +5303,7 @@ function visualComparisonSection(a){const hasComparison=a.content_comparison||a.
 function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const outlineRows=a.recommended_outline||[];const outlinePanel=outlineRows.length?collapsiblePanel('Recommended Section Order',`${sectionNote('Section themes ordered by where ranking competitors place them. "add" rows are themes the page does not cover yet.')}<ol style="margin:0;padding-left:20px">${outlineRows.map(r=>`<li style="margin-bottom:6px" title="${esc(r.sample_text||'')}"><span class="chip ${r.status==='have'?'covered':'missing'}">${esc(r.status)}</span> ${esc(r.label||'')} <span class="mini">— seen on ${n(r.competitor_pages||0)} competitor page(s)</span></li>`).join('')}</ol>`,{meta:`${n(outlineRows.filter(r=>r.status==='add').length)} to add`}):'';const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}${outlinePanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
 function decisionChipClass(decision){if(decision==='keep')return 'covered';if(decision==='rewrite')return 'partial';return 'missing';}
 function recommendationSection(page){const rec=page.ai_recommendation||{};if(!rec.status)return '';if(rec.status!=='ok'&&rec.status!=='invalid_recommendation'){return '';}
 const d=rec.data||{};const parts=[];
