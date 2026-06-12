@@ -136,6 +136,24 @@ def test_run_harnext_workspace_session_reads_files(tmp_path: Path) -> None:
     assert completion.raw["session"]["num_turns"] == 7
 
 
+def test_run_harnext_workspace_session_uses_files_after_runner_error(tmp_path: Path) -> None:
+    recommendation = _valid_recommendation()
+
+    def stub_runner(prompt, *, workspace, model, max_turns, api_key=None):
+        Path(workspace, "recommendation.json").write_text(json.dumps(recommendation), encoding="utf-8")
+        Path(workspace, "brief.md").write_text("# Editorial brief\n\nWritten before error.", encoding="utf-8")
+        raise RuntimeError("session stopped after writing files")
+
+    completion = run_harnext_workspace_session(
+        tmp_path, model="test-model", max_turns=5, session_runner=stub_runner,
+    )
+
+    assert completion.text.startswith("# Editorial brief")
+    assert completion.raw["recommendation"]["title"]["recommended"] == "Widget Tool"
+    assert completion.raw["session"]["is_error"] is True
+    assert completion.raw["session"]["file_output_after_error"] is True
+
+
 def test_validate_recommendation_enforces_serp_length_limits() -> None:
     payload = _valid_recommendation()
     payload["title"]["recommended"] = "AI Answer Improver & Reply Assistant for Customer Support | LiveAgent X"
@@ -157,3 +175,41 @@ def test_task_markdown_contains_anti_hallucination_rules(tmp_path) -> None:
     assert "ignored (off-intent)" in task
     assert "never" in task.lower() and "0.78" in task  # similarity interpretation bands
     assert "65 characters" in task and "165 characters" in task
+
+
+def test_write_agent_workspace_purges_stale_agent_outputs(tmp_path: Path) -> None:
+    workspace_dir = tmp_path / "agent" / "features-widget"
+    workspace_dir.mkdir(parents=True)
+    (workspace_dir / "recommendation.json").write_text('{"old": true}', encoding="utf-8")
+    (workspace_dir / "brief.md").write_text("old brief", encoding="utf-8")
+
+    workspace = write_agent_workspace(tmp_path, _page(), _own_ext(), {}, schema_doc=RECOMMENDATION_SCHEMA_DOC)
+
+    assert workspace == workspace_dir
+    assert not (workspace / "recommendation.json").exists()
+    assert not (workspace / "brief.md").exists()
+    assert (workspace / "evidence.json").is_file()
+
+
+def test_cached_workspace_completion_does_not_cache_failed_results(tmp_path: Path) -> None:
+    from site_audit.ai_agent import cached_workspace_completion
+
+    calls = {"n": 0}
+
+    def failing_runner():
+        calls["n"] += 1
+        return {"brief": "b", "recommendation": {}, "errors": ["title too long"]}
+
+    first = cached_workspace_completion(tmp_path, kind="t", key="k", runner=failing_runner)
+    second = cached_workspace_completion(tmp_path, kind="t", key="k", runner=failing_runner)
+    assert calls["n"] == 2          # failed result was retried, not served from cache
+    assert second["cache_status"] == "miss"
+
+    def ok_runner():
+        calls["n"] += 1
+        return {"brief": "b", "recommendation": {"x": 1}, "errors": []}
+
+    third = cached_workspace_completion(tmp_path, kind="t", key="k2", runner=ok_runner)
+    fourth = cached_workspace_completion(tmp_path, kind="t", key="k2", runner=ok_runner)
+    assert calls["n"] == 3          # clean result cached
+    assert fourth["cache_status"] == "hit"

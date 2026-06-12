@@ -1582,6 +1582,8 @@ def test_html_renders_with_minimal_payload() -> None:
     assert "AI Page Recommendation" in html
     assert "replace(/\\r\\n/g,'\\n').split('\\n')" in html
     assert "trimmed.match(/^(#{1,4})\\s+(.*)$/)" in html
+    assert ".split(/\\s+/).map(Number)" in html
+    assert ".split(/\\\\s+/).map(Number)" not in html
     assert "trimmed.match(/^(#{1,4})\n" not in html
     # centroids must be stripped from the HTML payload
     assert '"centroid"' not in html

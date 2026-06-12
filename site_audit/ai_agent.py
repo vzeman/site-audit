@@ -507,7 +507,18 @@ def run_harnext_workspace_session(
     if extra_prompt.strip():
         prompt = f"{prompt}\n\n{extra_prompt.strip()}"
     runner = session_runner or _harnext_session_runner
-    raw_session = runner(prompt, workspace=workspace, model=model, max_turns=max_turns, api_key=api_key) or {}
+    raw_session: dict[str, Any] = {}
+    session_error = ""
+    try:
+        raw_session = runner(prompt, workspace=workspace, model=model, max_turns=max_turns, api_key=api_key) or {}
+    except MissingOpenRouterKey:
+        raise
+    except Exception as exc:
+        # Harnext can return an error result after successfully writing the
+        # requested workspace files. Prefer the files when they exist, while
+        # preserving the session error for diagnostics.
+        session_error = str(exc)
+        raw_session = {"is_error": True, "result": session_error}
     recommendation: dict = {}
     rec_path = workspace / "recommendation.json"
     if rec_path.is_file():
@@ -525,7 +536,9 @@ def run_harnext_workspace_session(
     if not brief:
         brief = str(raw_session.get("result") or raw_session.get("assistant_text") or "").strip()
     if not brief and not recommendation:
-        raise RuntimeError("Harnext workspace session produced neither brief.md nor recommendation.json.")
+        raise RuntimeError(session_error or "Harnext workspace session produced neither brief.md nor recommendation.json.")
+    if session_error:
+        raw_session.setdefault("file_output_after_error", True)
     return AgentCompletion(
         text=brief,
         provider="harnext",
@@ -555,7 +568,10 @@ def cached_workspace_completion(
     payload = runner() or {}
     payload["cache_status"] = "miss"
     payload.setdefault("created_at", time.time())
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not payload.get("errors"):
+        # Only cache clean results; a failed recommendation should be retried
+        # on the next run instead of being frozen by the cache.
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
 
 

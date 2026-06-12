@@ -189,6 +189,13 @@ def write_agent_workspace(
 ) -> Path:
     workspace = Path(report_dir) / "agent" / _slug(str(page.get("url") or ""))
     workspace.mkdir(parents=True, exist_ok=True)
+    # Purge agent outputs from previous runs: if they survive, the next session
+    # sees its task as already done and stale recommendations get re-read.
+    for stale in ("recommendation.json", "brief.md"):
+        try:
+            (workspace / stale).unlink()
+        except FileNotFoundError:
+            pass
     (workspace / "evidence.json").write_text(
         json.dumps(_evidence_payload(page), ensure_ascii=False, indent=1),
         encoding="utf-8",
