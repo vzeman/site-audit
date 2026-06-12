@@ -772,10 +772,13 @@ def _ai_agent_state(config: SerpGapConfig) -> dict:
     if str(config.ai_agent_provider or "").lower() == "harnext":
         ok, detail = harnext_status()
         if not ok:
-            state["status"] = "missing_harnext"
-            state["notes"].append(detail)
-            return state
-        state["notes"].append(f"Harnext CLI: {detail}")
+            config.ai_agent_provider = "openrouter"
+            state["provider"] = "openrouter"
+            state["notes"].append(
+                f"Harnext unavailable, falling back to direct OpenRouter with the same recommendation contract. ({detail})"
+            )
+        else:
+            state["notes"].append(f"Harnext CLI: {detail}")
     state["status"] = "ready"
     return state
 

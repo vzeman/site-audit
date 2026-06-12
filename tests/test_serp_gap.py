@@ -202,13 +202,16 @@ def test_serp_gap_ai_agent_state_reports_missing_openrouter_key(monkeypatch) -> 
     assert "OPENROUTER_API_KEY" in state["notes"][0]
 
 
-def test_serp_gap_ai_agent_state_reports_missing_harnext(monkeypatch) -> None:
+def test_serp_gap_ai_agent_state_falls_back_to_openrouter_without_harnext(monkeypatch) -> None:
     monkeypatch.setattr("site_audit.serp_gap.openrouter_api_key", lambda: "sk-test")
     monkeypatch.setattr("site_audit.serp_gap.harnext_status", lambda: (False, "Install Harnext CLI"))
 
-    state = _ai_agent_state(SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True))
+    config = SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True)
+    state = _ai_agent_state(config)
 
-    assert state["status"] == "missing_harnext"
+    assert state["status"] == "ready"
+    assert state["provider"] == "openrouter"
+    assert config.ai_agent_provider == "openrouter"
     assert "Install Harnext CLI" in state["notes"][0]
 
 
