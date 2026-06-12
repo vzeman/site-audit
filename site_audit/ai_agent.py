@@ -290,6 +290,267 @@ def cached_completion(
     return completion
 
 
+RECOMMENDATION_SCHEMA_DOC = """## recommendation.json contract
+
+Output a single JSON object with exactly these top-level keys:
+
+```json
+{
+  "page_assessment": {"is_right_target_page": true, "reason": "why this page should (not) target the keywords"},
+  "title": {"current": "existing title", "recommended": "new or same title", "reason": "evidence-based reason"},
+  "meta_description": {"recommended": "new meta description", "reason": "reason"},
+  "h1": {"recommended": "new or same H1", "reason": "reason"},
+  "outline": [
+    {"level": 2, "heading": "section heading", "status": "keep|rename|new|remove",
+     "maps_to_topic": "topic label from evidence or empty string", "source_paragraphs": [0, 1]}
+  ],
+  "paragraph_decisions": [
+    {"index": 0, "decision": "keep|rewrite|move|merge|remove",
+     "reason": "short reason", "rewrite": "full replacement text when decision is rewrite, otherwise null"}
+  ],
+  "new_sections": [
+    {"heading": "new section heading", "placement_after_paragraph": 7, "topic": "topic label",
+     "format": "paragraphs|table|faq|steps", "draft": "full original draft copy",
+     "covers_paa": ["question covered by this section"]}
+  ],
+  "structured_data": [{"type": "FAQPage", "reason": "why"}],
+  "internal_links": [{"anchor": "anchor text", "from_hint": "what kind of page should link here", "reason": "why"}]
+}
+```
+
+Rules: every paragraph index of the page appears exactly once in `paragraph_decisions`;
+`placement_after_paragraph` is -1 for the top of the page or a valid paragraph index;
+`rewrite` must be non-empty exactly when decision is `rewrite`; every new section needs a non-empty `draft`."""
+
+_DECISION_ENUM = {"keep", "rewrite", "move", "merge", "remove"}
+_OUTLINE_STATUS_ENUM = {"keep", "rename", "new", "remove"}
+_SECTION_FORMAT_ENUM = {"paragraphs", "table", "faq", "steps"}
+
+
+def parse_recommendation(text: str) -> dict:
+    payload = _extract_json(text)
+    if isinstance(payload, list) and payload:
+        payload = payload[0]
+    return payload if isinstance(payload, dict) else {}
+
+
+def validate_recommendation(payload: dict, paragraph_count: int) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload, dict) or not payload:
+        return ["recommendation is empty or not a JSON object"]
+    for key, expected in (
+        ("page_assessment", dict),
+        ("title", dict),
+        ("meta_description", dict),
+        ("h1", dict),
+        ("outline", list),
+        ("paragraph_decisions", list),
+        ("new_sections", list),
+        ("structured_data", list),
+        ("internal_links", list),
+    ):
+        if key not in payload:
+            errors.append(f"missing key: {key}")
+        elif not isinstance(payload.get(key), expected):
+            errors.append(f"key {key} must be {expected.__name__}")
+    decisions = payload.get("paragraph_decisions") or []
+    if isinstance(decisions, list):
+        seen: set[int] = set()
+        for i, row in enumerate(decisions):
+            if not isinstance(row, dict):
+                errors.append(f"paragraph_decisions[{i}] is not an object")
+                continue
+            index = row.get("index")
+            if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index < max(paragraph_count, 1)):
+                errors.append(f"paragraph_decisions[{i}].index invalid: {index!r}")
+            elif index in seen:
+                errors.append(f"paragraph_decisions has duplicate index {index}")
+            else:
+                seen.add(index)
+            decision = str(row.get("decision") or "")
+            if decision not in _DECISION_ENUM:
+                errors.append(f"paragraph_decisions[{i}].decision invalid: {decision!r}")
+            rewrite = row.get("rewrite")
+            if decision == "rewrite" and not (isinstance(rewrite, str) and rewrite.strip()):
+                errors.append(f"paragraph_decisions[{i}] decision is rewrite but rewrite text is empty")
+            if decision != "rewrite" and isinstance(rewrite, str) and rewrite.strip():
+                errors.append(f"paragraph_decisions[{i}] has rewrite text but decision is {decision!r}")
+        if paragraph_count > 0:
+            missing = sorted(set(range(paragraph_count)) - seen)
+            if missing:
+                preview = ", ".join(str(x) for x in missing[:10])
+                errors.append(f"paragraph_decisions missing indexes: {preview}" + (" …" if len(missing) > 10 else ""))
+    for i, row in enumerate(payload.get("outline") or []):
+        if not isinstance(row, dict):
+            errors.append(f"outline[{i}] is not an object")
+            continue
+        if not str(row.get("heading") or "").strip():
+            errors.append(f"outline[{i}].heading is empty")
+        if str(row.get("status") or "") not in _OUTLINE_STATUS_ENUM:
+            errors.append(f"outline[{i}].status invalid: {row.get('status')!r}")
+    for i, row in enumerate(payload.get("new_sections") or []):
+        if not isinstance(row, dict):
+            errors.append(f"new_sections[{i}] is not an object")
+            continue
+        if not str(row.get("heading") or "").strip():
+            errors.append(f"new_sections[{i}].heading is empty")
+        if not str(row.get("draft") or "").strip():
+            errors.append(f"new_sections[{i}].draft is empty")
+        fmt = str(row.get("format") or "")
+        if fmt and fmt not in _SECTION_FORMAT_ENUM:
+            errors.append(f"new_sections[{i}].format invalid: {fmt!r}")
+        placement = row.get("placement_after_paragraph")
+        if placement is not None and (
+            not isinstance(placement, int) or isinstance(placement, bool)
+            or not (-1 <= placement < max(paragraph_count, 1))
+        ):
+            errors.append(f"new_sections[{i}].placement_after_paragraph invalid: {placement!r}")
+    has_removals = any(
+        isinstance(row, dict) and row.get("decision") == "remove" for row in decisions if isinstance(decisions, list)
+    )
+    if (has_removals or (payload.get("new_sections") or [])) and not (payload.get("outline") or []):
+        errors.append("outline must be provided when paragraphs are removed or new sections are added")
+    return errors
+
+
+def _workspace_session_prompt(workspace: Path) -> str:
+    return (
+        "You are a senior SEO/GEO editor working inside the directory "
+        f"{workspace}. Read TASK.md first, then evidence.json and our_page.md. "
+        "Consult the competitors/ directory and serp.json as needed. "
+        "Write two files into this directory: recommendation.json (must satisfy the contract in TASK.md exactly) "
+        "and brief.md (human-readable editorial brief). Do not modify any other file."
+    )
+
+
+def _harnext_session_runner(
+    prompt: str,
+    *,
+    workspace: Path,
+    model: str,
+    max_turns: int,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    from harnext_sdk import HarnextAgentOptions, query  # type: ignore
+    from harnext_sdk.types import AssistantMessage, ResultMessage, TextBlock  # type: ignore
+    import inspect
+
+    key = api_key or openrouter_api_key()
+    if not key:
+        raise MissingOpenRouterKey("Set OPENROUTER_API_KEY in .env or the environment.")
+    kwargs: dict[str, Any] = {
+        "provider": "openrouter",
+        "model": model,
+        "max_turns": max_turns,
+        "env": {"OPENROUTER_API_KEY": key, "OPENROUTER_MODEL": model},
+        "auto_update_cli": True,
+    }
+    try:
+        params = set(inspect.signature(HarnextAgentOptions).parameters)
+    except (TypeError, ValueError):
+        params = set()
+    for candidate in ("cwd", "workdir", "working_directory"):
+        if candidate in params:
+            kwargs[candidate] = str(workspace)
+            break
+    if "permission_mode" in params:
+        kwargs["permission_mode"] = "acceptEdits"
+    options = HarnextAgentOptions(**kwargs)
+    assistant_parts: list[str] = []
+    result_payload: dict[str, Any] = {}
+
+    async def _run() -> None:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock) and block.text:
+                        assistant_parts.append(block.text)
+            elif isinstance(message, ResultMessage):
+                result_payload.update({
+                    "subtype": message.subtype,
+                    "is_error": message.is_error,
+                    "result": message.result,
+                    "session_id": message.session_id,
+                    "num_turns": message.num_turns,
+                    "duration_ms": message.duration_ms,
+                    "total_cost_usd": message.total_cost_usd,
+                    "usage": message.usage,
+                })
+                if message.is_error:
+                    raise RuntimeError(message.result or "Harnext returned an error result.")
+
+    _run_async(_run())
+    result_payload.setdefault("assistant_text", "\n".join(p.strip() for p in assistant_parts if p.strip()))
+    return result_payload
+
+
+def run_harnext_workspace_session(
+    workspace: Path,
+    *,
+    model: str,
+    max_turns: int = 20,
+    timeout: int = 600,
+    api_key: str | None = None,
+    session_runner: Any = None,
+    extra_prompt: str = "",
+) -> AgentCompletion:
+    workspace = Path(workspace)
+    prompt = _workspace_session_prompt(workspace)
+    if extra_prompt.strip():
+        prompt = f"{prompt}\n\n{extra_prompt.strip()}"
+    runner = session_runner or _harnext_session_runner
+    raw_session = runner(prompt, workspace=workspace, model=model, max_turns=max_turns, api_key=api_key) or {}
+    recommendation: dict = {}
+    rec_path = workspace / "recommendation.json"
+    if rec_path.is_file():
+        try:
+            recommendation = json.loads(rec_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            recommendation = parse_recommendation(rec_path.read_text(encoding="utf-8", errors="replace"))
+    brief = ""
+    brief_path = workspace / "brief.md"
+    if brief_path.is_file():
+        try:
+            brief = brief_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            brief = ""
+    if not brief:
+        brief = str(raw_session.get("result") or raw_session.get("assistant_text") or "").strip()
+    if not brief and not recommendation:
+        raise RuntimeError("Harnext workspace session produced neither brief.md nor recommendation.json.")
+    return AgentCompletion(
+        text=brief,
+        provider="harnext",
+        model=model,
+        raw={"recommendation": recommendation, "session": raw_session},
+    )
+
+
+def cached_workspace_completion(
+    cache_dir: Path,
+    *,
+    kind: str,
+    key: str,
+    runner: Any,
+    refresh: bool = False,
+) -> dict:
+    root = cache_dir / "ai_agent" / _safe_name(kind)
+    root.mkdir(parents=True, exist_ok=True)
+    output_path = root / f"{key}.workspace.json"
+    if output_path.is_file() and not refresh:
+        try:
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            payload["cache_status"] = "hit"
+            return payload
+        except (json.JSONDecodeError, OSError):
+            pass
+    payload = runner() or {}
+    payload["cache_status"] = "miss"
+    payload.setdefault("created_at", time.time())
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
 def build_keyword_messages(page: dict, *, max_keywords: int = 5) -> list[dict[str, str]]:
     page_payload = {
         "url": page.get("url", ""),
@@ -459,6 +720,9 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "Do not duplicate topics listed in covered_topics. "
                 "If impressions, clicks, traffic, or volume are absent, say demand metrics absent instead of guessing. "
                 "Do not repeat the same instruction in multiple sections.\n\n"
+                "After the markdown brief, additionally output one fenced ```json code block containing the "
+                "machine-readable recommendation that follows this contract exactly:\n"
+                f"{RECOMMENDATION_SCHEMA_DOC}\n\n"
                 f"Evidence JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
             ),
         },

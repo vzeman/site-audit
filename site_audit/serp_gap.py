@@ -22,9 +22,15 @@ from urllib.parse import urlparse
 import numpy as np
 import requests
 
+from .agent_workspace import write_agent_workspace
 from .ai_agent import (
     DEFAULT_OPENROUTER_MODEL,
     MissingOpenRouterKey,
+    RECOMMENDATION_SCHEMA_DOC,
+    cached_workspace_completion,
+    parse_recommendation,
+    run_harnext_workspace_session,
+    validate_recommendation,
     build_agent_client,
     build_editor_brief_messages,
     build_keyword_messages,
@@ -113,6 +119,7 @@ class SerpGapConfig:
     ai_agent_provider: str = "harnext"
     ai_agent_model: str = DEFAULT_OPENROUTER_MODEL
     ai_agent_refresh: bool = False
+    ai_agent_max_turns: int = 20
 
 
 def run(config: SerpGapConfig) -> dict:
@@ -221,6 +228,8 @@ def run(config: SerpGapConfig) -> dict:
     competitor_cache = HttpCache(cache_dir / "competitors.sqlite")
 
     page_results: list[dict] = []
+    page_competitor_content: dict[str, dict[str, dict]] = {}
+    own_exts: dict[str, ExtractedPage] = {}
     all_competitor_urls: set[str] = set()
     serp_url_rankings: dict[str, dict] = {}
     overview_rows: list[dict] = []
@@ -347,6 +356,17 @@ def run(config: SerpGapConfig) -> dict:
                 _competitor_page(target, competitor_cache, embedder, config, own_ext=own_ext)
                 for target in targets
             ]
+            content_by_url = page_competitor_content.setdefault(page.url, {})
+            for cp in competitor_pages:
+                if cp.error or cp.target.competitor_url in content_by_url:
+                    continue
+                content_by_url[cp.target.competitor_url] = {
+                    "rank": cp.target.rank,
+                    "title": cp.title,
+                    "h1": cp.h1,
+                    "headings": cp.headers_rich,
+                    "paragraphs": cp.paragraphs,
+                }
             for competitor_page in competitor_pages:
                 competitor_url = competitor_page.target.competitor_url
                 if competitor_url in overview_urls_seen:
@@ -430,6 +450,7 @@ def run(config: SerpGapConfig) -> dict:
             }
             page_blocks.append(gap)
 
+        own_exts[page.url] = own_ext
         page_results.append({
             "url": page.url,
             "title": page.title,
@@ -451,7 +472,16 @@ def run(config: SerpGapConfig) -> dict:
         })
 
     aggregate_action_points = _attach_action_points(page_results)
-    _attach_ai_editor_briefs(page_results, cache_dir, config, ai_agent)
+    _attach_ai_editor_briefs(
+        page_results,
+        cache_dir,
+        config,
+        ai_agent,
+        page_competitor_content=page_competitor_content,
+        own_exts=own_exts,
+        report_dir=report_dir,
+        embedder=embedder,
+    )
     payload = {
         "status": "ok",
         "domain": config.domain,
@@ -2723,6 +2753,10 @@ def _attach_ai_editor_briefs(
     cache_dir: Path,
     config: SerpGapConfig,
     state: dict,
+    page_competitor_content: dict[str, dict] | None = None,
+    own_exts: dict[str, ExtractedPage] | None = None,
+    report_dir: Path | None = None,
+    embedder: Embedder | None = None,
 ) -> None:
     if not config.ai_agent:
         return
@@ -2733,49 +2767,184 @@ def _attach_ai_editor_briefs(
                 "message": "; ".join(state.get("notes") or []) or "AI editor brief was not generated.",
             }
         return
-    try:
-        client = build_agent_client(config.ai_agent_provider)
-    except Exception as exc:
-        state["status"] = "error"
-        state.setdefault("errors", []).append(f"AI editor client init failed: {exc}")
-        for page in page_results:
-            page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
-        return
-    for page in page_results:
-        messages = build_editor_brief_messages(page)
+    own_exts = own_exts or {}
+    page_competitor_content = page_competitor_content or {}
+    use_workspace = (
+        config.ai_agent_provider == "harnext"
+        and report_dir is not None
+        and bool(own_exts)
+        and harnext_status()[0]
+    )
+    client = None
+    if not use_workspace:
         try:
-            completion = cached_completion(
-                cache_dir,
-                kind=f"editor-brief-{_url_report_slug(page.get('url', ''))}",
-                messages=messages,
-                client=client,
-                model=config.ai_agent_model,
-                refresh=config.ai_agent_refresh,
-                temperature=0.2,
-                timeout=180,
-            )
-            if completion.cache_status == "hit":
-                state["cache_hits"] += 1
-            if completion.fallback_from:
-                state.setdefault("notes", []).append(
-                    f"Editor brief for {page.get('url', '')} used {completion.provider} after {completion.fallback_from}."
+            client = build_agent_client(config.ai_agent_provider)
+        except Exception as exc:
+            state["status"] = "error"
+            state.setdefault("errors", []).append(f"AI editor client init failed: {exc}")
+            for page in page_results:
+                page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
+            return
+    for page in page_results:
+        url = page.get("url", "")
+        paragraph_count = len((page.get("own_content") or {}).get("paragraphs") or [])
+        try:
+            if use_workspace and url in own_exts:
+                _attach_workspace_brief(
+                    page,
+                    cache_dir,
+                    config,
+                    state,
+                    own_ext=own_exts[url],
+                    competitor_content=page_competitor_content.get(url, {}),
+                    report_dir=report_dir,
+                    paragraph_count=paragraph_count,
                 )
-            page["ai_editor_brief"] = {
-                "status": "ok",
-                "provider": completion.provider,
-                "model": completion.model,
-                "cache_status": completion.cache_status,
-                "fallback_from": completion.fallback_from,
-                "markdown": _clean_ai_markdown(completion.text),
-            }
-            state["editor_briefs"] += 1
+            else:
+                _attach_chat_brief(page, cache_dir, config, state, client=client, paragraph_count=paragraph_count)
         except MissingOpenRouterKey:
             state["status"] = "missing_openrouter_api_key"
             message = "Set OPENROUTER_API_KEY in .env to generate the AI editor brief."
             page["ai_editor_brief"] = {"status": "missing_openrouter_api_key", "message": message}
+            page["ai_recommendation"] = {"status": "missing_openrouter_api_key", "errors": [], "data": {}}
         except Exception as exc:
-            state.setdefault("errors", []).append(f"Editor brief failed for {page.get('url', '')}: {exc}")
+            state.setdefault("errors", []).append(f"Editor brief failed for {url}: {exc}")
             page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
+            page["ai_recommendation"] = {"status": "error", "errors": [str(exc)], "data": {}}
+
+
+def _attach_workspace_brief(
+    page: dict,
+    cache_dir: Path,
+    config: SerpGapConfig,
+    state: dict,
+    *,
+    own_ext: ExtractedPage,
+    competitor_content: dict,
+    report_dir: Path,
+    paragraph_count: int,
+) -> None:
+    url = page.get("url", "")
+    workspace = write_agent_workspace(
+        report_dir,
+        page,
+        own_ext,
+        competitor_content,
+        schema_doc=RECOMMENDATION_SCHEMA_DOC,
+    )
+    evidence_text = (workspace / "evidence.json").read_text(encoding="utf-8")
+    cache_key = content_hash(
+        json.dumps({"evidence": content_hash(evidence_text), "model": config.ai_agent_model}, sort_keys=True)
+    )
+
+    def _run() -> dict:
+        completion = run_harnext_workspace_session(
+            workspace,
+            model=config.ai_agent_model,
+            max_turns=config.ai_agent_max_turns,
+        )
+        recommendation = (completion.raw or {}).get("recommendation") or {}
+        errors = validate_recommendation(recommendation, paragraph_count)
+        repair_attempted = False
+        if errors:
+            repair_attempted = True
+            repair_prompt = (
+                "Your recommendation.json failed validation with these errors:\n- "
+                + "\n- ".join(errors[:20])
+                + "\nFix recommendation.json only so it satisfies the contract in TASK.md."
+            )
+            completion = run_harnext_workspace_session(
+                workspace,
+                model=config.ai_agent_model,
+                max_turns=max(6, config.ai_agent_max_turns // 2),
+                extra_prompt=repair_prompt,
+            )
+            recommendation = (completion.raw or {}).get("recommendation") or {}
+            errors = validate_recommendation(recommendation, paragraph_count)
+        return {
+            "brief": completion.text,
+            "recommendation": recommendation,
+            "errors": errors,
+            "repair_attempted": repair_attempted,
+            "provider": completion.provider,
+            "model": completion.model,
+            "workspace": str(workspace),
+        }
+
+    payload = cached_workspace_completion(
+        cache_dir,
+        kind=f"editor-workspace-{_url_report_slug(url)}",
+        key=cache_key,
+        runner=_run,
+        refresh=config.ai_agent_refresh,
+    )
+    if payload.get("cache_status") == "hit":
+        state["cache_hits"] += 1
+    errors = payload.get("errors") or []
+    page["ai_editor_brief"] = {
+        "status": "ok",
+        "provider": payload.get("provider", "harnext"),
+        "model": payload.get("model", config.ai_agent_model),
+        "cache_status": payload.get("cache_status", "miss"),
+        "markdown": _clean_ai_markdown(str(payload.get("brief") or "")),
+    }
+    page["ai_recommendation"] = {
+        "status": "ok" if not errors else "invalid_recommendation",
+        "errors": errors,
+        "data": payload.get("recommendation") or {},
+        "repair_attempted": bool(payload.get("repair_attempted")),
+        "workspace": str(Path(payload.get("workspace") or workspace)),
+    }
+    state["editor_briefs"] += 1
+
+
+def _attach_chat_brief(
+    page: dict,
+    cache_dir: Path,
+    config: SerpGapConfig,
+    state: dict,
+    *,
+    client,
+    paragraph_count: int,
+) -> None:
+    messages = build_editor_brief_messages(page)
+    completion = cached_completion(
+        cache_dir,
+        kind=f"editor-brief-{_url_report_slug(page.get('url', ''))}",
+        messages=messages,
+        client=client,
+        model=config.ai_agent_model,
+        refresh=config.ai_agent_refresh,
+        temperature=0.2,
+        timeout=180,
+    )
+    if completion.cache_status == "hit":
+        state["cache_hits"] += 1
+    if completion.fallback_from:
+        state.setdefault("notes", []).append(
+            f"Editor brief for {page.get('url', '')} used {completion.provider} after {completion.fallback_from}."
+        )
+    recommendation = parse_recommendation(completion.text)
+    errors = validate_recommendation(recommendation, paragraph_count) if recommendation else ["no recommendation JSON found in completion"]
+    brief_markdown = completion.text
+    if recommendation:
+        brief_markdown = re.sub(r"```json\s*\{.*?\}\s*```", "", brief_markdown, flags=re.DOTALL | re.IGNORECASE).strip()
+    page["ai_editor_brief"] = {
+        "status": "ok",
+        "provider": completion.provider,
+        "model": completion.model,
+        "cache_status": completion.cache_status,
+        "fallback_from": completion.fallback_from,
+        "markdown": _clean_ai_markdown(brief_markdown),
+    }
+    page["ai_recommendation"] = {
+        "status": "ok" if not errors else "invalid_recommendation",
+        "errors": errors,
+        "data": recommendation,
+        "repair_attempted": False,
+        "workspace": "",
+    }
+    state["editor_briefs"] += 1
 
 
 def _clean_ai_markdown(text: str) -> str:
@@ -4735,7 +4904,29 @@ function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualCom
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
 function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
-function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
+function decisionChipClass(decision){if(decision==='keep')return 'covered';if(decision==='rewrite')return 'partial';return 'missing';}
+function recommendationSection(page){const rec=page.ai_recommendation||{};if(!rec.status)return '';if(rec.status!=='ok'&&rec.status!=='invalid_recommendation'){return '';}
+const d=rec.data||{};const parts=[];
+if(rec.status==='invalid_recommendation'&&(rec.errors||[]).length){parts.push(`<div class="mini" style="color:var(--missing);margin-bottom:8px">Recommendation failed validation: ${rec.errors.slice(0,6).map(e=>esc(e)).join('; ')}</div>`);}
+const titleRec=d.title||{};const h1Rec=d.h1||{};const metaRec=d.meta_description||{};const assessment=d.page_assessment||{};
+const headParts=[];
+if(assessment.reason)headParts.push(`<div class="mini" style="margin-bottom:6px">Target page check: <b>${assessment.is_right_target_page===false?'wrong target page':'right target page'}</b> — ${esc(assessment.reason||'')}</div>`);
+if(titleRec.recommended&&titleRec.recommended!==titleRec.current)headParts.push(`<div class="mini"><b>Title:</b> ${esc(titleRec.recommended)}${titleRec.reason?` <span class="muted">(${esc(titleRec.reason)})</span>`:''}</div>`);
+if(h1Rec.recommended)headParts.push(`<div class="mini"><b>H1:</b> ${esc(h1Rec.recommended)}</div>`);
+if(metaRec.recommended)headParts.push(`<div class="mini"><b>Meta description:</b> ${esc(metaRec.recommended)}</div>`);
+if(headParts.length)parts.push(`<div style="margin-bottom:10px">${headParts.join('')}</div>`);
+const outline=d.outline||[];
+if(outline.length){parts.push(`<h4 style="margin:10px 0 6px">Recommended outline</h4><table><thead><tr><th>Level</th><th>Heading</th><th>Status</th><th>Maps to topic</th></tr></thead><tbody>${outline.map(r=>`<tr><td>H${esc(String(r.level||2))}</td><td>${esc(r.heading||'')}</td><td><span class="chip ${r.status==='keep'?'covered':(r.status==='remove'?'missing':'partial')}">${esc(r.status||'')}</span></td><td>${esc(r.maps_to_topic||'')}</td></tr>`).join('')}</tbody></table>`);}
+const decisions=d.paragraph_decisions||[];
+if(decisions.length){parts.push(`<h4 style="margin:14px 0 6px">Paragraph decisions</h4><table><thead><tr><th>Paragraph</th><th>Decision</th><th>Reason</th></tr></thead><tbody>${decisions.map(r=>`<tr><td>[P${esc(String(r.index))}]</td><td><span class="chip ${decisionChipClass(r.decision)}">${esc(r.decision||'')}</span></td><td>${esc(r.reason||'')}${r.rewrite?`<details style="margin-top:4px"><summary class="mini">Replacement text</summary><div class="mini">${esc(r.rewrite)}</div></details>`:''}</td></tr>`).join('')}</tbody></table>`);}
+const sections=d.new_sections||[];
+if(sections.length){parts.push(`<h4 style="margin:14px 0 6px">New sections</h4><table><thead><tr><th>Heading</th><th>Placement</th><th>Format</th><th>Covers PAA</th><th>Draft</th></tr></thead><tbody>${sections.map(r=>`<tr><td>${esc(r.heading||'')}</td><td>${r.placement_after_paragraph===-1?'top':'after [P'+esc(String(r.placement_after_paragraph))+']'}</td><td>${esc(r.format||'')}</td><td>${n((r.covers_paa||[]).length)}</td><td>${r.draft?`<details><summary class="mini">Show draft</summary><div class="mini">${esc(r.draft)}</div></details>`:''}</td></tr>`).join('')}</tbody></table>`);}
+const schema=d.structured_data||[];const links=d.internal_links||[];
+if(schema.length)parts.push(`<div class="mini" style="margin-top:10px"><b>Structured data:</b> ${schema.map(r=>`${esc(r.type||'')} — ${esc(r.reason||'')}`).join(' · ')}</div>`);
+if(links.length)parts.push(`<div class="mini" style="margin-top:6px"><b>Internal links:</b> ${links.map(r=>`"${esc(r.anchor||'')}" (${esc(r.from_hint||'')})`).join(' · ')}</div>`);
+if(!parts.length)return '';
+return collapsiblePanel('AI Page Recommendation',`${sectionNote('Structured, validated recommendation produced by the AI agent from the full computed evidence.')}${parts.join('')}`,{meta:rec.status==='ok'?'validated':'validation errors',open:true});}
+function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);const aiRec=recommendationSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiRec?`<div class="keyword-card">${aiRec}</div>`:''}${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Task board</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
 function bindSerpUrlGraphInteractions(){document.querySelectorAll('.serp-url-graph-wrap').forEach(wrap=>{const tooltip=wrap.querySelector('.graph-tooltip');const clear=()=>{wrap.classList.remove('has-active');wrap.querySelectorAll('.is-active').forEach(el=>el.classList.remove('is-active'));tooltip?.classList.remove('open');};function show(el,event){let detail={};try{detail=JSON.parse(el.getAttribute('data-graph-detail')||'{}');}catch(_){}wrap.classList.add('has-active');wrap.querySelectorAll('.is-active').forEach(active=>active.classList.remove('is-active'));el.classList.add('is-active');if(el.matches('[data-graph-node]')){const index=el.getAttribute('data-node-index');wrap.querySelectorAll(`[data-graph-edge][data-nodes*=",${index},"]`).forEach(edge=>edge.classList.add('is-active'));}else if(el.matches('[data-graph-edge]')){(el.getAttribute('data-nodes')||'').split(',').filter(Boolean).forEach(index=>wrap.querySelector(`[data-graph-node][data-node-index="${index}"]`)?.classList.add('is-active'));}if(tooltip){tooltip.innerHTML=graphTooltipHtml(detail);tooltip.classList.add('open');position(event);}}function position(event){if(!tooltip||!event)return;const rect=wrap.getBoundingClientRect();const x=Math.min(Math.max(10,event.clientX-rect.left+14),Math.max(10,rect.width-380));const y=Math.min(Math.max(10,event.clientY-rect.top+14),Math.max(10,rect.height-190));tooltip.style.left=`${x}px`;tooltip.style.top=`${y}px`;}wrap.querySelectorAll('[data-graph-node],[data-graph-edge]').forEach(el=>{el.addEventListener('mouseenter',event=>show(el,event));el.addEventListener('mousemove',position);el.addEventListener('focus',event=>show(el,event));el.addEventListener('mouseleave',clear);el.addEventListener('blur',clear);});});}
