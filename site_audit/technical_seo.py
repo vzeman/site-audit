@@ -182,6 +182,7 @@ def _merge_page_signals(
 ) -> None:
     if metadata:
         row["title"] = row.get("title") or metadata.get("title", "")
+        row["description"] = metadata.get("description", row.get("description", ""))
         row["canonical_url"] = metadata.get("canonical_url", "")
         row["robots_content"] = metadata.get("robots_content", "")
         row["noindex_source"] = metadata.get("noindex_source", row.get("noindex_source", ""))
@@ -350,6 +351,14 @@ def _issues_for_row(row: dict) -> list[dict]:
     if (
         status == "indexable"
         and (
+            "missing_description" in (row.get("metadata_issues") or [])
+            or ("meta_description_tag_count" in row and _safe_int(row.get("meta_description_tag_count")) == 0)
+        )
+    ):
+        issues.append(_issue(row, "content", "indexable_meta_description_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_meta_description_tag_missing_or_empty")))
+    if (
+        status == "indexable"
+        and (
             "missing_title" in (row.get("metadata_issues") or [])
             or not str(row.get("title") or "").strip()
             or ("title_tag_count" in row and _safe_int(row.get("title_tag_count")) == 0)
@@ -501,6 +510,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
+        "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",

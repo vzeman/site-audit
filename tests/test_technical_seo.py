@@ -736,6 +736,59 @@ def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_meta_description() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/no-tag", title="No Tag", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "meta_description_tag_count": 0,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "meta_description_tag_count": 0,
+                    "issues": ["missing_description"],
+                },
+                {
+                    "url": "https://example.com/no-tag",
+                    "title": "No Tag",
+                    "meta_description_tag_count": 0,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "description": "A useful search snippet for the OK page.",
+                    "meta_description_tag_count": 1,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_meta_description_tag_missing_or_empty"]
+    assert {row["url"] for row in issues} == {"https://example.com/missing", "https://example.com/no-tag"}
+    assert all(row["issue_name"] == "Meta description tag missing or empty" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
