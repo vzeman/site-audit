@@ -885,6 +885,63 @@ def test_technical_seo_model_flags_indexable_pages_with_nofollow_outgoing_intern
     assert issues[0]["importance"] == "Notice"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_only_one_dofollow_incoming_link() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/one", title="One", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/two", title="Two", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/non-indexable",
+                    "title": "Non-indexable",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {
+                    "url": "https://example.com/one",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "incoming_dofollow_internal_link_count": 1,
+                    "incoming_nofollow_internal_link_count": 0,
+                },
+                {
+                    "url": "https://example.com/two",
+                    "in_degree": 2,
+                    "out_degree": 1,
+                    "incoming_dofollow_internal_link_count": 2,
+                    "incoming_nofollow_internal_link_count": 0,
+                },
+                {
+                    "url": "https://example.com/non-indexable",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "incoming_dofollow_internal_link_count": 1,
+                    "incoming_nofollow_internal_link_count": 0,
+                },
+            ]
+        },
+    )
+
+    issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "indexable_page_has_only_one_dofollow_incoming_internal_link"
+    ]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/one"
+    assert issues[0]["issue_name"] == "Page has only one dofollow incoming internal link"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],
