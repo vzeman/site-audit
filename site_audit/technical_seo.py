@@ -572,6 +572,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if "incomplete_open_graph" in (row.get("metadata_issues") or []):
         issues.append(_issue(row, "social_tags", "open_graph_tags_incomplete", "medium", 0.86, _recommendation("open_graph_tags_incomplete")))
+    if _urls_differ(row.get("og_url", ""), row.get("canonical_url", "")):
+        issues.append(_issue(row, "social_tags", "open_graph_url_not_matching_canonical", "medium", 0.86, _recommendation("open_graph_url_not_matching_canonical")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -679,6 +681,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_title_too_short": "Expand the title tag with a clear topic and differentiator while keeping it concise.",
         "not_indexable_title_too_short": "Expand the title tag if this non-indexable page remains visible to users, previews, or future indexing plans.",
         "open_graph_tags_incomplete": "Add the missing Open Graph title or description tags so shared URLs render complete previews.",
+        "open_graph_url_not_matching_canonical": "Set og:url to the canonical URL so social shares consolidate on the preferred page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -749,6 +752,12 @@ def _normalize_url(url: str) -> str:
     netloc = parsed.netloc.lower().removeprefix("www.")
     path = (parsed.path or "/").rstrip("/") or "/"
     return f"{parsed.scheme.lower()}://{netloc}{path}"
+
+
+def _urls_differ(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    return _normalize_url(left) != _normalize_url(right)
 
 
 def _url_scheme(url: str) -> str:

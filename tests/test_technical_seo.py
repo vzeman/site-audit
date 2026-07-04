@@ -1816,6 +1816,66 @@ def test_technical_seo_model_flags_open_graph_tags_incomplete() -> None:
     assert page["og_missing_fields"] == ["og_description"]
 
 
+def test_technical_seo_model_flags_open_graph_url_not_matching_canonical() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(url="https://example.com/mismatch", title="Mismatch", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/normalized", title="Normalized", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/missing-og-url", title="Missing OG URL", section="", word_count=250, language="en"),
+        ],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-mismatch",
+                    "title": "Noindex Mismatch",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/mismatch",
+                    "title": "Mismatch",
+                    "canonical_url": "https://example.com/canonical",
+                    "og_url": "https://example.com/other",
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/noindex-mismatch",
+                    "title": "Noindex Mismatch",
+                    "canonical_url": "https://example.com/noindex-canonical",
+                    "og_url": "https://example.com/noindex-other",
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/normalized",
+                    "title": "Normalized",
+                    "canonical_url": "https://www.example.com/normalized/",
+                    "og_url": "https://example.com/normalized",
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/missing-og-url",
+                    "title": "Missing OG URL",
+                    "canonical_url": "https://example.com/missing-og-url",
+                    "og_url": "",
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "open_graph_url_not_matching_canonical"]
+    assert {row["url"] for row in issues} == {"https://example.com/mismatch", "https://example.com/noindex-mismatch"}
+    assert all(row["issue_name"] == "Open Graph URL not matching canonical" for row in issues)
+    assert all(row["category"] == "social_tags" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
