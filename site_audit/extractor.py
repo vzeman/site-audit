@@ -53,8 +53,10 @@ class ExtractedPage:
     body: str
     word_count: int
     language: Optional[str]
+    html_lang: str = ""
     canonical_url: str = ""
     robots_content: str = ""
+    hreflang: list[dict] = field(default_factory=list)
     og_title: str = ""
     og_description: str = ""
     og_image: str = ""
@@ -287,6 +289,20 @@ def _canonical_url(soup: BeautifulSoup) -> str:
     tag = soup.find("link", rel=lambda value: value and "canonical" in [str(v).lower() for v in (value if isinstance(value, list) else [value])])
     href = (tag.get("href") or "").strip() if tag else ""
     return _clean(html.unescape(href))
+
+
+def _hreflang_annotations(soup: BeautifulSoup) -> list[dict]:
+    rows: list[dict] = []
+    for tag in soup.find_all("link"):
+        rel = tag.get("rel")
+        rel_values = [str(v).lower() for v in (rel if isinstance(rel, list) else [rel]) if v]
+        if "alternate" not in rel_values or not tag.get("hreflang"):
+            continue
+        hreflang = _clean(html.unescape(str(tag.get("hreflang") or "")))
+        href = _clean(html.unescape(str(tag.get("href") or "")))
+        if hreflang or href:
+            rows.append({"hreflang": hreflang, "href": href})
+    return rows
 
 
 def _robots_content(soup: BeautifulSoup) -> str:
@@ -911,7 +927,9 @@ def extract(
     title_tag_count = len(soup.find_all("title"))
     meta_description_tag_count = _meta_description_tag_count(soup)
     lang_attr = soup.find("html")
-    language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
+    html_lang = _clean(str(lang_attr.get("lang") or "")) if lang_attr and lang_attr.has_attr("lang") else ""
+    language = html_lang or None
+    hreflang = _hreflang_annotations(soup)
 
     body_text: str = ""
     if (
@@ -964,8 +982,10 @@ def extract(
         body=truncated,
         word_count=word_count,
         language=language,
+        html_lang=html_lang,
         canonical_url=canonical_url,
         robots_content=robots_content,
+        hreflang=hreflang,
         og_title=og_title,
         og_description=og_description,
         og_image=og_image,

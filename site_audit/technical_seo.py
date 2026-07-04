@@ -193,6 +193,8 @@ def _merge_page_signals(
         row["description"] = metadata.get("description", row.get("description", ""))
         row["description_length"] = _safe_int(metadata.get("description_length"))
         row["canonical_url"] = metadata.get("canonical_url", "")
+        row["html_lang"] = metadata.get("html_lang", row.get("language", ""))
+        row["hreflang"] = list(metadata.get("hreflang") or [])
         row["robots_content"] = metadata.get("robots_content", "")
         row["noindex_source"] = metadata.get("noindex_source", row.get("noindex_source", ""))
         row["nofollow"] = bool(metadata.get("nofollow"))
@@ -591,6 +593,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "social_tags", "twitter_card_missing", "low", 0.8, _recommendation("twitter_card_missing")))
     if row.get("duplicate_without_canonical"):
         issues.append(_issue(row, "duplicates", "duplicate_pages_without_canonical", "high", 0.92, _recommendation("duplicate_pages_without_canonical")))
+    if _hreflang_html_lang_mismatch(row):
+        issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -703,6 +707,7 @@ def _recommendation(issue_type: str) -> str:
         "open_graph_tags_missing": "Add Open Graph tags for pages that need complete social sharing previews.",
         "twitter_card_missing": "Add Twitter/X card metadata for pages that need complete social sharing previews.",
         "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
+        "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -790,6 +795,31 @@ def _apply_duplicate_signals(rows: list[dict], duplicates: dict[str, dict]) -> N
                 consolidates = True
                 break
         row["duplicate_without_canonical"] = not consolidates
+
+
+def _hreflang_html_lang_mismatch(row: dict) -> bool:
+    html_lang = _language_primary(row.get("html_lang") or row.get("language") or "")
+    if not html_lang:
+        return False
+    page_urls = {_normalize_url(row.get("url", ""))}
+    if row.get("canonical_url"):
+        page_urls.add(_normalize_url(row.get("canonical_url", "")))
+    self_hreflangs = [
+        _language_primary(item.get("hreflang", ""))
+        for item in (row.get("hreflang") or [])
+        if _normalize_url(item.get("href", "")) in page_urls
+    ]
+    self_hreflangs = [lang for lang in self_hreflangs if lang and lang != "x-default"]
+    if not self_hreflangs:
+        return False
+    return html_lang not in self_hreflangs
+
+
+def _language_primary(value: str) -> str:
+    language = str(value or "").strip().lower().replace("_", "-")
+    if not language:
+        return ""
+    return language.split("-", 1)[0]
 
 
 def _is_self_canonical(row: dict) -> bool:

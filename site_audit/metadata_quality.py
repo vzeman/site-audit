@@ -133,6 +133,8 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             "description": page.description,
             "description_length": len(page.description or ""),
             "canonical_url": page.canonical_url,
+            "html_lang": getattr(page, "html_lang", "") or page.language or "",
+            "hreflang": list(getattr(page, "hreflang", []) or []),
             "robots_content": page.robots_content,
             "nofollow": page.nofollow,
             "nofollow_source": page.nofollow_source,

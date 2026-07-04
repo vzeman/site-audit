@@ -38,10 +38,12 @@ def _page(
 
 def test_extract_serp_metadata_fields() -> None:
     html = """
-    <html><head>
+    <html lang="sk-SK"><head>
       <title>Complete metadata example</title>
       <meta name="description" content="A complete description for search result snippets and previews.">
       <link rel="canonical" href="https://example.com/canonical">
+      <link rel="alternate" hreflang="sk" href="https://example.com/page">
+      <link rel="alternate" hreflang="en" href="https://example.com/en/page">
       <meta name="robots" content="index,follow">
       <meta property="og:title" content="Open graph title">
       <meta property="og:description" content="Open graph description">
@@ -64,6 +66,11 @@ def test_extract_serp_metadata_fields() -> None:
     assert page is not None
     assert page.description == "A complete description for search result snippets and previews."
     assert page.canonical_url == "https://example.com/canonical"
+    assert page.html_lang == "sk-SK"
+    assert page.hreflang == [
+        {"hreflang": "sk", "href": "https://example.com/page"},
+        {"hreflang": "en", "href": "https://example.com/en/page"},
+    ]
     assert page.robots_content == "index,follow"
     assert page.og_title == "Open graph title"
     assert page.og_description == "Open graph description"
@@ -174,6 +181,9 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     assert any("missing_description" in row["issues"] for row in report["per_page"])
     incomplete = next(row for row in report["per_page"] if row["url"] == "https://example.com/b")
     missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/d")
+    canonical_external = next(row for row in report["per_page"] if row["url"] == "https://example.com/c")
+    assert canonical_external["html_lang"] == "en"
+    assert canonical_external["hreflang"] == []
     assert incomplete["og_missing_fields"] == ["og_description"]
     assert "incomplete_open_graph" not in missing["issues"]
     assert "missing_open_graph" in missing["issues"]

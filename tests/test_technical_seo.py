@@ -2123,6 +2123,73 @@ def test_technical_seo_model_flags_duplicate_pages_without_canonical() -> None:
     assert consolidated_page["duplicate_without_canonical"] is False
 
 
+def test_technical_seo_model_flags_hreflang_and_html_lang_mismatch() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(url="https://example.com/sk", title="SK", section="", word_count=250, language="sk"),
+            SimpleNamespace(url="https://example.com/compatible", title="Compatible", section="", word_count=250, language="sk-SK"),
+            SimpleNamespace(url="https://example.com/no-self", title="No Self", section="", word_count=250, language="sk"),
+        ],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/sk",
+                    "title": "SK",
+                    "html_lang": "sk",
+                    "canonical_url": "https://example.com/sk",
+                    "hreflang": [
+                        {"hreflang": "cs", "href": "https://example.com/sk"},
+                        {"hreflang": "x-default", "href": "https://example.com/"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "html_lang": "en",
+                    "canonical_url": "https://example.com/noindex",
+                    "hreflang": [{"hreflang": "de", "href": "https://example.com/noindex"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/compatible",
+                    "title": "Compatible",
+                    "html_lang": "sk-SK",
+                    "canonical_url": "https://example.com/compatible",
+                    "hreflang": [{"hreflang": "sk", "href": "https://example.com/compatible/"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/no-self",
+                    "title": "No Self",
+                    "html_lang": "sk",
+                    "canonical_url": "https://example.com/no-self",
+                    "hreflang": [{"hreflang": "cs", "href": "https://example.com/cs"}],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "hreflang_and_html_lang_mismatch"]
+    assert {row["url"] for row in issues} == {"https://example.com/sk", "https://example.com/noindex"}
+    assert all(row["issue_name"] == "Hreflang and HTML lang mismatch" for row in issues)
+    assert all(row["category"] == "localization" for row in issues)
+    assert all(row["importance"] == "Error" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
