@@ -24,8 +24,10 @@ _STYLE_WEIGHT = 20_000
 _FONT_WEIGHT = 40_000
 _PRELOAD_WEIGHT = 20_000
 _MOBILE_VIEWPORT_WIDTH = 390
+_MIN_READABLE_FONT_PX = 12.0
 _CSS_URL_RE = re.compile(r"url\(\s*['\"]?(http://[^)'\"\s]+)", re.I)
 _FIXED_WIDTH_RE = re.compile(r"(?<![\w-])(width|min-width)\s*:\s*(\d+(?:\.\d+)?)px\b", re.I)
+_FONT_SIZE_RE = re.compile(r"(?<![\w-])font-size\s*:\s*(\d+(?:\.\d+)?)(px|em|rem|%)(?![\w-])", re.I)
 _WIDTH_ATTR_RE = re.compile(r"\s*(\d+(?:\.\d+)?)(?:px)?\s*", re.I)
 _RESOURCE_LINK_RELS = {
     "apple-touch-icon",
@@ -180,6 +182,33 @@ def _plugin_elements(soup: BeautifulSoup) -> list[dict]:
     return plugins[:25]
 
 
+def _font_size_px(value: str, unit: str) -> float:
+    size = float(value)
+    unit = unit.lower()
+    if unit == "px":
+        return size
+    if unit in {"em", "rem"}:
+        return size * 16.0
+    if unit == "%":
+        return size * 16.0 / 100.0
+    return 0.0
+
+
+def _small_font_sizes(soup: BeautifulSoup) -> list[dict]:
+    issues: list[dict] = []
+    for tag in soup.select("[style]"):
+        for value, unit in _FONT_SIZE_RE.findall(str(tag.get("style") or "")):
+            px = _font_size_px(value, unit)
+            if 0 < px < _MIN_READABLE_FONT_PX:
+                issues.append({"source": "inline_style", "tag": tag.name, "font_size": f"{value}{unit}", "font_size_px": round(px, 2)})
+    for tag in soup.find_all("style"):
+        for value, unit in _FONT_SIZE_RE.findall(tag.get_text(" ") or ""):
+            px = _font_size_px(value, unit)
+            if 0 < px < _MIN_READABLE_FONT_PX:
+                issues.append({"source": "style_block", "tag": "style", "font_size": f"{value}{unit}", "font_size_px": round(px, 2)})
+    return issues[:25]
+
+
 def _bucket(estimated_weight: int) -> str:
     if estimated_weight < 500_000:
         return "light"
@@ -223,6 +252,7 @@ def _row(fetch) -> dict:
     mixed_content_urls = _mixed_content_urls(page_url, soup)
     content_sizing_issues = _oversized_fixed_widths(soup)
     plugin_elements = _plugin_elements(soup)
+    small_font_issues = _small_font_sizes(soup)
     html_weight_bytes = _html_weight(fetch)
     estimated_weight_bytes = (
         html_weight_bytes
@@ -262,6 +292,8 @@ def _row(fetch) -> dict:
         "content_sizing_issues": content_sizing_issues,
         "plugin_element_count": len(plugin_elements),
         "plugin_elements": plugin_elements,
+        "small_font_size_count": len(small_font_issues),
+        "small_font_size_issues": small_font_issues,
     }
 
 
@@ -276,6 +308,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     pages_with_mixed_content = sum(1 for row in rows if row["mixed_content_url_count"] > 0)
     pages_with_content_sizing_issues = sum(1 for row in rows if row["content_width_exceeds_viewport"])
     pages_with_plugins = sum(1 for row in rows if row["plugin_element_count"] > 0)
+    pages_with_small_font_sizes = sum(1 for row in rows if row["small_font_size_count"] > 0)
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -302,6 +335,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "content_sizing_issue_share": pages_with_content_sizing_issues / total_pages if total_pages else 0.0,
         "pages_with_plugins": pages_with_plugins,
         "plugin_usage_share": pages_with_plugins / total_pages if total_pages else 0.0,
+        "pages_with_small_font_sizes": pages_with_small_font_sizes,
+        "small_font_size_share": pages_with_small_font_sizes / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }

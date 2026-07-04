@@ -143,6 +143,37 @@ def test_performance_payload_detects_plugin_elements() -> None:
     assert payload["summary"]["plugin_usage_share"] == 0.5
 
 
+def test_performance_payload_detects_small_font_sizes() -> None:
+    bad_html = """
+    <html><head>
+      <style>
+        .fine-print { font-size: 11px; }
+        .legal { font-size: 70%; }
+      </style>
+    </head><body>
+      <p style="font-size:0.7rem"></p>
+      <p style="font-size:12px"></p>
+    </body></html>
+    """
+    clean_html = "<html><body><p style='font-size:14px'></p></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["small_font_size_count"] == 3
+    assert rows["https://example.com/bad"]["small_font_size_issues"] == [
+        {"source": "inline_style", "tag": "p", "font_size": "0.7rem", "font_size_px": 11.2},
+        {"source": "style_block", "tag": "style", "font_size": "11px", "font_size_px": 11.0},
+        {"source": "style_block", "tag": "style", "font_size": "70%", "font_size_px": 11.2},
+    ]
+    assert rows["https://example.com/clean"]["small_font_size_count"] == 0
+    assert payload["summary"]["pages_with_small_font_sizes"] == 1
+    assert payload["summary"]["small_font_size_share"] == 0.5
+
+
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
     html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
 

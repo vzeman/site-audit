@@ -3088,6 +3088,47 @@ def test_technical_seo_model_flags_document_uses_plugins() -> None:
     ]
 
 
+def test_technical_seo_model_flags_font_size_too_small() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/bad",
+                    "status": 200,
+                    "small_font_size_count": 1,
+                    "small_font_size_issues": [
+                        {"source": "style_block", "tag": "style", "font_size": "11px", "font_size_px": 11.0},
+                    ],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "status": 200,
+                    "small_font_size_count": 0,
+                    "small_font_size_issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "font_size_too_small"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Font size too small"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["small_font_size_count"] == 1
+    assert page["small_font_size_issues"] == [
+        {"source": "style_block", "tag": "style", "font_size": "11px", "font_size_px": 11.0},
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

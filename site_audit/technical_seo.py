@@ -238,6 +238,8 @@ def _merge_page_signals(
         row["content_sizing_issues"] = list(perf.get("content_sizing_issues") or [])
         row["plugin_element_count"] = _safe_int(perf.get("plugin_element_count"))
         row["plugin_elements"] = list(perf.get("plugin_elements") or [])
+        row["small_font_size_count"] = _safe_int(perf.get("small_font_size_count"))
+        row["small_font_size_issues"] = list(perf.get("small_font_size_issues") or [])
     if canonical:
         row["canonical_url"] = row.get("canonical_url") or canonical.get("canonical_url", "")
         row["canonical_target_http_status"] = canonical.get("canonical_target_http_status", "")
@@ -647,6 +649,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "content_is_not_sized_correctly", "medium", 0.84, _recommendation("content_is_not_sized_correctly")))
     if _safe_int(row.get("plugin_element_count")) > 0:
         issues.append(_issue(row, "performance", "document_uses_plugins", "medium", 0.86, _recommendation("document_uses_plugins")))
+    if _safe_int(row.get("small_font_size_count")) > 0:
+        issues.append(_issue(row, "performance", "font_size_too_small", "medium", 0.86, _recommendation("font_size_too_small")))
     return issues
 
 
@@ -766,6 +770,7 @@ def _recommendation(issue_type: str) -> str:
         "x_default_hreflang_annotation_missing": "Add an x-default hreflang annotation for users whose language or region does not match a specific alternate.",
         "content_is_not_sized_correctly": "Remove fixed-width layout constraints that exceed mobile viewports or make them responsive with max-width and fluid sizing.",
         "document_uses_plugins": "Remove plugin-based embeds such as object, embed, or applet and replace them with native HTML alternatives.",
+        "font_size_too_small": "Increase small text to at least 12px equivalent, and prefer readable responsive typography for mobile users.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
