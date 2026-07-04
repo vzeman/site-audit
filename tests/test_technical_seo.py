@@ -997,6 +997,45 @@ def test_technical_seo_model_flags_indexable_pages_with_multiple_h1_tags() -> No
     assert issues[0]["importance"] == "Notice"
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_multiple_h1_tags() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=250, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-multiple",
+                    "title": "Noindex Multiple",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Noindex OK",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        header_analysis={
+            "per_page": [
+                {"url": "https://example.com/indexable", "h1": "Primary H1", "h1_count": 2, "header_count": 4},
+                {"url": "https://example.com/noindex-multiple", "h1": "Noindex H1", "h1_count": 2, "header_count": 3},
+                {"url": "https://example.com/noindex-ok", "h1": "Noindex H1", "h1_count": 1, "header_count": 2},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_multiple_h1_tags"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex-multiple"
+    assert issues[0]["issue_name"] == "Multiple H1 tags"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_indexable_h1_changes() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=250, language="en")],

@@ -381,6 +381,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "not_indexable_h1_tag_missing_or_empty", "low", 0.82, _recommendation("not_indexable_h1_tag_missing_or_empty")))
     if status == "indexable" and _safe_int(row.get("h1_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_h1_tags", "low", 0.82, _recommendation("indexable_multiple_h1_tags")))
+    if status != "indexable" and _safe_int(row.get("h1_count")) > 1:
+        issues.append(_issue(row, "content", "not_indexable_multiple_h1_tags", "low", 0.8, _recommendation("not_indexable_multiple_h1_tags")))
     if status == "indexable" and row.get("h1_changed"):
         issues.append(_issue(row, "content", "indexable_h1_tag_changed", "low", 0.8, _recommendation("indexable_h1_tag_changed")))
     if status == "indexable" and row.get("description_changed"):
@@ -629,6 +631,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "not_indexable_h1_tag_missing_or_empty": "Review whether the non-indexable page still needs a clear H1 if it remains useful to users or internal crawl paths.",
         "indexable_multiple_h1_tags": "Keep one primary H1 heading and demote extra H1s to lower heading levels.",
+        "not_indexable_multiple_h1_tags": "Keep one primary H1 on non-indexable pages that remain useful to users or internal crawl paths.",
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
         "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
         "indexable_page_and_serp_titles_do_not_match": "Review the SERP title Google is showing and align the page title when the rewrite is not intentional.",
