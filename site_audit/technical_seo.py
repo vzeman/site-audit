@@ -586,6 +586,7 @@ def _merge_page_signals(
         row["external_issue_counts"] = external_issue_counts
         row["external_3xx_redirect_count"] = _safe_int(external_issue_counts.get("external_3xx_redirect"))
         row["external_4xx_count"] = _safe_int(external_issue_counts.get("external_4xx"))
+        row["external_5xx_count"] = _safe_int(external_issue_counts.get("external_5xx"))
         external_redirects = _external_links_with_issue(external, "external_3xx_redirect")
         if external_redirects:
             row["external_redirects"] = external_redirects
@@ -594,6 +595,10 @@ def _merge_page_signals(
         if external_4xx_links:
             row["external_4xx_links"] = external_4xx_links
             row["external_4xx_count"] = len(external_4xx_links)
+        external_5xx_links = _external_links_with_issue(external, "external_5xx")
+        if external_5xx_links:
+            row["external_5xx_links"] = external_5xx_links
+            row["external_5xx_count"] = len(external_5xx_links)
     if sitemap:
         row["in_sitemap"] = bool(sitemap.get("in_sitemap"))
         row["source_sitemaps"] = list(sitemap.get("source_sitemaps") or [])
@@ -1009,6 +1014,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "external_pages", "external_3xx_redirect", "low", 0.82, _recommendation("external_3xx_redirect")))
     if _safe_int(row.get("external_4xx_count")) > 0:
         issues.append(_issue(row, "external_pages", "external_4xx", "low", 0.86, _recommendation("external_4xx")))
+    if _safe_int(row.get("external_5xx_count")) > 0:
+        issues.append(_issue(row, "external_pages", "external_5xx", "low", 0.86, _recommendation("external_5xx")))
     if _safe_int(row.get("sitemap_redirect_count")) > 0:
         issues.append(_issue(row, "sitemaps", "3xx_redirect_in_sitemap", "high", 0.92, _recommendation("3xx_redirect_in_sitemap")))
     if _safe_int(row.get("sitemap_4xx_count")) > 0:
@@ -1193,6 +1200,7 @@ def _recommendation(issue_type: str) -> str:
         "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
         "external_3xx_redirect": "Update external links to point directly to the final destination URL where appropriate.",
         "external_4xx": "Update or remove external links that return 4XX client errors.",
+        "external_5xx": "Review external links that return 5XX server errors and update or remove them when the destination is unstable.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
