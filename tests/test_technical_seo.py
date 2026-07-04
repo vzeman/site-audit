@@ -941,6 +941,32 @@ def test_technical_seo_model_flags_indexable_page_and_serp_title_mismatch() -> N
     assert page["serp_title"] == "Cheap Tablets - Example"
 
 
+def test_technical_seo_model_flags_indexable_serp_title_changes() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=250, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["serp_title"],
+                    "serp_title_before": "Old SERP title",
+                    "serp_title_after": "New SERP title",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_serp_title_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "SERP title changed"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = payload["pages"][0]
+    assert page["previous_serp_title"] == "Old SERP title"
+    assert page["current_serp_title"] == "New SERP title"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_high_ai_content_levels() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/high-level", title="High Level", section="", word_count=250, language="en"),

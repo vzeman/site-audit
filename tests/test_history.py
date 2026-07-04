@@ -250,6 +250,38 @@ def test_compare_snapshots_reports_description_changes(tmp_path: Path) -> None:
     assert row["description_after"] == "New meta description"
 
 
+def test_compare_snapshots_reports_serp_title_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_search["top_pages"][0]["top_keyword_title"] = "Old SERP title"
+    after_search["top_pages"][0]["top_keyword_title"] = "New SERP title"
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "serp_title" in row["changed_fields"]
+    assert row["serp_title_before"] == "Old SERP title"
+    assert row["serp_title_after"] == "New SERP title"
+
+
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:
     report = tmp_path / "example.com" / "report"
     report.mkdir(parents=True)

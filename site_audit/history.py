@@ -101,6 +101,7 @@ def _search_lookup(search_payload: dict | None) -> dict[str, dict]:
             "keywords": _safe_int(row.get("keywords") or row.get("keywords_total")),
             "position": _safe_float(row.get("top_keyword_position") or row.get("position")),
             "top_keyword": row.get("top_keyword") or "",
+            "serp_title": row.get("top_keyword_title") or row.get("serp_title") or "",
             "clicks": _safe_float(row.get("clicks")),
             "impressions": _safe_float(row.get("impressions")),
         }, score_key="traffic")
@@ -117,6 +118,7 @@ def _search_lookup(search_payload: dict | None) -> dict[str, dict]:
             "keywords": max(_safe_int(current.get("keywords")), 1),
             "position": position if position < 999.0 else 0,
             "top_keyword": current.get("top_keyword") or row.get("keyword") or "",
+            "serp_title": current.get("serp_title") or row.get("page_title") or row.get("serp_title") or "",
         }, score_key="traffic")
     return out
 
@@ -189,6 +191,7 @@ def build_history_snapshot(
         canonical_url = metadata_row.get("canonical_url") or getattr(ext, "canonical_url", "") or ""
         h1 = getattr(ext, "h1", "") or ""
         redirect_target_url = index_row.get("redirect_target_url") or ""
+        serp_title = search_row.get("serp_title") or ""
         page_rows.append({
             "url": url,
             "title": title,
@@ -201,6 +204,8 @@ def build_history_snapshot(
             "canonical_hash": _hash(canonical_url),
             "h1": h1,
             "h1_hash": _hash(h1),
+            "serp_title": serp_title,
+            "serp_title_hash": _hash(serp_title),
             "redirect_target_url": redirect_target_url,
             "redirect_target_hash": _hash(redirect_target_url),
             "heading_hash": _hash("|".join(h["hash"] for h in headings)),
@@ -225,6 +230,7 @@ def build_history_snapshot(
                 "keywords": _safe_int(search_row.get("keywords")),
                 "position": _safe_float(search_row.get("position")),
                 "top_keyword": search_row.get("top_keyword") or "",
+                "serp_title": serp_title,
                 "clicks": _safe_float(search_row.get("clicks")),
                 "impressions": _safe_float(search_row.get("impressions")),
             },
@@ -413,6 +419,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             ("description", "description_hash"),
             ("canonical", "canonical_hash"),
             ("h1", "h1_hash"),
+            ("serp_title", "serp_title_hash"),
             ("redirect_target", "redirect_target_hash"),
             ("headings", "heading_hash"),
             ("paragraphs", "paragraph_hash"),
@@ -474,6 +481,8 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "canonical_after": a.get("canonical_url") or "",
             "h1_before": b.get("h1") or "",
             "h1_after": a.get("h1") or "",
+            "serp_title_before": b.get("serp_title") or "",
+            "serp_title_after": a.get("serp_title") or "",
             "redirect_target_before": b.get("redirect_target_url") or "",
             "redirect_target_after": a.get("redirect_target_url") or "",
             "freshness_before": b.get("freshness") or {},
