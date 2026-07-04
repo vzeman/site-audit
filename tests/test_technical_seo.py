@@ -4536,6 +4536,33 @@ def test_technical_seo_model_flags_sitemap_larger_than_50mb() -> None:
     assert page["sitemap_size_bytes"] == 60 * 1024 * 1024
 
 
+def test_technical_seo_model_flags_sitemap_with_over_50k_urls() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/large-count-sitemap.xml",
+                    "issue": "sitemap_with_over_50k_urls",
+                    "url_count": 50_001,
+                    "message": "50001 URLs",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "sitemap_with_over_50k_urls"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/large-count-sitemap.xml"
+    assert issues[0]["issue_name"] == "Sitemap with over 50K URLs"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/large-count-sitemap.xml")
+    assert page["sitemap_too_many_urls_count"] == 1
+    assert page["sitemap_url_count"] == 50_001
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

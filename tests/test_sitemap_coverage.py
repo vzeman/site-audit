@@ -248,6 +248,7 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
             "issue": "sitemap_has_syntax_error",
             "http_status": "",
             "size_bytes": "",
+            "url_count": "",
             "message": "not well-formed",
         }
     ]
@@ -302,6 +303,29 @@ def test_sitemap_coverage_flags_sitemap_larger_than_50mb() -> None:
     assert issues[0]["url"] == "https://example.com/huge-sitemap.xml"
     assert issues[0]["size_bytes"] == 60 * 1024 * 1024
     assert "50MB" in issues[0]["recommended_action"]
+
+
+def test_sitemap_coverage_flags_sitemap_with_over_50k_urls() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/large-count-sitemap.xml",
+                "issue": "sitemap_with_over_50k_urls",
+                "url_count": 50_001,
+                "message": "50001 URLs",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_with_over_50k_urls"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_with_over_50k_urls"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/large-count-sitemap.xml"
+    assert issues[0]["url_count"] == 50_001
+    assert "50,000 URLs" in issues[0]["recommended_action"]
 
 
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:

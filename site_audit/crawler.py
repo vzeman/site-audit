@@ -418,6 +418,19 @@ class Crawler:
             }
             for entry in sorted(entries.values(), key=lambda item: item.url)
         ]
+        sitemap_url_counts = collections.Counter(
+            source
+            for entry in entries.values()
+            for source in entry.source_sitemaps
+        )
+        for sitemap_url, url_count in sitemap_url_counts.items():
+            if url_count > 50_000:
+                self.sitemap_errors.append({
+                    "sitemap_url": sitemap_url,
+                    "issue": "sitemap_with_over_50k_urls",
+                    "url_count": url_count,
+                    "message": f"{url_count} URLs",
+                })
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
 

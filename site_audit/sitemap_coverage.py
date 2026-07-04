@@ -22,6 +22,7 @@ SITEMAP_TIMEOUT_ISSUE = "page_from_sitemap_timed_out"
 SITEMAP_SYNTAX_ISSUE = "sitemap_has_syntax_error"
 SITEMAP_NOT_ACCESSIBLE_ISSUE = "sitemap_is_not_accessible"
 SITEMAP_TOO_LARGE_ISSUE = "sitemap_larger_than_50mb"
+SITEMAP_TOO_MANY_URLS_ISSUE = "sitemap_with_over_50k_urls"
 
 
 def analyze(
@@ -53,6 +54,7 @@ def analyze(
             "issue": row.get("issue") or SITEMAP_SYNTAX_ISSUE,
             "http_status": row.get("http_status", ""),
             "size_bytes": row.get("size_bytes", ""),
+            "url_count": row.get("url_count", ""),
             "message": row.get("message", ""),
         }
         for row in (sitemap_errors or [])
@@ -170,6 +172,7 @@ def analyze(
             "sitemap_has_syntax_error": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_SYNTAX_ISSUE),
             "sitemap_is_not_accessible": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_NOT_ACCESSIBLE_ISSUE),
             "sitemap_larger_than_50mb": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_TOO_LARGE_ISSUE),
+            "sitemap_with_over_50k_urls": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_TOO_MANY_URLS_ISSUE),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -185,6 +188,7 @@ def analyze(
                 "crawled": False,
                 "http_status": row["http_status"],
                 "size_bytes": row["size_bytes"],
+                "url_count": row["url_count"],
                 "source_sitemaps": [row["sitemap_url"]] if row["sitemap_url"] else [],
                 "recommended_action": _sitemap_issue_action(row["issue"]),
                 "message": row["message"],
@@ -228,6 +232,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Restore access to the sitemap URL or remove the inaccessible sitemap reference."
     if issue_type == SITEMAP_TOO_LARGE_ISSUE:
         return "Split the sitemap into smaller files under the 50MB uncompressed limit."
+    if issue_type == SITEMAP_TOO_MANY_URLS_ISSUE:
+        return "Split the sitemap into smaller files with no more than 50,000 URLs each."
     return "Review and fix this sitemap issue."
 
 
