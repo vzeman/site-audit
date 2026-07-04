@@ -311,6 +311,31 @@ def test_technical_seo_model_flags_nofollow_page() -> None:
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_noindex_in_html_and_header() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "noindex_source": "meta+header",
+                }
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issue_types = {row["issue_type"] for row in payload["issues"]}
+    issues = [row for row in payload["issues"] if row["issue_type"] == "noindex_in_html_and_http_header"]
+    assert len(issues) == 1
+    assert "noindex" in issue_types
+    assert issues[0]["issue_name"] == "Noindex in HTML and HTTP header"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
