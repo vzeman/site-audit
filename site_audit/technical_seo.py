@@ -80,6 +80,7 @@ def build_technical_seo(
     rows = list(by_url.values())
     _apply_duplicate_signals(rows, duplicates)
     _apply_hreflang_target_signals(rows)
+    _apply_hreflang_reference_signals(rows)
     issues = []
     for row in rows:
         issues.extend(_issues_for_row(row))
@@ -613,6 +614,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "hreflang_to_redirect_or_broken_page", "high", 0.9, _recommendation("hreflang_to_redirect_or_broken_page")))
     if row.get("missing_reciprocal_hreflang_targets"):
         issues.append(_issue(row, "localization", "missing_reciprocal_hreflang_no_return_tag", "high", 0.9, _recommendation("missing_reciprocal_hreflang_no_return_tag")))
+    if row.get("hreflang_multi_language_references"):
+        issues.append(_issue(row, "localization", "page_referenced_for_more_than_one_language_in_hreflang", "high", 0.9, _recommendation("page_referenced_for_more_than_one_language_in_hreflang")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -732,6 +735,7 @@ def _recommendation(issue_type: str) -> str:
         "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
         "missing_reciprocal_hreflang_no_return_tag": "Add return hreflang annotations on alternate pages so every language URL references the others in the group.",
         "more_than_one_page_for_same_language_in_hreflang": "Keep only one alternate URL for each hreflang language code on a page.",
+        "page_referenced_for_more_than_one_language_in_hreflang": "Use one consistent hreflang language code for each alternate page across the hreflang set.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -872,6 +876,42 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
             row["hreflang_redirect_or_broken_targets"] = redirect_or_broken_targets
         if missing_reciprocal_targets:
             row["missing_reciprocal_hreflang_targets"] = missing_reciprocal_targets
+
+
+def _apply_hreflang_reference_signals(rows: list[dict]) -> None:
+    rows_by_normalized_url = {_normalize_url(row.get("url", "")): row for row in rows if row.get("url")}
+    references_by_target: dict[str, dict[str, list[dict]]] = {}
+    seen: set[tuple[str, str, str]] = set()
+    for source in rows:
+        source_url = source.get("url", "")
+        for item in source.get("hreflang") or []:
+            hreflang = str(item.get("hreflang") or "").strip().lower().replace("_", "-")
+            href = str(item.get("href") or "").strip()
+            if hreflang == "x-default" or not _valid_hreflang_code(hreflang) or not _absolute_url(href):
+                continue
+            target_url = _normalize_url(href)
+            if target_url not in rows_by_normalized_url:
+                continue
+            key = (target_url, hreflang, source_url)
+            if key in seen:
+                continue
+            seen.add(key)
+            references_by_target.setdefault(target_url, {}).setdefault(hreflang, []).append({
+                "source_url": source_url,
+                "href": href,
+            })
+    for target_url, references_by_language in references_by_target.items():
+        if len(references_by_language) < 2:
+            continue
+        row = rows_by_normalized_url[target_url]
+        row["hreflang_multi_language_references"] = [
+            {
+                "hreflang": hreflang,
+                "source_urls": [reference["source_url"] for reference in references],
+                "hrefs": [reference["href"] for reference in references],
+            }
+            for hreflang, references in sorted(references_by_language.items())
+        ]
 
 
 def _hreflang_html_lang_mismatch(row: dict) -> bool:

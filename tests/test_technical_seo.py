@@ -2634,6 +2634,75 @@ def test_technical_seo_model_flags_more_than_one_page_for_same_language_in_hrefl
     ]
 
 
+def test_technical_seo_model_flags_page_referenced_for_more_than_one_language_in_hreflang() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source-a", title="Source A", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/source-b", title="Source B", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/target", title="Target", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/clean-target", title="Clean Target", section="", word_count=250, language="pl"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/source-a",
+                    "title": "Source A",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/target"},
+                        {"hreflang": "pl", "href": "https://example.com/clean-target"},
+                        {"hreflang": "x-default", "href": "https://example.com/target"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/source-b",
+                    "title": "Source B",
+                    "hreflang": [
+                        {"hreflang": "cs", "href": "https://example.com/target/"},
+                        {"hreflang": "pl", "href": "https://example.com/clean-target"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/target",
+                    "title": "Target",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-target",
+                    "title": "Clean Target",
+                    "hreflang": [],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_referenced_for_more_than_one_language_in_hreflang"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/target"
+    assert issues[0]["issue_name"] == "Page referenced for more than one language in hreflang"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Error"
+    target = next(row for row in payload["pages"] if row["url"] == "https://example.com/target")
+    assert target["hreflang_multi_language_references"] == [
+        {
+            "hreflang": "cs",
+            "source_urls": ["https://example.com/source-b"],
+            "hrefs": ["https://example.com/target/"],
+        },
+        {
+            "hreflang": "sk",
+            "source_urls": ["https://example.com/source-a"],
+            "hrefs": ["https://example.com/target"],
+        },
+    ]
+    clean = next(row for row in payload["pages"] if row["url"] == "https://example.com/clean-target")
+    assert "hreflang_multi_language_references" not in clean
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
