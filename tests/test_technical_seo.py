@@ -1127,6 +1127,15 @@ def test_technical_seo_model_flags_indexable_pages_with_only_one_dofollow_incomi
     assert issues[0]["url"] == "https://example.com/one"
     assert issues[0]["issue_name"] == "Page has only one dofollow incoming internal link"
     assert issues[0]["importance"] == "Notice"
+    not_indexable_issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "not_indexable_page_has_only_one_dofollow_incoming_internal_link"
+    ]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/non-indexable"
+    assert not_indexable_issues[0]["issue_name"] == "Page has only one dofollow incoming internal link"
+    assert not_indexable_issues[0]["importance"] == "Notice"
 
 
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
