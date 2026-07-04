@@ -286,6 +286,31 @@ def test_technical_seo_model_flags_nofollow_in_html_and_header() -> None:
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_nofollow_page() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/nofollow", title="Nofollow", section="", word_count=100, language="en")],
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/nofollow",
+                    "title": "Nofollow",
+                    "robots_content": "index,nofollow",
+                    "nofollow": True,
+                    "nofollow_source": "meta",
+                    "issues": [],
+                }
+            ]
+        },
+    )
+
+    issue_types = {row["issue_type"] for row in payload["issues"]}
+    issues = [row for row in payload["issues"] if row["issue_type"] == "nofollow_page"]
+    assert len(issues) == 1
+    assert "nofollow_in_html_and_http_header" not in issue_types
+    assert issues[0]["issue_name"] == "Nofollow page"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 

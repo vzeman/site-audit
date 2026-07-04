@@ -219,6 +219,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
     if row.get("nofollow") and row.get("nofollow_source") == "meta+header":
         issues.append(_issue(row, "indexability", "nofollow_in_html_and_http_header", "medium", 0.94, _recommendation("nofollow_in_html_and_http_header")))
+    if row.get("nofollow"):
+        issues.append(_issue(row, "indexability", "nofollow_page", "medium", 0.9, _recommendation("nofollow_page")))
     for issue_type in row.get("canonical_issues") or []:
         if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx", "canonical_points_to_redirect"}:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
@@ -286,6 +288,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_points_to_redirect": "Change the canonical tag to the final destination URL and avoid canonicalizing through redirects.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
+        "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",
