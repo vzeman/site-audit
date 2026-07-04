@@ -235,6 +235,9 @@ def _merge_page_signals(
         row["previous_serp_title"] = history.get("serp_title_before", "")
         row["current_serp_title"] = history.get("serp_title_after", "")
         row["serp_title_changed"] = "serp_title" in (history.get("changed_fields") or [])
+        row["previous_word_count"] = _safe_int(history.get("word_count_before"))
+        row["current_word_count"] = _safe_int(history.get("word_count_after"))
+        row["word_count_changed"] = "word_count" in (history.get("changed_fields") or [])
         row["previous_redirect_target_url"] = history.get("redirect_target_before", "")
         row["current_redirect_target_url"] = history.get("redirect_target_after", "")
         row["redirect_target_changed"] = "redirect_target" in (history.get("changed_fields") or [])
@@ -383,6 +386,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_title_tag_changed", "low", 0.8, _recommendation("indexable_title_tag_changed")))
     if status == "indexable" and _has_high_ai_content(row):
         issues.append(_issue(row, "content", "indexable_pages_have_high_ai_content_levels", "low", 0.82, _recommendation("indexable_pages_have_high_ai_content_levels")))
+    if status == "indexable" and row.get("word_count_changed"):
+        issues.append(_issue(row, "content", "indexable_word_count_changed", "low", 0.8, _recommendation("indexable_word_count_changed")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
     if (
@@ -585,6 +590,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_serp_title_changed": "Review the changed SERP title and confirm the displayed search result still matches page intent.",
         "indexable_title_tag_changed": "Review the title tag change and confirm it still targets the intended search demand.",
         "indexable_pages_have_high_ai_content_levels": "Review pages with high AI-content scores and add original evidence, expert detail, and brand-specific value.",
+        "indexable_word_count_changed": "Review the word count change and confirm the page still satisfies its search intent.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",

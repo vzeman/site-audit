@@ -993,6 +993,55 @@ def test_technical_seo_model_flags_indexable_title_tag_changes() -> None:
     assert page["current_title"] == "New title"
 
 
+def test_technical_seo_model_flags_indexable_word_count_changes() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=260, language="en"),
+        SimpleNamespace(url="https://example.com/stable", title="Stable", section="", word_count=260, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "word_count": 260,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["word_count"],
+                    "word_count_before": 120,
+                    "word_count_after": 260,
+                },
+                {
+                    "url": "https://example.com/noindex",
+                    "changed_fields": ["word_count"],
+                    "word_count_before": 120,
+                    "word_count_after": 260,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_word_count_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "Word count changed"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/page")
+    assert page["previous_word_count"] == 120
+    assert page["current_word_count"] == 260
+
+
 def test_technical_seo_model_flags_indexable_pages_with_high_ai_content_levels() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/high-level", title="High Level", section="", word_count=250, language="en"),

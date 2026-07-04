@@ -282,6 +282,38 @@ def test_compare_snapshots_reports_serp_title_changes(tmp_path: Path) -> None:
     assert row["serp_title_after"] == "New SERP title"
 
 
+def test_compare_snapshots_reports_word_count_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, _before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, _after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_pages[0].word_count = 120
+    before_extracted[0].word_count = 120
+    after_pages[0].word_count = 260
+    after_extracted[0].word_count = 260
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "word_count" in row["changed_fields"]
+    assert row["word_count_before"] == 120
+    assert row["word_count_after"] == 260
+
+
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:
     report = tmp_path / "example.com" / "report"
     report.mkdir(parents=True)
