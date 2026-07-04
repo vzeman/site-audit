@@ -3620,6 +3620,61 @@ def test_technical_seo_model_flags_https_page_links_to_http_image() -> None:
     assert page["http_images"] == [{"src": "http://cdn.example.com/insecure.jpg"}]
 
 
+def test_technical_seo_model_flags_image_redirects() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        media_accessibility={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"image_redirects": 2}, "issue_count": 2},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "media_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "image",
+                    "src": "https://cdn.example.com/redirect.jpg",
+                    "http_status": 301,
+                    "redirect_target_url": "https://cdn.example.com/final.jpg",
+                    "issues": ["image_redirects"],
+                },
+                {
+                    "url": "https://example.com/bad",
+                    "type": "image",
+                    "src": "https://cdn.example.com/flagged.jpg",
+                    "redirect_target_url": "https://cdn.example.com/final-flagged.jpg",
+                    "issues": ["image_redirects"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "image_redirects"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Image redirects"
+    assert issues[0]["category"] == "images"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["redirected_image_count"] == 2
+    assert page["redirected_images"] == [
+        {
+            "src": "https://cdn.example.com/redirect.jpg",
+            "http_status": 301,
+            "redirect_target_url": "https://cdn.example.com/final.jpg",
+        },
+        {
+            "src": "https://cdn.example.com/flagged.jpg",
+            "http_status": "",
+            "redirect_target_url": "https://cdn.example.com/final-flagged.jpg",
+        },
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

@@ -355,6 +355,7 @@ def _merge_page_signals(
         row["broken_image_count"] = _safe_int(media_issue_counts.get("image_broken"))
         row["large_image_count"] = _safe_int(media_issue_counts.get("image_file_size_too_large"))
         row["http_image_count"] = _safe_int(media_issue_counts.get("https_page_links_to_http_image"))
+        row["redirected_image_count"] = _safe_int(media_issue_counts.get("image_redirects"))
     if media_issues:
         broken_images = [
             {
@@ -385,6 +386,17 @@ def _merge_page_signals(
         if http_images:
             row["http_images"] = http_images
             row["http_image_count"] = len(http_images)
+        redirected_images = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+                "redirect_target_url": issue.get("redirect_target_url", ""),
+            }
+            for issue in (media_issues.get("image_redirects") or [])
+        ]
+        if redirected_images:
+            row["redirected_images"] = redirected_images
+            row["redirected_image_count"] = len(redirected_images)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -743,6 +755,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "images", "image_file_size_too_large", "high", 0.9, _recommendation("image_file_size_too_large")))
     if _safe_int(row.get("http_image_count")) > 0:
         issues.append(_issue(row, "images", "https_page_links_to_http_image", "medium", 0.88, _recommendation("https_page_links_to_http_image")))
+    if _safe_int(row.get("redirected_image_count")) > 0:
+        issues.append(_issue(row, "images", "image_redirects", "medium", 0.88, _recommendation("image_redirects")))
     return issues
 
 
@@ -877,6 +891,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_broken_image": "Fix or remove broken image references on the page so users and crawlers receive live image assets.",
         "image_file_size_too_large": "Compress, resize, or replace oversized image assets and serve appropriately sized responsive variants.",
         "https_page_links_to_http_image": "Update image URLs on HTTPS pages so every image is loaded over HTTPS.",
+        "image_redirects": "Update image references so they point directly to the final image URL instead of a redirecting URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
