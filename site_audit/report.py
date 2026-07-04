@@ -156,6 +156,7 @@ def write_internal_linkbuilding_csv(
 def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
     pages = list((technical_seo or {}).get("pages") or [])
     issues = list((technical_seo or {}).get("issues") or [])
+    catalog = list((technical_seo or {}).get("issue_catalog") or [])
     page_payload = {
         "summary": (technical_seo or {}).get("summary", {}),
         "pages": pages,
@@ -166,13 +167,20 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
         "issue_counts": (technical_seo or {}).get("issue_counts", {}),
         "category_counts": (technical_seo or {}).get("category_counts", {}),
         "severity_counts": (technical_seo or {}).get("severity_counts", {}),
+        "issue_catalog": catalog,
         "issues": issues,
         "interpretation": (technical_seo or {}).get("interpretation", {}),
     }
+    catalog_payload = {
+        "summary": (technical_seo or {}).get("summary", {}),
+        "issue_catalog": catalog,
+    }
     _write_json(output_dir / "technical_pages.json", page_payload)
     _write_json(output_dir / "technical_issues.json", issue_payload)
+    _write_json(output_dir / "technical_issue_catalog.json", catalog_payload)
     _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
     _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
+    _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
 
 
 def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:

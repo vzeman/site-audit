@@ -99,6 +99,16 @@ def test_technical_seo_model_includes_skipped_pages() -> None:
     assert payload["issues"][0]["category"] == "indexability"
 
 
+def test_technical_seo_model_includes_full_issue_catalog() -> None:
+    payload = build_technical_seo([])
+
+    assert payload["summary"]["catalog_issue_types"] >= 150
+    names = {row["name"] for row in payload["issue_catalog"]}
+    assert "Canonical points to 4XX" in names
+    assert "Duplicate pages without canonical" in names
+    assert "Structured data has schema.org validation error" in names
+
+
 def test_write_technical_seo_exports_writes_json_and_csv(tmp_path) -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
@@ -109,8 +119,12 @@ def test_write_technical_seo_exports_writes_json_and_csv(tmp_path) -> None:
 
     assert (tmp_path / "technical_pages.json").is_file()
     assert (tmp_path / "technical_issues.json").is_file()
+    assert (tmp_path / "technical_issue_catalog.json").is_file()
     assert (tmp_path / "technical_pages.csv").is_file()
     assert (tmp_path / "technical_issues.csv").is_file()
+    assert (tmp_path / "technical_issue_catalog.csv").is_file()
     csv_text = (tmp_path / "technical_pages.csv").read_text(encoding="utf-8")
     assert "technical_severity_score" in csv_text
     assert "missing_title" in csv_text
+    issue_json = (tmp_path / "technical_issues.json").read_text(encoding="utf-8")
+    assert "issue_catalog" in issue_json

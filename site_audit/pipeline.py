@@ -24,7 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 import numpy as np
 
@@ -76,7 +76,7 @@ from .entities import to_payload as entities_payload
 from .entity_coverage import build_entity_coverage
 from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
-from .extractor import extract
+from .extractor import ExtractedPage, extract
 from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
 from .freshness_impact import build_freshness_impact
@@ -139,6 +139,103 @@ from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
+
+
+def _canonical_dedupe_key(url: str) -> str:
+    url, _ = urldefrag(url or "")
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return (url or "").rstrip("/")
+    netloc = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    return urlunparse((parsed.scheme.lower(), netloc, path, "", parsed.query, ""))
+
+
+def _absolute_canonical(page_url: str, canonical_url: str) -> str:
+    canonical_url = (canonical_url or "").strip()
+    if not canonical_url:
+        return ""
+    return urljoin(page_url, canonical_url)
+
+
+def filter_to_unique_canonical_pages(
+    pages: list[PageInfo],
+    extracted_pages: list[ExtractedPage],
+    embed_inputs: list[EmbedInput],
+    extraction_rows: list[dict],
+) -> tuple[list[PageInfo], list[ExtractedPage], list[EmbedInput], int]:
+    """Keep one analyzed row per HTML canonical URL.
+
+    Pages without a canonical tag stay in the corpus so missing-canonical pages
+    remain diagnosable. Pages that explicitly canonicalize to a different URL
+    are removed from embeddings/content analysis and marked in extraction rows.
+    """
+    if not pages:
+        return pages, extracted_pages, embed_inputs, 0
+
+    row_by_url = {
+        row.get("url"): row
+        for row in extraction_rows
+        if row.get("status") == "analyzed" and row.get("url")
+    }
+    groups: dict[str, list[int]] = {}
+    self_canonical_indices: set[int] = set()
+    keep_missing_canonical: set[int] = set()
+
+    for idx, (page, ext) in enumerate(zip(pages, extracted_pages)):
+        canonical = _absolute_canonical(page.url, ext.canonical_url)
+        page_key = _canonical_dedupe_key(page.url)
+        if not canonical:
+            key = f"url:{page_key}"
+            keep_missing_canonical.add(idx)
+        else:
+            canonical_key = _canonical_dedupe_key(canonical)
+            key = f"canonical:{canonical_key}"
+            if page_key == canonical_key:
+                self_canonical_indices.add(idx)
+        groups.setdefault(key, []).append(idx)
+
+    keep: set[int] = set(keep_missing_canonical)
+    canonical_kept_by_group: dict[str, int] = {}
+    for key, indices in groups.items():
+        if key.startswith("url:"):
+            keep.add(indices[0])
+            canonical_kept_by_group[key] = indices[0]
+            continue
+        self_indices = [idx for idx in indices if idx in self_canonical_indices]
+        if self_indices:
+            keep_idx = self_indices[0]
+            keep.add(keep_idx)
+            canonical_kept_by_group[key] = keep_idx
+
+    dropped = 0
+    for key, indices in groups.items():
+        kept_idx = canonical_kept_by_group.get(key)
+        kept_url = pages[kept_idx].url if kept_idx is not None else ""
+        for idx in indices:
+            if idx in keep:
+                continue
+            dropped += 1
+            row = row_by_url.get(pages[idx].url)
+            if not row:
+                continue
+            row["status"] = "skipped"
+            row["reason"] = "canonical_duplicate"
+            row["canonical_kept_url"] = kept_url
+            row["canonical_target_normalized"] = key.split(":", 1)[1]
+
+    if not dropped:
+        return pages, extracted_pages, embed_inputs, 0
+
+    kept_indices = [idx for idx in range(len(pages)) if idx in keep]
+    return (
+        [pages[idx] for idx in kept_indices],
+        [extracted_pages[idx] for idx in kept_indices],
+        [embed_inputs[idx] for idx in kept_indices],
+        dropped,
+    )
 
 
 @dataclass
@@ -302,6 +399,7 @@ def run(config: PipelineConfig) -> dict:
     LOG.info("  report: %s", report_dir)
 
     http_cache = HttpCache(cache_dir / "http.sqlite")
+    http_cache.clean_tracking_duplicates(min_candidates=100)
     embed_cache = EmbeddingCache(
         cache_dir / f"embeddings_{config.model.replace('/', '_').replace('-', '_')}.npz"
     )
@@ -425,6 +523,18 @@ def run(config: PipelineConfig) -> dict:
             LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
+
+    pages, extracted_pages, embed_inputs, canonical_dropped = filter_to_unique_canonical_pages(
+        pages,
+        extracted_pages,
+        embed_inputs,
+        extraction_rows,
+    )
+    if canonical_dropped:
+        LOG.info(
+            "  dropped %d non-canonical duplicate pages before embedding",
+            canonical_dropped,
+        )
 
     if not pages:
         LOG.warning("No usable pages — aborting before embedding.")
