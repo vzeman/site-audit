@@ -791,6 +791,11 @@ def test_technical_seo_model_flags_indexable_pages_linking_to_redirects() -> Non
     assert issues[0]["importance"] == "Warning"
     bad_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
     assert bad_page["redirect_internal_link_count"] == 1
+    not_indexable_issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_page_has_links_to_redirect"]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/non-indexable-bad"
+    assert not_indexable_issues[0]["issue_name"] == "Page has links to redirect"
+    assert not_indexable_issues[0]["importance"] == "Notice"
 
 
 def test_technical_seo_model_flags_redirected_indexable_pages_with_no_incoming_links() -> None:
