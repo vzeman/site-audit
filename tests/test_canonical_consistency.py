@@ -110,6 +110,39 @@ def test_canonical_consistency_flags_canonical_points_to_4xx() -> None:
     assert issue["canonical_target_http_status"] == 404
 
 
+def test_canonical_consistency_flags_canonical_points_to_5xx() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/error",
+            },
+            {
+                "url": "https://example.com/error",
+                "title": "",
+                "status": "skipped",
+                "reason": "non_2xx_status",
+                "http_status": 503,
+                "canonical_url": "",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/error", "indexability_status": "not_analyzed", "http_status": 503},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_points_to_5xx" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_target_http_status"] == 503
+    assert payload["summary"]["canonical_points_to_5xx"] == 1
+
+
 def test_canonical_consistency_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_pages": 1},

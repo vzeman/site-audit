@@ -11,6 +11,7 @@ ACTION_BY_ISSUE = {
     "canonical_external_host": "Confirm the external canonical is intentional; otherwise point it to the canonical URL on this domain.",
     "canonical_non_self": "Use a self-referencing canonical on unique SEO pages, or confirm this is a deliberate duplicate consolidation.",
     "canonical_points_to_4xx": "Point canonical tags only at live 2xx URLs or restore the canonical target.",
+    "canonical_points_to_5xx": "Fix the canonical target server error or point the canonical tag at a stable live URL.",
     "canonical_target_not_crawled": "Make sure the canonical target is crawlable and included in the audit scope.",
     "canonical_target_non_indexable": "Point canonical tags only at indexable URLs or fix the target page indexability.",
     "canonical_target_shared": "Review whether multiple pages should consolidate to the same canonical target.",
@@ -95,6 +96,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "canonical_external_host": issue_counts.get("canonical_external_host", 0),
             "canonical_non_self": issue_counts.get("canonical_non_self", 0),
             "canonical_points_to_4xx": issue_counts.get("canonical_points_to_4xx", 0),
+            "canonical_points_to_5xx": issue_counts.get("canonical_points_to_5xx", 0),
             "canonical_target_not_crawled": issue_counts.get("canonical_target_not_crawled", 0),
             "canonical_target_non_indexable": issue_counts.get("canonical_target_non_indexable", 0),
             "canonical_target_shared": issue_counts.get("canonical_target_shared", 0),
@@ -131,6 +133,8 @@ def _issues_for_page(
     target_status = _safe_int((target or {}).get("http_status"))
     if 400 <= target_status < 500:
         issues.append("canonical_points_to_4xx")
+    if 500 <= target_status < 600:
+        issues.append("canonical_points_to_5xx")
     if (
         normalized_canonical != _normalize_url(url)
         and target

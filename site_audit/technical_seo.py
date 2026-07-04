@@ -208,7 +208,7 @@ def _issues_for_row(row: dict) -> list[dict]:
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
     for issue_type in row.get("canonical_issues") or []:
-        if issue_type == "canonical_points_to_4xx":
+        if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx"}:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
@@ -268,6 +268,7 @@ def _recommendation(issue_type: str) -> str:
         "timed_out": "Reduce response time, fix blocking behavior, or remove the URL from crawlable SEO surfaces.",
         "https_http_mixed_content": "Serve every embedded resource on the HTTPS page over HTTPS or remove the insecure resource.",
         "canonical_points_to_4xx": "Update the canonical tag to a live 2xx URL, restore the canonical target, or remove the broken canonical.",
+        "canonical_points_to_5xx": "Fix the canonical target server error or update the canonical tag to a stable live 2xx URL.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

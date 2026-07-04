@@ -196,6 +196,29 @@ def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     assert payload["pages"][0]["canonical_target_http_status"] == 404
 
 
+def test_technical_seo_model_flags_canonical_points_to_5xx() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
+        canonical_consistency={
+            "rows": [
+                {
+                    "url": "https://example.com/source",
+                    "canonical_url": "https://example.com/error",
+                    "canonical_target_http_status": 503,
+                    "canonical_target_indexability_status": "not_analyzed",
+                    "issues": ["canonical_points_to_5xx"],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "canonical_points_to_5xx"]
+    assert len(issues) == 1
+    assert issues[0]["category"] == "indexability"
+    assert issues[0]["issue_name"] == "Canonical points to 5XX"
+    assert payload["pages"][0]["canonical_target_http_status"] == 503
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
