@@ -186,6 +186,57 @@ def test_linkgraph_payload_annotates_incoming_nofollow_and_dofollow_links() -> N
     assert mixed["incoming_dofollow_internal_link_count"] == 1
 
 
+def test_linkgraph_payload_annotates_outgoing_nofollow_internal_links() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/source", "in_degree": 1, "out_degree": 2},
+            {"url": "https://example.com/clean", "in_degree": 1, "out_degree": 1},
+            {"url": "https://example.com/target", "in_degree": 1, "out_degree": 0},
+        ]
+    }
+    extracted = [
+        SimpleNamespace(
+            url="https://example.com/source",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/target",
+                    "anchor": "nofollow target",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+                {
+                    "target_url": "https://external.example/page",
+                    "anchor": "external nofollow",
+                    "is_internal": False,
+                    "nofollow": True,
+                },
+            ],
+        ),
+        SimpleNamespace(
+            url="https://example.com/clean",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/target",
+                    "anchor": "clean target",
+                    "is_internal": True,
+                    "nofollow": False,
+                },
+            ],
+        ),
+    ]
+
+    annotated = annotate_internal_link_rel_stats(payload, extracted)
+    source = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/source")
+    clean = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/clean")
+
+    assert source["outgoing_nofollow_internal_link_count"] == 1
+    assert source["outgoing_nofollow_internal_links"] == [
+        {"target_url": "https://example.com/target", "anchor": "nofollow target"}
+    ]
+    assert clean["outgoing_nofollow_internal_link_count"] == 0
+    assert clean["outgoing_nofollow_internal_links"] == []
+
+
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:
     pages = [
         PageInfo(url="https://www.example.com/source/", title="Source", description="", section="root", word_count=100, language="en"),

@@ -741,6 +741,8 @@ def annotate_internal_link_rel_stats(linkgraph_payload: dict, extracted_pages: l
             "dofollow": 0,
             "nofollow_sources": [],
             "dofollow_sources": [],
+            "outgoing_nofollow": 0,
+            "outgoing_nofollow_targets": [],
         }
         for row in rows
         if row.get("url")
@@ -748,14 +750,43 @@ def annotate_internal_link_rel_stats(linkgraph_payload: dict, extracted_pages: l
 
     for source in extracted_pages or []:
         source_url = getattr(source, "url", "") or ""
+        source_row = row_by_normalized_url.get(_canonical_url(source_url))
+        source_stats = stats.setdefault(
+            source_row.get("url", "") if source_row else source_url,
+            {
+                "nofollow": 0,
+                "dofollow": 0,
+                "nofollow_sources": [],
+                "dofollow_sources": [],
+                "outgoing_nofollow": 0,
+                "outgoing_nofollow_targets": [],
+            },
+        )
         for link in getattr(source, "link_audit_rows", []) or []:
             if not link.get("is_internal"):
                 continue
+            if link.get("nofollow"):
+                source_stats["outgoing_nofollow"] += 1
+                if len(source_stats["outgoing_nofollow_targets"]) < 25:
+                    source_stats["outgoing_nofollow_targets"].append({
+                        "target_url": link.get("target_url", ""),
+                        "anchor": link.get("anchor", ""),
+                    })
             target_row = row_by_normalized_url.get(_canonical_url(link.get("target_url", "")))
             if not target_row:
                 continue
             target_url = target_row.get("url", "")
-            target_stats = stats.setdefault(target_url, {"nofollow": 0, "dofollow": 0, "nofollow_sources": [], "dofollow_sources": []})
+            target_stats = stats.setdefault(
+                target_url,
+                {
+                    "nofollow": 0,
+                    "dofollow": 0,
+                    "nofollow_sources": [],
+                    "dofollow_sources": [],
+                    "outgoing_nofollow": 0,
+                    "outgoing_nofollow_targets": [],
+                },
+            )
             source_record = {"source_url": source_url, "target_url": link.get("target_url", ""), "anchor": link.get("anchor", "")}
             if link.get("nofollow"):
                 target_stats["nofollow"] += 1
@@ -772,6 +803,8 @@ def annotate_internal_link_rel_stats(linkgraph_payload: dict, extracted_pages: l
         row["incoming_dofollow_internal_link_count"] = int(target_stats.get("dofollow", 0) or 0)
         row["incoming_nofollow_internal_links"] = list(target_stats.get("nofollow_sources") or [])
         row["incoming_dofollow_internal_links"] = list(target_stats.get("dofollow_sources") or [])
+        row["outgoing_nofollow_internal_link_count"] = int(target_stats.get("outgoing_nofollow", 0) or 0)
+        row["outgoing_nofollow_internal_links"] = list(target_stats.get("outgoing_nofollow_targets") or [])
     return linkgraph_payload
 
 

@@ -832,6 +832,59 @@ def test_technical_seo_model_flags_indexable_pages_with_mixed_nofollow_and_dofol
     assert issues[0]["importance"] == "Notice"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_nofollow_outgoing_internal_links() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/non-indexable",
+                    "title": "Non-indexable",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {
+                    "url": "https://example.com/source",
+                    "in_degree": 1,
+                    "out_degree": 2,
+                    "outgoing_nofollow_internal_link_count": 1,
+                    "outgoing_nofollow_internal_links": [
+                        {"target_url": "https://example.com/target", "anchor": "nofollow target"}
+                    ],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "outgoing_nofollow_internal_link_count": 0,
+                },
+                {
+                    "url": "https://example.com/non-indexable",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "outgoing_nofollow_internal_link_count": 1,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_page_has_nofollow_outgoing_internal_links"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Page has nofollow outgoing internal links"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],
