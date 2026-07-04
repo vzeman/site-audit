@@ -118,6 +118,8 @@ def _base_page_row(page) -> dict:
         "http_status": "",
         "canonical_url": "",
         "robots_content": "",
+        "nofollow": False,
+        "nofollow_source": "",
         "metadata_issues": [],
         "traffic": 0,
         "keywords": 0,
@@ -140,6 +142,8 @@ def _base_skipped_row(row: dict) -> dict:
         "http_status": row.get("http_status", ""),
         "canonical_url": "",
         "robots_content": "",
+        "nofollow": bool(row.get("nofollow")),
+        "nofollow_source": row.get("nofollow_source", ""),
         "metadata_issues": [],
         "traffic": 0,
         "keywords": 0,
@@ -164,6 +168,8 @@ def _merge_page_signals(
         row["title"] = row.get("title") or metadata.get("title", "")
         row["canonical_url"] = metadata.get("canonical_url", "")
         row["robots_content"] = metadata.get("robots_content", "")
+        row["nofollow"] = bool(metadata.get("nofollow"))
+        row["nofollow_source"] = metadata.get("nofollow_source", "")
         row["metadata_issues"] = list(metadata.get("issues") or [])
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
@@ -196,6 +202,8 @@ def _merge_page_signals(
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
         row["http_status"] = skipped.get("http_status", row.get("http_status", ""))
+        row["nofollow"] = bool(skipped.get("nofollow", row.get("nofollow", False)))
+        row["nofollow_source"] = skipped.get("nofollow_source", row.get("nofollow_source", ""))
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -209,6 +217,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
+    if row.get("nofollow") and row.get("nofollow_source") == "meta+header":
+        issues.append(_issue(row, "indexability", "nofollow_in_html_and_http_header", "medium", 0.94, _recommendation("nofollow_in_html_and_http_header")))
     for issue_type in row.get("canonical_issues") or []:
         if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx", "canonical_points_to_redirect"}:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
@@ -275,6 +285,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_points_to_5xx": "Fix the canonical target server error or update the canonical tag to a stable live 2xx URL.",
         "canonical_points_to_redirect": "Change the canonical tag to the final destination URL and avoid canonicalizing through redirects.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
+        "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

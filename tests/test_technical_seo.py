@@ -262,6 +262,30 @@ def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     assert issues[0]["issue_name"] == "Page size exceeds Googlebot's 2 MB crawl limit"
 
 
+def test_technical_seo_model_flags_nofollow_in_html_and_header() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/nofollow", title="Nofollow", section="", word_count=100, language="en")],
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/nofollow",
+                    "title": "Nofollow",
+                    "robots_content": "index,nofollow",
+                    "nofollow": True,
+                    "nofollow_source": "meta+header",
+                    "issues": [],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "nofollow_in_html_and_http_header"]
+    assert len(issues) == 1
+    assert issues[0]["category"] == "indexability"
+    assert issues[0]["issue_name"] == "Nofollow in HTML and HTTP header"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 

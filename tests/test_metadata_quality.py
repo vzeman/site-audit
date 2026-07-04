@@ -64,6 +64,26 @@ def test_extract_serp_metadata_fields() -> None:
     assert page.twitter_description == "Twitter description"
 
 
+def test_extract_robots_nofollow_sources_from_meta_and_header() -> None:
+    html = """
+    <html><head>
+      <title>Robots directives</title>
+      <meta name="robots" content="index,nofollow">
+    </head><body>
+      <p>This page has enough body copy for the extractor fallback to keep it.
+      It discusses robots directives and contains enough useful text for the
+      extraction test body threshold to be satisfied without external parsers.</p>
+    </body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000, x_robots_tag="googlebot: nofollow")
+
+    assert page is not None
+    assert page.nofollow is True
+    assert page.nofollow_source == "meta+header"
+    assert page.noindex is False
+
+
 def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),
