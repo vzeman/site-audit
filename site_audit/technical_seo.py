@@ -420,6 +420,7 @@ def _merge_page_signals(
         row["redirected_javascript_count"] = _safe_int(resource_issue_counts.get("javascript_redirects"))
         row["css_broken_count"] = _safe_int(resource_issue_counts.get("css_broken"))
         row["large_css_count"] = _safe_int(resource_issue_counts.get("css_file_size_too_large"))
+        row["redirected_css_count"] = _safe_int(resource_issue_counts.get("css_redirects"))
     if resource_issues:
         broken_javascript = [
             {
@@ -471,6 +472,17 @@ def _merge_page_signals(
         if large_css:
             row["large_css"] = large_css
             row["large_css_count"] = len(large_css)
+        redirected_css = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+                "redirect_target_url": issue.get("redirect_target_url", ""),
+            }
+            for issue in (resource_issues.get("css_redirects") or [])
+        ]
+        if redirected_css:
+            row["redirected_css"] = redirected_css
+            row["redirected_css_count"] = len(redirected_css)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -849,6 +861,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "css_broken", "medium", 0.9, _recommendation("css_broken")))
     if _safe_int(row.get("large_css_count")) > 0:
         issues.append(_issue(row, "css", "css_file_size_too_large", "medium", 0.86, _recommendation("css_file_size_too_large")))
+    if _safe_int(row.get("redirected_css_count")) > 0:
+        issues.append(_issue(row, "css", "css_redirects", "medium", 0.88, _recommendation("css_redirects")))
     return issues
 
 
@@ -993,6 +1007,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_redirected_javascript": "Update redirected JavaScript references on the page so each script points directly to its final URL.",
         "css_broken": "Restore the CSS URL, update it to a live stylesheet asset, or remove the broken stylesheet reference.",
         "css_file_size_too_large": "Reduce, split, or minify oversized CSS files and remove unused style rules.",
+        "css_redirects": "Update CSS references so they point directly to the final stylesheet URL instead of a redirecting URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

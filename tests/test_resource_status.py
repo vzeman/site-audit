@@ -170,3 +170,33 @@ def test_resource_status_payload_flags_redirected_javascript() -> None:
         "https://cdn.example.com/flagged.js",
     ]
     assert redirected_rows[0]["redirect_target_url"] == "https://cdn.example.com/final.js"
+
+
+def test_resource_status_payload_flags_redirected_css() -> None:
+    report = to_payload(analyze([
+        SimpleNamespace(
+            url="https://example.com/page",
+            resource_items=[
+                {
+                    "type": "css",
+                    "src": "https://cdn.example.com/redirect.css",
+                    "http_status": 302,
+                    "redirect_target_url": "https://cdn.example.com/final.css",
+                },
+                {"type": "css", "src": "https://cdn.example.com/flagged.css", "redirected": True},
+                {"type": "css", "src": "https://cdn.example.com/ok.css", "http_status": 200},
+            ],
+        ),
+    ]))
+
+    assert report["summary"]["redirected_css"] == 2
+    assert report["issues_by_type"]["css_redirects"] == 2
+    redirected_rows = [
+        row for row in report["resources_with_issues"]
+        if "css_redirects" in row["issues"]
+    ]
+    assert [row["src"] for row in redirected_rows] == [
+        "https://cdn.example.com/redirect.css",
+        "https://cdn.example.com/flagged.css",
+    ]
+    assert redirected_rows[0]["redirect_target_url"] == "https://cdn.example.com/final.css"

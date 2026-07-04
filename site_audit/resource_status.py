@@ -98,6 +98,8 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
         issues.append("https_page_links_to_http_javascript")
     if resource_type == "javascript" and (item.get("redirected") or redirect_target_url or 300 <= status < 400):
         issues.append("javascript_redirects")
+    if resource_type == "css" and (item.get("redirected") or redirect_target_url or 300 <= status < 400):
+        issues.append("css_redirects")
     return issues
 
 
@@ -160,6 +162,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "large_css": issues_by_type.get("css_file_size_too_large", 0),
         "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
         "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
+        "redirected_css": issues_by_type.get("css_redirects", 0),
     }
     per_page.sort(key=lambda row: (-row["issue_count"], -row["resource_count"], row["url"]))
     return ResourceStatusReport(
