@@ -2367,6 +2367,59 @@ def test_technical_seo_model_flags_hreflang_defined_but_html_lang_missing() -> N
     assert page["html_lang_missing"] is True
 
 
+def test_technical_seo_model_flags_html_lang_attribute_missing() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing-with-hreflang", title="Missing With Hreflang", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/missing-without-hreflang", title="Missing Without Hreflang", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/legacy", title="Legacy", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="sk"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing-with-hreflang",
+                    "title": "Missing With Hreflang",
+                    "html_lang": "",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/missing-with-hreflang"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/missing-without-hreflang",
+                    "title": "Missing Without Hreflang",
+                    "html_lang": "",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/legacy",
+                    "title": "Legacy",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "html_lang": "sk",
+                    "hreflang": [],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "html_lang_attribute_missing"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/missing-with-hreflang",
+        "https://example.com/missing-without-hreflang",
+    }
+    assert all(row["issue_name"] == "HTML lang attribute missing" for row in issues)
+    assert all(row["category"] == "localization" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+    assert all(row["severity"] == "medium" for row in issues)
+
+
 def test_technical_seo_model_flags_hreflang_to_non_canonical() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),

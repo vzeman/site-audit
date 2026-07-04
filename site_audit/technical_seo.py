@@ -609,6 +609,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "html_lang_attribute_invalid", "high", 0.9, _recommendation("html_lang_attribute_invalid")))
     if row.get("hreflang") and row.get("html_lang_missing"):
         issues.append(_issue(row, "localization", "hreflang_defined_but_html_lang_missing", "medium", 0.86, _recommendation("hreflang_defined_but_html_lang_missing")))
+    if row.get("html_lang_missing"):
+        issues.append(_issue(row, "localization", "html_lang_attribute_missing", "medium", 0.86, _recommendation("html_lang_attribute_missing")))
     if _hreflang_html_lang_mismatch(row):
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("hreflang_non_canonical_targets"):
@@ -734,6 +736,7 @@ def _recommendation(issue_type: str) -> str:
         "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
         "html_lang_attribute_invalid": "Update the HTML lang attribute to a valid BCP 47 language code such as en, sk, or sk-SK.",
         "hreflang_defined_but_html_lang_missing": "Add an HTML lang attribute that matches the page language when hreflang annotations are present.",
+        "html_lang_attribute_missing": "Add an HTML lang attribute to the root html element so crawlers and assistive tools can identify the page language.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
         "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
