@@ -618,7 +618,12 @@ class Crawler:
                 resp._content = b""
                 resp.headers = {}
                 message = str(exc).lower()
-                resp.reason = "timed_out" if "timeout" in message or "timed out" in message else "fetch_failed"
+                if isinstance(exc, requests.TooManyRedirects):
+                    resp.reason = "redirect_loop"
+                elif "timeout" in message or "timed out" in message:
+                    resp.reason = "timed_out"
+                else:
+                    resp.reason = "fetch_failed"
                 return resp
             if r.status_code in (429, 503):
                 # honour Retry-After when present, else exponential + jitter

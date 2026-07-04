@@ -265,6 +265,8 @@ def _issues_for_row(row: dict) -> list[dict]:
     status = str(row.get("indexability_status") or "")
     if status == "timed_out":
         issues.append(_issue(row, "internal_pages", "timed_out", "high", 0.98, _recommendation("timed_out")))
+    elif status == "redirect_loop":
+        issues.append(_issue(row, "redirects", "redirect_loop", "high", 0.96, _recommendation("redirect_loop")))
     elif status == "noindex":
         issues.append(_issue(row, "indexability", "noindex_page", "medium", 0.95, _recommendation("noindex_page")))
     elif status and status != "indexable":
@@ -431,6 +433,7 @@ def _recommendation(issue_type: str) -> str:
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "broken_redirect": "Update the redirect so it resolves to a live 2XX destination or remove links and sitemap references to the redirecting URL.",
         "redirect_chain_too_long": "Collapse the redirect path so the requested URL redirects directly to the final destination.",
+        "redirect_loop": "Fix the redirect rules so the URL resolves to a final destination instead of cycling between URLs.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

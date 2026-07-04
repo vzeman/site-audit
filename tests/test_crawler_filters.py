@@ -1,3 +1,5 @@
+import requests
+
 from site_audit.crawler import CrawlConfig, Crawler, FetchResult
 
 
@@ -226,6 +228,24 @@ def test_fetch_preserves_redirect_chain_from_response_history() -> None:
         "https://example.com/final",
     ]
     assert result.redirect_hop_count == 2
+
+
+def test_request_with_retry_classifies_too_many_redirects_as_redirect_loop() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+
+    def raise_loop(*args, **kwargs):
+        raise requests.TooManyRedirects("Exceeded 30 redirects")
+
+    crawler._session.get = raise_loop
+
+    response = crawler._request_with_retry("https://example.com/loop")
+
+    assert response is not None
+    assert response.status_code == 0
+    assert response.reason == "redirect_loop"
 
 
 def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:

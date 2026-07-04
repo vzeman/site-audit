@@ -24,6 +24,7 @@ ACTION_BY_ISSUE = {
     "empty_embedding_text": "Add crawlable main content so the page can be evaluated for topical relevance and internal linking.",
     "canonical_duplicate": "Keep the canonical target in the SEO corpus and remove duplicate internal links/sitemap entries that point at this non-canonical URL.",
     "timed_out": "Reduce server latency or crawl-blocking behavior so the URL responds within the audit timeout.",
+    "redirect_loop": "Fix redirect rules so the URL resolves to a final destination instead of looping.",
     "non_2xx_status": "Fix the HTTP response or update internal links and sitemaps so SEO pages resolve cleanly.",
     "skipped": "Review why extraction skipped this URL and decide whether it should be part of the SEO corpus.",
 }

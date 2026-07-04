@@ -151,6 +151,31 @@ def test_technical_seo_model_flags_timed_out_pages() -> None:
     assert payload["issue_counts"]["timed_out"] == 1
 
 
+def test_technical_seo_model_flags_redirect_loops() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/loop",
+                    "title": "",
+                    "reason": "redirect_loop",
+                    "http_status": 0,
+                    "requested_url": "https://example.com/loop",
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "redirect_loop"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/loop"
+    assert issues[0]["issue_name"] == "Redirect loop"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_broken_redirects() -> None:
     payload = build_technical_seo(
         [],
