@@ -232,6 +232,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
     if status == "noindex" and row.get("noindex_source") == "meta+header":
         issues.append(_issue(row, "indexability", "noindex_in_html_and_http_header", "medium", 0.94, _recommendation("noindex_in_html_and_http_header")))
+    if status == "noindex" and row.get("nofollow"):
+        issues.append(_issue(row, "indexability", "noindex_and_nofollow_page", "low", 0.86, _recommendation("noindex_and_nofollow_page")))
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
     if row.get("nofollow") and row.get("nofollow_source") == "meta+header":
@@ -321,6 +323,7 @@ def _recommendation(issue_type: str) -> str:
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "noindex_in_html_and_http_header": "Remove duplicate noindex directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
+        "noindex_and_nofollow_page": "Confirm this page should be excluded from indexing and that links on it should not be followed.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

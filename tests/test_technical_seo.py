@@ -481,6 +481,31 @@ def test_technical_seo_model_flags_noindex_page() -> None:
     assert payload["pages"][0]["indexability_status"] == "noindex"
 
 
+def test_technical_seo_model_flags_noindex_and_nofollow_page() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-nofollow",
+                    "title": "Noindex Nofollow",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "noindex_source": "meta",
+                    "nofollow": True,
+                    "nofollow_source": "meta",
+                }
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "noindex_and_nofollow_page"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Noindex and nofollow page"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
