@@ -709,6 +709,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "3xx_page_receives_organic_traffic", "high", 0.94, _recommendation("3xx_page_receives_organic_traffic")))
     if _receives_organic_traffic(row) and _safe_int(row.get("http_status")) == 403:
         issues.append(_issue(row, "other", "403_page_receives_organic_traffic", "high", 0.96, _recommendation("403_page_receives_organic_traffic")))
+    if _receives_organic_traffic(row) and 400 <= _safe_int(row.get("http_status")) < 500:
+        issues.append(_issue(row, "other", "4xx_page_receives_organic_traffic", "high", 0.96, _recommendation("4xx_page_receives_organic_traffic")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1216,6 +1218,7 @@ def _recommendation(issue_type: str) -> str:
         "external_time_out": "Review external links that time out and update or remove destinations that are not reliably reachable.",
         "3xx_page_receives_organic_traffic": "Move organic traffic to the final indexable URL by updating rankings, links, canonicals, and redirects around the redirecting page.",
         "403_page_receives_organic_traffic": "Restore crawler access for organic landing pages returning 403, or move rankings and links to an accessible replacement URL.",
+        "4xx_page_receives_organic_traffic": "Restore the organic landing page, redirect it to a relevant live URL, or remove stale search demand signals pointing at the 4XX URL.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",

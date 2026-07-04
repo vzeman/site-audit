@@ -501,6 +501,55 @@ def test_technical_seo_model_flags_403_page_receives_organic_traffic() -> None:
     assert "403_page_receives_organic_traffic" not in no_traffic_issue_types
 
 
+def test_technical_seo_model_flags_4xx_page_receives_organic_traffic() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                },
+                {
+                    "url": "https://example.com/no-traffic-missing",
+                    "title": "No Traffic Missing",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/missing",
+                    "traffic": 65,
+                    "keywords": 4,
+                    "top_keyword": "missing page",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "4xx_page_receives_organic_traffic"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "4XX page receives organic traffic"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/missing"]["receives_organic_traffic"] is True
+    assert by_url["https://example.com/missing"]["traffic"] == 65
+    no_traffic_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/no-traffic-missing"
+    }
+    assert "4xx_page_receives_organic_traffic" not in no_traffic_issue_types
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],
