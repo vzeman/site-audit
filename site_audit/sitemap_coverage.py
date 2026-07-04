@@ -19,6 +19,7 @@ SITEMAP_5XX_ISSUE = "5xx_page_in_sitemap"
 SITEMAP_NOINDEX_ISSUE = "noindex_page_in_sitemap"
 SITEMAP_NON_CANONICAL_ISSUE = "non_canonical_page_in_sitemap"
 SITEMAP_TIMEOUT_ISSUE = "page_from_sitemap_timed_out"
+SITEMAP_SYNTAX_ISSUE = "sitemap_has_syntax_error"
 
 
 def analyze(
@@ -26,6 +27,7 @@ def analyze(
     fetched: Iterable,
     extraction_rows: list[dict],
     indexability: dict | None = None,
+    sitemap_errors: Iterable[dict] | None = None,
 ) -> dict:
     sitemap_by_url = {row.get("url", ""): row for row in sitemap_entries if row.get("url")}
     fetched_by_url = {getattr(row, "url", ""): row for row in fetched}
@@ -43,6 +45,14 @@ def analyze(
     urls = sorted(set(sitemap_by_url) | set(fetched_by_url))
     rows: list[dict] = []
     issues: list[dict] = []
+    sitemap_error_rows = [
+        {
+            "sitemap_url": row.get("sitemap_url") or row.get("url", ""),
+            "issue": row.get("issue") or SITEMAP_SYNTAX_ISSUE,
+            "message": row.get("message", ""),
+        }
+        for row in (sitemap_errors or [])
+    ]
     status_counts: Counter[str] = Counter()
 
     for url in urls:
@@ -153,13 +163,28 @@ def analyze(
             "page_from_sitemap_timed_out": sum(
                 1 for row in rows if SITEMAP_TIMEOUT_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "sitemap_has_syntax_error": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_SYNTAX_ISSUE),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
         },
         "status_counts": dict(status_counts),
         "rows": rows,
-        "issues": issues,
+        "issues": issues + [
+            {
+                "url": row["sitemap_url"],
+                "title": "Sitemap",
+                "issue": row["issue"],
+                "in_sitemap": False,
+                "crawled": False,
+                "http_status": "",
+                "source_sitemaps": [row["sitemap_url"]] if row["sitemap_url"] else [],
+                "recommended_action": _sitemap_issue_action(row["issue"]),
+                "message": row["message"],
+            }
+            for row in sitemap_error_rows
+        ],
+        "sitemap_errors": sitemap_error_rows,
         "interpretation": {
             "why_it_matters": "XML sitemaps should point search engines at canonical, indexable URLs. Gaps show wasted crawl hints or important pages missing from sitemap coverage.",
             "how_to_use": "First remove or fix non-indexable sitemap URLs, then add valuable crawled indexable pages that are missing from sitemaps.",
@@ -190,6 +215,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Update XML sitemaps to list the canonical URL instead of a non-canonical URL."
     if issue_type == SITEMAP_TIMEOUT_ISSUE:
         return "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably."
+    if issue_type == SITEMAP_SYNTAX_ISSUE:
+        return "Fix the XML syntax error so crawlers can parse the sitemap."
     return "Review and fix this sitemap issue."
 
 

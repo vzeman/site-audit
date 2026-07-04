@@ -225,6 +225,34 @@ def test_sitemap_coverage_flags_page_from_sitemap_timed_out() -> None:
     assert "timeout" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/broken-sitemap.xml",
+                "issue": "sitemap_has_syntax_error",
+                "message": "not well-formed",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_has_syntax_error"] == 1
+    assert payload["sitemap_errors"] == [
+        {
+            "sitemap_url": "https://example.com/broken-sitemap.xml",
+            "issue": "sitemap_has_syntax_error",
+            "message": "not well-formed",
+        }
+    ]
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_has_syntax_error"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/broken-sitemap.xml"
+    assert "XML syntax" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},

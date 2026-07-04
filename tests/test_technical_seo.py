@@ -4453,6 +4453,33 @@ def test_technical_seo_model_flags_page_from_sitemap_timed_out() -> None:
     assert page["in_sitemap"] is True
 
 
+def test_technical_seo_model_flags_sitemap_has_syntax_error() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/broken-sitemap.xml",
+                    "issue": "sitemap_has_syntax_error",
+                    "message": "not well-formed",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "sitemap_has_syntax_error"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/broken-sitemap.xml"
+    assert issues[0]["issue_name"] == "Sitemap has syntax error"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/broken-sitemap.xml")
+    assert page["sitemap_syntax_error_count"] == 1
+    assert page["sitemap_error_message"] == "not well-formed"
+    assert page["fix_scope"] == "sitemap"
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

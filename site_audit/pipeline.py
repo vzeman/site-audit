@@ -624,6 +624,7 @@ def run(config: PipelineConfig) -> dict:
         fetched,
         extraction_rows,
         indexability_data,
+        sitemap_errors=getattr(crawler, "sitemap_errors", []),
     )
     canonical_consistency_data = analyze_canonical_consistency(
         extraction_rows,

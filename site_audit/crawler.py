@@ -214,6 +214,7 @@ class Crawler:
         self._robots: Optional[urllib.robotparser.RobotFileParser] = None
         self.sitemap_entries: list[dict] = []
         self.sitemap_urls_seen: list[str] = []
+        self.sitemap_errors: list[dict] = []
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -333,6 +334,7 @@ class Crawler:
         queue = collections.deque(dict.fromkeys(sm for sm in candidates if self._sitemap_allowed(sm)))
         self.sitemap_entries = []
         self.sitemap_urls_seen = []
+        self.sitemap_errors = []
 
         while queue:
             sm = queue.popleft()
@@ -352,6 +354,11 @@ class Crawler:
                 root = ET.fromstring(content)
             except Exception as exc:
                 LOG.warning("sitemap parse failed for %s: %s", sm, exc)
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_has_syntax_error",
+                    "message": str(exc),
+                })
                 continue
 
             tag = root.tag.split("}", 1)[-1]
