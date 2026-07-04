@@ -274,6 +274,10 @@ def _merge_page_signals(
         row["previous_redirect_target_url"] = history.get("redirect_target_before", "")
         row["current_redirect_target_url"] = history.get("redirect_target_after", "")
         row["redirect_target_changed"] = "redirect_target" in (history.get("changed_fields") or [])
+        row["previous_cwv_passed"] = history.get("cwv_passed_before", history.get("previous_cwv_passed", ""))
+        row["current_cwv_passed"] = history.get("cwv_passed_after", history.get("current_cwv_passed", ""))
+        row["previous_cwv_status"] = history.get("cwv_status_before", history.get("previous_cwv_status", ""))
+        row["current_cwv_status"] = history.get("cwv_status_after", history.get("current_cwv_status", ""))
     if links:
         row["in_degree"] = _safe_int(links.get("in_degree"))
         row["out_degree"] = _safe_int(links.get("out_degree"))
@@ -659,6 +663,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "font_size_too_small", "medium", 0.86, _recommendation("font_size_too_small")))
     if row.get("not_compressed"):
         issues.append(_issue(row, "performance", "not_compressed", "medium", 0.86, _recommendation("not_compressed")))
+    if _page_stopped_passing_cwv(row):
+        issues.append(_issue(row, "performance", "page_stopped_passing_cwv_requirements", "medium", 0.86, _recommendation("page_stopped_passing_cwv_requirements")))
     return issues
 
 
@@ -781,6 +787,7 @@ def _recommendation(issue_type: str) -> str:
         "font_size_too_small": "Increase small text to at least 12px equivalent, and prefer readable responsive typography for mobile users.",
         "html_file_size_too_large": "Reduce the HTML document size by removing excessive inline markup, scripts, styles, or embedded data.",
         "not_compressed": "Enable gzip, Brotli, deflate, or zstd compression for HTML responses.",
+        "page_stopped_passing_cwv_requirements": "Review the changed Core Web Vitals metrics and fix the regression that moved the page from passing to failing.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -1018,6 +1025,27 @@ def _content_not_sized_correctly(row: dict) -> bool:
     if row.get("content_sized_correctly") is False:
         return True
     return bool(row.get("content_width_exceeds_viewport") or row.get("content_sizing_issues"))
+
+
+def _page_stopped_passing_cwv(row: dict) -> bool:
+    before = _cwv_passed(row.get("previous_cwv_passed"))
+    after = _cwv_passed(row.get("current_cwv_passed"))
+    if before is None:
+        before = _cwv_passed(row.get("previous_cwv_status"))
+    if after is None:
+        after = _cwv_passed(row.get("current_cwv_status"))
+    return before is True and after is False
+
+
+def _cwv_passed(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"pass", "passed", "passing", "good", "true", "yes", "1"}:
+        return True
+    if text in {"fail", "failed", "failing", "poor", "needs_improvement", "false", "no", "0"}:
+        return False
+    return None
 
 
 def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:

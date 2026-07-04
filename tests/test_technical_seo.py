@@ -3196,6 +3196,47 @@ def test_technical_seo_model_flags_not_compressed() -> None:
     assert page["not_compressed"] is True
 
 
+def test_technical_seo_model_flags_page_stopped_passing_cwv_requirements() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/regressed", title="Regressed", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/still-passing", title="Still Passing", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/already-failing", title="Already Failing", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/regressed",
+                    "cwv_passed_before": True,
+                    "cwv_passed_after": False,
+                },
+                {
+                    "url": "https://example.com/still-passing",
+                    "cwv_status_before": "good",
+                    "cwv_status_after": "good",
+                },
+                {
+                    "url": "https://example.com/already-failing",
+                    "cwv_status_before": "poor",
+                    "cwv_status_after": "poor",
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_stopped_passing_cwv_requirements"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/regressed"
+    assert issues[0]["issue_name"] == "Page stopped passing CWV requirements"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/regressed")
+    assert page["previous_cwv_passed"] is True
+    assert page["current_cwv_passed"] is False
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
