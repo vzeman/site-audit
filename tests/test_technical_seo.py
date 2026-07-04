@@ -241,6 +241,29 @@ def test_technical_seo_model_flags_canonical_points_to_redirect() -> None:
     assert payload["pages"][0]["canonical_redirect_target_url"] == "https://example.com/final"
 
 
+def test_technical_seo_model_flags_non_canonical_target() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
+        canonical_consistency={
+            "rows": [
+                {
+                    "url": "https://example.com/source",
+                    "canonical_url": "https://example.com/variant",
+                    "canonical_target_canonical_url": "https://example.com/final",
+                    "issues": ["non_canonical_page_specified_as_canonical_one"],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "non_canonical_page_specified_as_canonical_one"]
+    assert len(issues) == 1
+    assert issues[0]["category"] == "indexability"
+    assert issues[0]["issue_name"] == "Non-canonical page specified as canonical one"
+    assert issues[0]["importance"] == "Warning"
+    assert payload["pages"][0]["canonical_target_canonical_url"] == "https://example.com/final"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

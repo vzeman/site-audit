@@ -13,6 +13,7 @@ ACTION_BY_ISSUE = {
     "canonical_points_to_4xx": "Point canonical tags only at live 2xx URLs or restore the canonical target.",
     "canonical_points_to_5xx": "Fix the canonical target server error or point the canonical tag at a stable live URL.",
     "canonical_points_to_redirect": "Point canonical tags directly at the final destination URL instead of a redirecting URL.",
+    "non_canonical_page_specified_as_canonical_one": "Point the canonical tag at the final self-canonical URL instead of a non-canonical target.",
     "canonical_target_not_crawled": "Make sure the canonical target is crawlable and included in the audit scope.",
     "canonical_target_non_indexable": "Point canonical tags only at indexable URLs or fix the target page indexability.",
     "canonical_target_shared": "Review whether multiple pages should consolidate to the same canonical target.",
@@ -42,6 +43,11 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
         for row in page_rows
         if row.get("canonical_url")
     )
+    page_by_normalized_url = {
+        _normalize_url(row.get("url", "")): row
+        for row in page_rows
+        if row.get("url")
+    }
     rows: list[dict] = []
     issues: list[dict] = []
     issue_counts: Counter[str] = Counter()
@@ -51,6 +57,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
         canonical_url = page.get("canonical_url", "")
         normalized_canonical = _normalize_url(canonical_url)
         target = indexability_by_url.get(canonical_url) or indexability_by_normalized_url.get(normalized_canonical)
+        target_page = page_by_normalized_url.get(normalized_canonical, {})
         canonical_redirect_target = redirect_by_normalized_requested_url.get(normalized_canonical, "")
         issue_keys = _issues_for_page(
             url,
@@ -60,6 +67,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             indexability_by_normalized_url,
             canonical_counts,
             redirect_by_normalized_requested_url,
+            page_by_normalized_url,
         )
         issue_counts.update(issue_keys)
         row = {
@@ -69,6 +77,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "canonical_target_normalized": normalized_canonical,
             "canonical_target_http_status": (target or {}).get("http_status", ""),
             "canonical_target_indexability_status": (target or {}).get("indexability_status", ""),
+            "canonical_target_canonical_url": target_page.get("canonical_url", ""),
             "canonical_redirect_target_url": canonical_redirect_target,
             "http_status": page.get("http_status", ""),
             "extraction_status": page.get("status", ""),
@@ -87,6 +96,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
                 "canonical_url": canonical_url,
                 "canonical_target_http_status": row["canonical_target_http_status"],
                 "canonical_target_indexability_status": row["canonical_target_indexability_status"],
+                "canonical_target_canonical_url": row["canonical_target_canonical_url"],
                 "canonical_redirect_target_url": row["canonical_redirect_target_url"],
                 "http_status": row["http_status"],
                 "indexability_status": row["indexability_status"],
@@ -108,6 +118,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "canonical_points_to_4xx": issue_counts.get("canonical_points_to_4xx", 0),
             "canonical_points_to_5xx": issue_counts.get("canonical_points_to_5xx", 0),
             "canonical_points_to_redirect": issue_counts.get("canonical_points_to_redirect", 0),
+            "non_canonical_page_specified_as_canonical_one": issue_counts.get("non_canonical_page_specified_as_canonical_one", 0),
             "canonical_target_not_crawled": issue_counts.get("canonical_target_not_crawled", 0),
             "canonical_target_non_indexable": issue_counts.get("canonical_target_non_indexable", 0),
             "canonical_target_shared": issue_counts.get("canonical_target_shared", 0),
@@ -130,6 +141,7 @@ def _issues_for_page(
     indexability_by_normalized_url: dict[str, dict],
     canonical_counts: Counter[str],
     redirect_by_normalized_requested_url: dict[str, str],
+    page_by_normalized_url: dict[str, dict],
 ) -> list[str]:
     if not canonical_url:
         return ["missing_canonical"]
@@ -150,6 +162,10 @@ def _issues_for_page(
     redirect_target_url = redirect_by_normalized_requested_url.get(normalized_canonical, "")
     if redirect_target_url and _normalize_url(redirect_target_url) != normalized_canonical:
         issues.append("canonical_points_to_redirect")
+    target_page = page_by_normalized_url.get(normalized_canonical, {})
+    target_canonical = target_page.get("canonical_url", "")
+    if target_canonical and _normalize_url(target_canonical) != normalized_canonical:
+        issues.append("non_canonical_page_specified_as_canonical_one")
     if (
         normalized_canonical != _normalize_url(url)
         and target
