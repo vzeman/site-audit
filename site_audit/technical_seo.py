@@ -223,6 +223,7 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "sitemap_too_many_urls_count": 1 if issue_type == "sitemap_with_over_50k_urls" else 0,
         "sitemap_wrong_format_count": 1 if issue_type == "sitemap_in_the_wrong_format" else 0,
         "sitemap_out_of_scope_count": 1 if issue_type == "sitemap_includes_urls_out_of_its_scope" else 0,
+        "sitemap_url_count_decreased_count": 1 if issue_type == "no_of_urls_in_sitemap_decreased" else 0,
     }
 
 
@@ -971,6 +972,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "sitemap_in_the_wrong_format", "medium", 0.9, _recommendation("sitemap_in_the_wrong_format")))
     if _safe_int(row.get("sitemap_out_of_scope_count")) > 0:
         issues.append(_issue(row, "sitemaps", "sitemap_includes_urls_out_of_its_scope", "medium", 0.88, _recommendation("sitemap_includes_urls_out_of_its_scope")))
+    if _safe_int(row.get("sitemap_url_count_decreased_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "no_of_urls_in_sitemap_decreased", "low", 0.82, _recommendation("no_of_urls_in_sitemap_decreased")))
     return issues
 
 
@@ -1132,6 +1135,7 @@ def _recommendation(issue_type: str) -> str:
         "sitemap_with_over_50k_urls": "Split the sitemap into smaller files with no more than 50,000 URLs each.",
         "sitemap_in_the_wrong_format": "Publish the sitemap as a valid XML urlset or sitemapindex file.",
         "sitemap_includes_urls_out_of_its_scope": "Remove URLs outside the audited site scope from this XML sitemap.",
+        "no_of_urls_in_sitemap_decreased": "Review the sitemap URL decrease and confirm the removed URLs were intentionally dropped.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

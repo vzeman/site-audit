@@ -376,6 +376,25 @@ def test_sitemap_coverage_flags_sitemap_includes_urls_out_of_scope() -> None:
     assert "outside the audited site scope" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_sitemap_url_count_decreased() -> None:
+    payload = analyze(
+        [
+            {"url": "https://example.com/a", "source_sitemaps": ["https://example.com/sitemap.xml"]},
+            {"url": "https://example.com/b", "source_sitemaps": ["https://example.com/sitemap.xml"]},
+        ],
+        [],
+        [],
+        previous_total_sitemap_urls=5,
+    )
+
+    assert payload["summary"]["no_of_urls_in_sitemap_decreased"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "no_of_urls_in_sitemap_decreased"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "sitemaps://total-urls"
+    assert issues[0]["url_count"] == 2
+    assert "decrease" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},

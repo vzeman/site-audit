@@ -4656,6 +4656,33 @@ def test_technical_seo_model_flags_sitemap_includes_urls_out_of_scope() -> None:
     assert page["sitemap_url_count"] == 2
 
 
+def test_technical_seo_model_flags_no_of_urls_in_sitemap_decreased() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "sitemaps://total-urls",
+                    "issue": "no_of_urls_in_sitemap_decreased",
+                    "url_count": 2,
+                    "message": "5 to 2 URLs",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "no_of_urls_in_sitemap_decreased"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "sitemaps://total-urls"
+    assert issues[0]["issue_name"] == "No. of URLs in sitemap decreased"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    page = next(row for row in payload["pages"] if row["url"] == "sitemaps://total-urls")
+    assert page["sitemap_url_count_decreased_count"] == 1
+    assert page["sitemap_url_count"] == 2
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

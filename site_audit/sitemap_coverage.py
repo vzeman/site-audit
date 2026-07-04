@@ -26,6 +26,7 @@ SITEMAP_TOO_MANY_URLS_ISSUE = "sitemap_with_over_50k_urls"
 SITEMAP_WRONG_FORMAT_ISSUE = "sitemap_in_the_wrong_format"
 SITEMAP_OUT_OF_SCOPE_ISSUE = "sitemap_includes_urls_out_of_its_scope"
 SITEMAP_INDEXABLE_MISSING_ISSUE = "indexable_page_not_in_sitemap"
+SITEMAP_URL_COUNT_DECREASED_ISSUE = "no_of_urls_in_sitemap_decreased"
 
 
 def analyze(
@@ -34,6 +35,7 @@ def analyze(
     extraction_rows: list[dict],
     indexability: dict | None = None,
     sitemap_errors: Iterable[dict] | None = None,
+    previous_total_sitemap_urls: int | None = None,
 ) -> dict:
     sitemap_by_url = {row.get("url", ""): row for row in sitemap_entries if row.get("url")}
     fetched_by_url = {getattr(row, "url", ""): row for row in fetched}
@@ -145,6 +147,16 @@ def analyze(
             })
 
     sitemap_total = len(sitemap_by_url)
+    previous_total = _safe_int(previous_total_sitemap_urls)
+    if previous_total > sitemap_total:
+        sitemap_error_rows.append({
+            "sitemap_url": "sitemaps://total-urls",
+            "issue": SITEMAP_URL_COUNT_DECREASED_ISSUE,
+            "http_status": "",
+            "size_bytes": "",
+            "url_count": sitemap_total,
+            "message": f"{previous_total} to {sitemap_total} URLs",
+        })
     fetched_sitemap = sum(1 for row in rows if row["in_sitemap"] and row["crawled"])
     indexable_sitemap = status_counts.get("sitemap_indexable", 0)
     return {
@@ -183,6 +195,7 @@ def analyze(
             "indexable_page_not_in_sitemap": sum(
                 1 for row in rows if SITEMAP_INDEXABLE_MISSING_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "no_of_urls_in_sitemap_decreased": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_URL_COUNT_DECREASED_ISSUE),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -250,6 +263,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Remove URLs outside the audited site scope from this XML sitemap."
     if issue_type == SITEMAP_INDEXABLE_MISSING_ISSUE:
         return "Add this indexable URL to the XML sitemap if it is an SEO landing page."
+    if issue_type == SITEMAP_URL_COUNT_DECREASED_ISSUE:
+        return "Review the sitemap URL decrease and confirm the removed URLs were intentionally dropped."
     return "Review and fix this sitemap issue."
 
 
