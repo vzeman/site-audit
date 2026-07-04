@@ -328,6 +328,40 @@ def test_technical_seo_model_flags_canonical_url_changed() -> None:
     assert payload["pages"][0]["previous_canonical_url"] == "https://example.com/old"
 
 
+def test_technical_seo_model_flags_indexable_page_became_non_indexable() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/page",
+                    "title": "Page",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "noindex_source": "meta",
+                }
+            ],
+            "noindex_pages": [],
+        },
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["indexability"],
+                    "indexability_before": "indexable",
+                    "indexability_after": "noindex",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_page_became_non_indexable"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Indexable page became non-indexable"
+    assert issues[0]["importance"] == "Notice"
+    assert payload["pages"][0]["previous_indexability_status"] == "indexable"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],
