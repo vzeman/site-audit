@@ -196,6 +196,7 @@ def _merge_page_signals(
         row["description_length"] = _safe_int(metadata.get("description_length"))
         row["canonical_url"] = metadata.get("canonical_url", "")
         row["html_lang"] = metadata.get("html_lang", row.get("language", ""))
+        row["html_lang_missing"] = "html_lang" in metadata and not str(metadata.get("html_lang") or "").strip()
         row["hreflang"] = list(metadata.get("hreflang") or [])
         row["robots_content"] = metadata.get("robots_content", "")
         row["noindex_source"] = metadata.get("noindex_source", row.get("noindex_source", ""))
@@ -606,6 +607,8 @@ def _issues_for_row(row: dict) -> list[dict]:
     if _html_lang_attribute_invalid(row):
         row["invalid_html_lang"] = str(row.get("html_lang") or "").strip()
         issues.append(_issue(row, "localization", "html_lang_attribute_invalid", "high", 0.9, _recommendation("html_lang_attribute_invalid")))
+    if row.get("hreflang") and row.get("html_lang_missing"):
+        issues.append(_issue(row, "localization", "hreflang_defined_but_html_lang_missing", "medium", 0.86, _recommendation("hreflang_defined_but_html_lang_missing")))
     if _hreflang_html_lang_mismatch(row):
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("hreflang_non_canonical_targets"):
@@ -730,6 +733,7 @@ def _recommendation(issue_type: str) -> str:
         "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
         "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
         "html_lang_attribute_invalid": "Update the HTML lang attribute to a valid BCP 47 language code such as en, sk, or sk-SK.",
+        "hreflang_defined_but_html_lang_missing": "Add an HTML lang attribute that matches the page language when hreflang annotations are present.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
         "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
