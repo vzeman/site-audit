@@ -3,6 +3,7 @@ import numpy as np
 from site_audit.analyzer import PageInfo
 from site_audit.linkgraph import (
     analyze,
+    annotate_link_target_statuses,
     high_demand_low_link_payload,
     hub_bottleneck_payload,
     link_flow_payload,
@@ -82,6 +83,42 @@ def test_linkgraph_payload_counts_internal_links_by_protocol() -> None:
     assert source["internal_http_links"] == ["http://example.com/legacy"]
     assert source["internal_https_link_count"] == 1
     assert source["internal_https_links"] == [pages[1].url]
+
+
+def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/source", "in_degree": 1, "out_degree": 3},
+            {"url": "https://example.com/clean", "in_degree": 1, "out_degree": 1},
+        ]
+    }
+    outlinks = {
+        "https://example.com/source": [
+            ("https://example.com/missing", "missing"),
+            ("https://example.com/missing", "duplicate"),
+            ("https://example.com/error", "error"),
+            ("https://example.com/live", "live"),
+        ],
+        "https://example.com/clean": [("https://example.com/live", "live")],
+    }
+    indexability = {
+        "per_page": [
+            {"url": "https://example.com/missing", "http_status": 404},
+            {"url": "https://example.com/error", "http_status": 500},
+            {"url": "https://example.com/live", "http_status": 200},
+        ]
+    }
+
+    annotated = annotate_link_target_statuses(payload, outlinks, indexability)
+    source = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/source")
+    clean = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/clean")
+
+    assert source["broken_internal_link_count"] == 2
+    assert source["broken_internal_links"] == [
+        {"url": "https://example.com/missing", "http_status": 404},
+        {"url": "https://example.com/error", "http_status": 500},
+    ]
+    assert clean["broken_internal_link_count"] == 0
 
 
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:

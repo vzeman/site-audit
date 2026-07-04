@@ -688,6 +688,32 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
     }
 
 
+def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[str, list[tuple[str, str]]], indexability: dict | None) -> dict:
+    status_by_url: dict[str, int] = {}
+    for row in (indexability or {}).get("per_page") or []:
+        url = row.get("url")
+        if not url:
+            continue
+        status = _safe_int(row.get("http_status"))
+        status_by_url[str(url)] = status
+        status_by_url[_canonical_url(str(url))] = status
+
+    for row in (linkgraph_payload or {}).get("page_link_counts") or []:
+        source_url = row.get("url") or ""
+        broken: list[dict] = []
+        seen: set[str] = set()
+        for target, _anchor in (outlinks_map or {}).get(source_url, []) or []:
+            if not target or target in seen:
+                continue
+            seen.add(target)
+            status = status_by_url.get(target, status_by_url.get(_canonical_url(target), 0))
+            if 400 <= status < 600:
+                broken.append({"url": target, "http_status": status})
+        row["broken_internal_link_count"] = len(broken)
+        row["broken_internal_links"] = broken[:25]
+    return linkgraph_payload
+
+
 def _canonical_url(url: str) -> str:
     try:
         parsed = urlparse(url)

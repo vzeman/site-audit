@@ -101,6 +101,7 @@ from .keyword_coverage import (
 )
 from .keyword_attribution import build_keyword_attribution
 from .linkgraph import analyze as analyze_linkgraph
+from .linkgraph import annotate_link_target_statuses
 from .linkgraph import high_demand_low_link_payload
 from .linkgraph import hub_bottleneck_payload
 from .linkgraph import link_removal_simulation_payload
@@ -775,6 +776,7 @@ def run(config: PipelineConfig) -> dict:
             top_recommendations=config.link_recommendations_top_k,
         )
         link_payload = linkgraph_payload(link_result, pages)
+        link_payload = annotate_link_target_statuses(link_payload, outlinks_map, indexability_data)
         LOG.info(
             "  link graph: %d edges, %d orphans, %d dead-ends, %d recs, max depth %d",
             link_result.edge_count, len(link_result.orphans),
