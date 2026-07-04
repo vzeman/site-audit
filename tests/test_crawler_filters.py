@@ -13,6 +13,7 @@ class _Response:
         url: str = "https://example.com/sitemap.xml",
         status_code: int = 200,
         content_type: str = "application/xml",
+        history: list | None = None,
     ):
         self.status_code = status_code
         self.content = body.encode("utf-8")
@@ -21,6 +22,7 @@ class _Response:
         self.headers = {"Content-Type": content_type}
         self.reason = ""
         self.encoding = "utf-8"
+        self.history = history or []
 
 
 def _crawler(config: CrawlConfig, responses: dict[str, str]) -> Crawler:
@@ -197,6 +199,33 @@ def test_fetch_preserves_requested_url_and_redirect_target() -> None:
     assert result.url == "https://example.com/final"
     assert result.requested_url == "https://example.com/redirecting"
     assert result.redirect_target_url == "https://example.com/final"
+
+
+def test_fetch_preserves_redirect_chain_from_response_history() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "<html><title>Final</title></html>",
+        url="https://example.com/final",
+        status_code=200,
+        content_type="text/html",
+        history=[
+            _Response("", url="https://example.com/start", status_code=301, content_type="text/html"),
+            _Response("", url="https://example.com/middle", status_code=302, content_type="text/html"),
+        ],
+    )
+
+    result = crawler._fetch("https://example.com/start")
+
+    assert result is not None
+    assert result.redirect_chain == [
+        "https://example.com/start",
+        "https://example.com/middle",
+        "https://example.com/final",
+    ]
+    assert result.redirect_hop_count == 2
 
 
 def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:

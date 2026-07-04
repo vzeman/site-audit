@@ -16,6 +16,7 @@ from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CAT
 
 _SEVERITY_WEIGHT = {"high": 100.0, "medium": 55.0, "low": 25.0}
 _GOOGLEBOT_HTML_LIMIT_BYTES = 2 * 1024 * 1024
+_MAX_REDIRECT_HOPS = 5
 _METADATA_SEVERITY = {
     "missing_title": "high",
     "missing_canonical": "high",
@@ -233,6 +234,8 @@ def _merge_page_signals(
     if indexability:
         row["requested_url"] = indexability.get("requested_url", "")
         row["redirect_target_url"] = indexability.get("redirect_target_url", "")
+        row["redirect_chain"] = list(indexability.get("redirect_chain") or [])
+        row["redirect_hop_count"] = _safe_int(indexability.get("redirect_hop_count"))
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -251,6 +254,8 @@ def _merge_page_signals(
         row["nofollow_source"] = skipped.get("nofollow_source", row.get("nofollow_source", ""))
         row["requested_url"] = skipped.get("requested_url", row.get("requested_url", ""))
         row["redirect_target_url"] = skipped.get("redirect_target_url", row.get("redirect_target_url", ""))
+        row["redirect_chain"] = list(skipped.get("redirect_chain") or row.get("redirect_chain", []) or [])
+        row["redirect_hop_count"] = _safe_int(skipped.get("redirect_hop_count", row.get("redirect_hop_count", 0)))
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -291,6 +296,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "noindex_page_became_indexable", "low", 0.84, _recommendation("noindex_page_became_indexable")))
     if _is_redirected_fetch(row) and _safe_int(row.get("http_status")) >= 400:
         issues.append(_issue(row, "redirects", "broken_redirect", "high", 0.96, _recommendation("broken_redirect")))
+    if _safe_int(row.get("redirect_hop_count")) > _MAX_REDIRECT_HOPS:
+        issues.append(_issue(row, "redirects", "redirect_chain_too_long", "high", 0.94, _recommendation("redirect_chain_too_long")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -423,6 +430,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_became_non_indexable": "Review the before/after snapshot and restore indexability if this URL should remain eligible for search.",
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "broken_redirect": "Update the redirect so it resolves to a live 2XX destination or remove links and sitemap references to the redirecting URL.",
+        "redirect_chain_too_long": "Collapse the redirect path so the requested URL redirects directly to the final destination.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

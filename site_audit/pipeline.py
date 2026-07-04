@@ -454,6 +454,8 @@ def run(config: PipelineConfig) -> dict:
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
                 "requested_url": getattr(r, "requested_url", ""),
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
             })
             continue
         if http_status and not 200 <= http_status < 400:
@@ -466,6 +468,8 @@ def run(config: PipelineConfig) -> dict:
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
                 "requested_url": getattr(r, "requested_url", ""),
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
             })
             continue
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
@@ -479,6 +483,8 @@ def run(config: PipelineConfig) -> dict:
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
                 "requested_url": getattr(r, "requested_url", ""),
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
             })
             continue
         if ext.noindex:
@@ -506,6 +512,8 @@ def run(config: PipelineConfig) -> dict:
                 "word_count": ext.word_count,
                 "requested_url": getattr(r, "requested_url", ""),
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
             })
             continue
         section = section_for_url(r.url)
@@ -528,6 +536,8 @@ def run(config: PipelineConfig) -> dict:
                 "word_count": ext.word_count,
                 "requested_url": getattr(r, "requested_url", ""),
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
             })
             continue
         page = PageInfo(
@@ -560,6 +570,8 @@ def run(config: PipelineConfig) -> dict:
             "word_count": ext.word_count,
             "requested_url": getattr(r, "requested_url", ""),
             "redirect_target_url": getattr(r, "redirect_target_url", ""),
+            "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+            "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
         })
         if idx % 500 == 0 or idx == fetched_total:
             LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))

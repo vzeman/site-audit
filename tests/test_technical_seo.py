@@ -194,6 +194,59 @@ def test_technical_seo_model_flags_broken_redirects() -> None:
     assert issues[0]["importance"] == "Error"
 
 
+def test_technical_seo_model_flags_redirect_chains_that_are_too_long() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/start",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_chain": [
+                        "https://example.com/start",
+                        "https://example.com/a",
+                        "https://example.com/b",
+                        "https://example.com/c",
+                        "https://example.com/d",
+                        "https://example.com/e",
+                        "https://example.com/final",
+                    ],
+                    "redirect_hop_count": 6,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/short-final",
+                    "title": "Short Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/short-start",
+                    "redirect_target_url": "https://example.com/short-final",
+                    "redirect_chain": [
+                        "https://example.com/short-start",
+                        "https://example.com/short-final",
+                    ],
+                    "redirect_hop_count": 1,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "redirect_chain_too_long"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "Redirect chain too long"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Error"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/final")
+    assert page["redirect_hop_count"] == 6
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

@@ -146,6 +146,8 @@ class FetchResult:
     error: str = ""
     requested_url: str = ""
     redirect_target_url: str = ""
+    redirect_chain: list[str] = field(default_factory=list)
+    redirect_hop_count: int = 0
 
 
 @dataclass
@@ -159,6 +161,22 @@ def normalize_url(url: str) -> str:
     """Strip fragments and trailing slashes consistently."""
     url, _ = urldefrag(url)
     return url
+
+
+def _response_redirect_chain(response, requested_url: str, final_url: str) -> list[str]:
+    history = list(getattr(response, "history", []) or [])
+    if not history and requested_url == final_url:
+        return []
+    chain: list[str] = []
+    for item in history:
+        item_url = normalize_url(getattr(item, "url", "") or "")
+        if item_url and (not chain or chain[-1] != item_url):
+            chain.append(item_url)
+    if not chain and requested_url != final_url:
+        chain.append(requested_url)
+    if final_url and (not chain or chain[-1] != final_url):
+        chain.append(final_url)
+    return chain
 
 
 def _starting_url(domain: str) -> str:
@@ -654,6 +672,8 @@ class Crawler:
                     x_robots_tag=xrt,
                     requested_url=url,
                     redirect_target_url=cached.canonical_url or "",
+                    redirect_chain=[url, cached.canonical_url] if cached.canonical_url and cached.canonical_url != url else [],
+                    redirect_hop_count=1 if cached.canonical_url and cached.canonical_url != url else 0,
                 )
 
         if self.config.request_delay > 0:
@@ -667,6 +687,9 @@ class Crawler:
         ctype = r.headers.get("Content-Type", "").lower()
         body_bytes = r.content
 
+        redirect_chain = _response_redirect_chain(r, url, final_url)
+        redirect_hop_count = max(len(redirect_chain) - 1, 0)
+
         if r.status_code <= 0:
             return FetchResult(
                 url=final_url,
@@ -678,6 +701,8 @@ class Crawler:
                 error=getattr(r, "reason", "") or "fetch_failed",
                 requested_url=url,
                 redirect_target_url=final_url if url != final_url else "",
+                redirect_chain=redirect_chain,
+                redirect_hop_count=redirect_hop_count,
             )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
@@ -701,6 +726,8 @@ class Crawler:
                 x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
                 requested_url=url,
                 redirect_target_url=final_url if url != final_url else "",
+                redirect_chain=redirect_chain,
+                redirect_hop_count=redirect_hop_count,
             )
         if "html" not in ctype:
             return None
@@ -720,6 +747,8 @@ class Crawler:
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
             requested_url=url,
             redirect_target_url=final_url if url != final_url else "",
+            redirect_chain=redirect_chain,
+            redirect_hop_count=redirect_hop_count,
         )
 
     def _prepare_html_body(self, body: str) -> str:
