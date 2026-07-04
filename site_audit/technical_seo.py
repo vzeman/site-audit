@@ -372,6 +372,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "not_indexable_multiple_meta_description_tags", "medium", 0.86, _recommendation("not_indexable_multiple_meta_description_tags")))
     if status == "indexable" and _safe_int(row.get("title_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_title_tags", "high", 0.92, _recommendation("indexable_multiple_title_tags")))
+    if status != "indexable" and _safe_int(row.get("title_tag_count")) > 1:
+        issues.append(_issue(row, "content", "not_indexable_multiple_title_tags", "medium", 0.86, _recommendation("not_indexable_multiple_title_tags")))
     if status == "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
         issues.append(_issue(row, "content", "indexable_h1_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_h1_tag_missing_or_empty")))
     if status == "indexable" and _safe_int(row.get("h1_count")) > 1:
@@ -593,6 +595,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
         "not_indexable_multiple_meta_description_tags": "Keep one meta description tag on non-indexable pages that remain in crawl paths, or remove duplicate tags from the template.",
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
+        "not_indexable_multiple_title_tags": "Keep one title tag on non-indexable pages that remain in crawl paths, or remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "indexable_multiple_h1_tags": "Keep one primary H1 heading and demote extra H1s to lower heading levels.",
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",

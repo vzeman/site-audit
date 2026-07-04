@@ -659,6 +659,50 @@ def test_technical_seo_model_flags_indexable_pages_with_multiple_title_tags() ->
     assert issues[0]["importance"] == "Error"
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_multiple_title_tags() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=100, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-multiple",
+                    "title": "Noindex Multiple",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "title_tag_count": 2,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-one",
+                    "title": "Noindex One",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "title_tag_count": 1,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/indexable",
+                    "title": "Indexable",
+                    "title_tag_count": 2,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_multiple_title_tags"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex-multiple"
+    assert issues[0]["issue_name"] == "Multiple title tags"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_title_tag() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/missing", title="", section="", word_count=100, language="en"),
