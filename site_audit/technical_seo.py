@@ -224,6 +224,7 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "sitemap_wrong_format_count": 1 if issue_type == "sitemap_in_the_wrong_format" else 0,
         "sitemap_out_of_scope_count": 1 if issue_type == "sitemap_includes_urls_out_of_its_scope" else 0,
         "sitemap_url_count_decreased_count": 1 if issue_type == "no_of_urls_in_sitemap_decreased" else 0,
+        "sitemap_removed_count": 1 if issue_type == "pages_removed_from_sitemaps" else 0,
     }
 
 
@@ -982,6 +983,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "sitemap_includes_urls_out_of_its_scope", "medium", 0.88, _recommendation("sitemap_includes_urls_out_of_its_scope")))
     if _safe_int(row.get("sitemap_url_count_decreased_count")) > 0:
         issues.append(_issue(row, "sitemaps", "no_of_urls_in_sitemap_decreased", "low", 0.82, _recommendation("no_of_urls_in_sitemap_decreased")))
+    if _safe_int(row.get("sitemap_removed_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "pages_removed_from_sitemaps", "low", 0.8, _recommendation("pages_removed_from_sitemaps")))
     return issues
 
 
@@ -1139,6 +1142,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_not_in_sitemap": "Add this indexable URL to the XML sitemap if it is an SEO landing page.",
         "page_in_multiple_sitemaps": "Keep the URL in one canonical sitemap location to avoid duplicate sitemap signals.",
         "pages_added_to_sitemaps": "Review newly added sitemap URLs and confirm they should be submitted for indexing.",
+        "pages_removed_from_sitemaps": "Review removed sitemap URLs and confirm they were intentionally dropped.",
         "sitemap_has_syntax_error": "Fix the XML syntax error so crawlers can parse the sitemap.",
         "sitemap_is_not_accessible": "Restore access to the sitemap URL or remove the inaccessible sitemap reference.",
         "sitemap_larger_than_50mb": "Split the sitemap into smaller files under the 50MB uncompressed limit.",

@@ -4757,6 +4757,32 @@ def test_technical_seo_model_flags_no_of_urls_in_sitemap_decreased() -> None:
     assert page["sitemap_url_count"] == 2
 
 
+def test_technical_seo_model_flags_pages_removed_from_sitemaps() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/removed",
+                    "issue": "pages_removed_from_sitemaps",
+                    "message": "removed from current sitemap set",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "pages_removed_from_sitemaps"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/removed"
+    assert issues[0]["issue_name"] == "Pages removed from sitemaps"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/removed")
+    assert page["sitemap_removed_count"] == 1
+    assert page["sitemap_error_message"] == "removed from current sitemap set"
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

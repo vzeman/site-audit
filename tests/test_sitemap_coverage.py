@@ -445,6 +445,24 @@ def test_sitemap_coverage_flags_pages_added_to_sitemaps() -> None:
     assert issues[0]["url"] == "https://example.com/new"
 
 
+def test_sitemap_coverage_flags_pages_removed_from_sitemaps() -> None:
+    payload = analyze(
+        [
+            {"url": "https://example.com/existing", "source_sitemaps": ["https://example.com/sitemap.xml"]},
+        ],
+        [_Fetched("https://example.com/existing")],
+        [{"url": "https://example.com/existing", "status": "analyzed", "http_status": 200}],
+        {"per_page": [{"url": "https://example.com/existing", "indexability_status": "indexable", "issues": []}]},
+        previous_sitemap_urls=["https://example.com/existing", "https://example.com/removed"],
+    )
+
+    assert payload["summary"]["pages_removed_from_sitemaps"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "pages_removed_from_sitemaps"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/removed"
+    assert "intentionally dropped" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},
