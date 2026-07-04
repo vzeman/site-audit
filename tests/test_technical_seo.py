@@ -306,6 +306,28 @@ def test_technical_seo_model_flags_canonical_from_https_to_http() -> None:
     assert issues[0]["severity"] == "low"
 
 
+def test_technical_seo_model_flags_canonical_url_changed() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=100, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["canonical"],
+                    "canonical_before": "https://example.com/old",
+                    "canonical_after": "https://example.com/page",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "canonical_url_changed"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Canonical URL changed"
+    assert issues[0]["importance"] == "Notice"
+    assert payload["pages"][0]["previous_canonical_url"] == "https://example.com/old"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

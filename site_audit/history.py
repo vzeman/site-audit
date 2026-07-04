@@ -183,6 +183,7 @@ def build_history_snapshot(
         schema_types = sorted(set(structured_row.get("types") or getattr(ext, "schema_types", []) or []))
         title = getattr(page, "title", "") or getattr(ext, "title", "") or ""
         description = getattr(page, "description", "") or getattr(ext, "description", "") or ""
+        canonical_url = metadata_row.get("canonical_url") or getattr(ext, "canonical_url", "") or ""
         page_rows.append({
             "url": url,
             "title": title,
@@ -190,6 +191,8 @@ def build_history_snapshot(
             "word_count": _safe_int(getattr(page, "word_count", 0)),
             "title_hash": _hash(title),
             "description_hash": _hash(description),
+            "canonical_url": canonical_url,
+            "canonical_hash": _hash(canonical_url),
             "heading_hash": _hash("|".join(h["hash"] for h in headings)),
             "paragraph_hash": _hash("|".join(p["hash"] for p in paragraphs)),
             "link_hash": _hash("|".join(links)),
@@ -398,6 +401,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
         for label, key in [
             ("title", "title_hash"),
             ("description", "description_hash"),
+            ("canonical", "canonical_hash"),
             ("headings", "heading_hash"),
             ("paragraphs", "paragraph_hash"),
             ("links", "link_hash"),
@@ -452,6 +456,8 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "schema_removed": schema_removed,
             "metadata_before": b.get("metadata_issues") or [],
             "metadata_after": a.get("metadata_issues") or [],
+            "canonical_before": b.get("canonical_url") or "",
+            "canonical_after": a.get("canonical_url") or "",
             "freshness_before": b.get("freshness") or {},
             "freshness_after": a.get("freshness") or {},
             "traffic_before": round(traffic_before, 1),

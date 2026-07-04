@@ -50,13 +50,15 @@ def test_history_snapshot_captures_page_paragraph_link_schema_and_metrics() -> N
         outlinks_map={"https://example.com/a": [("https://example.com/b", "B")]},
         structured_data={"per_page": [{"url": "https://example.com/a", "types": ["Article"], "valid_blocks": 1}]},
         freshness={"per_page": [{"url": "https://example.com/a", "bucket": "fresh", "date": "2026-01-01"}]},
-        metadata_quality={"per_page": [{"url": "https://example.com/a", "issues": []}]},
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/a", "issues": []}]},
         search_payload=search,
     )
 
     row = payload["pages"][0]
     assert row["paragraphs"][0]["hash"]
     assert row["links"] == ["https://example.com/b"]
+    assert row["canonical_url"] == "https://example.com/a"
+    assert row["canonical_hash"]
     assert row["schema_types"] == ["Article"]
     assert row["metrics"]["traffic"] == 100
     assert row["metrics"]["clicks"] == 50
@@ -116,6 +118,38 @@ def test_compare_snapshots_reports_content_link_schema_metadata_and_metric_delta
     assert row["schema_added"] == ["FAQPage"]
     assert row["confidence"] in {"medium", "low-medium"}
     assert diff["summary"]["caveats"]
+
+
+def test_compare_snapshots_reports_canonical_url_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/a", "issues": []}]},
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/canonical", "issues": []}]},
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "canonical" in row["changed_fields"]
+    assert row["canonical_before"] == "https://example.com/a"
+    assert row["canonical_after"] == "https://example.com/canonical"
 
 
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:

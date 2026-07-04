@@ -40,6 +40,7 @@ def build_technical_seo(
     metadata_quality: dict | None = None,
     performance: dict | None = None,
     canonical_consistency: dict | None = None,
+    history_changes: dict | None = None,
     search_payload: dict | None = None,
     page_types: dict | None = None,
 ) -> dict:
@@ -48,18 +49,19 @@ def build_technical_seo(
     metadata = _lookup_rows((metadata_quality or {}).get("per_page") or [])
     perf = _lookup_rows((performance or {}).get("per_page") or [])
     canonical = _lookup_rows((canonical_consistency or {}).get("rows") or [])
+    history = _lookup_rows((history_changes or {}).get("changes") or [])
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), search.get(url), types.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), search.get(url), types.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), search.get(url), types.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), search.get(url), types.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -162,6 +164,7 @@ def _merge_page_signals(
     metadata: dict | None,
     perf: dict | None,
     canonical: dict | None,
+    history: dict | None,
     search: dict | None,
     page_type: dict | None,
     skipped: dict | None,
@@ -193,6 +196,9 @@ def _merge_page_signals(
         row["canonical_target_canonical_url"] = canonical.get("canonical_target_canonical_url", "")
         row["canonical_redirect_target_url"] = canonical.get("canonical_redirect_target_url", "")
         row["canonical_issues"] = list(canonical.get("issues") or [])
+    if history:
+        row["previous_canonical_url"] = history.get("canonical_before", "")
+        row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -237,6 +243,8 @@ def _issues_for_row(row: dict) -> list[dict]:
             issues.append(_issue(row, "indexability", issue_type, "medium", 0.9, _recommendation(issue_type)))
         elif issue_type in {"canonical_from_http_to_https", "canonical_from_https_to_http"}:
             issues.append(_issue(row, "indexability", issue_type, "low", 0.86, _recommendation(issue_type)))
+    if row.get("canonical_changed"):
+        issues.append(_issue(row, "indexability", "canonical_url_changed", "low", 0.82, _recommendation("canonical_url_changed")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -303,6 +311,7 @@ def _recommendation(issue_type: str) -> str:
         "non_canonical_page_specified_as_canonical_one": "Update the canonical tag to point directly at the final self-canonical URL.",
         "canonical_from_http_to_https": "Use the HTTPS URL as the crawled and internally linked version so the canonical does not need to consolidate from HTTP.",
         "canonical_from_https_to_http": "Update the canonical tag to the HTTPS URL and avoid consolidating secure pages to HTTP.",
+        "canonical_url_changed": "Review the canonical change against the previous snapshot and confirm the new canonical target is intentional.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
