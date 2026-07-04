@@ -368,6 +368,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "redirect_target_changed", "low", 0.8, _recommendation("redirect_target_changed")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
+    if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
+        issues.append(_issue(row, "content", "not_indexable_multiple_meta_description_tags", "medium", 0.86, _recommendation("not_indexable_multiple_meta_description_tags")))
     if status == "indexable" and _safe_int(row.get("title_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_title_tags", "high", 0.92, _recommendation("indexable_multiple_title_tags")))
     if status == "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
@@ -589,6 +591,7 @@ def _recommendation(issue_type: str) -> str:
         "meta_refresh_redirect": "Replace the meta refresh with a server-side redirect or direct internal links to the target URL.",
         "redirect_target_changed": "Review the changed redirect destination and confirm the new target is intentional.",
         "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
+        "not_indexable_multiple_meta_description_tags": "Keep one meta description tag on non-indexable pages that remain in crawl paths, or remove duplicate tags from the template.",
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "indexable_multiple_h1_tags": "Keep one primary H1 heading and demote extra H1s to lower heading levels.",
