@@ -115,6 +115,8 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
         og_missing_fields = _open_graph_missing_fields(page)
         if _has_open_graph_tags(page) and og_missing_fields:
             issues.append("incomplete_open_graph")
+        if not _has_open_graph_tags(page):
+            issues.append("missing_open_graph")
         twitter_missing_fields = _twitter_missing_fields(page)
         if _has_twitter_tags(page) and twitter_missing_fields:
             issues.append("incomplete_twitter_card")
@@ -162,6 +164,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
         "missing_canonical": issues_by_type.get("missing_canonical", 0),
         "canonical_external_host": issues_by_type.get("canonical_external_host", 0),
         "incomplete_open_graph": issues_by_type.get("incomplete_open_graph", 0),
+        "missing_open_graph": issues_by_type.get("missing_open_graph", 0),
         "incomplete_twitter_card": issues_by_type.get("incomplete_twitter_card", 0),
         "missing_twitter_card": issues_by_type.get("missing_twitter_card", 0),
     }

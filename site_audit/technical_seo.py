@@ -582,6 +582,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "social_tags", "open_graph_url_not_matching_canonical", "medium", 0.86, _recommendation("open_graph_url_not_matching_canonical")))
     if "incomplete_twitter_card" in (row.get("metadata_issues") or []):
         issues.append(_issue(row, "social_tags", "twitter_card_incomplete", "medium", 0.86, _recommendation("twitter_card_incomplete")))
+    if "missing_open_graph" in (row.get("metadata_issues") or []):
+        issues.append(_issue(row, "social_tags", "open_graph_tags_missing", "low", 0.8, _recommendation("open_graph_tags_missing")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -691,6 +693,7 @@ def _recommendation(issue_type: str) -> str:
         "open_graph_tags_incomplete": "Add the missing Open Graph title or description tags so shared URLs render complete previews.",
         "open_graph_url_not_matching_canonical": "Set og:url to the canonical URL so social shares consolidate on the preferred page.",
         "twitter_card_incomplete": "Add the missing Twitter/X card, title, or description tags so shared URLs render complete previews.",
+        "open_graph_tags_missing": "Add Open Graph tags for pages that need complete social sharing previews.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

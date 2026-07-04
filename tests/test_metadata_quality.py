@@ -162,12 +162,13 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     ]))
 
     assert report["summary"]["total_pages"] == 4
-    assert report["summary"]["pages_with_issues"] == 3
+    assert report["summary"]["pages_with_issues"] == 4
     assert report["summary"]["missing_description"] == 1
     assert report["summary"]["duplicate_title_pages"] == 2
     assert report["summary"]["missing_canonical"] == 1
     assert report["summary"]["canonical_external_host"] == 1
     assert report["summary"]["incomplete_open_graph"] == 1
+    assert report["summary"]["missing_open_graph"] == 1
     assert report["summary"]["missing_twitter_card"] == 1
     assert report["issues_by_type"]["duplicate_title"] == 2
     assert any("missing_description" in row["issues"] for row in report["per_page"])
@@ -175,6 +176,7 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/d")
     assert incomplete["og_missing_fields"] == ["og_description"]
     assert "incomplete_open_graph" not in missing["issues"]
+    assert "missing_open_graph" in missing["issues"]
 
 
 def test_metadata_quality_payload_distinguishes_incomplete_twitter_cards() -> None:

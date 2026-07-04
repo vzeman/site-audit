@@ -1947,6 +1947,69 @@ def test_technical_seo_model_flags_twitter_card_incomplete() -> None:
     assert page["twitter_missing_fields"] == ["twitter_title"]
 
 
+def test_technical_seo_model_flags_open_graph_tags_missing() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/incomplete", title="Incomplete", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/complete", title="Complete", section="", word_count=250, language="en"),
+        ],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "Noindex Missing",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "og_tag_count": 0,
+                    "og_missing_fields": ["og_title", "og_description"],
+                    "issues": ["missing_open_graph"],
+                },
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "Noindex Missing",
+                    "og_tag_count": 0,
+                    "og_missing_fields": ["og_title", "og_description"],
+                    "issues": ["missing_open_graph"],
+                },
+                {
+                    "url": "https://example.com/incomplete",
+                    "title": "Incomplete",
+                    "og_title": "Incomplete OG",
+                    "og_tag_count": 1,
+                    "og_missing_fields": ["og_description"],
+                    "issues": ["incomplete_open_graph"],
+                },
+                {
+                    "url": "https://example.com/complete",
+                    "title": "Complete",
+                    "og_title": "Complete OG",
+                    "og_description": "Complete OG description",
+                    "og_tag_count": 2,
+                    "og_missing_fields": [],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "open_graph_tags_missing"]
+    assert {row["url"] for row in issues} == {"https://example.com/missing", "https://example.com/noindex-missing"}
+    assert all(row["issue_name"] == "Open Graph tags missing" for row in issues)
+    assert all(row["category"] == "social_tags" for row in issues)
+    assert all(row["importance"] == "Notice" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
