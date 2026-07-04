@@ -429,6 +429,7 @@ def _merge_page_signals(
         row["keywords"] = _safe_int(search.get("keywords"))
         row["top_keyword"] = search.get("top_keyword", "")
         row["serp_title"] = search.get("serp_title", "")
+        row["receives_organic_traffic"] = row["traffic"] > 0
     if page_type:
         row["page_type"] = page_type.get("page_type", "")
         row["template_family"] = page_type.get("template_family", "")
@@ -704,6 +705,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "meta_refresh_redirect", "low", 0.82, _recommendation("meta_refresh_redirect")))
     if row.get("redirect_target_changed"):
         issues.append(_issue(row, "redirects", "redirect_target_changed", "low", 0.8, _recommendation("redirect_target_changed")))
+    if _receives_organic_traffic(row) and _is_3xx_traffic_page(row):
+        issues.append(_issue(row, "other", "3xx_page_receives_organic_traffic", "high", 0.94, _recommendation("3xx_page_receives_organic_traffic")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1209,6 +1212,7 @@ def _recommendation(issue_type: str) -> str:
         "external_4xx": "Update or remove external links that return 4XX client errors.",
         "external_5xx": "Review external links that return 5XX server errors and update or remove them when the destination is unstable.",
         "external_time_out": "Review external links that time out and update or remove destinations that are not reliably reachable.",
+        "3xx_page_receives_organic_traffic": "Move organic traffic to the final indexable URL by updating rankings, links, canonicals, and redirects around the redirecting page.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
@@ -1647,6 +1651,19 @@ def _is_redirected_fetch(row: dict) -> bool:
     requested_url = row.get("requested_url", "")
     redirect_target_url = row.get("redirect_target_url", "")
     return bool(requested_url and redirect_target_url and _normalize_url(requested_url) != _normalize_url(redirect_target_url))
+
+
+def _receives_organic_traffic(row: dict) -> bool:
+    return _safe_int(row.get("traffic")) > 0
+
+
+def _is_3xx_traffic_page(row: dict) -> bool:
+    status = _safe_int(row.get("http_status"))
+    if 300 <= status < 400:
+        return True
+    if any(300 <= _safe_int(code) < 400 for code in (row.get("redirect_status_codes") or [])):
+        return True
+    return _is_redirected_fetch(row)
 
 
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
