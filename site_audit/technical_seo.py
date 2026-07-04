@@ -598,6 +598,10 @@ def _issues_for_row(row: dict) -> list[dict]:
     if invalid_hreflang:
         row["invalid_hreflang_annotations"] = invalid_hreflang
         issues.append(_issue(row, "localization", "hreflang_annotation_invalid", "high", 0.9, _recommendation("hreflang_annotation_invalid")))
+    duplicate_hreflang_languages = _duplicate_hreflang_language_targets(row.get("hreflang") or [])
+    if duplicate_hreflang_languages:
+        row["duplicate_hreflang_language_targets"] = duplicate_hreflang_languages
+        issues.append(_issue(row, "localization", "more_than_one_page_for_same_language_in_hreflang", "high", 0.9, _recommendation("more_than_one_page_for_same_language_in_hreflang")))
     if _html_lang_attribute_invalid(row):
         row["invalid_html_lang"] = str(row.get("html_lang") or "").strip()
         issues.append(_issue(row, "localization", "html_lang_attribute_invalid", "high", 0.9, _recommendation("html_lang_attribute_invalid")))
@@ -727,6 +731,7 @@ def _recommendation(issue_type: str) -> str:
         "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
         "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
         "missing_reciprocal_hreflang_no_return_tag": "Add return hreflang annotations on alternate pages so every language URL references the others in the group.",
+        "more_than_one_page_for_same_language_in_hreflang": "Keep only one alternate URL for each hreflang language code on a page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -903,6 +908,30 @@ def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:
         if reasons:
             invalid.append({"hreflang": hreflang, "href": href, "reasons": reasons})
     return invalid
+
+
+def _duplicate_hreflang_language_targets(rows: list[dict]) -> list[dict]:
+    targets_by_language: dict[str, list[dict]] = {}
+    seen_by_language: dict[str, set[str]] = {}
+    for row in rows:
+        hreflang = str(row.get("hreflang") or "").strip().lower().replace("_", "-")
+        href = str(row.get("href") or "").strip()
+        if hreflang == "x-default" or not _valid_hreflang_code(hreflang) or not _absolute_url(href):
+            continue
+        normalized_href = _normalize_url(href)
+        seen = seen_by_language.setdefault(hreflang, set())
+        if normalized_href in seen:
+            continue
+        seen.add(normalized_href)
+        targets_by_language.setdefault(hreflang, []).append({"href": href, "normalized_href": normalized_href})
+    duplicates = []
+    for hreflang, targets in targets_by_language.items():
+        if len(targets) > 1:
+            duplicates.append({
+                "hreflang": hreflang,
+                "hrefs": [target["href"] for target in targets],
+            })
+    return duplicates
 
 
 def _html_lang_attribute_invalid(row: dict) -> bool:

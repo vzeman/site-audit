@@ -2584,6 +2584,56 @@ def test_technical_seo_model_flags_missing_reciprocal_hreflang() -> None:
     assert "missing_reciprocal_hreflang_targets" not in clean
 
 
+def test_technical_seo_model_flags_more_than_one_page_for_same_language_in_hreflang() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/duplicate", title="Duplicate", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/duplicate",
+                    "title": "Duplicate",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/sk-one"},
+                        {"hreflang": "sk", "href": "https://example.com/sk-two"},
+                        {"hreflang": "de", "href": "https://example.com/de"},
+                        {"hreflang": "de", "href": "https://example.com/de/"},
+                        {"hreflang": "en-US", "href": "https://example.com/us"},
+                        {"hreflang": "en-GB", "href": "https://example.com/uk"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "title": "Clean",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/sk"},
+                        {"hreflang": "cs", "href": "https://example.com/cs"},
+                    ],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "more_than_one_page_for_same_language_in_hreflang"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/duplicate"
+    assert issues[0]["issue_name"] == "More than one page for same language in hreflang"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Error"
+    duplicate = next(row for row in payload["pages"] if row["url"] == "https://example.com/duplicate")
+    assert duplicate["duplicate_hreflang_language_targets"] == [
+        {
+            "hreflang": "sk",
+            "hrefs": ["https://example.com/sk-one", "https://example.com/sk-two"],
+        }
+    ]
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
