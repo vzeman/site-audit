@@ -728,6 +728,53 @@ def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[st
     return linkgraph_payload
 
 
+def annotate_internal_link_rel_stats(linkgraph_payload: dict, extracted_pages: list) -> dict:
+    rows = (linkgraph_payload or {}).get("page_link_counts") or []
+    row_by_normalized_url = {
+        _canonical_url(row.get("url", "")): row
+        for row in rows
+        if row.get("url")
+    }
+    stats: dict[str, dict] = {
+        row.get("url", ""): {
+            "nofollow": 0,
+            "dofollow": 0,
+            "nofollow_sources": [],
+            "dofollow_sources": [],
+        }
+        for row in rows
+        if row.get("url")
+    }
+
+    for source in extracted_pages or []:
+        source_url = getattr(source, "url", "") or ""
+        for link in getattr(source, "link_audit_rows", []) or []:
+            if not link.get("is_internal"):
+                continue
+            target_row = row_by_normalized_url.get(_canonical_url(link.get("target_url", "")))
+            if not target_row:
+                continue
+            target_url = target_row.get("url", "")
+            target_stats = stats.setdefault(target_url, {"nofollow": 0, "dofollow": 0, "nofollow_sources": [], "dofollow_sources": []})
+            source_record = {"source_url": source_url, "target_url": link.get("target_url", ""), "anchor": link.get("anchor", "")}
+            if link.get("nofollow"):
+                target_stats["nofollow"] += 1
+                if len(target_stats["nofollow_sources"]) < 25:
+                    target_stats["nofollow_sources"].append(source_record)
+            else:
+                target_stats["dofollow"] += 1
+                if len(target_stats["dofollow_sources"]) < 25:
+                    target_stats["dofollow_sources"].append(source_record)
+
+    for row in rows:
+        target_stats = stats.get(row.get("url", ""), {})
+        row["incoming_nofollow_internal_link_count"] = int(target_stats.get("nofollow", 0) or 0)
+        row["incoming_dofollow_internal_link_count"] = int(target_stats.get("dofollow", 0) or 0)
+        row["incoming_nofollow_internal_links"] = list(target_stats.get("nofollow_sources") or [])
+        row["incoming_dofollow_internal_links"] = list(target_stats.get("dofollow_sources") or [])
+    return linkgraph_payload
+
+
 def _canonical_url(url: str) -> str:
     try:
         parsed = urlparse(url)

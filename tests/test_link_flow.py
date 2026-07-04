@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 import numpy as np
 
 from site_audit.analyzer import PageInfo
 from site_audit.linkgraph import (
     analyze,
+    annotate_internal_link_rel_stats,
     annotate_link_target_statuses,
     high_demand_low_link_payload,
     hub_bottleneck_payload,
@@ -132,6 +135,55 @@ def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
     ]
     assert clean["broken_internal_link_count"] == 0
     assert clean["redirect_internal_link_count"] == 0
+
+
+def test_linkgraph_payload_annotates_incoming_nofollow_and_dofollow_links() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/nofollow-only", "in_degree": 1, "out_degree": 1},
+            {"url": "https://example.com/mixed", "in_degree": 2, "out_degree": 1},
+        ]
+    }
+    extracted = [
+        SimpleNamespace(
+            url="https://example.com/source-a",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/nofollow-only",
+                    "anchor": "nofollow target",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+                {
+                    "target_url": "https://example.com/mixed",
+                    "anchor": "mixed nofollow",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+            ],
+        ),
+        SimpleNamespace(
+            url="https://example.com/source-b",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/mixed",
+                    "anchor": "mixed dofollow",
+                    "is_internal": True,
+                    "nofollow": False,
+                },
+            ],
+        ),
+    ]
+
+    annotated = annotate_internal_link_rel_stats(payload, extracted)
+    nofollow_only = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/nofollow-only")
+    mixed = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/mixed")
+
+    assert nofollow_only["incoming_nofollow_internal_link_count"] == 1
+    assert nofollow_only["incoming_dofollow_internal_link_count"] == 0
+    assert nofollow_only["incoming_nofollow_internal_links"][0]["source_url"] == "https://example.com/source-a"
+    assert mixed["incoming_nofollow_internal_link_count"] == 1
+    assert mixed["incoming_dofollow_internal_link_count"] == 1
 
 
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:

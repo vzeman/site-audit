@@ -634,11 +634,16 @@ def _link_quality(soup: BeautifulSoup, page_url: str) -> tuple[dict, list[dict]]
         target_url = urldefrag(urljoin(page_url, href))[0]
         context_parent = a.find_parent(["p", "li", "h1", "h2", "h3", "h4", "td", "th", "section", "article"])
         context_text = _clean(context_parent.get_text(" "))[:320] if context_parent else ""
+        rel_attr = a.get("rel") or []
+        if isinstance(rel_attr, str):
+            rel_attr = rel_attr.split()
+        rel_tokens = {str(item).lower() for item in rel_attr}
         rows.append({
             "anchor": eff[:200],
             "href": href[:500],
             "target_url": target_url[:1000],
             "context": context_text,
+            "nofollow": "nofollow" in rel_tokens,
             "has_text": bool(text),
             "has_title": bool(title_attr),
             "has_aria": bool(aria_label),

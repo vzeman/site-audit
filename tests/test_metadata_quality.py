@@ -84,6 +84,25 @@ def test_extract_robots_nofollow_sources_from_meta_and_header() -> None:
     assert page.noindex is False
 
 
+def test_extract_link_audit_rows_include_nofollow_rel() -> None:
+    html = """
+    <html><head><title>Link rel page</title></head><body>
+      <p>This page has enough body copy for the extractor fallback to keep it.
+      It contains internal links with different rel attributes so the link audit
+      rows can record whether each individual link is nofollow.</p>
+      <a href="/target" rel="nofollow">Nofollow target</a>
+      <a href="/other">Dofollow target</a>
+    </body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000)
+
+    assert page is not None
+    by_target = {row["target_url"]: row for row in page.link_audit_rows}
+    assert by_target["https://example.com/target"]["nofollow"] is True
+    assert by_target["https://example.com/other"]["nofollow"] is False
+
+
 def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),
