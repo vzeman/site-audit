@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -58,12 +58,16 @@ def _resource_items(fetch, http_cache=None) -> list[dict]:
     return _script_resources(getattr(fetch, "url", "") or "", getattr(fetch, "body", "") or "", http_cache)
 
 
-def _resource_issues(item: dict) -> list[str]:
+def _resource_issues(item: dict, page_url: str = "") -> list[str]:
+    issues: list[str] = []
     resource_type = _resource_type(item.get("type") or item.get("resource_type") or "")
     status = _safe_int(item.get("http_status", item.get("status", 0)))
     if resource_type in {"javascript", "script", "js"} and (item.get("broken") or status >= 400):
-        return ["javascript_broken"]
-    return []
+        issues.append("javascript_broken")
+    src = str(item.get("src") or item.get("url") or "")
+    if resource_type == "javascript" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
+        issues.append("https_page_links_to_http_javascript")
+    return issues
 
 
 def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport:
@@ -84,7 +88,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
             resource_type = _resource_type(item.get("type") or item.get("resource_type") or "")
             resource_type_counts[resource_type] += 1
             page_resource_type_counts[resource_type] += 1
-            issues = _resource_issues(item)
+            issues = _resource_issues(item, page_url)
             if not issues:
                 continue
             page_issues.update(issues)
@@ -117,6 +121,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "total_resources": sum(resource_type_counts.values()),
         "total_javascript": resource_type_counts.get("javascript", 0),
         "broken_javascript": issues_by_type.get("javascript_broken", 0),
+        "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
     }
     per_page.sort(key=lambda row: (-row["issue_count"], -row["resource_count"], row["url"]))
     return ResourceStatusReport(
