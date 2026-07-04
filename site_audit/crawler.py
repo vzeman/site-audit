@@ -309,7 +309,13 @@ class Crawler:
         robots_url = f"{self.base_url}/robots.txt"
         r = self._request_with_retry(robots_url)
         if r is not None and r.status_code == 200:
-            self.robots_txt_info = analyze_robots_txt(robots_url, r.status_code, r.text, final_url=r.url)
+            self.robots_txt_info = analyze_robots_txt(
+                robots_url,
+                r.status_code,
+                r.text,
+                final_url=r.url,
+                redirect_status_codes=_response_redirect_status_codes(r),
+            )
             rp.parse(r.text.splitlines())
         else:
             status = r.status_code if r is not None else 0
@@ -319,6 +325,7 @@ class Crawler:
                 "",
                 final_url=(r.url if r is not None else robots_url),
                 error=(getattr(r, "reason", "") if r is not None else "request_failed"),
+                redirect_status_codes=(_response_redirect_status_codes(r) if r is not None else []),
             )
             rp.parse([])
         self._robots = rp

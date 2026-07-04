@@ -21,3 +21,21 @@ def test_robots_txt_analyzer_allows_valid_and_extension_directives() -> None:
 
     assert payload["issues"] == []
     assert payload["syntax_errors"] == []
+
+
+def test_robots_txt_analyzer_flags_redirect_loop_error() -> None:
+    payload = analyze("https://example.com/robots.txt", 0, "", error="redirect_loop")
+
+    assert payload["issues"] == ["robots_txt_has_too_many_redirects_or_redirect_loop"]
+
+
+def test_robots_txt_analyzer_flags_too_many_redirects() -> None:
+    payload = analyze(
+        "https://example.com/robots.txt",
+        200,
+        "User-agent: *\nDisallow:\n",
+        redirect_status_codes=[301, 301, 302, 301, 302, 301],
+    )
+
+    assert payload["issues"] == ["robots_txt_has_too_many_redirects_or_redirect_loop"]
+    assert payload["redirect_status_codes"] == [301, 301, 302, 301, 302, 301]

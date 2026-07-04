@@ -676,6 +676,34 @@ def test_technical_seo_model_does_not_add_robots_txt_row_without_issue() -> None
     assert payload["issues"] == []
 
 
+def test_technical_seo_model_flags_robots_txt_redirect_loop() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 0,
+            "error": "redirect_loop",
+            "redirect_status_codes": [],
+            "issues": ["robots_txt_has_too_many_redirects_or_redirect_loop"],
+        },
+    )
+
+    issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "robots_txt_has_too_many_redirects_or_redirect_loop"
+    ]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/robots.txt"
+    assert issues[0]["issue_name"] == "Robots.txt has too many redirects or redirect loop"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    page = payload["pages"][0]
+    assert page["robots_txt_redirect_loop_count"] == 1
+    assert page["robots_txt_error"] == "redirect_loop"
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],

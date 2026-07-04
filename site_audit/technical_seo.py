@@ -300,9 +300,11 @@ def _base_robots_txt_row(row: dict) -> dict:
         "robots_txt_issue_types": issues,
         "robots_txt_final_url": row.get("final_url", ""),
         "robots_txt_error": row.get("error", ""),
+        "robots_txt_redirect_status_codes": [_safe_int(code) for code in (row.get("redirect_status_codes") or [])],
         "robots_txt_syntax_errors": list(row.get("syntax_errors") or []),
         "robots_txt_size_bytes": _safe_int(row.get("size_bytes")),
         "robots_txt_syntax_error_count": 1 if "robots_txt_has_syntax_error" in issues else 0,
+        "robots_txt_redirect_loop_count": 1 if "robots_txt_has_too_many_redirects_or_redirect_loop" in issues else 0,
     }
 
 
@@ -1108,6 +1110,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "pages_removed_from_sitemaps", "low", 0.8, _recommendation("pages_removed_from_sitemaps")))
     if _safe_int(row.get("robots_txt_syntax_error_count")) > 0:
         issues.append(_issue(row, "other", "robots_txt_has_syntax_error", "high", 0.96, _recommendation("robots_txt_has_syntax_error")))
+    if _safe_int(row.get("robots_txt_redirect_loop_count")) > 0:
+        issues.append(_issue(row, "other", "robots_txt_has_too_many_redirects_or_redirect_loop", "high", 0.96, _recommendation("robots_txt_has_too_many_redirects_or_redirect_loop")))
     return issues
 
 
@@ -1307,6 +1311,7 @@ def _recommendation(issue_type: str) -> str:
         "not_indexable_page_has_only_one_dofollow_incoming_internal_link": "Review whether this non-indexable page needs more internal discovery or should remain lightly linked.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "robots_txt_has_syntax_error": "Fix malformed robots.txt directives so crawlers can parse crawl rules and sitemap references reliably.",
+        "robots_txt_has_too_many_redirects_or_redirect_loop": "Fix robots.txt redirects so the file resolves directly to one reachable URL without loops or long redirect chains.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "noindex_in_html_and_http_header": "Remove duplicate noindex directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
