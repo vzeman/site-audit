@@ -49,3 +49,22 @@ def test_robots_txt_analyzer_flags_not_accessible() -> None:
 
     assert payload["issues"] == ["robots_txt_is_not_accessible"]
     assert payload["status"] == 404
+
+
+def test_robots_txt_analyzer_flags_changed_content() -> None:
+    payload = analyze(
+        "https://example.com/robots.txt",
+        200,
+        "User-agent: *\nDisallow: /new\n",
+        previous_body="User-agent: *\nDisallow: /old\n",
+    )
+
+    assert payload["issues"] == ["robots_txt_changed"]
+    assert payload["content_hash"] != payload["previous_content_hash"]
+
+
+def test_robots_txt_analyzer_does_not_flag_unchanged_content() -> None:
+    body = "User-agent: *\nDisallow: /same\n"
+    payload = analyze("https://example.com/robots.txt", 200, body, previous_body=body)
+
+    assert payload["issues"] == []

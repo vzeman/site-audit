@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 
 MAX_ROBOTS_REDIRECTS = 5
 
@@ -14,8 +16,12 @@ def analyze(
     final_url: str = "",
     error: str = "",
     redirect_status_codes: list[int] | None = None,
+    previous_body: str = "",
+    previous_hash: str = "",
 ) -> dict:
     redirects = [_safe_int(code) for code in (redirect_status_codes or [])]
+    current_hash = _content_hash(body)
+    before_hash = previous_hash or _content_hash(previous_body)
     syntax_errors = _syntax_errors(body) if int(status or 0) == 200 else []
     issues = []
     if syntax_errors:
@@ -24,12 +30,16 @@ def analyze(
         issues.append("robots_txt_has_too_many_redirects_or_redirect_loop")
     if _is_not_accessible(status):
         issues.append("robots_txt_is_not_accessible")
+    if before_hash and current_hash and before_hash != current_hash:
+        issues.append("robots_txt_changed")
     return {
         "url": robots_url,
         "final_url": final_url or robots_url,
         "status": int(status or 0),
         "error": error,
         "redirect_status_codes": redirects,
+        "content_hash": current_hash,
+        "previous_content_hash": before_hash,
         "issues": issues,
         "syntax_errors": syntax_errors,
         "size_bytes": len((body or "").encode("utf-8")),
@@ -64,6 +74,13 @@ def _has_redirect_loop_or_too_many_redirects(error: str, redirect_status_codes: 
 def _is_not_accessible(status: int) -> bool:
     status_int = _safe_int(status)
     return status_int <= 0 or status_int >= 400
+
+
+def _content_hash(body: str) -> str:
+    text = str(body or "").strip()
+    if not text:
+        return ""
+    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _safe_int(value) -> int:

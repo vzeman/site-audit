@@ -726,6 +726,32 @@ def test_technical_seo_model_flags_robots_txt_is_not_accessible() -> None:
     assert page["robots_txt_not_accessible_count"] == 1
 
 
+def test_technical_seo_model_flags_robots_txt_changed() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 200,
+            "issues": ["robots_txt_changed"],
+            "content_hash": "current",
+            "previous_content_hash": "previous",
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "robots_txt_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/robots.txt"
+    assert issues[0]["issue_name"] == "Robots.txt changed"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = payload["pages"][0]
+    assert page["robots_txt_changed_count"] == 1
+    assert page["robots_txt_content_hash"] == "current"
+    assert page["robots_txt_previous_content_hash"] == "previous"
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],

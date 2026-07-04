@@ -301,11 +301,14 @@ def _base_robots_txt_row(row: dict) -> dict:
         "robots_txt_final_url": row.get("final_url", ""),
         "robots_txt_error": row.get("error", ""),
         "robots_txt_redirect_status_codes": [_safe_int(code) for code in (row.get("redirect_status_codes") or [])],
+        "robots_txt_content_hash": row.get("content_hash", ""),
+        "robots_txt_previous_content_hash": row.get("previous_content_hash", ""),
         "robots_txt_syntax_errors": list(row.get("syntax_errors") or []),
         "robots_txt_size_bytes": _safe_int(row.get("size_bytes")),
         "robots_txt_syntax_error_count": 1 if "robots_txt_has_syntax_error" in issues else 0,
         "robots_txt_redirect_loop_count": 1 if "robots_txt_has_too_many_redirects_or_redirect_loop" in issues else 0,
         "robots_txt_not_accessible_count": 1 if "robots_txt_is_not_accessible" in issues else 0,
+        "robots_txt_changed_count": 1 if "robots_txt_changed" in issues else 0,
     }
 
 
@@ -1115,6 +1118,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "robots_txt_has_too_many_redirects_or_redirect_loop", "high", 0.96, _recommendation("robots_txt_has_too_many_redirects_or_redirect_loop")))
     if _safe_int(row.get("robots_txt_not_accessible_count")) > 0:
         issues.append(_issue(row, "other", "robots_txt_is_not_accessible", "high", 0.96, _recommendation("robots_txt_is_not_accessible")))
+    if _safe_int(row.get("robots_txt_changed_count")) > 0:
+        issues.append(_issue(row, "other", "robots_txt_changed", "medium", 0.86, _recommendation("robots_txt_changed")))
     return issues
 
 
@@ -1316,6 +1321,7 @@ def _recommendation(issue_type: str) -> str:
         "robots_txt_has_syntax_error": "Fix malformed robots.txt directives so crawlers can parse crawl rules and sitemap references reliably.",
         "robots_txt_has_too_many_redirects_or_redirect_loop": "Fix robots.txt redirects so the file resolves directly to one reachable URL without loops or long redirect chains.",
         "robots_txt_is_not_accessible": "Restore a reachable robots.txt response so crawlers can read crawl rules and sitemap references.",
+        "robots_txt_changed": "Review the robots.txt change and confirm new crawl directives or sitemap references are intentional.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "noindex_in_html_and_http_header": "Remove duplicate noindex directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
