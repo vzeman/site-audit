@@ -26,7 +26,10 @@ def test_robots_txt_analyzer_allows_valid_and_extension_directives() -> None:
 def test_robots_txt_analyzer_flags_redirect_loop_error() -> None:
     payload = analyze("https://example.com/robots.txt", 0, "", error="redirect_loop")
 
-    assert payload["issues"] == ["robots_txt_has_too_many_redirects_or_redirect_loop"]
+    assert payload["issues"] == [
+        "robots_txt_has_too_many_redirects_or_redirect_loop",
+        "robots_txt_is_not_accessible",
+    ]
 
 
 def test_robots_txt_analyzer_flags_too_many_redirects() -> None:
@@ -39,3 +42,10 @@ def test_robots_txt_analyzer_flags_too_many_redirects() -> None:
 
     assert payload["issues"] == ["robots_txt_has_too_many_redirects_or_redirect_loop"]
     assert payload["redirect_status_codes"] == [301, 301, 302, 301, 302, 301]
+
+
+def test_robots_txt_analyzer_flags_not_accessible() -> None:
+    payload = analyze("https://example.com/robots.txt", 404, "")
+
+    assert payload["issues"] == ["robots_txt_is_not_accessible"]
+    assert payload["status"] == 404

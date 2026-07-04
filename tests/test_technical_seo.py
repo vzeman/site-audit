@@ -704,6 +704,28 @@ def test_technical_seo_model_flags_robots_txt_redirect_loop() -> None:
     assert page["robots_txt_error"] == "redirect_loop"
 
 
+def test_technical_seo_model_flags_robots_txt_is_not_accessible() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 404,
+            "issues": ["robots_txt_is_not_accessible"],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "robots_txt_is_not_accessible"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/robots.txt"
+    assert issues[0]["issue_name"] == "Robots.txt is not accessible"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    page = payload["pages"][0]
+    assert page["http_status"] == 404
+    assert page["robots_txt_not_accessible_count"] == 1
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],

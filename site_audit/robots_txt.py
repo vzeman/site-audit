@@ -22,6 +22,8 @@ def analyze(
         issues.append("robots_txt_has_syntax_error")
     if _has_redirect_loop_or_too_many_redirects(error, redirects):
         issues.append("robots_txt_has_too_many_redirects_or_redirect_loop")
+    if _is_not_accessible(status):
+        issues.append("robots_txt_is_not_accessible")
     return {
         "url": robots_url,
         "final_url": final_url or robots_url,
@@ -57,6 +59,11 @@ def _has_redirect_loop_or_too_many_redirects(error: str, redirect_status_codes: 
     if "redirect loop" in normalized_error or "too many redirect" in normalized_error:
         return True
     return len(redirect_status_codes) > MAX_ROBOTS_REDIRECTS
+
+
+def _is_not_accessible(status: int) -> bool:
+    status_int = _safe_int(status)
+    return status_int <= 0 or status_int >= 400
 
 
 def _safe_int(value) -> int:
