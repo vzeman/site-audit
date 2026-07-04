@@ -219,6 +219,9 @@ def _merge_page_signals(
         row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
         row["previous_indexability_status"] = history.get("indexability_before", "")
         row["current_indexability_status"] = history.get("indexability_after", "")
+        row["previous_h1"] = history.get("h1_before", "")
+        row["current_h1"] = history.get("h1_after", "")
+        row["h1_changed"] = "h1" in (history.get("changed_fields") or [])
         row["previous_redirect_target_url"] = history.get("redirect_target_before", "")
         row["current_redirect_target_url"] = history.get("redirect_target_after", "")
         row["redirect_target_changed"] = "redirect_target" in (history.get("changed_fields") or [])
@@ -348,6 +351,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_multiple_title_tags", "high", 0.92, _recommendation("indexable_multiple_title_tags")))
     if status == "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
         issues.append(_issue(row, "content", "indexable_h1_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_h1_tag_missing_or_empty")))
+    if status == "indexable" and row.get("h1_changed"):
+        issues.append(_issue(row, "content", "indexable_h1_tag_changed", "low", 0.8, _recommendation("indexable_h1_tag_changed")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
     if (
@@ -543,6 +548,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
+        "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",

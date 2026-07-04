@@ -790,6 +790,32 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() ->
     assert missing_page["h1_count"] == 0
 
 
+def test_technical_seo_model_flags_indexable_h1_changes() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=250, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["h1"],
+                    "h1_before": "Old H1",
+                    "h1_after": "New H1",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_h1_tag_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "H1 tag changed"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = payload["pages"][0]
+    assert page["previous_h1"] == "Old H1"
+    assert page["current_h1"] == "New H1"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/thin", title="Thin", section="", word_count=80, language="en"),

@@ -187,6 +187,7 @@ def build_history_snapshot(
         title = getattr(page, "title", "") or getattr(ext, "title", "") or ""
         description = getattr(page, "description", "") or getattr(ext, "description", "") or ""
         canonical_url = metadata_row.get("canonical_url") or getattr(ext, "canonical_url", "") or ""
+        h1 = getattr(ext, "h1", "") or ""
         redirect_target_url = index_row.get("redirect_target_url") or ""
         page_rows.append({
             "url": url,
@@ -197,6 +198,8 @@ def build_history_snapshot(
             "description_hash": _hash(description),
             "canonical_url": canonical_url,
             "canonical_hash": _hash(canonical_url),
+            "h1": h1,
+            "h1_hash": _hash(h1),
             "redirect_target_url": redirect_target_url,
             "redirect_target_hash": _hash(redirect_target_url),
             "heading_hash": _hash("|".join(h["hash"] for h in headings)),
@@ -408,6 +411,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             ("title", "title_hash"),
             ("description", "description_hash"),
             ("canonical", "canonical_hash"),
+            ("h1", "h1_hash"),
             ("redirect_target", "redirect_target_hash"),
             ("headings", "heading_hash"),
             ("paragraphs", "paragraph_hash"),
@@ -465,6 +469,8 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "metadata_after": a.get("metadata_issues") or [],
             "canonical_before": b.get("canonical_url") or "",
             "canonical_after": a.get("canonical_url") or "",
+            "h1_before": b.get("h1") or "",
+            "h1_after": a.get("h1") or "",
             "redirect_target_before": b.get("redirect_target_url") or "",
             "redirect_target_after": a.get("redirect_target_url") or "",
             "freshness_before": b.get("freshness") or {},
