@@ -772,6 +772,57 @@ def test_technical_seo_model_flags_non_canonical_page_receives_organic_traffic()
     assert "non_canonical_page_receives_organic_traffic" not in self_issue_types
 
 
+def test_technical_seo_model_flags_organic_traffic_dropped() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/dropped-traffic",
+                title="Dropped Traffic",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/stable-traffic",
+                title="Stable Traffic",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/dropped-traffic",
+                    "traffic": 80,
+                    "previous_traffic": 140,
+                },
+                {
+                    "matched_url": "https://example.com/stable-traffic",
+                    "traffic": 140,
+                    "previous_traffic": 140,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "organic_traffic_dropped"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/dropped-traffic"
+    assert issues[0]["issue_name"] == "Organic traffic dropped"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/dropped-traffic"]["traffic"] == 80
+    assert by_url["https://example.com/dropped-traffic"]["previous_traffic"] == 140
+    stable_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/stable-traffic"
+    }
+    assert "organic_traffic_dropped" not in stable_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

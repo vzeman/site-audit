@@ -470,6 +470,7 @@ def _merge_page_signals(
         row["meta_description_tag_count"] = _safe_int(indexability.get("meta_description_tag_count", row.get("meta_description_tag_count", 0)))
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
+        row["previous_traffic"] = _safe_int(search.get("previous_traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
         row["top_keyword"] = search.get("top_keyword", "")
         row["serp_title"] = search.get("serp_title", "")
@@ -767,6 +768,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "no_of_referring_domains_dropped", "low", 0.82, _recommendation("no_of_referring_domains_dropped")))
     if _receives_organic_traffic(row) and _is_non_canonical(row):
         issues.append(_issue(row, "other", "non_canonical_page_receives_organic_traffic", "low", 0.84, _recommendation("non_canonical_page_receives_organic_traffic")))
+    if _organic_traffic_dropped(row):
+        issues.append(_issue(row, "other", "organic_traffic_dropped", "low", 0.84, _recommendation("organic_traffic_dropped")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1288,6 +1291,7 @@ def _recommendation(issue_type: str) -> str:
         "noindex_page_receives_organic_traffic": "Remove noindex if the page should keep receiving organic traffic, or consolidate the traffic to an indexable canonical replacement.",
         "no_of_referring_domains_dropped": "Review lost referring domains and recover important links or replace them with stronger internal and external authority signals.",
         "non_canonical_page_receives_organic_traffic": "Consolidate organic traffic to the canonical URL or update the canonical if this page should be the ranking URL.",
+        "organic_traffic_dropped": "Review the page changes, rankings, snippets, and technical status that may have caused organic traffic to decline.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
@@ -1775,6 +1779,12 @@ def _referring_domains_dropped(row: dict) -> bool:
     return previous > 0 and current < previous
 
 
+def _organic_traffic_dropped(row: dict) -> bool:
+    previous = _safe_int(row.get("previous_traffic"))
+    current = _safe_int(row.get("traffic"))
+    return previous > 0 and current < previous
+
+
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for row in (payload or {}).get("top_pages") or []:
@@ -1783,6 +1793,7 @@ def _search_lookup(payload: dict | None) -> dict[str, dict]:
             continue
         out[str(url)] = {
             "traffic": row.get("traffic", 0),
+            "previous_traffic": row.get("previous_traffic", row.get("traffic_before", 0)),
             "keywords": row.get("keywords", 0),
             "top_keyword": row.get("top_keyword", ""),
             "serp_title": row.get("top_keyword_title") or row.get("serp_title") or "",
