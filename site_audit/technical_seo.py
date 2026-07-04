@@ -875,6 +875,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "css_file_size_too_large", "medium", 0.86, _recommendation("css_file_size_too_large")))
     if _safe_int(row.get("redirected_css_count")) > 0:
         issues.append(_issue(row, "css", "css_redirects", "medium", 0.88, _recommendation("css_redirects")))
+    if _safe_int(row.get("redirected_css_count")) > 0:
+        issues.append(_issue(row, "css", "page_has_redirected_css", "medium", 0.86, _recommendation("page_has_redirected_css")))
     if _safe_int(row.get("http_css_count")) > 0:
         issues.append(_issue(row, "css", "https_page_links_to_http_css", "medium", 0.88, _recommendation("https_page_links_to_http_css")))
     return issues
@@ -1023,6 +1025,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_broken_css": "Fix or remove broken CSS references on the page so users and crawlers receive live stylesheet assets.",
         "css_file_size_too_large": "Reduce, split, or minify oversized CSS files and remove unused style rules.",
         "css_redirects": "Update CSS references so they point directly to the final stylesheet URL instead of a redirecting URL.",
+        "page_has_redirected_css": "Update redirected CSS references on the page so each stylesheet points directly to its final URL.",
         "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
