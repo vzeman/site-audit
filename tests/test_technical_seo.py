@@ -151,6 +151,49 @@ def test_technical_seo_model_flags_timed_out_pages() -> None:
     assert payload["issue_counts"]["timed_out"] == 1
 
 
+def test_technical_seo_model_flags_broken_redirects() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                    "requested_url": "https://example.com/old",
+                    "redirect_target_url": "https://example.com/missing",
+                },
+                {
+                    "url": "https://example.com/direct-missing",
+                    "title": "",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                    "requested_url": "https://example.com/direct-missing",
+                    "redirect_target_url": "",
+                },
+            ],
+            "per_page": [
+                {
+                    "url": "https://example.com/live",
+                    "indexability_status": "indexable",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/old-live",
+                    "redirect_target_url": "https://example.com/live",
+                }
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "broken_redirect"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "Broken redirect"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
