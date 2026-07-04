@@ -417,6 +417,7 @@ def _merge_page_signals(
         row["resource_issue_counts"] = resource_issue_counts
         row["javascript_broken_count"] = _safe_int(resource_issue_counts.get("javascript_broken"))
         row["http_javascript_count"] = _safe_int(resource_issue_counts.get("https_page_links_to_http_javascript"))
+        row["redirected_javascript_count"] = _safe_int(resource_issue_counts.get("javascript_redirects"))
     if resource_issues:
         broken_javascript = [
             {
@@ -437,6 +438,17 @@ def _merge_page_signals(
         if http_javascript:
             row["http_javascript"] = http_javascript
             row["http_javascript_count"] = len(http_javascript)
+        redirected_javascript = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+                "redirect_target_url": issue.get("redirect_target_url", ""),
+            }
+            for issue in (resource_issues.get("javascript_redirects") or [])
+        ]
+        if redirected_javascript:
+            row["redirected_javascript"] = redirected_javascript
+            row["redirected_javascript_count"] = len(redirected_javascript)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -807,6 +819,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "javascript", "page_has_broken_javascript", "high", 0.92, _recommendation("page_has_broken_javascript")))
     if _safe_int(row.get("http_javascript_count")) > 0:
         issues.append(_issue(row, "javascript", "https_page_links_to_http_javascript", "medium", 0.88, _recommendation("https_page_links_to_http_javascript")))
+    if _safe_int(row.get("redirected_javascript_count")) > 0:
+        issues.append(_issue(row, "javascript", "javascript_redirects", "medium", 0.88, _recommendation("javascript_redirects")))
     return issues
 
 
@@ -947,6 +961,7 @@ def _recommendation(issue_type: str) -> str:
         "javascript_broken": "Restore the JavaScript URL, update it to a live script asset, or remove the broken script reference.",
         "page_has_broken_javascript": "Fix or remove broken JavaScript references on the page so users and crawlers receive live script assets.",
         "https_page_links_to_http_javascript": "Update JavaScript URLs on HTTPS pages so every script is loaded over HTTPS.",
+        "javascript_redirects": "Update JavaScript references so they point directly to the final script URL instead of a redirecting URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

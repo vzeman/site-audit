@@ -62,11 +62,14 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
     issues: list[str] = []
     resource_type = _resource_type(item.get("type") or item.get("resource_type") or "")
     status = _safe_int(item.get("http_status", item.get("status", 0)))
+    redirect_target_url = str(item.get("redirect_target_url") or "")
     if resource_type in {"javascript", "script", "js"} and (item.get("broken") or status >= 400):
         issues.append("javascript_broken")
     src = str(item.get("src") or item.get("url") or "")
     if resource_type == "javascript" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
         issues.append("https_page_links_to_http_javascript")
+    if resource_type == "javascript" and (item.get("redirected") or redirect_target_url or 300 <= status < 400):
+        issues.append("javascript_redirects")
     return issues
 
 
@@ -100,6 +103,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
                 "type": resource_type,
                 "src": item.get("src") or item.get("url") or "",
                 "http_status": item.get("http_status", item.get("status", "")),
+                "redirect_target_url": item.get("redirect_target_url", ""),
                 "issues": issues,
             })
         if page_issues:
@@ -122,6 +126,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "total_javascript": resource_type_counts.get("javascript", 0),
         "broken_javascript": issues_by_type.get("javascript_broken", 0),
         "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
+        "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
     }
     per_page.sort(key=lambda row: (-row["issue_count"], -row["resource_count"], row["url"]))
     return ResourceStatusReport(

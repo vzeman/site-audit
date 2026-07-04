@@ -3874,6 +3874,61 @@ def test_technical_seo_model_flags_https_page_links_to_http_javascript() -> None
     assert page["http_javascript"] == [{"src": "http://cdn.example.com/insecure.js"}]
 
 
+def test_technical_seo_model_flags_javascript_redirects() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        resource_status={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"javascript_redirects": 2}, "issue_count": 2},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "resources_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "javascript",
+                    "src": "https://cdn.example.com/redirect.js",
+                    "http_status": 301,
+                    "redirect_target_url": "https://cdn.example.com/final.js",
+                    "issues": ["javascript_redirects"],
+                },
+                {
+                    "url": "https://example.com/bad",
+                    "type": "javascript",
+                    "src": "https://cdn.example.com/flagged.js",
+                    "redirect_target_url": "https://cdn.example.com/final-flagged.js",
+                    "issues": ["javascript_redirects"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "javascript_redirects"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "JavaScript redirects"
+    assert issues[0]["category"] == "javascript"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["redirected_javascript_count"] == 2
+    assert page["redirected_javascript"] == [
+        {
+            "src": "https://cdn.example.com/redirect.js",
+            "http_status": 301,
+            "redirect_target_url": "https://cdn.example.com/final.js",
+        },
+        {
+            "src": "https://cdn.example.com/flagged.js",
+            "http_status": "",
+            "redirect_target_url": "https://cdn.example.com/final-flagged.js",
+        },
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

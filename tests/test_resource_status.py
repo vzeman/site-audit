@@ -44,6 +44,7 @@ def test_resource_status_payload_flags_broken_javascript_from_cache() -> None:
             "type": "javascript",
             "src": "https://example.com/broken.js",
             "http_status": 404,
+            "redirect_target_url": "",
             "issues": ["javascript_broken"],
         }
     ]
@@ -91,3 +92,33 @@ def test_resource_status_payload_flags_https_pages_linking_to_http_javascript() 
     assert len(insecure_rows) == 1
     assert insecure_rows[0]["url"] == "https://example.com/secure"
     assert insecure_rows[0]["src"] == "http://cdn.example.com/insecure.js"
+
+
+def test_resource_status_payload_flags_redirected_javascript() -> None:
+    report = to_payload(analyze([
+        SimpleNamespace(
+            url="https://example.com/page",
+            resource_items=[
+                {
+                    "type": "javascript",
+                    "src": "https://cdn.example.com/redirect.js",
+                    "http_status": 301,
+                    "redirect_target_url": "https://cdn.example.com/final.js",
+                },
+                {"type": "javascript", "src": "https://cdn.example.com/flagged.js", "redirected": True},
+                {"type": "javascript", "src": "https://cdn.example.com/ok.js", "http_status": 200},
+            ],
+        ),
+    ]))
+
+    assert report["summary"]["redirected_javascript"] == 2
+    assert report["issues_by_type"]["javascript_redirects"] == 2
+    redirected_rows = [
+        row for row in report["resources_with_issues"]
+        if "javascript_redirects" in row["issues"]
+    ]
+    assert [row["src"] for row in redirected_rows] == [
+        "https://cdn.example.com/redirect.js",
+        "https://cdn.example.com/flagged.js",
+    ]
+    assert redirected_rows[0]["redirect_target_url"] == "https://cdn.example.com/final.js"
