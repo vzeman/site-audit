@@ -922,6 +922,45 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() ->
     assert missing_page["h1_count"] == 0
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_missing_or_empty_h1() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=100, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "Noindex Missing",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Noindex OK",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        header_analysis={
+            "per_page": [
+                {"url": "https://example.com/indexable", "h1": "", "h1_count": 0, "header_count": 2},
+                {"url": "https://example.com/noindex-missing", "h1": "", "h1_count": 0, "header_count": 1},
+                {"url": "https://example.com/noindex-ok", "h1": "Noindex H1", "h1_count": 1, "header_count": 2},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_h1_tag_missing_or_empty"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex-missing"
+    assert issues[0]["issue_name"] == "H1 tag missing or empty"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_multiple_h1_tags() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/multiple", title="Multiple", section="", word_count=250, language="en"),

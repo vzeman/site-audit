@@ -376,6 +376,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "not_indexable_multiple_title_tags", "medium", 0.86, _recommendation("not_indexable_multiple_title_tags")))
     if status == "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
         issues.append(_issue(row, "content", "indexable_h1_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_h1_tag_missing_or_empty")))
+    if status != "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
+        issues.append(_issue(row, "content", "not_indexable_h1_tag_missing_or_empty", "low", 0.82, _recommendation("not_indexable_h1_tag_missing_or_empty")))
     if status == "indexable" and _safe_int(row.get("h1_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_h1_tags", "low", 0.82, _recommendation("indexable_multiple_h1_tags")))
     if status == "indexable" and row.get("h1_changed"):
@@ -606,6 +608,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "not_indexable_multiple_title_tags": "Keep one title tag on non-indexable pages that remain in crawl paths, or remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
+        "not_indexable_h1_tag_missing_or_empty": "Review whether the non-indexable page still needs a clear H1 if it remains useful to users or internal crawl paths.",
         "indexable_multiple_h1_tags": "Keep one primary H1 heading and demote extra H1s to lower heading levels.",
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
         "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
