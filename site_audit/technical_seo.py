@@ -585,20 +585,15 @@ def _merge_page_signals(
         external_issue_counts = dict(external.get("issues") or {})
         row["external_issue_counts"] = external_issue_counts
         row["external_3xx_redirect_count"] = _safe_int(external_issue_counts.get("external_3xx_redirect"))
-        external_redirects = [
-            {
-                "url": issue.get("url", ""),
-                "anchor": issue.get("anchor", ""),
-                "status": issue.get("status", ""),
-                "final_url": issue.get("final_url", ""),
-                "redirect_status_codes": list(issue.get("redirect_status_codes") or []),
-            }
-            for issue in (external.get("external_links_with_issues") or [])
-            if "external_3xx_redirect" in (issue.get("issues") or [])
-        ]
+        row["external_4xx_count"] = _safe_int(external_issue_counts.get("external_4xx"))
+        external_redirects = _external_links_with_issue(external, "external_3xx_redirect")
         if external_redirects:
             row["external_redirects"] = external_redirects
             row["external_3xx_redirect_count"] = len(external_redirects)
+        external_4xx_links = _external_links_with_issue(external, "external_4xx")
+        if external_4xx_links:
+            row["external_4xx_links"] = external_4xx_links
+            row["external_4xx_count"] = len(external_4xx_links)
     if sitemap:
         row["in_sitemap"] = bool(sitemap.get("in_sitemap"))
         row["source_sitemaps"] = list(sitemap.get("source_sitemaps") or [])
@@ -1012,6 +1007,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "https_page_links_to_http_css", "medium", 0.88, _recommendation("https_page_links_to_http_css")))
     if _safe_int(row.get("external_3xx_redirect_count")) > 0:
         issues.append(_issue(row, "external_pages", "external_3xx_redirect", "low", 0.82, _recommendation("external_3xx_redirect")))
+    if _safe_int(row.get("external_4xx_count")) > 0:
+        issues.append(_issue(row, "external_pages", "external_4xx", "low", 0.86, _recommendation("external_4xx")))
     if _safe_int(row.get("sitemap_redirect_count")) > 0:
         issues.append(_issue(row, "sitemaps", "3xx_redirect_in_sitemap", "high", 0.92, _recommendation("3xx_redirect_in_sitemap")))
     if _safe_int(row.get("sitemap_4xx_count")) > 0:
@@ -1195,6 +1192,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_redirected_css": "Update redirected CSS references on the page so each stylesheet points directly to its final URL.",
         "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
         "external_3xx_redirect": "Update external links to point directly to the final destination URL where appropriate.",
+        "external_4xx": "Update or remove external links that return 4XX client errors.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
@@ -1254,6 +1252,20 @@ def _recommendation(issue_type: str) -> str:
         "incomplete_open_graph": "Complete OpenGraph title and description for share previews.",
         "missing_twitter_card": "Add Twitter/X card metadata if social previews matter.",
     }.get(issue_type, "Review and fix this technical SEO issue.")
+
+
+def _external_links_with_issue(external: dict, issue_type: str) -> list[dict]:
+    return [
+        {
+            "url": issue.get("url", ""),
+            "anchor": issue.get("anchor", ""),
+            "status": issue.get("status", ""),
+            "final_url": issue.get("final_url", ""),
+            "redirect_status_codes": list(issue.get("redirect_status_codes") or []),
+        }
+        for issue in (external.get("external_links_with_issues") or [])
+        if issue_type in (issue.get("issues") or [])
+    ]
 
 
 def _lookup_rows(rows: list[dict]) -> dict[str, dict]:
