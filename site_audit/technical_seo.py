@@ -473,6 +473,8 @@ def _merge_page_signals(
         row["keywords"] = _safe_int(search.get("keywords"))
         row["top_keyword"] = search.get("top_keyword", "")
         row["serp_title"] = search.get("serp_title", "")
+        row["referring_domains"] = _safe_int(search.get("referring_domains"))
+        row["previous_referring_domains"] = _safe_int(search.get("previous_referring_domains"))
         row["receives_organic_traffic"] = row["traffic"] > 0
     if page_type:
         row["page_type"] = page_type.get("page_type", "")
@@ -761,6 +763,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "more_than_three_parameters_in_url", "low", 0.82, _recommendation("more_than_three_parameters_in_url")))
     if _receives_organic_traffic(row) and status == "noindex":
         issues.append(_issue(row, "other", "noindex_page_receives_organic_traffic", "high", 0.96, _recommendation("noindex_page_receives_organic_traffic")))
+    if _referring_domains_dropped(row):
+        issues.append(_issue(row, "other", "no_of_referring_domains_dropped", "low", 0.82, _recommendation("no_of_referring_domains_dropped")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1280,6 +1284,7 @@ def _recommendation(issue_type: str) -> str:
         "double_slash_in_url": "Normalize the URL path to remove duplicate slashes and update internal links, canonicals, and sitemap entries to the clean URL.",
         "more_than_three_parameters_in_url": "Review parameterized URLs and consolidate, canonicalize, or block low-value combinations that create crawl duplication.",
         "noindex_page_receives_organic_traffic": "Remove noindex if the page should keep receiving organic traffic, or consolidate the traffic to an indexable canonical replacement.",
+        "no_of_referring_domains_dropped": "Review lost referring domains and recover important links or replace them with stronger internal and external authority signals.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
@@ -1753,6 +1758,12 @@ def _url_parameter_count(url: str) -> int:
     return len(parse_qsl(query, keep_blank_values=True))
 
 
+def _referring_domains_dropped(row: dict) -> bool:
+    previous = _safe_int(row.get("previous_referring_domains"))
+    current = _safe_int(row.get("referring_domains"))
+    return previous > 0 and current < previous
+
+
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for row in (payload or {}).get("top_pages") or []:
@@ -1764,6 +1775,11 @@ def _search_lookup(payload: dict | None) -> dict[str, dict]:
             "keywords": row.get("keywords", 0),
             "top_keyword": row.get("top_keyword", ""),
             "serp_title": row.get("top_keyword_title") or row.get("serp_title") or "",
+            "referring_domains": row.get("referring_domains", row.get("refdomains", 0)),
+            "previous_referring_domains": row.get(
+                "previous_referring_domains",
+                row.get("referring_domains_before", row.get("refdomains_before", 0)),
+            ),
         }
     return out
 

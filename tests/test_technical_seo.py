@@ -669,6 +669,55 @@ def test_technical_seo_model_flags_noindex_page_receives_organic_traffic() -> No
     assert "noindex_page_receives_organic_traffic" not in no_traffic_issue_types
 
 
+def test_technical_seo_model_flags_referring_domains_dropped() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/dropped",
+                title="Dropped",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/stable",
+                title="Stable",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/dropped",
+                    "traffic": 40,
+                    "referring_domains": 7,
+                    "previous_referring_domains": 12,
+                },
+                {
+                    "matched_url": "https://example.com/stable",
+                    "traffic": 40,
+                    "referring_domains": 12,
+                    "previous_referring_domains": 12,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "no_of_referring_domains_dropped"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/dropped"
+    assert issues[0]["issue_name"] == "No. of referring domains dropped"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/dropped"]["referring_domains"] == 7
+    assert by_url["https://example.com/dropped"]["previous_referring_domains"] == 12
+    stable_issue_types = {row["issue_type"] for row in payload["issues"] if row["url"] == "https://example.com/stable"}
+    assert "no_of_referring_domains_dropped" not in stable_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],
