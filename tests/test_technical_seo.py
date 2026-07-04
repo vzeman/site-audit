@@ -789,6 +789,45 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_meta_de
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_indexable_pages_with_meta_description_too_long() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/long", title="Long", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/length", title="Length", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/long",
+                    "title": "Long",
+                    "description_length": 180,
+                    "issues": ["long_description"],
+                },
+                {
+                    "url": "https://example.com/length",
+                    "title": "Length",
+                    "description_length": 170,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "description_length": 120,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_meta_description_too_long"]
+    assert {row["url"] for row in issues} == {"https://example.com/long", "https://example.com/length"}
+    assert all(row["issue_name"] == "Meta description too long" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
