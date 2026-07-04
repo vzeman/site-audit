@@ -235,6 +235,9 @@ def _merge_page_signals(
         row["inp_rating"] = perf.get("inp_rating", perf.get("cwv_inp_rating", ""))
         row["lcp_score"] = _safe_float(perf.get("lcp_score", perf.get("lcp", perf.get("largest_contentful_paint", 0.0))))
         row["lcp_rating"] = perf.get("lcp_rating", perf.get("cwv_lcp_rating", ""))
+        row["load_time_ms"] = _safe_float(perf.get("load_time_ms", perf.get("page_load_time_ms", 0.0)))
+        row["response_time_ms"] = _safe_float(perf.get("response_time_ms", perf.get("fetch_time_ms", 0.0)))
+        row["ttfb_ms"] = _safe_float(perf.get("ttfb_ms", perf.get("time_to_first_byte_ms", 0.0)))
         row["html_weight_bytes"] = perf.get("html_weight_bytes", "")
         row["estimated_weight_bytes"] = perf.get("estimated_weight_bytes", "")
         row["weight_bucket"] = perf.get("weight_bucket", "")
@@ -681,6 +684,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "pages_with_poor_inp", "medium", 0.86, _recommendation("pages_with_poor_inp")))
     if _poor_cwv_metric(row, "lcp", 4000.0):
         issues.append(_issue(row, "performance", "pages_with_poor_lcp", "medium", 0.86, _recommendation("pages_with_poor_lcp")))
+    if _slow_page(row):
+        issues.append(_issue(row, "performance", "slow_page", "medium", 0.84, _recommendation("slow_page")))
     return issues
 
 
@@ -808,6 +813,7 @@ def _recommendation(issue_type: str) -> str:
         "pages_with_poor_fid": "Reduce main-thread blocking work and third-party JavaScript so pages respond quickly to first input.",
         "pages_with_poor_inp": "Reduce long tasks and expensive interaction handlers so the page responds quickly throughout the visit.",
         "pages_with_poor_lcp": "Improve largest contentful paint by optimizing the hero asset, server response, render-blocking resources, and critical CSS.",
+        "slow_page": "Improve server response, reduce blocking resources, and optimize page weight so the page loads faster.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -1075,6 +1081,14 @@ def _poor_cwv_metric(row: dict, metric: str, poor_threshold: float) -> bool:
     if rating in {"good", "needs_improvement"}:
         return False
     return _safe_float(row.get(f"{metric}_score")) > poor_threshold
+
+
+def _slow_page(row: dict) -> bool:
+    return (
+        _safe_float(row.get("load_time_ms")) > 3000.0
+        or _safe_float(row.get("response_time_ms")) > 3000.0
+        or _safe_float(row.get("ttfb_ms")) > 1800.0
+    )
 
 
 def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:

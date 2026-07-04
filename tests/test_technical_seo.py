@@ -3365,6 +3365,36 @@ def test_technical_seo_model_flags_pages_with_poor_lcp() -> None:
     assert page["lcp_score"] == 4500
 
 
+def test_technical_seo_model_flags_slow_page() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/load", title="Load", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/ttfb", title="TTFB", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {"url": "https://example.com/load", "status": 200, "load_time_ms": 3500},
+                {"url": "https://example.com/ttfb", "status": 200, "ttfb_ms": 1900},
+                {"url": "https://example.com/clean", "status": 200, "load_time_ms": 1800, "ttfb_ms": 400},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "slow_page"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/load",
+        "https://example.com/ttfb",
+    }
+    assert all(row["issue_name"] == "Slow page" for row in issues)
+    assert all(row["category"] == "performance" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+    assert all(row["severity"] == "medium" for row in issues)
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/load")
+    assert page["load_time_ms"] == 3500
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
