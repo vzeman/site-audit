@@ -269,6 +269,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "noindex_page_became_indexable", "low", 0.84, _recommendation("noindex_page_became_indexable")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
+    if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
+        issues.append(_issue(row, "links", "indexable_orphan_page_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_orphan_page_has_no_incoming_internal_links")))
     if status == "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_https_page_has_internal_links_to_http", "high", 0.94, _recommendation("indexable_https_page_has_internal_links_to_http")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
@@ -341,6 +343,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_became_non_indexable": "Review the before/after snapshot and restore indexability if this URL should remain eligible for search.",
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
+        "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "indexable_https_page_has_internal_links_to_http": "Update internal links on this HTTPS page so they point directly to HTTPS URLs.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",

@@ -411,6 +411,41 @@ def test_technical_seo_model_flags_self_canonical_with_no_incoming_links() -> No
     assert payload["pages"][0]["in_degree"] == 0
 
 
+def test_technical_seo_model_flags_indexable_orphan_pages() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/orphan", title="Orphan", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/linked", title="Linked", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/non-indexable-orphan",
+                    "title": "Noindex Orphan",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {"url": "https://example.com/orphan", "in_degree": 0, "out_degree": 1},
+                {"url": "https://example.com/linked", "in_degree": 2, "out_degree": 1},
+                {"url": "https://example.com/non-indexable-orphan", "in_degree": 0, "out_degree": 1},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_orphan_page_has_no_incoming_internal_links"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/orphan"
+    assert issues[0]["issue_name"] == "Orphan page (has no incoming internal links)"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_https_pages_linking_to_http() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
