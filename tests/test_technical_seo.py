@@ -3269,6 +3269,38 @@ def test_technical_seo_model_flags_pages_with_poor_cls() -> None:
     assert page["cls_score"] == 0.31
 
 
+def test_technical_seo_model_flags_pages_with_poor_fid() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/high", title="High", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/rating", title="Rating", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/needs", title="Needs", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/good", title="Good", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {"url": "https://example.com/high", "status": 200, "fid_score": 350},
+                {"url": "https://example.com/rating", "status": 200, "fid_rating": "poor", "fid_score": 50},
+                {"url": "https://example.com/needs", "status": 200, "fid_score": 220},
+                {"url": "https://example.com/good", "status": 200, "fid_rating": "good", "fid_score": 500},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "pages_with_poor_fid"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/high",
+        "https://example.com/rating",
+    }
+    assert all(row["issue_name"] == "Pages with poor FID" for row in issues)
+    assert all(row["category"] == "performance" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+    assert all(row["severity"] == "medium" for row in issues)
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/high")
+    assert page["fid_score"] == 350
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
