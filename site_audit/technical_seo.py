@@ -79,6 +79,7 @@ def build_technical_seo(
     duplicates = _duplicate_lookup(duplicate_rows or [])
     rows = list(by_url.values())
     _apply_duplicate_signals(rows, duplicates)
+    _apply_hreflang_target_signals(rows)
     issues = []
     for row in rows:
         issues.extend(_issues_for_row(row))
@@ -599,6 +600,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "hreflang_annotation_invalid", "high", 0.9, _recommendation("hreflang_annotation_invalid")))
     if _hreflang_html_lang_mismatch(row):
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
+    if row.get("hreflang_non_canonical_targets"):
+        issues.append(_issue(row, "localization", "hreflang_to_non_canonical", "high", 0.9, _recommendation("hreflang_to_non_canonical")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -713,6 +716,7 @@ def _recommendation(issue_type: str) -> str:
         "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
         "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
+        "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -800,6 +804,27 @@ def _apply_duplicate_signals(rows: list[dict], duplicates: dict[str, dict]) -> N
                 consolidates = True
                 break
         row["duplicate_without_canonical"] = not consolidates
+
+
+def _apply_hreflang_target_signals(rows: list[dict]) -> None:
+    rows_by_normalized_url = {_normalize_url(row.get("url", "")): row for row in rows if row.get("url")}
+    for row in rows:
+        non_canonical_targets = []
+        for item in row.get("hreflang") or []:
+            href = item.get("href", "")
+            target = rows_by_normalized_url.get(_normalize_url(href))
+            if not target:
+                continue
+            target_url = _normalize_url(target.get("url", ""))
+            target_canonical = _normalize_url(target.get("canonical_url", ""))
+            if target_url and target_canonical and target_url != target_canonical:
+                non_canonical_targets.append({
+                    "hreflang": item.get("hreflang", ""),
+                    "href": href,
+                    "target_canonical_url": target.get("canonical_url", ""),
+                })
+        if non_canonical_targets:
+            row["hreflang_non_canonical_targets"] = non_canonical_targets
 
 
 def _hreflang_html_lang_mismatch(row: dict) -> bool:

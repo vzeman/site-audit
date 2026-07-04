@@ -2255,6 +2255,76 @@ def test_technical_seo_model_flags_invalid_hreflang_annotations() -> None:
     assert page["invalid_hreflang_annotations"] == [{"hreflang": "en-US", "href": "/relative", "reasons": ["invalid_href"]}]
 
 
+def test_technical_seo_model_flags_hreflang_to_non_canonical() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/non-canonical", title="Non Canonical", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/canonical", title="Canonical", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/ok-alt", title="OK Alt", section="", word_count=250, language="cs"),
+        SimpleNamespace(url="https://example.com/clean-source", title="Clean Source", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/source",
+                    "title": "Source",
+                    "canonical_url": "https://example.com/source",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/non-canonical"},
+                        {"hreflang": "de", "href": "https://example.com/not-crawled"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/non-canonical",
+                    "title": "Non Canonical",
+                    "canonical_url": "https://example.com/canonical",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/canonical",
+                    "title": "Canonical",
+                    "canonical_url": "https://example.com/canonical",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok-alt",
+                    "title": "OK Alt",
+                    "canonical_url": "https://example.com/ok-alt",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-source",
+                    "title": "Clean Source",
+                    "canonical_url": "https://example.com/clean-source",
+                    "hreflang": [{"hreflang": "cs", "href": "https://example.com/ok-alt"}],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "hreflang_to_non_canonical"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Hreflang to non-canonical"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Error"
+    source = next(row for row in payload["pages"] if row["url"] == "https://example.com/source")
+    assert source["hreflang_non_canonical_targets"] == [
+        {
+            "hreflang": "sk",
+            "href": "https://example.com/non-canonical",
+            "target_canonical_url": "https://example.com/canonical",
+        }
+    ]
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
