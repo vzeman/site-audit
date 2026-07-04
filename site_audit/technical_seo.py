@@ -235,6 +235,8 @@ def _issues_for_row(row: dict) -> list[dict]:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
         elif issue_type == "non_canonical_page_specified_as_canonical_one":
             issues.append(_issue(row, "indexability", issue_type, "medium", 0.9, _recommendation(issue_type)))
+        elif issue_type == "canonical_from_http_to_https":
+            issues.append(_issue(row, "indexability", issue_type, "low", 0.86, _recommendation(issue_type)))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -299,6 +301,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_points_to_5xx": "Fix the canonical target server error or update the canonical tag to a stable live 2xx URL.",
         "canonical_points_to_redirect": "Change the canonical tag to the final destination URL and avoid canonicalizing through redirects.",
         "non_canonical_page_specified_as_canonical_one": "Update the canonical tag to point directly at the final self-canonical URL.",
+        "canonical_from_http_to_https": "Use the HTTPS URL as the crawled and internally linked version so the canonical does not need to consolidate from HTTP.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",

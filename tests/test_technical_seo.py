@@ -264,6 +264,27 @@ def test_technical_seo_model_flags_non_canonical_target() -> None:
     assert payload["pages"][0]["canonical_target_canonical_url"] == "https://example.com/final"
 
 
+def test_technical_seo_model_flags_canonical_from_http_to_https() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="http://example.com/page", title="HTTP Page", section="", word_count=100, language="en")],
+        canonical_consistency={
+            "rows": [
+                {
+                    "url": "http://example.com/page",
+                    "canonical_url": "https://example.com/page",
+                    "issues": ["canonical_from_http_to_https"],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "canonical_from_http_to_https"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Canonical from HTTP to HTTPS"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

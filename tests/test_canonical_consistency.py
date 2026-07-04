@@ -217,6 +217,37 @@ def test_canonical_consistency_flags_non_canonical_target() -> None:
     assert payload["summary"]["non_canonical_page_specified_as_canonical_one"] == 1
 
 
+def test_canonical_consistency_flags_canonical_from_http_to_https() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "http://example.com/page",
+                "title": "HTTP Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/page",
+            },
+            {
+                "url": "https://example.com/page",
+                "title": "HTTPS Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/page",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "http://example.com/page", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/page", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_from_http_to_https" in by_url["http://example.com/page"]["issues"]
+    assert payload["summary"]["canonical_from_http_to_https"] == 1
+
+
 def test_canonical_consistency_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_pages": 1},
