@@ -994,6 +994,15 @@ def test_technical_seo_model_flags_indexable_pages_with_mixed_nofollow_and_dofol
     assert issues[0]["url"] == "https://example.com/mixed"
     assert issues[0]["issue_name"] == "Page has nofollow and dofollow incoming internal links"
     assert issues[0]["importance"] == "Notice"
+    not_indexable_issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "not_indexable_page_has_nofollow_and_dofollow_incoming_internal_links"
+    ]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/non-indexable"
+    assert not_indexable_issues[0]["issue_name"] == "Page has nofollow and dofollow incoming internal links"
+    assert not_indexable_issues[0]["importance"] == "Notice"
 
 
 def test_technical_seo_model_flags_indexable_pages_with_nofollow_outgoing_internal_links() -> None:

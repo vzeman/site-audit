@@ -329,6 +329,12 @@ def _issues_for_row(row: dict) -> list[dict]:
         and _safe_int(row.get("incoming_dofollow_internal_link_count")) > 0
     ):
         issues.append(_issue(row, "links", "indexable_page_has_nofollow_and_dofollow_incoming_internal_links", "low", 0.84, _recommendation("indexable_page_has_nofollow_and_dofollow_incoming_internal_links")))
+    if (
+        status != "indexable"
+        and _safe_int(row.get("incoming_nofollow_internal_link_count")) > 0
+        and _safe_int(row.get("incoming_dofollow_internal_link_count")) > 0
+    ):
+        issues.append(_issue(row, "links", "not_indexable_page_has_nofollow_and_dofollow_incoming_internal_links", "low", 0.82, _recommendation("not_indexable_page_has_nofollow_and_dofollow_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("outgoing_nofollow_internal_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_page_has_nofollow_outgoing_internal_links", "low", 0.84, _recommendation("indexable_page_has_nofollow_outgoing_internal_links")))
     if status == "indexable" and _safe_int(row.get("incoming_dofollow_internal_link_count")) == 1:
@@ -418,6 +424,7 @@ def _recommendation(issue_type: str) -> str:
         "not_indexable_page_has_no_outgoing_links": "Review whether this non-indexable page should remain a crawl dead end; add relevant internal links if it remains useful.",
         "indexable_page_has_nofollow_incoming_internal_links_only": "Add at least one dofollow internal link to this page or remove nofollow from appropriate incoming internal links.",
         "indexable_page_has_nofollow_and_dofollow_incoming_internal_links": "Review mixed incoming internal link directives and keep nofollow only where the link should not pass crawl signals.",
+        "not_indexable_page_has_nofollow_and_dofollow_incoming_internal_links": "Review mixed incoming internal link directives to this non-indexable page and keep nofollow only where intentional.",
         "indexable_page_has_nofollow_outgoing_internal_links": "Review outgoing nofollow internal links and remove nofollow when internal destinations should receive crawl signals.",
         "indexable_page_has_only_one_dofollow_incoming_internal_link": "Add more relevant dofollow internal links so this indexable page is not dependent on a single crawl path.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
