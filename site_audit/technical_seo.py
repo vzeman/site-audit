@@ -767,6 +767,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "images", "https_page_links_to_http_image", "medium", 0.88, _recommendation("https_page_links_to_http_image")))
     if _safe_int(row.get("redirected_image_count")) > 0:
         issues.append(_issue(row, "images", "image_redirects", "medium", 0.88, _recommendation("image_redirects")))
+    if _safe_int(row.get("redirected_image_count")) > 0:
+        issues.append(_issue(row, "images", "page_has_redirected_image", "medium", 0.86, _recommendation("page_has_redirected_image")))
     if _safe_int(row.get("missing_alt_text_count")) > 0:
         issues.append(_issue(row, "images", "missing_alt_text", "medium", 0.88, _recommendation("missing_alt_text")))
     return issues
@@ -904,6 +906,7 @@ def _recommendation(issue_type: str) -> str:
         "image_file_size_too_large": "Compress, resize, or replace oversized image assets and serve appropriately sized responsive variants.",
         "https_page_links_to_http_image": "Update image URLs on HTTPS pages so every image is loaded over HTTPS.",
         "image_redirects": "Update image references so they point directly to the final image URL instead of a redirecting URL.",
+        "page_has_redirected_image": "Update redirected image references on the page so each image points directly to its final URL.",
         "missing_alt_text": "Add descriptive alt text to meaningful images and mark decorative images with empty alt attributes.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
