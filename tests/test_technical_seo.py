@@ -2325,6 +2325,116 @@ def test_technical_seo_model_flags_hreflang_to_non_canonical() -> None:
     ]
 
 
+def test_technical_seo_model_flags_hreflang_to_redirect_or_broken_page() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/broken", title="Broken", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/redirecting", title="Redirecting", section="", word_count=250, language="cs"),
+        SimpleNamespace(url="https://example.com/final", title="Final", section="", word_count=250, language="cs"),
+        SimpleNamespace(url="https://example.com/ok-alt", title="OK Alt", section="", word_count=250, language="de"),
+        SimpleNamespace(url="https://example.com/clean-source", title="Clean Source", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/source",
+                    "title": "Source",
+                    "canonical_url": "https://example.com/source",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/broken"},
+                        {"hreflang": "cs", "href": "https://example.com/redirecting"},
+                        {"hreflang": "de", "href": "https://example.com/ok-alt"},
+                        {"hreflang": "pl", "href": "https://example.com/not-crawled"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/broken",
+                    "title": "Broken",
+                    "canonical_url": "https://example.com/broken",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/redirecting",
+                    "title": "Redirecting",
+                    "canonical_url": "https://example.com/redirecting",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "canonical_url": "https://example.com/final",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok-alt",
+                    "title": "OK Alt",
+                    "canonical_url": "https://example.com/ok-alt",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-source",
+                    "title": "Clean Source",
+                    "canonical_url": "https://example.com/clean-source",
+                    "hreflang": [{"hreflang": "de", "href": "https://example.com/ok-alt"}],
+                    "issues": [],
+                },
+            ]
+        },
+        performance={
+            "per_page": [
+                {"url": "https://example.com/broken", "status": 404},
+                {"url": "https://example.com/redirecting", "status": 200},
+                {"url": "https://example.com/ok-alt", "status": 200},
+            ]
+        },
+        indexability={
+            "per_page": [
+                {
+                    "url": "https://example.com/redirecting",
+                    "requested_url": "https://example.com/redirecting",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_chain": ["https://example.com/redirecting", "https://example.com/final"],
+                    "redirect_hop_count": 1,
+                    "redirect_status_codes": [301],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "hreflang_to_redirect_or_broken_page"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Hreflang to redirect or broken page"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Error"
+    source = next(row for row in payload["pages"] if row["url"] == "https://example.com/source")
+    assert source["hreflang_redirect_or_broken_targets"] == [
+        {
+            "hreflang": "sk",
+            "href": "https://example.com/broken",
+            "http_status": 404,
+            "redirect_target_url": "",
+            "issue": "broken",
+        },
+        {
+            "hreflang": "cs",
+            "href": "https://example.com/redirecting",
+            "http_status": 200,
+            "redirect_target_url": "https://example.com/final",
+            "issue": "redirect",
+        },
+    ]
+    clean = next(row for row in payload["pages"] if row["url"] == "https://example.com/clean-source")
+    assert "hreflang_redirect_or_broken_targets" not in clean
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

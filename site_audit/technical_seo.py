@@ -602,6 +602,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("hreflang_non_canonical_targets"):
         issues.append(_issue(row, "localization", "hreflang_to_non_canonical", "high", 0.9, _recommendation("hreflang_to_non_canonical")))
+    if row.get("hreflang_redirect_or_broken_targets"):
+        issues.append(_issue(row, "localization", "hreflang_to_redirect_or_broken_page", "high", 0.9, _recommendation("hreflang_to_redirect_or_broken_page")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -717,6 +719,7 @@ def _recommendation(issue_type: str) -> str:
         "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
+        "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -810,6 +813,7 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
     rows_by_normalized_url = {_normalize_url(row.get("url", "")): row for row in rows if row.get("url")}
     for row in rows:
         non_canonical_targets = []
+        redirect_or_broken_targets = []
         for item in row.get("hreflang") or []:
             href = item.get("href", "")
             target = rows_by_normalized_url.get(_normalize_url(href))
@@ -823,8 +827,21 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
                     "href": href,
                     "target_canonical_url": target.get("canonical_url", ""),
                 })
+            status = _safe_int(target.get("http_status"))
+            is_redirect = (300 <= status < 400) or _is_redirected_fetch(target)
+            is_broken = status >= 400
+            if is_redirect or is_broken:
+                redirect_or_broken_targets.append({
+                    "hreflang": item.get("hreflang", ""),
+                    "href": href,
+                    "http_status": status,
+                    "redirect_target_url": target.get("redirect_target_url", ""),
+                    "issue": "redirect" if is_redirect else "broken",
+                })
         if non_canonical_targets:
             row["hreflang_non_canonical_targets"] = non_canonical_targets
+        if redirect_or_broken_targets:
+            row["hreflang_redirect_or_broken_targets"] = redirect_or_broken_targets
 
 
 def _hreflang_html_lang_mismatch(row: dict) -> bool:
