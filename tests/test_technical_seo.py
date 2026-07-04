@@ -1165,6 +1165,50 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_meta_de
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_missing_or_empty_meta_description() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=250, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "Noindex Missing",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "meta_description_tag_count": 0,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Noindex OK",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "meta_description_tag_count": 1,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/indexable",
+                    "title": "Indexable",
+                    "meta_description_tag_count": 0,
+                    "issues": ["missing_description"],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_meta_description_tag_missing_or_empty"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex-missing"
+    assert issues[0]["issue_name"] == "Meta description tag missing or empty"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_meta_description_too_long() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/long", title="Long", section="", word_count=250, language="en"),

@@ -399,6 +399,14 @@ def _issues_for_row(row: dict) -> list[dict]:
     ):
         issues.append(_issue(row, "content", "indexable_meta_description_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_meta_description_tag_missing_or_empty")))
     if (
+        status != "indexable"
+        and (
+            "missing_description" in (row.get("metadata_issues") or [])
+            or ("meta_description_tag_count" in row and _safe_int(row.get("meta_description_tag_count")) == 0)
+        )
+    ):
+        issues.append(_issue(row, "content", "not_indexable_meta_description_tag_missing_or_empty", "medium", 0.86, _recommendation("not_indexable_meta_description_tag_missing_or_empty")))
+    if (
         status == "indexable"
         and (
             "long_description" in (row.get("metadata_issues") or [])
@@ -593,6 +601,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_word_count_changed": "Review the word count change and confirm the page still satisfies its search intent.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
+        "not_indexable_meta_description_tag_missing_or_empty": "Review whether the non-indexable page still needs a meta description; add one if it appears in crawl paths, previews, or future indexing plans.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
         "indexable_meta_description_too_short": "Expand the meta description so it communicates the page value in search snippets.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
