@@ -67,6 +67,7 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["pages_with_issues"] == 2
     assert report["summary"]["images_missing_alt"] == 1
     assert report["summary"]["broken_images"] == 0
+    assert report["summary"]["large_images"] == 0
     assert report["summary"]["decorative_images"] == 1
     assert report["summary"]["linked_images_empty_alt"] == 1
     assert report["summary"]["images_filename_alt"] == 1
@@ -92,6 +93,23 @@ def test_media_accessibility_payload_flags_broken_images() -> None:
     broken_rows = [row for row in report["media_with_issues"] if "image_broken" in row["issues"]]
     assert [row["src"] for row in broken_rows] == ["/broken.jpg", "/flagged.jpg"]
     assert broken_rows[0]["http_status"] == 404
+
+
+def test_media_accessibility_payload_flags_large_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "/large.jpg", "alt_present": True, "alt": "Large", "size_bytes": 1_400_000},
+            {"type": "image", "src": "/also-large.jpg", "alt_present": True, "alt": "Large", "content_length_bytes": 1_100_000},
+            {"type": "image", "src": "/ok.jpg", "alt_present": True, "alt": "OK", "size_bytes": 800_000},
+        ]),
+    ]))
+
+    assert report["summary"]["large_images"] == 2
+    assert report["issues_by_type"]["image_file_size_too_large"] == 2
+    assert report["per_page"][0]["issues"]["image_file_size_too_large"] == 2
+    large_rows = [row for row in report["media_with_issues"] if "image_file_size_too_large" in row["issues"]]
+    assert [row["src"] for row in large_rows] == ["/large.jpg", "/also-large.jpg"]
+    assert large_rows[0]["size_bytes"] == 1_400_000
 
 
 def test_compare_leaderboard_includes_media_accessibility_metrics(tmp_path: Path) -> None:

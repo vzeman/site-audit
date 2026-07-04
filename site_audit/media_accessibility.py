@@ -21,6 +21,7 @@ class MediaAccessibilityReport:
 
 
 _GENERIC_ALT_RE = re.compile(r"^(?:image|img|photo|picture|graphic|icon|logo|banner)(?:\s+\d+)?$", re.I)
+_LARGE_IMAGE_BYTES = 1_000_000
 
 
 def _image_filename(src: str) -> str:
@@ -40,8 +41,11 @@ def _image_issues(item: dict) -> list[str]:
     alt_present = bool(item.get("alt_present"))
     decorative = _is_decorative(item)
     status = _safe_int(item.get("http_status", item.get("status", 0)))
+    size_bytes = _safe_int(item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", 0))))
     if item.get("broken") or status >= 400:
         issues.append("image_broken")
+    if size_bytes > _LARGE_IMAGE_BYTES:
+        issues.append("image_file_size_too_large")
     if not alt_present and not decorative:
         issues.append("image_missing_alt")
     if alt_present and not alt and item.get("in_link"):
@@ -112,6 +116,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
                 "type": media_type,
                 "src": item.get("src", ""),
                 "http_status": item.get("http_status", item.get("status", "")),
+                "size_bytes": item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", ""))),
                 "alt": item.get("alt", ""),
                 "issues": issues,
             })
@@ -139,6 +144,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
         "total_images": media_type_counts.get("image", 0),
         "decorative_images": decorative_images,
         "broken_images": issues_by_type.get("image_broken", 0),
+        "large_images": issues_by_type.get("image_file_size_too_large", 0),
         "images_missing_alt": issues_by_type.get("image_missing_alt", 0),
         "linked_images_empty_alt": issues_by_type.get("linked_image_empty_alt", 0),
         "images_long_alt": issues_by_type.get("image_long_alt", 0),

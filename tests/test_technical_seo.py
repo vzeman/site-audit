@@ -3504,6 +3504,52 @@ def test_technical_seo_model_flags_image_broken() -> None:
     ]
 
 
+def test_technical_seo_model_flags_image_file_size_too_large() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        media_accessibility={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"image_file_size_too_large": 2}, "issue_count": 2},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "media_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "image",
+                    "src": "https://cdn.example.com/large.jpg",
+                    "size_bytes": 1_400_000,
+                    "issues": ["image_file_size_too_large"],
+                },
+                {
+                    "url": "https://example.com/bad",
+                    "type": "image",
+                    "src": "https://cdn.example.com/huge.png",
+                    "size_bytes": 2_200_000,
+                    "issues": ["image_file_size_too_large"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "image_file_size_too_large"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Image file size too large"
+    assert issues[0]["category"] == "images"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["large_image_count"] == 2
+    assert page["large_images"] == [
+        {"src": "https://cdn.example.com/large.jpg", "size_bytes": 1_400_000},
+        {"src": "https://cdn.example.com/huge.png", "size_bytes": 2_200_000},
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

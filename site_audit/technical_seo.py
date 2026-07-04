@@ -353,6 +353,7 @@ def _merge_page_signals(
         media_issue_counts = dict(media.get("issues") or {})
         row["media_issue_counts"] = media_issue_counts
         row["broken_image_count"] = _safe_int(media_issue_counts.get("image_broken"))
+        row["large_image_count"] = _safe_int(media_issue_counts.get("image_file_size_too_large"))
     if media_issues:
         broken_images = [
             {
@@ -364,6 +365,16 @@ def _merge_page_signals(
         if broken_images:
             row["broken_images"] = broken_images
             row["broken_image_count"] = len(broken_images)
+        large_images = [
+            {
+                "src": issue.get("src", ""),
+                "size_bytes": _safe_int(issue.get("size_bytes")),
+            }
+            for issue in (media_issues.get("image_file_size_too_large") or [])
+        ]
+        if large_images:
+            row["large_images"] = large_images
+            row["large_image_count"] = len(large_images)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -716,6 +727,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "viewport_not_set", "medium", 0.86, _recommendation("viewport_not_set")))
     if _safe_int(row.get("broken_image_count")) > 0:
         issues.append(_issue(row, "images", "image_broken", "high", 0.94, _recommendation("image_broken")))
+    if _safe_int(row.get("large_image_count")) > 0:
+        issues.append(_issue(row, "images", "image_file_size_too_large", "high", 0.9, _recommendation("image_file_size_too_large")))
     return issues
 
 
@@ -847,6 +860,7 @@ def _recommendation(issue_type: str) -> str:
         "tap_targets_too_small_or_too_close_together": "Increase interactive element dimensions and spacing so tap targets are at least 48px where possible.",
         "viewport_not_set": "Add a responsive viewport meta tag, for example width=device-width, initial-scale=1.",
         "image_broken": "Restore the image URL, update it to a live image asset, or remove the broken image reference.",
+        "image_file_size_too_large": "Compress, resize, or replace oversized image assets and serve appropriately sized responsive variants.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
