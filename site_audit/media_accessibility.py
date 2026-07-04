@@ -35,17 +35,20 @@ def _is_decorative(item: dict) -> bool:
     return bool(item.get("aria_hidden")) or role in {"presentation", "none"}
 
 
-def _image_issues(item: dict) -> list[str]:
+def _image_issues(item: dict, page_url: str = "") -> list[str]:
     issues: list[str] = []
     alt = (item.get("alt") or "").strip()
     alt_present = bool(item.get("alt_present"))
     decorative = _is_decorative(item)
     status = _safe_int(item.get("http_status", item.get("status", 0)))
     size_bytes = _safe_int(item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", 0))))
+    src = str(item.get("src") or "")
     if item.get("broken") or status >= 400:
         issues.append("image_broken")
     if size_bytes > _LARGE_IMAGE_BYTES:
         issues.append("image_file_size_too_large")
+    if urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
+        issues.append("https_page_links_to_http_image")
     if not alt_present and not decorative:
         issues.append("image_missing_alt")
     if alt_present and not alt and item.get("in_link"):
@@ -71,10 +74,10 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _media_issues(item: dict) -> list[str]:
+def _media_issues(item: dict, page_url: str = "") -> list[str]:
     media_type = item.get("type")
     if media_type == "image":
-        return _image_issues(item)
+        return _image_issues(item, page_url)
     if media_type == "video" and not item.get("has_captions"):
         return ["video_missing_captions"]
     if media_type == "audio" and not item.get("has_transcript_hint"):
@@ -104,7 +107,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
             media_type_counts[media_type] += 1
             if media_type == "image" and _is_decorative(item):
                 decorative_images += 1
-            issues = _media_issues(item)
+            issues = _media_issues(item, page.url)
             if not issues:
                 continue
             page_issues.update(issues)
@@ -145,6 +148,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
         "decorative_images": decorative_images,
         "broken_images": issues_by_type.get("image_broken", 0),
         "large_images": issues_by_type.get("image_file_size_too_large", 0),
+        "https_pages_linking_to_http_images": issues_by_type.get("https_page_links_to_http_image", 0),
         "images_missing_alt": issues_by_type.get("image_missing_alt", 0),
         "linked_images_empty_alt": issues_by_type.get("linked_image_empty_alt", 0),
         "images_long_alt": issues_by_type.get("image_long_alt", 0),

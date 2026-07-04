@@ -3585,6 +3585,41 @@ def test_technical_seo_model_flags_page_has_broken_image() -> None:
     assert page["broken_image_count"] == 1
 
 
+def test_technical_seo_model_flags_https_page_links_to_http_image() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        media_accessibility={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"https_page_links_to_http_image": 1}, "issue_count": 1},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "media_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "image",
+                    "src": "http://cdn.example.com/insecure.jpg",
+                    "issues": ["https_page_links_to_http_image"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "https_page_links_to_http_image"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "HTTPS page links to HTTP image"
+    assert issues[0]["category"] == "images"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["http_image_count"] == 1
+    assert page["http_images"] == [{"src": "http://cdn.example.com/insecure.jpg"}]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

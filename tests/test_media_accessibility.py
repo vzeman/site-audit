@@ -68,6 +68,7 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["images_missing_alt"] == 1
     assert report["summary"]["broken_images"] == 0
     assert report["summary"]["large_images"] == 0
+    assert report["summary"]["https_pages_linking_to_http_images"] == 0
     assert report["summary"]["decorative_images"] == 1
     assert report["summary"]["linked_images_empty_alt"] == 1
     assert report["summary"]["images_filename_alt"] == 1
@@ -110,6 +111,25 @@ def test_media_accessibility_payload_flags_large_images() -> None:
     large_rows = [row for row in report["media_with_issues"] if "image_file_size_too_large" in row["issues"]]
     assert [row["src"] for row in large_rows] == ["/large.jpg", "/also-large.jpg"]
     assert large_rows[0]["size_bytes"] == 1_400_000
+
+
+def test_media_accessibility_payload_flags_https_pages_linking_to_http_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "http://cdn.example.com/insecure.jpg", "alt_present": True, "alt": "Insecure"},
+            {"type": "image", "src": "https://cdn.example.com/secure.jpg", "alt_present": True, "alt": "Secure"},
+        ]),
+        _page("http://example.com/b", [
+            {"type": "image", "src": "http://cdn.example.com/http-page.jpg", "alt_present": True, "alt": "HTTP page"},
+        ]),
+    ]))
+
+    assert report["summary"]["https_pages_linking_to_http_images"] == 1
+    assert report["issues_by_type"]["https_page_links_to_http_image"] == 1
+    insecure_rows = [row for row in report["media_with_issues"] if "https_page_links_to_http_image" in row["issues"]]
+    assert len(insecure_rows) == 1
+    assert insecure_rows[0]["url"] == "https://example.com/a"
+    assert insecure_rows[0]["src"] == "http://cdn.example.com/insecure.jpg"
 
 
 def test_compare_leaderboard_includes_media_accessibility_metrics(tmp_path: Path) -> None:
