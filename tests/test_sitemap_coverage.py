@@ -143,6 +143,30 @@ def test_sitemap_coverage_flags_4xx_page_in_sitemap() -> None:
     assert "4XX page" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_5xx_page_in_sitemap() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/error",
+                "source_sitemaps": ["https://example.com/sitemap.xml"],
+                "lastmod": "2026-05-01",
+            },
+        ],
+        [_Fetched("https://example.com/error", status=503)],
+        [{"url": "https://example.com/error", "status": "skipped", "reason": "non_2xx_status", "http_status": 503}],
+        {"per_page": [{"url": "https://example.com/error", "indexability_status": "not_indexable", "issues": []}]},
+    )
+
+    assert payload["summary"]["5xx_page_in_sitemap"] == 1
+    row = payload["rows"][0]
+    assert row["url"] == "https://example.com/error"
+    assert row["http_status"] == 503
+    assert row["sitemap_issue_types"] == ["5xx_page_in_sitemap"]
+    issues = [row for row in payload["issues"] if row["issue"] == "5xx_page_in_sitemap"]
+    assert len(issues) == 1
+    assert "server error" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},
