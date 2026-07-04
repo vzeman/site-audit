@@ -550,6 +550,40 @@ def test_technical_seo_model_flags_4xx_page_receives_organic_traffic() -> None:
     assert "4xx_page_receives_organic_traffic" not in no_traffic_issue_types
 
 
+def test_technical_seo_model_flags_double_slash_in_url() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/category//item",
+                title="Double Slash",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/category/item",
+                title="Clean",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ]
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "double_slash_in_url"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/category//item"
+    assert issues[0]["issue_name"] == "Double slash in URL"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    clean_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/category/item"
+    }
+    assert "double_slash_in_url" not in clean_issue_types
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],
