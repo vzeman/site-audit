@@ -941,6 +941,45 @@ def test_technical_seo_model_flags_indexable_page_and_serp_title_mismatch() -> N
     assert page["serp_title"] == "Cheap Tablets - Example"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_high_ai_content_levels() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/high-level", title="High Level", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/high-score", title="High Score", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/medium", title="Medium", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        content_quality={
+            "per_page": [
+                {"url": "https://example.com/high-level", "ai_content_level": "high", "ai_content_score": 0.6},
+                {"url": "https://example.com/high-score", "ai_content_level": "medium", "ai_content_score": 0.86},
+                {"url": "https://example.com/medium", "ai_content_level": "medium", "ai_content_score": 0.5},
+                {"url": "https://example.com/noindex", "ai_content_level": "very_high", "ai_content_score": 0.95},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_pages_have_high_ai_content_levels"]
+    assert {row["url"] for row in issues} == {"https://example.com/high-level", "https://example.com/high-score"}
+    assert all(row["issue_name"] == "Pages have high AI content levels" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Notice" for row in issues)
+    high_score_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/high-score")
+    assert high_score_page["ai_content_score"] == 0.86
+
+
 def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/thin", title="Thin", section="", word_count=80, language="en"),

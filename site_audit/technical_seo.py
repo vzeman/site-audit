@@ -49,6 +49,7 @@ def build_technical_seo(
     search_payload: dict | None = None,
     page_types: dict | None = None,
     header_analysis: dict | None = None,
+    content_quality: dict | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
     by_url = {row["url"]: row for row in page_rows if row.get("url")}
@@ -60,17 +61,18 @@ def build_technical_seo(
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     headers = _lookup_rows((header_analysis or {}).get("per_page") or [])
+    quality = _lookup_rows((content_quality or {}).get("per_page") or (content_quality or {}).get("rows") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -179,6 +181,7 @@ def _merge_page_signals(
     search: dict | None,
     page_type: dict | None,
     header: dict | None,
+    quality: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -276,6 +279,10 @@ def _merge_page_signals(
         row["h1"] = header.get("h1", "")
         row["h1_count"] = _safe_int(header.get("h1_count"))
         row["header_count"] = _safe_int(header.get("header_count"))
+    if quality:
+        row["ai_content_level"] = quality.get("ai_content_level", "")
+        row["ai_content_score"] = _safe_float(quality.get("ai_content_score", quality.get("ai_content_probability", 0.0)))
+        row["ai_content_probability"] = _safe_float(quality.get("ai_content_probability", quality.get("ai_content_score", 0.0)))
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -364,6 +371,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_meta_description_changed", "low", 0.8, _recommendation("indexable_meta_description_changed")))
     if status == "indexable" and _titles_do_not_match(row.get("title", ""), row.get("serp_title", "")):
         issues.append(_issue(row, "content", "indexable_page_and_serp_titles_do_not_match", "low", 0.82, _recommendation("indexable_page_and_serp_titles_do_not_match")))
+    if status == "indexable" and _has_high_ai_content(row):
+        issues.append(_issue(row, "content", "indexable_pages_have_high_ai_content_levels", "low", 0.82, _recommendation("indexable_pages_have_high_ai_content_levels")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
     if (
@@ -563,6 +572,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
         "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
         "indexable_page_and_serp_titles_do_not_match": "Review the SERP title Google is showing and align the page title when the rewrite is not intentional.",
+        "indexable_pages_have_high_ai_content_levels": "Review pages with high AI-content scores and add original evidence, expert detail, and brand-specific value.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
@@ -675,6 +685,22 @@ def _titles_do_not_match(page_title: str, serp_title: str) -> bool:
     page = _title_fingerprint(page_title)
     serp = _title_fingerprint(serp_title)
     return bool(page and serp and page != serp)
+
+
+def _has_high_ai_content(row: dict) -> bool:
+    level = str(row.get("ai_content_level") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if level in {"high", "very_high"}:
+        return True
+    return max(_safe_float(row.get("ai_content_score")), _safe_float(row.get("ai_content_probability"))) >= 0.8
+
+
+def _safe_float(value) -> float:
+    try:
+        if value in (None, ""):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _safe_int(value) -> int:
