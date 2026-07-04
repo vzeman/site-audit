@@ -128,6 +128,8 @@ from .performance_explainer import build_performance_explainer
 from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all
+from .resource_status import analyze as analyze_resource_status
+from .resource_status import to_payload as resource_status_payload
 from .scatter import project
 from .semantic_ablation import build_semantic_ablation
 from .search_fusion import build_combined_search_analysis
@@ -658,6 +660,15 @@ def run(config: PipelineConfig) -> dict:
         (pf_summary.get("median_html_weight_bytes", 0) or 0) / 1024,
         (pf_summary.get("render_blocking_share", 0.0) or 0.0) * 100,
         pf_summary.get("heavy_pages", 0),
+    )
+    resource_status_data = resource_status_payload(
+        analyze_resource_status(fetched, http_cache=getattr(crawler, "cache", None))
+    )
+    rs_summary = resource_status_data.get("summary", {}) or {}
+    LOG.info(
+        "  resource status: %d resources · %d broken JavaScript",
+        rs_summary.get("total_resources", 0),
+        rs_summary.get("broken_javascript", 0),
     )
 
     # 3) Embed pages (model loaded here, reused below for queries)
@@ -1844,6 +1855,7 @@ def run(config: PipelineConfig) -> dict:
         page_types=page_types_data,
         header_analysis=header_analysis_data,
         media_accessibility=media_accessibility_data,
+        resource_status=resource_status_data,
         duplicate_rows=duplicate_rows,
     )
     tech_summary = technical_seo_data.get("summary", {}) or {}
@@ -1911,6 +1923,7 @@ def run(config: PipelineConfig) -> dict:
         conversion_balance=conversion_balance_data,
         metadata_quality=metadata_quality_data,
         media_accessibility=media_accessibility_data,
+        resource_status=resource_status_data,
         page_types=page_types_data,
         entities=entities_data,
         freshness=freshness_data,

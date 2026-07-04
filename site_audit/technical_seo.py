@@ -52,6 +52,7 @@ def build_technical_seo(
     header_analysis: dict | None = None,
     content_quality: dict | None = None,
     media_accessibility: dict | None = None,
+    resource_status: dict | None = None,
     duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
@@ -67,17 +68,19 @@ def build_technical_seo(
     quality = _lookup_rows((content_quality or {}).get("per_page") or (content_quality or {}).get("rows") or [])
     media = _lookup_rows((media_accessibility or {}).get("per_page") or [])
     media_issues = _media_issue_lookup((media_accessibility or {}).get("media_with_issues") or [])
+    resources = _lookup_rows((resource_status or {}).get("per_page") or [])
+    resource_issues = _media_issue_lookup((resource_status or {}).get("resources_with_issues") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), resources.get(url), resource_issues.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), resources.get(url), resource_issues.get(url), skip)
         by_url[url] = row
 
     duplicates = _duplicate_lookup(duplicate_rows or [])
@@ -193,6 +196,8 @@ def _merge_page_signals(
     quality: dict | None,
     media: dict | None,
     media_issues: dict | None,
+    resource: dict | None,
+    resource_issues: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -407,6 +412,21 @@ def _merge_page_signals(
         if images_missing_alt:
             row["images_missing_alt"] = images_missing_alt
             row["missing_alt_text_count"] = len(images_missing_alt)
+    if resource:
+        resource_issue_counts = dict(resource.get("issues") or {})
+        row["resource_issue_counts"] = resource_issue_counts
+        row["javascript_broken_count"] = _safe_int(resource_issue_counts.get("javascript_broken"))
+    if resource_issues:
+        broken_javascript = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+            }
+            for issue in (resource_issues.get("javascript_broken") or [])
+        ]
+        if broken_javascript:
+            row["broken_javascript"] = broken_javascript
+            row["javascript_broken_count"] = len(broken_javascript)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -771,6 +791,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "images", "page_has_redirected_image", "medium", 0.86, _recommendation("page_has_redirected_image")))
     if _safe_int(row.get("missing_alt_text_count")) > 0:
         issues.append(_issue(row, "images", "missing_alt_text", "medium", 0.88, _recommendation("missing_alt_text")))
+    if _safe_int(row.get("javascript_broken_count")) > 0:
+        issues.append(_issue(row, "javascript", "javascript_broken", "high", 0.94, _recommendation("javascript_broken")))
     return issues
 
 
@@ -908,6 +930,7 @@ def _recommendation(issue_type: str) -> str:
         "image_redirects": "Update image references so they point directly to the final image URL instead of a redirecting URL.",
         "page_has_redirected_image": "Update redirected image references on the page so each image points directly to its final URL.",
         "missing_alt_text": "Add descriptive alt text to meaningful images and mark decorative images with empty alt attributes.",
+        "javascript_broken": "Restore the JavaScript URL, update it to a live script asset, or remove the broken script reference.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

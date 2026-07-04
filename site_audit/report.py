@@ -569,6 +569,7 @@ def write_all(
     conversion_balance: Optional[dict] = None,
     metadata_quality: Optional[dict] = None,
     media_accessibility: Optional[dict] = None,
+    resource_status: Optional[dict] = None,
     page_types: Optional[dict] = None,
     entities: Optional[dict] = None,
     freshness: Optional[dict] = None,
@@ -669,6 +670,8 @@ def write_all(
         _write_json(output_dir / "metadata_quality.json", metadata_quality)
     if media_accessibility is not None:
         _write_json(output_dir / "media_accessibility.json", media_accessibility)
+    if resource_status is not None:
+        _write_json(output_dir / "resource_status.json", resource_status)
     if page_types is not None:
         _write_json(output_dir / "page_types.json", page_types)
     if entities is not None:
