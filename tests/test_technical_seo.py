@@ -272,6 +272,53 @@ def test_technical_seo_model_flags_redirect_chains_that_are_too_long() -> None:
     assert page["redirect_hop_count"] == 6
 
 
+def test_technical_seo_model_flags_redirect_chains() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/start",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_hop_count": 2,
+                    "redirect_chain": [
+                        "https://example.com/start",
+                        "https://example.com/middle",
+                        "https://example.com/final",
+                    ],
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/one-hop-final",
+                    "title": "One Hop Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/one-hop-start",
+                    "redirect_target_url": "https://example.com/one-hop-final",
+                    "redirect_hop_count": 1,
+                    "redirect_chain": [
+                        "https://example.com/one-hop-start",
+                        "https://example.com/one-hop-final",
+                    ],
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "redirect_chain"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "Redirect chain"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_302_redirects() -> None:
     payload = build_technical_seo(
         [],

@@ -308,6 +308,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "broken_redirect", "high", 0.96, _recommendation("broken_redirect")))
     if _safe_int(row.get("redirect_hop_count")) > _MAX_REDIRECT_HOPS:
         issues.append(_issue(row, "redirects", "redirect_chain_too_long", "high", 0.94, _recommendation("redirect_chain_too_long")))
+    if _safe_int(row.get("redirect_hop_count")) > 1:
+        issues.append(_issue(row, "redirects", "redirect_chain", "low", 0.82, _recommendation("redirect_chain")))
     if 302 in (row.get("redirect_status_codes") or []):
         issues.append(_issue(row, "redirects", "302_redirect", "medium", 0.9, _recommendation("302_redirect")))
     if any(300 <= _safe_int(code) < 400 for code in (row.get("redirect_status_codes") or [])):
@@ -451,6 +453,7 @@ def _recommendation(issue_type: str) -> str:
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "broken_redirect": "Update the redirect so it resolves to a live 2XX destination or remove links and sitemap references to the redirecting URL.",
         "redirect_chain_too_long": "Collapse the redirect path so the requested URL redirects directly to the final destination.",
+        "redirect_chain": "Collapse multi-hop redirects so the requested URL points directly to the final destination.",
         "redirect_loop": "Fix the redirect rules so the URL resolves to a final destination instead of cycling between URLs.",
         "302_redirect": "Review whether the temporary redirect should be a permanent 301/308 redirect for SEO consolidation.",
         "3xx_redirect": "Review redirecting URLs and update internal links or sitemap references to the final destination where appropriate.",
