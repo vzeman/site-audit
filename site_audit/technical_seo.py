@@ -293,6 +293,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_orphan_page_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_orphan_page_has_no_incoming_internal_links")))
+    if status != "indexable" and "in_degree" in row and _safe_int(row.get("in_degree")) == 0:
+        issues.append(_issue(row, "links", "not_indexable_orphan_page_has_no_incoming_internal_links", "medium", 0.88, _recommendation("not_indexable_orphan_page_has_no_incoming_internal_links")))
     if status == "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_https_page_has_internal_links_to_http", "high", 0.94, _recommendation("indexable_https_page_has_internal_links_to_http")))
     if status != "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
@@ -394,6 +396,7 @@ def _recommendation(issue_type: str) -> str:
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
+        "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
         "indexable_https_page_has_internal_links_to_http": "Update internal links on this HTTPS page so they point directly to HTTPS URLs.",
         "not_indexable_https_page_has_internal_links_to_http": "Update internal links on this non-indexable HTTPS page so they point directly to HTTPS URLs.",
         "indexable_http_page_has_internal_links_to_https": "Prefer serving and linking the HTTPS source page directly instead of relying on HTTP pages that link into HTTPS.",
