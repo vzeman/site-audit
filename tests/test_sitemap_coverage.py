@@ -234,6 +234,7 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
             {
                 "sitemap_url": "https://example.com/broken-sitemap.xml",
                 "issue": "sitemap_has_syntax_error",
+                "http_status": "",
                 "message": "not well-formed",
             }
         ],
@@ -244,6 +245,7 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
         {
             "sitemap_url": "https://example.com/broken-sitemap.xml",
             "issue": "sitemap_has_syntax_error",
+            "http_status": "",
             "message": "not well-formed",
         }
     ]
@@ -251,6 +253,29 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
     assert len(issues) == 1
     assert issues[0]["url"] == "https://example.com/broken-sitemap.xml"
     assert "XML syntax" in issues[0]["recommended_action"]
+
+
+def test_sitemap_coverage_flags_sitemap_is_not_accessible() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/missing-sitemap.xml",
+                "issue": "sitemap_is_not_accessible",
+                "http_status": 404,
+                "message": "HTTP 404",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_is_not_accessible"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_is_not_accessible"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing-sitemap.xml"
+    assert issues[0]["http_status"] == 404
+    assert "Restore access" in issues[0]["recommended_action"]
 
 
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:

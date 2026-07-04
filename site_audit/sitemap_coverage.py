@@ -20,6 +20,7 @@ SITEMAP_NOINDEX_ISSUE = "noindex_page_in_sitemap"
 SITEMAP_NON_CANONICAL_ISSUE = "non_canonical_page_in_sitemap"
 SITEMAP_TIMEOUT_ISSUE = "page_from_sitemap_timed_out"
 SITEMAP_SYNTAX_ISSUE = "sitemap_has_syntax_error"
+SITEMAP_NOT_ACCESSIBLE_ISSUE = "sitemap_is_not_accessible"
 
 
 def analyze(
@@ -49,6 +50,7 @@ def analyze(
         {
             "sitemap_url": row.get("sitemap_url") or row.get("url", ""),
             "issue": row.get("issue") or SITEMAP_SYNTAX_ISSUE,
+            "http_status": row.get("http_status", ""),
             "message": row.get("message", ""),
         }
         for row in (sitemap_errors or [])
@@ -164,6 +166,7 @@ def analyze(
                 1 for row in rows if SITEMAP_TIMEOUT_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
             "sitemap_has_syntax_error": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_SYNTAX_ISSUE),
+            "sitemap_is_not_accessible": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_NOT_ACCESSIBLE_ISSUE),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -177,7 +180,7 @@ def analyze(
                 "issue": row["issue"],
                 "in_sitemap": False,
                 "crawled": False,
-                "http_status": "",
+                "http_status": row["http_status"],
                 "source_sitemaps": [row["sitemap_url"]] if row["sitemap_url"] else [],
                 "recommended_action": _sitemap_issue_action(row["issue"]),
                 "message": row["message"],
@@ -217,6 +220,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably."
     if issue_type == SITEMAP_SYNTAX_ISSUE:
         return "Fix the XML syntax error so crawlers can parse the sitemap."
+    if issue_type == SITEMAP_NOT_ACCESSIBLE_ISSUE:
+        return "Restore access to the sitemap URL or remove the inaccessible sitemap reference."
     return "Review and fix this sitemap issue."
 
 

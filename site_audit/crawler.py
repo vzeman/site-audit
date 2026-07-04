@@ -343,6 +343,12 @@ class Crawler:
             seen_sitemaps.add(sm)
             r = self._request_with_retry(sm)
             if r is None or r.status_code != 200:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_is_not_accessible",
+                    "http_status": getattr(r, "status_code", 0) if r is not None else 0,
+                    "message": "not accessible" if r is None else f"HTTP {r.status_code}",
+                })
                 continue
             content = r.content
             if sm.endswith(".gz") or r.headers.get("Content-Type", "").endswith("gzip"):

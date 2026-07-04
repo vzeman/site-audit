@@ -191,6 +191,7 @@ def _base_skipped_row(row: dict) -> dict:
 
 
 def _base_sitemap_error_row(row: dict) -> dict:
+    issue_type = row.get("issue") or "sitemap_has_syntax_error"
     return {
         "url": row.get("sitemap_url") or row.get("url") or "",
         "title": "Sitemap",
@@ -198,7 +199,7 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "word_count": "",
         "language": "",
         "indexability_status": "sitemap_error",
-        "http_status": "",
+        "http_status": row.get("http_status", ""),
         "canonical_url": "",
         "robots_content": "",
         "noindex_source": "",
@@ -212,9 +213,10 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "template_family": "",
         "template_signature": "",
         "fix_scope": "sitemap",
-        "sitemap_issue_types": [row.get("issue") or "sitemap_has_syntax_error"],
+        "sitemap_issue_types": [issue_type],
         "sitemap_error_message": row.get("message", ""),
-        "sitemap_syntax_error_count": 1 if (row.get("issue") or "sitemap_has_syntax_error") == "sitemap_has_syntax_error" else 0,
+        "sitemap_syntax_error_count": 1 if issue_type == "sitemap_has_syntax_error" else 0,
+        "sitemap_not_accessible_count": 1 if issue_type == "sitemap_is_not_accessible" else 0,
     }
 
 
@@ -949,6 +951,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "page_from_sitemap_timed_out", "high", 0.94, _recommendation("page_from_sitemap_timed_out")))
     if _safe_int(row.get("sitemap_syntax_error_count")) > 0:
         issues.append(_issue(row, "sitemaps", "sitemap_has_syntax_error", "high", 0.96, _recommendation("sitemap_has_syntax_error")))
+    if _safe_int(row.get("sitemap_not_accessible_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "sitemap_is_not_accessible", "high", 0.96, _recommendation("sitemap_is_not_accessible")))
     return issues
 
 
@@ -1104,6 +1108,7 @@ def _recommendation(issue_type: str) -> str:
         "non_canonical_page_in_sitemap": "Update XML sitemaps to list the canonical URL instead of a non-canonical URL.",
         "page_from_sitemap_timed_out": "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably.",
         "sitemap_has_syntax_error": "Fix the XML syntax error so crawlers can parse the sitemap.",
+        "sitemap_is_not_accessible": "Restore access to the sitemap URL or remove the inaccessible sitemap reference.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

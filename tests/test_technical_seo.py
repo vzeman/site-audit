@@ -4480,6 +4480,34 @@ def test_technical_seo_model_flags_sitemap_has_syntax_error() -> None:
     assert page["fix_scope"] == "sitemap"
 
 
+def test_technical_seo_model_flags_sitemap_is_not_accessible() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/missing-sitemap.xml",
+                    "issue": "sitemap_is_not_accessible",
+                    "http_status": 404,
+                    "message": "HTTP 404",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "sitemap_is_not_accessible"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing-sitemap.xml"
+    assert issues[0]["issue_name"] == "Sitemap is not accessible"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing-sitemap.xml")
+    assert page["sitemap_not_accessible_count"] == 1
+    assert page["http_status"] == 404
+    assert page["sitemap_error_message"] == "HTTP 404"
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
