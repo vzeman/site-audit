@@ -440,6 +440,14 @@ def _issues_for_row(row: dict) -> list[dict]:
     ):
         issues.append(_issue(row, "content", "indexable_meta_description_too_short", "medium", 0.86, _recommendation("indexable_meta_description_too_short")))
     if (
+        status != "indexable"
+        and (
+            "short_description" in (row.get("metadata_issues") or [])
+            or 0 < _safe_int(row.get("description_length")) < 50
+        )
+    ):
+        issues.append(_issue(row, "content", "not_indexable_meta_description_too_short", "low", 0.8, _recommendation("not_indexable_meta_description_too_short")))
+    if (
         status == "indexable"
         and (
             "missing_title" in (row.get("metadata_issues") or [])
@@ -635,6 +643,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
         "not_indexable_meta_description_too_long": "Shorten the meta description if this non-indexable page still appears in previews, internal search, or future indexing plans.",
         "indexable_meta_description_too_short": "Expand the meta description so it communicates the page value in search snippets.",
+        "not_indexable_meta_description_too_short": "Expand the meta description if this non-indexable page still appears in previews, internal search, or future indexing plans.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
         "not_indexable_title_tag_missing_or_empty": "Review whether the non-indexable page still needs a title tag; add one if it remains in crawl paths, previews, or future indexing plans.",
         "indexable_title_too_long": "Shorten the title tag so the main topic and differentiator fit cleanly in search results.",

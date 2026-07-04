@@ -1555,6 +1555,60 @@ def test_technical_seo_model_flags_indexable_pages_with_meta_description_too_sho
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_meta_description_too_short() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=250, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-short",
+                    "title": "Noindex Short",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-length",
+                    "title": "Noindex Length",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "Noindex Missing",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Noindex OK",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {"url": "https://example.com/indexable", "title": "Indexable", "description_length": 40, "issues": ["short_description"]},
+                {"url": "https://example.com/noindex-short", "title": "Noindex Short", "description_length": 40, "issues": ["short_description"]},
+                {"url": "https://example.com/noindex-length", "title": "Noindex Length", "description_length": 20, "issues": []},
+                {"url": "https://example.com/noindex-missing", "title": "Noindex Missing", "description_length": 0, "issues": ["missing_description"]},
+                {"url": "https://example.com/noindex-ok", "title": "Noindex OK", "description_length": 120, "issues": []},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_meta_description_too_short"]
+    assert {row["url"] for row in issues} == {"https://example.com/noindex-short", "https://example.com/noindex-length"}
+    assert all(row["issue_name"] == "Meta description too short" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Notice" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
