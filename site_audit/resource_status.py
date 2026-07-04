@@ -96,6 +96,8 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
     src = str(item.get("src") or item.get("url") or "")
     if resource_type == "javascript" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
         issues.append("https_page_links_to_http_javascript")
+    if resource_type == "css" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
+        issues.append("https_page_links_to_http_css")
     if resource_type == "javascript" and (item.get("redirected") or redirect_target_url or 300 <= status < 400):
         issues.append("javascript_redirects")
     if resource_type == "css" and (item.get("redirected") or redirect_target_url or 300 <= status < 400):
@@ -161,6 +163,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "broken_css": issues_by_type.get("css_broken", 0),
         "large_css": issues_by_type.get("css_file_size_too_large", 0),
         "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
+        "https_pages_linking_to_http_css": issues_by_type.get("https_page_links_to_http_css", 0),
         "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
         "redirected_css": issues_by_type.get("css_redirects", 0),
     }

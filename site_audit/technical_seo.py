@@ -421,6 +421,7 @@ def _merge_page_signals(
         row["css_broken_count"] = _safe_int(resource_issue_counts.get("css_broken"))
         row["large_css_count"] = _safe_int(resource_issue_counts.get("css_file_size_too_large"))
         row["redirected_css_count"] = _safe_int(resource_issue_counts.get("css_redirects"))
+        row["http_css_count"] = _safe_int(resource_issue_counts.get("https_page_links_to_http_css"))
     if resource_issues:
         broken_javascript = [
             {
@@ -483,6 +484,15 @@ def _merge_page_signals(
         if redirected_css:
             row["redirected_css"] = redirected_css
             row["redirected_css_count"] = len(redirected_css)
+        http_css = [
+            {
+                "src": issue.get("src", ""),
+            }
+            for issue in (resource_issues.get("https_page_links_to_http_css") or [])
+        ]
+        if http_css:
+            row["http_css"] = http_css
+            row["http_css_count"] = len(http_css)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -863,6 +873,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "css_file_size_too_large", "medium", 0.86, _recommendation("css_file_size_too_large")))
     if _safe_int(row.get("redirected_css_count")) > 0:
         issues.append(_issue(row, "css", "css_redirects", "medium", 0.88, _recommendation("css_redirects")))
+    if _safe_int(row.get("http_css_count")) > 0:
+        issues.append(_issue(row, "css", "https_page_links_to_http_css", "medium", 0.88, _recommendation("https_page_links_to_http_css")))
     return issues
 
 
@@ -1008,6 +1020,7 @@ def _recommendation(issue_type: str) -> str:
         "css_broken": "Restore the CSS URL, update it to a live stylesheet asset, or remove the broken stylesheet reference.",
         "css_file_size_too_large": "Reduce, split, or minify oversized CSS files and remove unused style rules.",
         "css_redirects": "Update CSS references so they point directly to the final stylesheet URL instead of a redirecting URL.",
+        "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

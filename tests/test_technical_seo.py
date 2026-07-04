@@ -4111,6 +4111,41 @@ def test_technical_seo_model_flags_css_redirects() -> None:
     ]
 
 
+def test_technical_seo_model_flags_https_page_links_to_http_css() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        resource_status={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"https_page_links_to_http_css": 1}, "issue_count": 1},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "resources_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "css",
+                    "src": "http://cdn.example.com/insecure.css",
+                    "issues": ["https_page_links_to_http_css"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "https_page_links_to_http_css"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "HTTPS page links to HTTP CSS"
+    assert issues[0]["category"] == "css"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["http_css_count"] == 1
+    assert page["http_css"] == [{"src": "http://cdn.example.com/insecure.css"}]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

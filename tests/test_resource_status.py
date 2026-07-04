@@ -142,6 +142,34 @@ def test_resource_status_payload_flags_https_pages_linking_to_http_javascript() 
     assert insecure_rows[0]["src"] == "http://cdn.example.com/insecure.js"
 
 
+def test_resource_status_payload_flags_https_pages_linking_to_http_css() -> None:
+    report = to_payload(analyze([
+        SimpleNamespace(
+            url="https://example.com/secure",
+            resource_items=[
+                {"type": "css", "src": "http://cdn.example.com/insecure.css", "http_status": 200},
+                {"type": "css", "src": "https://cdn.example.com/secure.css", "http_status": 200},
+            ],
+        ),
+        SimpleNamespace(
+            url="http://example.com/plain",
+            resource_items=[
+                {"type": "css", "src": "http://cdn.example.com/http-page.css", "http_status": 200},
+            ],
+        ),
+    ]))
+
+    assert report["summary"]["https_pages_linking_to_http_css"] == 1
+    assert report["issues_by_type"]["https_page_links_to_http_css"] == 1
+    insecure_rows = [
+        row for row in report["resources_with_issues"]
+        if "https_page_links_to_http_css" in row["issues"]
+    ]
+    assert len(insecure_rows) == 1
+    assert insecure_rows[0]["url"] == "https://example.com/secure"
+    assert insecure_rows[0]["src"] == "http://cdn.example.com/insecure.css"
+
+
 def test_resource_status_payload_flags_redirected_javascript() -> None:
     report = to_payload(analyze([
         SimpleNamespace(
