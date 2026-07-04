@@ -691,6 +691,15 @@ def test_technical_seo_model_flags_indexable_pages_linking_to_broken_pages() -> 
     assert issues[0]["importance"] == "Error"
     bad_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
     assert bad_page["broken_internal_link_count"] == 2
+    not_indexable_issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "not_indexable_page_has_links_to_broken_page"
+    ]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/non-indexable-bad"
+    assert not_indexable_issues[0]["issue_name"] == "Page has links to broken page"
+    assert not_indexable_issues[0]["importance"] == "Warning"
 
 
 def test_technical_seo_model_flags_indexable_pages_linking_to_redirects() -> None:

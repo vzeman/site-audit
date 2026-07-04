@@ -303,6 +303,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "indexable_http_page_has_internal_links_to_https", "low", 0.86, _recommendation("indexable_http_page_has_internal_links_to_https")))
     if status == "indexable" and _safe_int(row.get("broken_internal_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_page_has_links_to_broken_page", "high", 0.94, _recommendation("indexable_page_has_links_to_broken_page")))
+    if status != "indexable" and _safe_int(row.get("broken_internal_link_count")) > 0:
+        issues.append(_issue(row, "links", "not_indexable_page_has_links_to_broken_page", "medium", 0.9, _recommendation("not_indexable_page_has_links_to_broken_page")))
     if status == "indexable" and _safe_int(row.get("redirect_internal_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_page_has_links_to_redirect", "medium", 0.9, _recommendation("indexable_page_has_links_to_redirect")))
     if status == "indexable" and _is_redirected_fetch(row) and _safe_int(row.get("in_degree")) == 0:
@@ -401,6 +403,7 @@ def _recommendation(issue_type: str) -> str:
         "not_indexable_https_page_has_internal_links_to_http": "Update internal links on this non-indexable HTTPS page so they point directly to HTTPS URLs.",
         "indexable_http_page_has_internal_links_to_https": "Prefer serving and linking the HTTPS source page directly instead of relying on HTTP pages that link into HTTPS.",
         "indexable_page_has_links_to_broken_page": "Update or remove internal links that point to broken 4XX/5XX URLs.",
+        "not_indexable_page_has_links_to_broken_page": "Update or remove broken internal links from this non-indexable page if it remains part of the crawl path.",
         "indexable_page_has_links_to_redirect": "Update internal links to point directly at the final destination URL instead of the redirecting URL.",
         "indexable_redirected_page_has_no_incoming_internal_links": "Add direct internal links to the final redirected URL or remove obsolete redirected URL references.",
         "indexable_page_has_no_outgoing_links": "Add relevant crawlable internal links from this page to useful destination pages.",
