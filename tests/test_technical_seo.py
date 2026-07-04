@@ -790,6 +790,42 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() ->
     assert missing_page["h1_count"] == 0
 
 
+def test_technical_seo_model_flags_indexable_pages_with_multiple_h1_tags() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/multiple", title="Multiple", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        header_analysis={
+            "per_page": [
+                {"url": "https://example.com/multiple", "h1": "Primary H1", "h1_count": 2, "header_count": 4},
+                {"url": "https://example.com/ok", "h1": "Useful H1", "h1_count": 1, "header_count": 3},
+                {"url": "https://example.com/noindex", "h1": "Noindex H1", "h1_count": 2, "header_count": 3},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_multiple_h1_tags"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/multiple"
+    assert issues[0]["issue_name"] == "Multiple H1 tags"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_indexable_h1_changes() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=250, language="en")],
