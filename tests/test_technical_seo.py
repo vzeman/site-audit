@@ -823,6 +823,59 @@ def test_technical_seo_model_flags_organic_traffic_dropped() -> None:
     assert "organic_traffic_dropped" not in stable_issue_types
 
 
+def test_technical_seo_model_flags_pages_dropped_from_top_10() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/dropped-top-10",
+                title="Dropped Top 10",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/still-top-10",
+                title="Still Top 10",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/dropped-top-10",
+                    "traffic": 80,
+                    "position": 14,
+                    "previous_position": 8,
+                },
+                {
+                    "matched_url": "https://example.com/still-top-10",
+                    "traffic": 80,
+                    "position": 9,
+                    "previous_position": 8,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "pages_dropped_from_top_10"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/dropped-top-10"
+    assert issues[0]["issue_name"] == "Pages dropped from Top 10"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/dropped-top-10"]["position"] == 14
+    assert by_url["https://example.com/dropped-top-10"]["previous_position"] == 8
+    stable_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/still-top-10"
+    }
+    assert "pages_dropped_from_top_10" not in stable_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],
