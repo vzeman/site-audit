@@ -10,6 +10,7 @@ ACTION_BY_ISSUE = {
     "missing_canonical": "Add a self-referencing canonical or the intended canonical target.",
     "canonical_external_host": "Confirm the external canonical is intentional; otherwise point it to the canonical URL on this domain.",
     "canonical_non_self": "Use a self-referencing canonical on unique SEO pages, or confirm this is a deliberate duplicate consolidation.",
+    "canonical_points_to_4xx": "Point canonical tags only at live 2xx URLs or restore the canonical target.",
     "canonical_target_not_crawled": "Make sure the canonical target is crawlable and included in the audit scope.",
     "canonical_target_non_indexable": "Point canonical tags only at indexable URLs or fix the target page indexability.",
     "canonical_target_shared": "Review whether multiple pages should consolidate to the same canonical target.",
@@ -41,6 +42,8 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
     for page in page_rows:
         url = page.get("url", "")
         canonical_url = page.get("canonical_url", "")
+        normalized_canonical = _normalize_url(canonical_url)
+        target = indexability_by_url.get(canonical_url) or indexability_by_normalized_url.get(normalized_canonical)
         issue_keys = _issues_for_page(
             url,
             canonical_url,
@@ -54,7 +57,9 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "url": url,
             "title": page.get("title", ""),
             "canonical_url": canonical_url,
-            "canonical_target_normalized": _normalize_url(canonical_url),
+            "canonical_target_normalized": normalized_canonical,
+            "canonical_target_http_status": (target or {}).get("http_status", ""),
+            "canonical_target_indexability_status": (target or {}).get("indexability_status", ""),
             "http_status": page.get("http_status", ""),
             "extraction_status": page.get("status", ""),
             "indexability_status": (indexability_by_url.get(url) or {}).get("indexability_status", ""),
@@ -70,6 +75,8 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
                 "title": row["title"],
                 "issue": issue,
                 "canonical_url": canonical_url,
+                "canonical_target_http_status": row["canonical_target_http_status"],
+                "canonical_target_indexability_status": row["canonical_target_indexability_status"],
                 "http_status": row["http_status"],
                 "indexability_status": row["indexability_status"],
                 "recommended_action": ACTION_BY_ISSUE.get(issue, "Review canonical configuration."),
@@ -87,6 +94,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "missing_canonical": issue_counts.get("missing_canonical", 0),
             "canonical_external_host": issue_counts.get("canonical_external_host", 0),
             "canonical_non_self": issue_counts.get("canonical_non_self", 0),
+            "canonical_points_to_4xx": issue_counts.get("canonical_points_to_4xx", 0),
             "canonical_target_not_crawled": issue_counts.get("canonical_target_not_crawled", 0),
             "canonical_target_non_indexable": issue_counts.get("canonical_target_non_indexable", 0),
             "canonical_target_shared": issue_counts.get("canonical_target_shared", 0),
@@ -120,6 +128,9 @@ def _issues_for_page(
     if normalized_canonical not in normalized_crawled_urls:
         issues.append("canonical_target_not_crawled")
     target = indexability_by_url.get(canonical_url) or indexability_by_normalized_url.get(normalized_canonical)
+    target_status = _safe_int((target or {}).get("http_status"))
+    if 400 <= target_status < 500:
+        issues.append("canonical_points_to_4xx")
     if (
         normalized_canonical != _normalize_url(url)
         and target
@@ -130,6 +141,15 @@ def _issues_for_page(
     if canonical_counts.get(_normalize_url(canonical_url), 0) > 1 and _normalize_url(url) != _normalize_url(canonical_url):
         issues.append("canonical_target_shared")
     return list(dict.fromkeys(issues))
+
+
+def _safe_int(value) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _recommended_action(issues: list[str]) -> str:

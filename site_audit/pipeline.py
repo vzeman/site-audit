@@ -1786,6 +1786,7 @@ def run(config: PipelineConfig) -> dict:
         indexability=indexability_data,
         metadata_quality=metadata_quality_data,
         performance=performance_data,
+        canonical_consistency=canonical_consistency_data,
         search_payload=ahrefs_data,
         page_types=page_types_data,
     )

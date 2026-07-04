@@ -38,6 +38,7 @@ def build_technical_seo(
     indexability: dict | None = None,
     metadata_quality: dict | None = None,
     performance: dict | None = None,
+    canonical_consistency: dict | None = None,
     search_payload: dict | None = None,
     page_types: dict | None = None,
 ) -> dict:
@@ -45,18 +46,19 @@ def build_technical_seo(
     by_url = {row["url"]: row for row in page_rows if row.get("url")}
     metadata = _lookup_rows((metadata_quality or {}).get("per_page") or [])
     perf = _lookup_rows((performance or {}).get("per_page") or [])
+    canonical = _lookup_rows((canonical_consistency or {}).get("rows") or [])
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), search.get(url), types.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), search.get(url), types.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), search.get(url), types.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), search.get(url), types.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -148,7 +150,15 @@ def _base_skipped_row(row: dict) -> dict:
     }
 
 
-def _merge_page_signals(row: dict, metadata: dict | None, perf: dict | None, search: dict | None, page_type: dict | None, skipped: dict | None) -> None:
+def _merge_page_signals(
+    row: dict,
+    metadata: dict | None,
+    perf: dict | None,
+    canonical: dict | None,
+    search: dict | None,
+    page_type: dict | None,
+    skipped: dict | None,
+) -> None:
     if metadata:
         row["title"] = row.get("title") or metadata.get("title", "")
         row["canonical_url"] = metadata.get("canonical_url", "")
@@ -166,6 +176,11 @@ def _merge_page_signals(row: dict, metadata: dict | None, perf: dict | None, sea
         row["script_count"] = perf.get("script_count", "")
         row["mixed_content_url_count"] = perf.get("mixed_content_url_count", 0)
         row["mixed_content_urls"] = list(perf.get("mixed_content_urls") or [])
+    if canonical:
+        row["canonical_url"] = row.get("canonical_url") or canonical.get("canonical_url", "")
+        row["canonical_target_http_status"] = canonical.get("canonical_target_http_status", "")
+        row["canonical_target_indexability_status"] = canonical.get("canonical_target_indexability_status", "")
+        row["canonical_issues"] = list(canonical.get("issues") or [])
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -192,6 +207,9 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
+    for issue_type in row.get("canonical_issues") or []:
+        if issue_type == "canonical_points_to_4xx":
+            issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -249,6 +267,7 @@ def _recommendation(issue_type: str) -> str:
         "5xx_page": "Investigate server-side failures and make the URL reliably crawlable before keeping it in SEO surfaces.",
         "timed_out": "Reduce response time, fix blocking behavior, or remove the URL from crawlable SEO surfaces.",
         "https_http_mixed_content": "Serve every embedded resource on the HTTPS page over HTTPS or remove the insecure resource.",
+        "canonical_points_to_4xx": "Update the canonical tag to a live 2xx URL, restore the canonical target, or remove the broken canonical.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",
