@@ -368,6 +368,14 @@ def _issues_for_row(row: dict) -> list[dict]:
     if (
         status == "indexable"
         and (
+            "short_description" in (row.get("metadata_issues") or [])
+            or 0 < _safe_int(row.get("description_length")) < 50
+        )
+    ):
+        issues.append(_issue(row, "content", "indexable_meta_description_too_short", "medium", 0.86, _recommendation("indexable_meta_description_too_short")))
+    if (
+        status == "indexable"
+        and (
             "missing_title" in (row.get("metadata_issues") or [])
             or not str(row.get("title") or "").strip()
             or ("title_tag_count" in row and _safe_int(row.get("title_tag_count")) == 0)
@@ -521,6 +529,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
+        "indexable_meta_description_too_short": "Expand the meta description so it communicates the page value in search snippets.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
