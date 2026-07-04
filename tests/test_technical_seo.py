@@ -2802,6 +2802,63 @@ def test_technical_seo_model_flags_page_referenced_for_more_than_one_language_in
     assert "hreflang_multi_language_references" not in clean
 
 
+def test_technical_seo_model_flags_self_reference_hreflang_annotation_missing() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/self-url", title="Self URL", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/self-canonical", title="Self Canonical", section="", word_count=250, language="cs"),
+        SimpleNamespace(url="https://example.com/no-hreflang", title="No Hreflang", section="", word_count=250, language="de"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "canonical_url": "https://example.com/missing",
+                    "hreflang": [
+                        {"hreflang": "x-default", "href": "https://example.com/missing"},
+                        {"hreflang": "sk", "href": "https://example.com/sk"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/self-url",
+                    "title": "Self URL",
+                    "canonical_url": "https://example.com/self-url",
+                    "hreflang": [{"hreflang": "sk", "href": "https://example.com/self-url"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/self-canonical",
+                    "title": "Self Canonical",
+                    "canonical_url": "https://example.com/self-canonical/",
+                    "hreflang": [{"hreflang": "cs", "href": "https://example.com/self-canonical/"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/no-hreflang",
+                    "title": "No Hreflang",
+                    "canonical_url": "https://example.com/no-hreflang",
+                    "hreflang": [],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "self_reference_hreflang_annotation_missing"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "Self-reference hreflang annotation missing"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert page["self_reference_hreflang_missing"] is True
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
