@@ -10,6 +10,9 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 
+_LARGE_CSS_BYTES = 150_000
+
+
 @dataclass
 class ResourceStatusReport:
     summary: dict
@@ -49,6 +52,7 @@ def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
             "type": "javascript",
             "src": absolute_url,
             "http_status": getattr(cached, "status", "") if cached is not None else "",
+            "size_bytes": len(getattr(cached, "body", b"") or b"") if cached is not None else "",
         })
     for tag in soup.find_all("link"):
         rel = tag.get("rel") or []
@@ -65,6 +69,7 @@ def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
             "type": "css",
             "src": absolute_url,
             "http_status": getattr(cached, "status", "") if cached is not None else "",
+            "size_bytes": len(getattr(cached, "body", b"") or b"") if cached is not None else "",
         })
     return resources
 
@@ -80,11 +85,14 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
     issues: list[str] = []
     resource_type = _resource_type(item.get("type") or item.get("resource_type") or "")
     status = _safe_int(item.get("http_status", item.get("status", 0)))
+    size_bytes = _safe_int(item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", 0))))
     redirect_target_url = str(item.get("redirect_target_url") or "")
     if resource_type in {"javascript", "script", "js"} and (item.get("broken") or status >= 400):
         issues.append("javascript_broken")
     if resource_type == "css" and (item.get("broken") or status >= 400):
         issues.append("css_broken")
+    if resource_type == "css" and size_bytes > _LARGE_CSS_BYTES:
+        issues.append("css_file_size_too_large")
     src = str(item.get("src") or item.get("url") or "")
     if resource_type == "javascript" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
         issues.append("https_page_links_to_http_javascript")
@@ -124,6 +132,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
                 "src": item.get("src") or item.get("url") or "",
                 "http_status": item.get("http_status", item.get("status", "")),
                 "redirect_target_url": item.get("redirect_target_url", ""),
+                "size_bytes": item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", ""))),
                 "issues": issues,
             })
         if page_issues:
@@ -148,6 +157,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "total_css": resource_type_counts.get("css", 0),
         "broken_javascript": issues_by_type.get("javascript_broken", 0),
         "broken_css": issues_by_type.get("css_broken", 0),
+        "large_css": issues_by_type.get("css_file_size_too_large", 0),
         "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
         "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
     }

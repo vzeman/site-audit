@@ -45,6 +45,7 @@ def test_resource_status_payload_flags_broken_javascript_from_cache() -> None:
             "src": "https://example.com/broken.js",
             "http_status": 404,
             "redirect_target_url": "",
+            "size_bytes": 0,
             "issues": ["javascript_broken"],
         }
     ]
@@ -89,6 +90,28 @@ def test_resource_status_payload_uses_explicit_resource_items() -> None:
     assert report["summary"]["total_javascript"] == 2
     assert report["summary"]["broken_javascript"] == 1
     assert report["resources_with_issues"][0]["src"] == "https://cdn.example.com/broken.js"
+
+
+def test_resource_status_payload_flags_large_css() -> None:
+    report = to_payload(analyze([
+        SimpleNamespace(
+            url="https://example.com/page",
+            resource_items=[
+                {"type": "css", "src": "https://cdn.example.com/large.css", "size_bytes": 220_000},
+                {"type": "css", "src": "https://cdn.example.com/ok.css", "size_bytes": 80_000},
+            ],
+        ),
+    ]))
+
+    assert report["summary"]["large_css"] == 1
+    assert report["issues_by_type"]["css_file_size_too_large"] == 1
+    large_rows = [
+        row for row in report["resources_with_issues"]
+        if "css_file_size_too_large" in row["issues"]
+    ]
+    assert len(large_rows) == 1
+    assert large_rows[0]["src"] == "https://cdn.example.com/large.css"
+    assert large_rows[0]["size_bytes"] == 220_000
 
 
 def test_resource_status_payload_flags_https_pages_linking_to_http_javascript() -> None:
