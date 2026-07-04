@@ -615,6 +615,58 @@ def test_technical_seo_model_flags_indexable_pages_with_multiple_title_tags() ->
     assert issues[0]["importance"] == "Error"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_title_tag() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/no-tag", title="Fallback title", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="Useful title", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "title_tag_count": 0,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "",
+                    "title_tag_count": 0,
+                    "issues": ["missing_title"],
+                },
+                {
+                    "url": "https://example.com/no-tag",
+                    "title": "Fallback title",
+                    "title_tag_count": 0,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "Useful title",
+                    "title_tag_count": 1,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_title_tag_missing_or_empty"]
+    assert {row["url"] for row in issues} == {"https://example.com/missing", "https://example.com/no-tag"}
+    assert all(row["issue_name"] == "Title tag missing or empty" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Error" for row in issues)
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
