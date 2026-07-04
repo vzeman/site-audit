@@ -1859,6 +1859,7 @@ def run(config: PipelineConfig) -> dict:
         resource_status=resource_status_data,
         sitemap_coverage=sitemap_coverage_data,
         external_links=external_payload_data,
+        robots_txt=getattr(crawler, "robots_txt_info", {}),
         duplicate_rows=duplicate_rows,
     )
     tech_summary = technical_seo_data.get("summary", {}) or {}

@@ -55,6 +55,7 @@ def build_technical_seo(
     resource_status: dict | None = None,
     sitemap_coverage: dict | None = None,
     external_links: dict | None = None,
+    robots_txt: dict | None = None,
     duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
@@ -130,6 +131,11 @@ def build_technical_seo(
         if not url or url in by_url:
             continue
         by_url[url] = _base_sitemap_error_row(error)
+
+    if robots_txt and (robots_txt.get("issues") or []):
+        row = _base_robots_txt_row(robots_txt)
+        if row["url"] and row["url"] not in by_url:
+            by_url[row["url"]] = row
 
     duplicates = _duplicate_lookup(duplicate_rows or [])
     rows = list(by_url.values())
@@ -265,6 +271,38 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "sitemap_out_of_scope_count": 1 if issue_type == "sitemap_includes_urls_out_of_its_scope" else 0,
         "sitemap_url_count_decreased_count": 1 if issue_type == "no_of_urls_in_sitemap_decreased" else 0,
         "sitemap_removed_count": 1 if issue_type == "pages_removed_from_sitemaps" else 0,
+    }
+
+
+def _base_robots_txt_row(row: dict) -> dict:
+    issues = list(row.get("issues") or [])
+    return {
+        "url": row.get("url") or "",
+        "title": "Robots.txt",
+        "section": "robots",
+        "word_count": "",
+        "language": "",
+        "indexability_status": "robots_txt",
+        "http_status": row.get("status", ""),
+        "canonical_url": "",
+        "robots_content": "",
+        "noindex_source": "",
+        "nofollow": False,
+        "nofollow_source": "",
+        "metadata_issues": [],
+        "traffic": 0,
+        "keywords": 0,
+        "top_keyword": "",
+        "page_type": "robots_txt",
+        "template_family": "",
+        "template_signature": "",
+        "fix_scope": "robots_txt",
+        "robots_txt_issue_types": issues,
+        "robots_txt_final_url": row.get("final_url", ""),
+        "robots_txt_error": row.get("error", ""),
+        "robots_txt_syntax_errors": list(row.get("syntax_errors") or []),
+        "robots_txt_size_bytes": _safe_int(row.get("size_bytes")),
+        "robots_txt_syntax_error_count": 1 if "robots_txt_has_syntax_error" in issues else 0,
     }
 
 
@@ -1068,6 +1106,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "no_of_urls_in_sitemap_decreased", "low", 0.82, _recommendation("no_of_urls_in_sitemap_decreased")))
     if _safe_int(row.get("sitemap_removed_count")) > 0:
         issues.append(_issue(row, "sitemaps", "pages_removed_from_sitemaps", "low", 0.8, _recommendation("pages_removed_from_sitemaps")))
+    if _safe_int(row.get("robots_txt_syntax_error_count")) > 0:
+        issues.append(_issue(row, "other", "robots_txt_has_syntax_error", "high", 0.96, _recommendation("robots_txt_has_syntax_error")))
     return issues
 
 
@@ -1266,6 +1306,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_has_only_one_dofollow_incoming_internal_link": "Add more relevant dofollow internal links so this indexable page is not dependent on a single crawl path.",
         "not_indexable_page_has_only_one_dofollow_incoming_internal_link": "Review whether this non-indexable page needs more internal discovery or should remain lightly linked.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
+        "robots_txt_has_syntax_error": "Fix malformed robots.txt directives so crawlers can parse crawl rules and sitemap references reliably.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "noindex_in_html_and_http_header": "Remove duplicate noindex directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",

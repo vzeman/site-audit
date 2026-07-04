@@ -635,6 +635,47 @@ def test_technical_seo_model_flags_noindex_page_receives_organic_traffic() -> No
     assert "noindex_page_receives_organic_traffic" not in no_traffic_issue_types
 
 
+def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 200,
+            "issues": ["robots_txt_has_syntax_error"],
+            "syntax_errors": [{"line": 2, "message": "Missing ':' separator"}],
+            "size_bytes": 64,
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "robots_txt_has_syntax_error"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/robots.txt"
+    assert issues[0]["issue_name"] == "Robots.txt has syntax error"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    page = payload["pages"][0]
+    assert page["page_type"] == "robots_txt"
+    assert page["robots_txt_syntax_error_count"] == 1
+    assert page["robots_txt_syntax_errors"][0]["line"] == 2
+
+
+def test_technical_seo_model_does_not_add_robots_txt_row_without_issue() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 200,
+            "issues": [],
+            "syntax_errors": [],
+        },
+    )
+
+    assert payload["pages"] == []
+    assert payload["issues"] == []
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],

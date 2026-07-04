@@ -34,6 +34,8 @@ from urllib.parse import urljoin, urlparse, urldefrag
 import requests
 from bs4 import BeautifulSoup
 
+from .robots_txt import analyze as analyze_robots_txt
+
 # `curl_cffi` mimics a real browser's TLS fingerprint, which lets us past
 # Cloudflare / Shopify / DataDome / PerimeterX bot challenges that
 # fingerprint `python-requests` and serve 429s no matter how polite we
@@ -216,6 +218,7 @@ class Crawler:
         self.sitemap_entries: list[dict] = []
         self.sitemap_urls_seen: list[str] = []
         self.sitemap_errors: list[dict] = []
+        self.robots_txt_info: dict = {}
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -306,8 +309,17 @@ class Crawler:
         robots_url = f"{self.base_url}/robots.txt"
         r = self._request_with_retry(robots_url)
         if r is not None and r.status_code == 200:
+            self.robots_txt_info = analyze_robots_txt(robots_url, r.status_code, r.text, final_url=r.url)
             rp.parse(r.text.splitlines())
         else:
+            status = r.status_code if r is not None else 0
+            self.robots_txt_info = analyze_robots_txt(
+                robots_url,
+                status,
+                "",
+                final_url=(r.url if r is not None else robots_url),
+                error=(getattr(r, "reason", "") if r is not None else "request_failed"),
+            )
             rp.parse([])
         self._robots = rp
         return rp
