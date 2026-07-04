@@ -3333,6 +3333,38 @@ def test_technical_seo_model_flags_pages_with_poor_inp() -> None:
     assert page["inp_score"] == 620
 
 
+def test_technical_seo_model_flags_pages_with_poor_lcp() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/high", title="High", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/rating", title="Rating", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/needs", title="Needs", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/good", title="Good", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {"url": "https://example.com/high", "status": 200, "lcp_score": 4500},
+                {"url": "https://example.com/rating", "status": 200, "lcp_rating": "poor", "lcp_score": 1200},
+                {"url": "https://example.com/needs", "status": 200, "lcp_score": 3200},
+                {"url": "https://example.com/good", "status": 200, "lcp_rating": "good", "lcp_score": 6000},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "pages_with_poor_lcp"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/high",
+        "https://example.com/rating",
+    }
+    assert all(row["issue_name"] == "Pages with poor LCP" for row in issues)
+    assert all(row["category"] == "performance" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+    assert all(row["severity"] == "medium" for row in issues)
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/high")
+    assert page["lcp_score"] == 4500
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
