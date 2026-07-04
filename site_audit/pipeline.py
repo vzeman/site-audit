@@ -441,6 +441,17 @@ def run(config: PipelineConfig) -> dict:
     fetched_total = len(fetched)
     for idx, r in enumerate(fetched, 1):
         http_status = int(getattr(r, "status", 0) or 0)
+        fetch_error = getattr(r, "error", "") or ""
+        if fetch_error:
+            extraction_rows.append({
+                "url": r.url,
+                "status": "skipped",
+                "reason": fetch_error,
+                "http_status": http_status,
+                "content_type": getattr(r, "content_type", ""),
+                "x_robots_tag": getattr(r, "x_robots_tag", ""),
+            })
+            continue
         if http_status and not 200 <= http_status < 400:
             extraction_rows.append({
                 "url": r.url,

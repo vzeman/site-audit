@@ -184,7 +184,9 @@ def _issues_for_row(row: dict) -> list[dict]:
     for issue_type in _http_status_issue_types(row):
         issues.append(_issue(row, "internal_pages", issue_type, "high", 0.98, _recommendation(issue_type)))
     status = str(row.get("indexability_status") or "")
-    if status and status != "indexable":
+    if status == "timed_out":
+        issues.append(_issue(row, "internal_pages", "timed_out", "high", 0.98, _recommendation("timed_out")))
+    elif status and status != "indexable":
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
@@ -241,6 +243,7 @@ def _recommendation(issue_type: str) -> str:
         "4xx_page": "Fix the client error or remove internal links and sitemap references to this URL.",
         "500_page": "Fix the server error so the URL returns a stable 2xx response, or remove it from crawlable SEO surfaces.",
         "5xx_page": "Investigate server-side failures and make the URL reliably crawlable before keeping it in SEO surfaces.",
+        "timed_out": "Reduce response time, fix blocking behavior, or remove the URL from crawlable SEO surfaces.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

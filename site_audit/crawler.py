@@ -143,6 +143,7 @@ class FetchResult:
     x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
+    error: str = ""
 
 
 @dataclass
@@ -236,7 +237,7 @@ class Crawler:
         final_url: Optional[str] = canonical_url
         if final_url is None:
             r = self._request_with_retry(self.base_url + "/")
-            if r is None or r.status_code >= 400:
+            if r is None or r.status_code <= 0 or r.status_code >= 400:
                 return
             final_url = str(r.url)
             if self.config.use_cache and "html" in (r.headers.get("Content-Type") or "").lower():
@@ -591,7 +592,14 @@ class Crawler:
                     r = self._session.get(url, timeout=self.config.timeout, allow_redirects=True)
             except Exception as exc:
                 LOG.warning("%s %s failed: %s", method, url, exc)
-                return None
+                resp = requests.Response()
+                resp.status_code = 0
+                resp.url = url
+                resp._content = b""
+                resp.headers = {}
+                message = str(exc).lower()
+                resp.reason = "timed_out" if "timeout" in message or "timed out" in message else "fetch_failed"
+                return resp
             if r.status_code in (429, 503):
                 # honour Retry-After when present, else exponential + jitter
                 retry_after = r.headers.get("Retry-After")
@@ -654,6 +662,17 @@ class Crawler:
         final_url = normalize_url(r.url)
         ctype = r.headers.get("Content-Type", "").lower()
         body_bytes = r.content
+
+        if r.status_code <= 0:
+            return FetchResult(
+                url=final_url,
+                status=0,
+                body="",
+                content_type=ctype,
+                from_cache=False,
+                content_length_bytes=0,
+                error=getattr(r, "reason", "") or "fetch_failed",
+            )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
             self.cache.put(final_url, r.status_code, dict(r.headers), body_bytes)

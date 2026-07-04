@@ -13,6 +13,7 @@ class _Response:
         self.text = body
         self.url = url
         self.headers = {"Content-Type": "application/xml"}
+        self.reason = ""
 
 
 def _crawler(config: CrawlConfig, responses: dict[str, str]) -> Crawler:
@@ -308,3 +309,20 @@ def test_fetch_keeps_internal_error_page_for_technical_audit() -> None:
     assert result.url == "https://example.com/missing"
     assert result.status == 404
     assert result.body == ""
+
+
+def test_fetch_keeps_timeout_for_technical_audit() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    response = _Response("", url="https://example.com/slow", status_code=0)
+    response.reason = "timed_out"
+    crawler._request_with_retry = lambda url: response
+
+    result = crawler._fetch("https://example.com/slow")
+
+    assert result is not None
+    assert result.url == "https://example.com/slow"
+    assert result.status == 0
+    assert result.error == "timed_out"

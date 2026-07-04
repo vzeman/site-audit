@@ -130,6 +130,27 @@ def test_technical_seo_model_flags_internal_4xx_and_5xx_pages() -> None:
     assert payload["issue_counts"]["5xx_page"] == 1
 
 
+def test_technical_seo_model_flags_timed_out_pages() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/slow",
+                    "title": "",
+                    "reason": "timed_out",
+                    "http_status": 0,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issue_types = {row["issue_type"] for row in payload["issues"]}
+    assert "timed_out" in issue_types
+    assert payload["issue_counts"]["timed_out"] == 1
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
