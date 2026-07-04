@@ -62,6 +62,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36 site-audit/+https://github.com/vzeman/site-audit"
 )
+MAX_SITEMAP_BYTES = 50 * 1024 * 1024
 DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -356,6 +357,14 @@ class Crawler:
                     content = gzip.decompress(content)
                 except Exception:
                     pass
+            if len(content or b"") > MAX_SITEMAP_BYTES:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_larger_than_50mb",
+                    "http_status": r.status_code,
+                    "size_bytes": len(content or b""),
+                    "message": f"{len(content or b'')} bytes",
+                })
             try:
                 root = ET.fromstring(content)
             except Exception as exc:

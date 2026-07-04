@@ -4508,6 +4508,34 @@ def test_technical_seo_model_flags_sitemap_is_not_accessible() -> None:
     assert page["sitemap_error_message"] == "HTTP 404"
 
 
+def test_technical_seo_model_flags_sitemap_larger_than_50mb() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/huge-sitemap.xml",
+                    "issue": "sitemap_larger_than_50mb",
+                    "http_status": 200,
+                    "size_bytes": 60 * 1024 * 1024,
+                    "message": "62914560 bytes",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "sitemap_larger_than_50mb"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/huge-sitemap.xml"
+    assert issues[0]["issue_name"] == "Sitemap larger than 50MB"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/huge-sitemap.xml")
+    assert page["sitemap_too_large_count"] == 1
+    assert page["sitemap_size_bytes"] == 60 * 1024 * 1024
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

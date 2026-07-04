@@ -235,6 +235,7 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
                 "sitemap_url": "https://example.com/broken-sitemap.xml",
                 "issue": "sitemap_has_syntax_error",
                 "http_status": "",
+                "size_bytes": "",
                 "message": "not well-formed",
             }
         ],
@@ -246,6 +247,7 @@ def test_sitemap_coverage_flags_sitemap_syntax_error() -> None:
             "sitemap_url": "https://example.com/broken-sitemap.xml",
             "issue": "sitemap_has_syntax_error",
             "http_status": "",
+            "size_bytes": "",
             "message": "not well-formed",
         }
     ]
@@ -276,6 +278,30 @@ def test_sitemap_coverage_flags_sitemap_is_not_accessible() -> None:
     assert issues[0]["url"] == "https://example.com/missing-sitemap.xml"
     assert issues[0]["http_status"] == 404
     assert "Restore access" in issues[0]["recommended_action"]
+
+
+def test_sitemap_coverage_flags_sitemap_larger_than_50mb() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/huge-sitemap.xml",
+                "issue": "sitemap_larger_than_50mb",
+                "http_status": 200,
+                "size_bytes": 60 * 1024 * 1024,
+                "message": "62914560 bytes",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_larger_than_50mb"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_larger_than_50mb"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/huge-sitemap.xml"
+    assert issues[0]["size_bytes"] == 60 * 1024 * 1024
+    assert "50MB" in issues[0]["recommended_action"]
 
 
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:

@@ -215,8 +215,10 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "fix_scope": "sitemap",
         "sitemap_issue_types": [issue_type],
         "sitemap_error_message": row.get("message", ""),
+        "sitemap_size_bytes": _safe_int(row.get("size_bytes")),
         "sitemap_syntax_error_count": 1 if issue_type == "sitemap_has_syntax_error" else 0,
         "sitemap_not_accessible_count": 1 if issue_type == "sitemap_is_not_accessible" else 0,
+        "sitemap_too_large_count": 1 if issue_type == "sitemap_larger_than_50mb" else 0,
     }
 
 
@@ -953,6 +955,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "sitemap_has_syntax_error", "high", 0.96, _recommendation("sitemap_has_syntax_error")))
     if _safe_int(row.get("sitemap_not_accessible_count")) > 0:
         issues.append(_issue(row, "sitemaps", "sitemap_is_not_accessible", "high", 0.96, _recommendation("sitemap_is_not_accessible")))
+    if _safe_int(row.get("sitemap_too_large_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "sitemap_larger_than_50mb", "high", 0.94, _recommendation("sitemap_larger_than_50mb")))
     return issues
 
 
@@ -1109,6 +1113,7 @@ def _recommendation(issue_type: str) -> str:
         "page_from_sitemap_timed_out": "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably.",
         "sitemap_has_syntax_error": "Fix the XML syntax error so crawlers can parse the sitemap.",
         "sitemap_is_not_accessible": "Restore access to the sitemap URL or remove the inaccessible sitemap reference.",
+        "sitemap_larger_than_50mb": "Split the sitemap into smaller files under the 50MB uncompressed limit.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
