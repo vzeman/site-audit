@@ -217,6 +217,24 @@ def test_performance_payload_detects_small_tap_targets() -> None:
     assert payload["summary"]["small_tap_target_share"] == 0.5
 
 
+def test_performance_payload_detects_missing_viewport() -> None:
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/missing", "<html><head></head><body></body></html>"),
+        _Fetched(
+            "https://example.com/ok",
+            '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head></html>',
+        ),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/missing"]["viewport_set"] is False
+    assert rows["https://example.com/missing"]["viewport_meta"] == ""
+    assert rows["https://example.com/ok"]["viewport_set"] is True
+    assert rows["https://example.com/ok"]["viewport_meta"] == "width=device-width, initial-scale=1"
+    assert payload["summary"]["pages_missing_viewport"] == 1
+    assert payload["summary"]["missing_viewport_share"] == 0.5
+
+
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
     html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
 

@@ -262,6 +262,8 @@ def _row(fetch) -> dict:
     styles = soup.find_all("style")
     links = soup.find_all("link")
     images = soup.find_all("img")
+    viewport_tag = soup.find("meta", attrs={"name": lambda value: str(value or "").lower() == "viewport"})
+    viewport_meta = str(viewport_tag.get("content") or "").strip() if viewport_tag else ""
 
     script_count = len(scripts)
     external_script_count = sum(1 for tag in scripts if tag.get("src"))
@@ -295,6 +297,8 @@ def _row(fetch) -> dict:
         "content_encoding": content_encoding,
         "compressed": content_encoding in _COMPRESSED_ENCODINGS,
         "not_compressed": "html" in content_type.lower() and content_encoding not in _COMPRESSED_ENCODINGS,
+        "viewport_meta": viewport_meta,
+        "viewport_set": bool(viewport_tag),
         "content_size_bytes": int(getattr(fetch, "content_length_bytes", 0) or html_weight_bytes),
         "html_weight_bytes": html_weight_bytes,
         "estimated_weight_bytes": estimated_weight_bytes,
@@ -341,6 +345,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     pages_with_small_font_sizes = sum(1 for row in rows if row["small_font_size_count"] > 0)
     pages_with_small_tap_targets = sum(1 for row in rows if row["small_tap_target_count"] > 0)
     pages_not_compressed = sum(1 for row in rows if row["not_compressed"])
+    pages_missing_viewport = sum(1 for row in rows if not row["viewport_set"])
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -373,6 +378,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "small_tap_target_share": pages_with_small_tap_targets / total_pages if total_pages else 0.0,
         "pages_not_compressed": pages_not_compressed,
         "not_compressed_share": pages_not_compressed / total_pages if total_pages else 0.0,
+        "pages_missing_viewport": pages_missing_viewport,
+        "missing_viewport_share": pages_missing_viewport / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }

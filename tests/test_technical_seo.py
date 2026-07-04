@@ -3432,6 +3432,32 @@ def test_technical_seo_model_flags_tap_targets_too_small_or_too_close_together()
     assert page["small_tap_targets"] == [{"tag": "button", "text": "Go", "width_px": 32, "height_px": 40}]
 
 
+def test_technical_seo_model_flags_viewport_not_set() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {"url": "https://example.com/missing", "status": 200, "viewport_set": False, "viewport_meta": ""},
+                {"url": "https://example.com/ok", "status": 200, "viewport_set": True, "viewport_meta": "width=device-width, initial-scale=1"},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "viewport_not_set"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "Viewport not set"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert page["viewport_set"] is False
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
