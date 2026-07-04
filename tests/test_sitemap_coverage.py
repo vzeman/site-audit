@@ -170,6 +170,37 @@ def test_sitemap_coverage_flags_5xx_page_in_sitemap() -> None:
     assert "server error" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_non_canonical_page_in_sitemap() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/duplicate",
+                "source_sitemaps": ["https://example.com/sitemap.xml"],
+                "lastmod": "2026-05-01",
+            },
+        ],
+        [_Fetched("https://example.com/duplicate")],
+        [
+            {
+                "url": "https://example.com/duplicate",
+                "title": "Duplicate",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/canonical",
+            }
+        ],
+        {"per_page": [{"url": "https://example.com/duplicate", "indexability_status": "indexable", "issues": []}]},
+    )
+
+    assert payload["summary"]["non_canonical_page_in_sitemap"] == 1
+    row = payload["rows"][0]
+    assert row["canonical_url"] == "https://example.com/canonical"
+    assert row["sitemap_issue_types"] == ["non_canonical_page_in_sitemap"]
+    issues = [row for row in payload["issues"] if row["issue"] == "non_canonical_page_in_sitemap"]
+    assert len(issues) == 1
+    assert "canonical URL" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},

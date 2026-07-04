@@ -500,6 +500,7 @@ def _merge_page_signals(
         row["in_sitemap"] = bool(sitemap.get("in_sitemap"))
         row["source_sitemaps"] = list(sitemap.get("source_sitemaps") or [])
         row["sitemap_issue_types"] = list(sitemap.get("sitemap_issue_types") or [])
+        row["sitemap_canonical_url"] = sitemap.get("canonical_url", "")
         row["sitemap_redirect_target_url"] = sitemap.get("redirect_target_url", "")
         row["sitemap_redirect_status_codes"] = [_safe_int(code) for code in (sitemap.get("redirect_status_codes") or [])]
         if "3xx_redirect_in_sitemap" in row["sitemap_issue_types"]:
@@ -510,6 +511,8 @@ def _merge_page_signals(
             row["sitemap_5xx_count"] = 1
         if "noindex_page_in_sitemap" in row["sitemap_issue_types"]:
             row["sitemap_noindex_count"] = 1
+        if "non_canonical_page_in_sitemap" in row["sitemap_issue_types"]:
+            row["sitemap_non_canonical_count"] = 1
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -904,6 +907,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "5xx_page_in_sitemap", "high", 0.94, _recommendation("5xx_page_in_sitemap")))
     if _safe_int(row.get("sitemap_noindex_count")) > 0:
         issues.append(_issue(row, "sitemaps", "noindex_page_in_sitemap", "high", 0.92, _recommendation("noindex_page_in_sitemap")))
+    if _safe_int(row.get("sitemap_non_canonical_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "non_canonical_page_in_sitemap", "high", 0.92, _recommendation("non_canonical_page_in_sitemap")))
     return issues
 
 
@@ -1056,6 +1061,7 @@ def _recommendation(issue_type: str) -> str:
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
         "noindex_page_in_sitemap": "Remove noindex URLs from XML sitemaps or make the page indexable if it should rank.",
+        "non_canonical_page_in_sitemap": "Update XML sitemaps to list the canonical URL instead of a non-canonical URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

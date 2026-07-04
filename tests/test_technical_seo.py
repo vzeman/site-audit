@@ -4375,6 +4375,45 @@ def test_technical_seo_model_flags_noindex_page_in_sitemap() -> None:
     assert page["in_sitemap"] is True
 
 
+def test_technical_seo_model_flags_non_canonical_page_in_sitemap() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/duplicate", title="Duplicate", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/duplicate",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "canonical_url": "https://example.com/canonical",
+                    "sitemap_issue_types": ["non_canonical_page_in_sitemap"],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "canonical_url": "https://example.com/clean",
+                    "sitemap_issue_types": [],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "non_canonical_page_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/duplicate"
+    assert issues[0]["issue_name"] == "Non-canonical page in sitemap"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/duplicate")
+    assert page["sitemap_non_canonical_count"] == 1
+    assert page["sitemap_canonical_url"] == "https://example.com/canonical"
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

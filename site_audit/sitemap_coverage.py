@@ -17,6 +17,7 @@ SITEMAP_REDIRECT_ISSUE = "3xx_redirect_in_sitemap"
 SITEMAP_4XX_ISSUE = "4xx_page_in_sitemap"
 SITEMAP_5XX_ISSUE = "5xx_page_in_sitemap"
 SITEMAP_NOINDEX_ISSUE = "noindex_page_in_sitemap"
+SITEMAP_NON_CANONICAL_ISSUE = "non_canonical_page_in_sitemap"
 
 
 def analyze(
@@ -66,6 +67,9 @@ def analyze(
             sitemap_issue_types.append(SITEMAP_5XX_ISSUE)
         if in_sitemap and indexability_status == "noindex":
             sitemap_issue_types.append(SITEMAP_NOINDEX_ISSUE)
+        canonical_url = extraction_row.get("canonical_url", "")
+        if in_sitemap and _canonical_differs(url, canonical_url):
+            sitemap_issue_types.append(SITEMAP_NON_CANONICAL_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -75,6 +79,7 @@ def analyze(
             "lastmod": sitemap_row.get("lastmod", ""),
             "crawled": crawled,
             "http_status": http_status,
+            "canonical_url": canonical_url,
             "redirect_target_url": redirect_target_url,
             "redirect_status_codes": redirect_status_codes,
             "redirect_hop_count": _safe_int(getattr(fetched_row, "redirect_hop_count", 0)),
@@ -136,6 +141,9 @@ def analyze(
             "noindex_page_in_sitemap": sum(
                 1 for row in rows if SITEMAP_NOINDEX_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "non_canonical_page_in_sitemap": sum(
+                1 for row in rows if SITEMAP_NON_CANONICAL_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -169,7 +177,15 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Fix the server error before keeping this URL in XML sitemaps."
     if issue_type == SITEMAP_NOINDEX_ISSUE:
         return "Remove noindex URLs from XML sitemaps or make the page indexable if it should rank."
+    if issue_type == SITEMAP_NON_CANONICAL_ISSUE:
+        return "Update XML sitemaps to list the canonical URL instead of a non-canonical URL."
     return "Review and fix this sitemap issue."
+
+
+def _canonical_differs(url: str, canonical_url: str) -> bool:
+    if not canonical_url:
+        return False
+    return url.rstrip("/") != canonical_url.rstrip("/")
 
 
 def _safe_int(value) -> int:
