@@ -926,6 +926,64 @@ def test_technical_seo_model_flags_pages_to_submit_to_indexnow() -> None:
     assert "pages_to_submit_to_indexnow" not in clean_issue_types
 
 
+def test_technical_seo_model_flags_google_rich_results_validation_error() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/rich-error",
+                title="Rich Error",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/rich-clean",
+                title="Rich Clean",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        structured_data={
+            "per_page": [
+                {
+                    "url": "https://example.com/rich-error",
+                    "types": ["Product"],
+                    "valid_blocks": 1,
+                    "invalid_blocks": 0,
+                    "google_rich_results_validation_errors": [{"field": "offers", "message": "Missing field"}],
+                },
+                {
+                    "url": "https://example.com/rich-clean",
+                    "types": ["Product"],
+                    "valid_blocks": 1,
+                    "invalid_blocks": 0,
+                    "google_rich_results_validation_errors": [],
+                },
+            ]
+        },
+    )
+
+    issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "structured_data_has_google_rich_results_validation_error"
+    ]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/rich-error"
+    assert issues[0]["issue_name"] == "Structured data has Google rich results validation error"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/rich-error"]["google_rich_results_validation_error_count"] == 1
+    clean_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/rich-clean"
+    }
+    assert "structured_data_has_google_rich_results_validation_error" not in clean_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

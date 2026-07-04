@@ -1855,6 +1855,7 @@ def run(config: PipelineConfig) -> dict:
         search_payload=ahrefs_data,
         page_types=page_types_data,
         header_analysis=header_analysis_data,
+        structured_data=structured_data_data,
         media_accessibility=media_accessibility_data,
         resource_status=resource_status_data,
         sitemap_coverage=sitemap_coverage_data,

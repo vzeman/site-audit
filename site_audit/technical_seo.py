@@ -51,6 +51,7 @@ def build_technical_seo(
     page_types: dict | None = None,
     header_analysis: dict | None = None,
     content_quality: dict | None = None,
+    structured_data: dict | None = None,
     media_accessibility: dict | None = None,
     resource_status: dict | None = None,
     sitemap_coverage: dict | None = None,
@@ -70,6 +71,7 @@ def build_technical_seo(
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     headers = _lookup_rows((header_analysis or {}).get("per_page") or [])
     quality = _lookup_rows((content_quality or {}).get("per_page") or (content_quality or {}).get("rows") or [])
+    structured = _lookup_rows((structured_data or {}).get("per_page") or [])
     media = _lookup_rows((media_accessibility or {}).get("per_page") or [])
     media_issues = _media_issue_lookup((media_accessibility or {}).get("media_with_issues") or [])
     resources = _lookup_rows((resource_status or {}).get("per_page") or [])
@@ -93,6 +95,7 @@ def build_technical_seo(
             types.get(url),
             headers.get(url),
             quality.get(url),
+            structured.get(url),
             media.get(url),
             media_issues.get(url),
             resources.get(url),
@@ -119,6 +122,7 @@ def build_technical_seo(
             types.get(url),
             headers.get(url),
             quality.get(url),
+            structured.get(url),
             media.get(url),
             media_issues.get(url),
             resources.get(url),
@@ -359,6 +363,7 @@ def _merge_page_signals(
     page_type: dict | None,
     header: dict | None,
     quality: dict | None,
+    structured: dict | None,
     media: dict | None,
     media_issues: dict | None,
     resource: dict | None,
@@ -528,6 +533,20 @@ def _merge_page_signals(
         row["ai_content_level"] = quality.get("ai_content_level", "")
         row["ai_content_score"] = _safe_float(quality.get("ai_content_score", quality.get("ai_content_probability", 0.0)))
         row["ai_content_probability"] = _safe_float(quality.get("ai_content_probability", quality.get("ai_content_score", 0.0)))
+    if structured:
+        row["structured_data_types"] = list(structured.get("types") or [])
+        row["structured_data_valid_blocks"] = _safe_int(structured.get("valid_blocks"))
+        row["structured_data_invalid_blocks"] = _safe_int(structured.get("invalid_blocks"))
+        google_errors = list(
+            structured.get("google_rich_results_validation_errors")
+            or structured.get("google_rich_results_errors")
+            or structured.get("rich_results_errors")
+            or []
+        )
+        row["google_rich_results_validation_errors"] = google_errors
+        row["google_rich_results_validation_error_count"] = _safe_int(
+            structured.get("google_rich_results_validation_error_count", len(google_errors))
+        )
     if media:
         media_issue_counts = dict(media.get("issues") or {})
         row["media_issue_counts"] = media_issue_counts
@@ -819,6 +838,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "pages_dropped_from_top_10", "low", 0.84, _recommendation("pages_dropped_from_top_10")))
     if row.get("indexnow_submission_recommended"):
         issues.append(_issue(row, "other", "pages_to_submit_to_indexnow", "low", 0.8, _recommendation("pages_to_submit_to_indexnow")))
+    if _safe_int(row.get("google_rich_results_validation_error_count")) > 0:
+        issues.append(_issue(row, "other", "structured_data_has_google_rich_results_validation_error", "low", 0.84, _recommendation("structured_data_has_google_rich_results_validation_error")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1345,6 +1366,7 @@ def _recommendation(issue_type: str) -> str:
         "organic_traffic_dropped": "Review the page changes, rankings, snippets, and technical status that may have caused organic traffic to decline.",
         "pages_dropped_from_top_10": "Review ranking, content, SERP, and technical changes for pages that fell out of the top 10 results.",
         "pages_to_submit_to_indexnow": "Submit this changed or newly important URL through IndexNow so supported search engines can recrawl it sooner.",
+        "structured_data_has_google_rich_results_validation_error": "Fix structured-data fields required for Google rich results and revalidate the page against Google Search rich result rules.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
