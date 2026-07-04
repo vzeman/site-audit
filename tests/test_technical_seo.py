@@ -878,6 +878,69 @@ def test_technical_seo_model_flags_indexable_meta_description_changes() -> None:
     assert page["current_description"] == "New meta description"
 
 
+def test_technical_seo_model_flags_indexable_page_and_serp_title_mismatch() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/mismatch", title="Buy Tablets Online", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/normalized", title="Buy Tablets | Example", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/no-serp", title="No SERP Title", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex Title",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/mismatch",
+                    "traffic": 100,
+                    "keywords": 5,
+                    "top_keyword": "tablets",
+                    "top_keyword_title": "Cheap Tablets - Example",
+                },
+                {
+                    "matched_url": "https://example.com/normalized",
+                    "traffic": 80,
+                    "keywords": 3,
+                    "top_keyword": "buy tablets",
+                    "top_keyword_title": "buy tablets - example",
+                },
+                {
+                    "matched_url": "https://example.com/no-serp",
+                    "traffic": 10,
+                    "keywords": 1,
+                    "top_keyword": "no serp",
+                },
+                {
+                    "matched_url": "https://example.com/noindex",
+                    "traffic": 5,
+                    "keywords": 1,
+                    "top_keyword": "noindex",
+                    "top_keyword_title": "Different Noindex SERP Title",
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_page_and_serp_titles_do_not_match"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/mismatch"
+    assert issues[0]["issue_name"] == "Page and SERP titles do not match"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/mismatch")
+    assert page["serp_title"] == "Cheap Tablets - Example"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/thin", title="Thin", section="", word_count=80, language="en"),

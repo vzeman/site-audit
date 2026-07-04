@@ -8,6 +8,7 @@ technical SEO analyzers can extend.
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -265,6 +266,7 @@ def _merge_page_signals(
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
         row["top_keyword"] = search.get("top_keyword", "")
+        row["serp_title"] = search.get("serp_title", "")
     if page_type:
         row["page_type"] = page_type.get("page_type", "")
         row["template_family"] = page_type.get("template_family", "")
@@ -360,6 +362,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_h1_tag_changed", "low", 0.8, _recommendation("indexable_h1_tag_changed")))
     if status == "indexable" and row.get("description_changed"):
         issues.append(_issue(row, "content", "indexable_meta_description_changed", "low", 0.8, _recommendation("indexable_meta_description_changed")))
+    if status == "indexable" and _titles_do_not_match(row.get("title", ""), row.get("serp_title", "")):
+        issues.append(_issue(row, "content", "indexable_page_and_serp_titles_do_not_match", "low", 0.82, _recommendation("indexable_page_and_serp_titles_do_not_match")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
     if (
@@ -558,6 +562,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_h1_tags": "Keep one primary H1 heading and demote extra H1s to lower heading levels.",
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
         "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
+        "indexable_page_and_serp_titles_do_not_match": "Review the SERP title Google is showing and align the page title when the rewrite is not intentional.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
@@ -657,8 +662,19 @@ def _search_lookup(payload: dict | None) -> dict[str, dict]:
             "traffic": row.get("traffic", 0),
             "keywords": row.get("keywords", 0),
             "top_keyword": row.get("top_keyword", ""),
+            "serp_title": row.get("top_keyword_title") or row.get("serp_title") or "",
         }
     return out
+
+
+def _title_fingerprint(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _titles_do_not_match(page_title: str, serp_title: str) -> bool:
+    page = _title_fingerprint(page_title)
+    serp = _title_fingerprint(serp_title)
+    return bool(page and serp and page != serp)
 
 
 def _safe_int(value) -> int:
