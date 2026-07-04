@@ -667,6 +667,45 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_title_t
     assert all(row["importance"] == "Error" for row in issues)
 
 
+def test_technical_seo_model_flags_indexable_pages_with_title_too_long() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/long", title="Long", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/length", title="Length", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/long",
+                    "title": "Long",
+                    "title_length": 80,
+                    "issues": ["long_title"],
+                },
+                {
+                    "url": "https://example.com/length",
+                    "title": "Length",
+                    "title_length": 70,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "title_length": 45,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_title_too_long"]
+    assert {row["url"] for row in issues} == {"https://example.com/long", "https://example.com/length"}
+    assert all(row["issue_name"] == "Title too long" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+
+
 def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=100, language="en"),

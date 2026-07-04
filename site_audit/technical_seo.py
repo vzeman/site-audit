@@ -182,6 +182,7 @@ def _merge_page_signals(
 ) -> None:
     if metadata:
         row["title"] = row.get("title") or metadata.get("title", "")
+        row["title_length"] = _safe_int(metadata.get("title_length"))
         row["description"] = metadata.get("description", row.get("description", ""))
         row["description_length"] = _safe_int(metadata.get("description_length"))
         row["canonical_url"] = metadata.get("canonical_url", "")
@@ -382,6 +383,14 @@ def _issues_for_row(row: dict) -> list[dict]:
         )
     ):
         issues.append(_issue(row, "content", "indexable_title_tag_missing_or_empty", "high", 0.94, _recommendation("indexable_title_tag_missing_or_empty")))
+    if (
+        status == "indexable"
+        and (
+            "long_title" in (row.get("metadata_issues") or [])
+            or _safe_int(row.get("title_length")) > 65
+        )
+    ):
+        issues.append(_issue(row, "content", "indexable_title_too_long", "medium", 0.86, _recommendation("indexable_title_too_long")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -531,6 +540,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
         "indexable_meta_description_too_short": "Expand the meta description so it communicates the page value in search snippets.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
+        "indexable_title_too_long": "Shorten the title tag so the main topic and differentiator fit cleanly in search results.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
