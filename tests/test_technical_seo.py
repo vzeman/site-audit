@@ -596,6 +596,54 @@ def test_technical_seo_model_flags_indexable_pages_linking_to_redirects() -> Non
     assert bad_page["redirect_internal_link_count"] == 1
 
 
+def test_technical_seo_model_flags_redirected_indexable_pages_with_no_incoming_links() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/final", title="Final", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/final-linked", title="Final Linked", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/direct", title="Direct", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "per_page": [
+                {
+                    "url": "https://example.com/final",
+                    "indexability_status": "indexable",
+                    "requested_url": "https://example.com/redirecting",
+                    "redirect_target_url": "https://example.com/final",
+                },
+                {
+                    "url": "https://example.com/final-linked",
+                    "indexability_status": "indexable",
+                    "requested_url": "https://example.com/redirecting-linked",
+                    "redirect_target_url": "https://example.com/final-linked",
+                },
+                {
+                    "url": "https://example.com/direct",
+                    "indexability_status": "indexable",
+                },
+            ],
+            "skipped": [],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {"url": "https://example.com/final", "in_degree": 0, "out_degree": 1},
+                {"url": "https://example.com/final-linked", "in_degree": 2, "out_degree": 1},
+                {"url": "https://example.com/direct", "in_degree": 0, "out_degree": 1},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_redirected_page_has_no_incoming_internal_links"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "Redirected page has no incoming internal links"
+    assert issues[0]["importance"] == "Warning"
+    final_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/final")
+    assert final_page["requested_url"] == "https://example.com/redirecting"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_no_outgoing_links() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/dead-end", title="Dead End", section="", word_count=100, language="en"),

@@ -55,16 +55,17 @@ def build_technical_seo(
     links = _lookup_rows((linkgraph or {}).get("page_link_counts") or [])
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
+    index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), search.get(url), types.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), search.get(url), types.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -169,6 +170,7 @@ def _merge_page_signals(
     canonical: dict | None,
     history: dict | None,
     links: dict | None,
+    indexability: dict | None,
     search: dict | None,
     page_type: dict | None,
     skipped: dict | None,
@@ -226,6 +228,9 @@ def _merge_page_signals(
         row["incoming_dofollow_internal_link_count"] = _safe_int(links.get("incoming_dofollow_internal_link_count"))
         row["incoming_nofollow_internal_links"] = list(links.get("incoming_nofollow_internal_links") or [])
         row["incoming_dofollow_internal_links"] = list(links.get("incoming_dofollow_internal_links") or [])
+    if indexability:
+        row["requested_url"] = indexability.get("requested_url", "")
+        row["redirect_target_url"] = indexability.get("redirect_target_url", "")
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -242,6 +247,8 @@ def _merge_page_signals(
         row["noindex_source"] = skipped.get("noindex_source") or skipped.get("source") or row.get("noindex_source", "")
         row["nofollow"] = bool(skipped.get("nofollow", row.get("nofollow", False)))
         row["nofollow_source"] = skipped.get("nofollow_source", row.get("nofollow_source", ""))
+        row["requested_url"] = skipped.get("requested_url", row.get("requested_url", ""))
+        row["redirect_target_url"] = skipped.get("redirect_target_url", row.get("redirect_target_url", ""))
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -290,6 +297,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "indexable_page_has_links_to_broken_page", "high", 0.94, _recommendation("indexable_page_has_links_to_broken_page")))
     if status == "indexable" and _safe_int(row.get("redirect_internal_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_page_has_links_to_redirect", "medium", 0.9, _recommendation("indexable_page_has_links_to_redirect")))
+    if status == "indexable" and _is_redirected_fetch(row) and _safe_int(row.get("in_degree")) == 0:
+        issues.append(_issue(row, "links", "indexable_redirected_page_has_no_incoming_internal_links", "medium", 0.88, _recommendation("indexable_redirected_page_has_no_incoming_internal_links")))
     if status == "indexable" and row.get("internal_link_counts_available") and _safe_int(row.get("raw_internal_link_count")) == 0:
         issues.append(_issue(row, "links", "indexable_page_has_no_outgoing_links", "high", 0.9, _recommendation("indexable_page_has_no_outgoing_links")))
     if (
@@ -372,6 +381,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_https_page_has_internal_links_to_http": "Update internal links on this HTTPS page so they point directly to HTTPS URLs.",
         "indexable_page_has_links_to_broken_page": "Update or remove internal links that point to broken 4XX/5XX URLs.",
         "indexable_page_has_links_to_redirect": "Update internal links to point directly at the final destination URL instead of the redirecting URL.",
+        "indexable_redirected_page_has_no_incoming_internal_links": "Add direct internal links to the final redirected URL or remove obsolete redirected URL references.",
         "indexable_page_has_no_outgoing_links": "Add relevant crawlable internal links from this page to useful destination pages.",
         "indexable_page_has_nofollow_incoming_internal_links_only": "Add at least one dofollow internal link to this page or remove nofollow from appropriate incoming internal links.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
@@ -425,6 +435,12 @@ def _normalize_url(url: str) -> str:
 
 def _url_scheme(url: str) -> str:
     return urlparse(url or "").scheme.lower()
+
+
+def _is_redirected_fetch(row: dict) -> bool:
+    requested_url = row.get("requested_url", "")
+    redirect_target_url = row.get("redirect_target_url", "")
+    return bool(requested_url and redirect_target_url and _normalize_url(requested_url) != _normalize_url(redirect_target_url))
 
 
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
