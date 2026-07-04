@@ -136,10 +136,14 @@ def build_technical_seo(
             continue
         by_url[url] = _base_sitemap_error_row(error)
 
-    if robots_txt and (robots_txt.get("issues") or []):
-        row = _base_robots_txt_row(robots_txt)
-        if row["url"] and row["url"] not in by_url:
-            by_url[row["url"]] = row
+    if robots_txt:
+        if robots_txt.get("issues") or []:
+            row = _base_robots_txt_row(robots_txt)
+            if row["url"] and row["url"] not in by_url:
+                by_url[row["url"]] = row
+        for disallowed_url in robots_txt.get("disallowed_urls") or []:
+            if disallowed_url and disallowed_url not in by_url:
+                by_url[disallowed_url] = _base_robots_disallowed_row(str(disallowed_url), robots_txt)
 
     duplicates = _duplicate_lookup(duplicate_rows or [])
     rows = list(by_url.values())
@@ -313,6 +317,33 @@ def _base_robots_txt_row(row: dict) -> dict:
         "robots_txt_redirect_loop_count": 1 if "robots_txt_has_too_many_redirects_or_redirect_loop" in issues else 0,
         "robots_txt_not_accessible_count": 1 if "robots_txt_is_not_accessible" in issues else 0,
         "robots_txt_changed_count": 1 if "robots_txt_changed" in issues else 0,
+    }
+
+
+def _base_robots_disallowed_row(url: str, robots_txt: dict) -> dict:
+    return {
+        "url": url,
+        "title": "",
+        "section": "robots",
+        "word_count": "",
+        "language": "",
+        "indexability_status": "robots_disallowed",
+        "http_status": "",
+        "canonical_url": "",
+        "robots_content": "",
+        "noindex_source": "",
+        "nofollow": False,
+        "nofollow_source": "",
+        "metadata_issues": [],
+        "traffic": 0,
+        "keywords": 0,
+        "top_keyword": "",
+        "page_type": "robots_disallowed",
+        "template_family": "",
+        "template_signature": "",
+        "fix_scope": "robots_txt",
+        "robots_txt_url": robots_txt.get("url", ""),
+        "robots_txt_disallow_count": 1,
     }
 
 
@@ -1149,6 +1180,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "robots_txt_is_not_accessible", "high", 0.96, _recommendation("robots_txt_is_not_accessible")))
     if _safe_int(row.get("robots_txt_changed_count")) > 0:
         issues.append(_issue(row, "other", "robots_txt_changed", "medium", 0.86, _recommendation("robots_txt_changed")))
+    if _safe_int(row.get("robots_txt_disallow_count")) > 0:
+        issues.append(_issue(row, "other", "robots_txt_rules_disallow_to_crawl", "low", 0.84, _recommendation("robots_txt_rules_disallow_to_crawl")))
     return issues
 
 
@@ -1357,6 +1390,7 @@ def _recommendation(issue_type: str) -> str:
         "robots_txt_has_too_many_redirects_or_redirect_loop": "Fix robots.txt redirects so the file resolves directly to one reachable URL without loops or long redirect chains.",
         "robots_txt_is_not_accessible": "Restore a reachable robots.txt response so crawlers can read crawl rules and sitemap references.",
         "robots_txt_changed": "Review the robots.txt change and confirm new crawl directives or sitemap references are intentional.",
+        "robots_txt_rules_disallow_to_crawl": "Review robots.txt disallow rules and allow crawling for URLs that should be audited or indexed.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
         "noindex_in_html_and_http_header": "Remove duplicate noindex directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",

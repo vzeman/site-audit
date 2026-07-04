@@ -219,6 +219,7 @@ class Crawler:
         self.sitemap_urls_seen: list[str] = []
         self.sitemap_errors: list[dict] = []
         self.robots_txt_info: dict = {}
+        self.robots_disallowed_urls: set[str] = set()
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -247,7 +248,10 @@ class Crawler:
         if not frontier_seed:
             frontier_seed.add(self.base_url)
 
-        return self._bfs(frontier_seed)
+        results = self._bfs(frontier_seed)
+        if self.robots_txt_info:
+            self.robots_txt_info["disallowed_urls"] = sorted(self.robots_disallowed_urls)
+        return results
 
     def _warm_session(self) -> None:
         """Fetch the homepage so CDNs hand us their bot-challenge cookie.
@@ -543,6 +547,7 @@ class Crawler:
         if rp is not None:
             try:
                 if not rp.can_fetch(self.config.user_agent, url):
+                    self.robots_disallowed_urls.add(normalize_url(url))
                     return False
             except Exception:
                 pass

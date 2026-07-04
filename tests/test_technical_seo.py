@@ -1043,6 +1043,46 @@ def test_technical_seo_model_flags_robots_txt_changed() -> None:
     assert page["robots_txt_previous_content_hash"] == "previous"
 
 
+def test_technical_seo_model_flags_robots_txt_rules_disallow_to_crawl() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 200,
+            "issues": [],
+            "disallowed_urls": ["https://example.com/private"],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "robots_txt_rules_disallow_to_crawl"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/private"
+    assert issues[0]["issue_name"] == "Robots.txt rules disallow to crawl"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    page = payload["pages"][0]
+    assert page["url"] == "https://example.com/private"
+    assert page["indexability_status"] == "robots_disallowed"
+    assert page["robots_txt_disallow_count"] == 1
+
+
+def test_technical_seo_model_does_not_add_robots_disallowed_rows_without_urls() -> None:
+    payload = build_technical_seo(
+        [],
+        robots_txt={
+            "url": "https://example.com/robots.txt",
+            "final_url": "https://example.com/robots.txt",
+            "status": 200,
+            "issues": [],
+            "disallowed_urls": [],
+        },
+    )
+
+    assert payload["pages"] == []
+    assert payload["issues"] == []
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],
