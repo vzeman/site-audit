@@ -2501,6 +2501,89 @@ def test_technical_seo_model_flags_hreflang_to_redirect_or_broken_page() -> None
     assert "hreflang_redirect_or_broken_targets" not in clean
 
 
+def test_technical_seo_model_flags_missing_reciprocal_hreflang() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/missing-return", title="Missing Return", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/return-url", title="Return URL", section="", word_count=250, language="cs"),
+        SimpleNamespace(url="https://example.com/return-canonical", title="Return Canonical", section="", word_count=250, language="de"),
+        SimpleNamespace(url="https://example.com/clean-source", title="Clean Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/clean-target", title="Clean Target", section="", word_count=250, language="pl"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/source",
+                    "title": "Source",
+                    "canonical_url": "https://example.com/source/",
+                    "hreflang": [
+                        {"hreflang": "en", "href": "https://example.com/source"},
+                        {"hreflang": "sk", "href": "https://example.com/missing-return"},
+                        {"hreflang": "cs", "href": "https://example.com/return-url"},
+                        {"hreflang": "de", "href": "https://example.com/return-canonical"},
+                        {"hreflang": "hu", "href": "https://example.com/not-crawled"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/missing-return",
+                    "title": "Missing Return",
+                    "canonical_url": "https://example.com/missing-return",
+                    "hreflang": [{"hreflang": "sk", "href": "https://example.com/missing-return"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/return-url",
+                    "title": "Return URL",
+                    "canonical_url": "https://example.com/return-url",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/source"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/return-canonical",
+                    "title": "Return Canonical",
+                    "canonical_url": "https://example.com/return-canonical",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/source/"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-source",
+                    "title": "Clean Source",
+                    "canonical_url": "https://example.com/clean-source",
+                    "hreflang": [{"hreflang": "pl", "href": "https://example.com/clean-target"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-target",
+                    "title": "Clean Target",
+                    "canonical_url": "https://example.com/clean-target",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/clean-source"}],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "missing_reciprocal_hreflang_no_return_tag"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Missing reciprocal hreflang (no return-tag)"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Error"
+    source = next(row for row in payload["pages"] if row["url"] == "https://example.com/source")
+    assert source["missing_reciprocal_hreflang_targets"] == [
+        {
+            "hreflang": "sk",
+            "href": "https://example.com/missing-return",
+            "target_url": "https://example.com/missing-return",
+        }
+    ]
+    clean = next(row for row in payload["pages"] if row["url"] == "https://example.com/clean-source")
+    assert "missing_reciprocal_hreflang_targets" not in clean
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
