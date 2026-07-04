@@ -58,6 +58,7 @@ class ExtractedPage:
     og_title: str = ""
     og_description: str = ""
     og_image: str = ""
+    og_url: str = ""
     twitter_card: str = ""
     twitter_title: str = ""
     twitter_description: str = ""
@@ -902,6 +903,7 @@ def extract(
     og_title = _meta(soup, "og:title")
     og_description = _meta(soup, "og:description")
     og_image = _meta(soup, "og:image")
+    og_url = _meta(soup, "og:url")
     twitter_card = _meta(soup, "twitter:card")
     twitter_title = _meta(soup, "twitter:title")
     twitter_description = _meta(soup, "twitter:description")
@@ -967,6 +969,7 @@ def extract(
         og_title=og_title,
         og_description=og_description,
         og_image=og_image,
+        og_url=og_url,
         twitter_card=twitter_card,
         twitter_title=twitter_title,
         twitter_description=twitter_description,

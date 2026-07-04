@@ -55,6 +55,25 @@ def _description_issue(description: str) -> str:
     return ""
 
 
+def _open_graph_values(page: ExtractedPage) -> dict[str, str]:
+    return {
+        "og_title": page.og_title or "",
+        "og_description": page.og_description or "",
+        "og_image": page.og_image or "",
+        "og_url": getattr(page, "og_url", "") or "",
+    }
+
+
+def _open_graph_missing_fields(page: ExtractedPage) -> list[str]:
+    values = _open_graph_values(page)
+    required = ("og_title", "og_description")
+    return [field for field in required if not values[field]]
+
+
+def _has_open_graph_tags(page: ExtractedPage) -> bool:
+    return any(_open_graph_values(page).values())
+
+
 def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
     page_list = list(pages)
     title_counts = Counter(_norm(page.title) for page in page_list if _norm(page.title))
@@ -75,7 +94,8 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             issues.append("missing_canonical")
         elif not _same_host(page.url, page.canonical_url):
             issues.append("canonical_external_host")
-        if not page.og_title or not page.og_description:
+        og_missing_fields = _open_graph_missing_fields(page)
+        if _has_open_graph_tags(page) and og_missing_fields:
             issues.append("incomplete_open_graph")
         if not page.twitter_card:
             issues.append("missing_twitter_card")
@@ -97,7 +117,10 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             "meta_refresh_target_url": page.meta_refresh_target_url,
             "title_tag_count": page.title_tag_count,
             "meta_description_tag_count": page.meta_description_tag_count,
-            "og_complete": bool(page.og_title and page.og_description),
+            **_open_graph_values(page),
+            "og_tag_count": sum(1 for value in _open_graph_values(page).values() if value),
+            "og_missing_fields": og_missing_fields,
+            "og_complete": not og_missing_fields,
             "twitter_card": page.twitter_card,
             "issues": issues,
         })

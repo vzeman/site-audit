@@ -198,6 +198,13 @@ def _merge_page_signals(
         row["meta_refresh_target_url"] = metadata.get("meta_refresh_target_url", "")
         row["title_tag_count"] = _safe_int(metadata.get("title_tag_count"))
         row["meta_description_tag_count"] = _safe_int(metadata.get("meta_description_tag_count"))
+        row["og_title"] = metadata.get("og_title", "")
+        row["og_description"] = metadata.get("og_description", "")
+        row["og_image"] = metadata.get("og_image", "")
+        row["og_url"] = metadata.get("og_url", "")
+        row["og_tag_count"] = _safe_int(metadata.get("og_tag_count"))
+        row["og_missing_fields"] = list(metadata.get("og_missing_fields") or [])
+        row["og_complete"] = bool(metadata.get("og_complete", False))
         row["metadata_issues"] = list(metadata.get("issues") or [])
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
@@ -563,6 +570,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "not_indexable_page_has_only_one_dofollow_incoming_internal_link", "low", 0.8, _recommendation("not_indexable_page_has_only_one_dofollow_incoming_internal_link")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
+    if "incomplete_open_graph" in (row.get("metadata_issues") or []):
+        issues.append(_issue(row, "social_tags", "open_graph_tags_incomplete", "medium", 0.86, _recommendation("open_graph_tags_incomplete")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -669,6 +678,7 @@ def _recommendation(issue_type: str) -> str:
         "not_indexable_title_too_long": "Shorten the title tag if this non-indexable page remains visible to users, previews, or future indexing plans.",
         "indexable_title_too_short": "Expand the title tag with a clear topic and differentiator while keeping it concise.",
         "not_indexable_title_too_short": "Expand the title tag if this non-indexable page remains visible to users, previews, or future indexing plans.",
+        "open_graph_tags_incomplete": "Add the missing Open Graph title or description tags so shared URLs render complete previews.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

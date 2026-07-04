@@ -12,6 +12,8 @@ def _page(
     canonical_url: str = "https://example.com/page",
     og_title: str = "OG title",
     og_description: str = "OG description",
+    og_image: str = "",
+    og_url: str = "",
     twitter_card: str = "summary",
 ) -> ExtractedPage:
     return ExtractedPage(
@@ -24,6 +26,8 @@ def _page(
         canonical_url=canonical_url,
         og_title=og_title,
         og_description=og_description,
+        og_image=og_image,
+        og_url=og_url,
         twitter_card=twitter_card,
     )
 
@@ -38,6 +42,7 @@ def test_extract_serp_metadata_fields() -> None:
       <meta property="og:title" content="Open graph title">
       <meta property="og:description" content="Open graph description">
       <meta property="og:image" content="https://example.com/image.png">
+      <meta property="og:url" content="https://example.com/page">
       <meta name="twitter:card" content="summary_large_image">
       <meta name="twitter:title" content="Twitter title">
       <meta name="twitter:description" content="Twitter description">
@@ -59,6 +64,7 @@ def test_extract_serp_metadata_fields() -> None:
     assert page.og_title == "Open graph title"
     assert page.og_description == "Open graph description"
     assert page.og_image == "https://example.com/image.png"
+    assert page.og_url == "https://example.com/page"
     assert page.twitter_card == "summary_large_image"
     assert page.twitter_title == "Twitter title"
     assert page.twitter_description == "Twitter description"
@@ -140,9 +146,18 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
         _page("https://example.com/a", title="Same title", description=""),
         _page("https://example.com/b", title="Same title", canonical_url="", og_description=""),
         _page("https://example.com/c", canonical_url="https://other.example/c", twitter_card=""),
+        _page(
+            "https://example.com/d",
+            title="Useful Search Title Long Enough",
+            description="A unique description that keeps this control page free of metadata issues.",
+            og_title="",
+            og_description="",
+            og_image="",
+            og_url="",
+        ),
     ]))
 
-    assert report["summary"]["total_pages"] == 3
+    assert report["summary"]["total_pages"] == 4
     assert report["summary"]["pages_with_issues"] == 3
     assert report["summary"]["missing_description"] == 1
     assert report["summary"]["duplicate_title_pages"] == 2
@@ -152,6 +167,10 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     assert report["summary"]["missing_twitter_card"] == 1
     assert report["issues_by_type"]["duplicate_title"] == 2
     assert any("missing_description" in row["issues"] for row in report["per_page"])
+    incomplete = next(row for row in report["per_page"] if row["url"] == "https://example.com/b")
+    missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/d")
+    assert incomplete["og_missing_fields"] == ["og_description"]
+    assert "incomplete_open_graph" not in missing["issues"]
 
 
 def test_compare_leaderboard_includes_metadata_quality_metrics(tmp_path: Path) -> None:
