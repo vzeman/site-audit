@@ -4010,6 +4010,41 @@ def test_technical_seo_model_flags_css_broken() -> None:
     ]
 
 
+def test_technical_seo_model_flags_page_has_broken_css() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        resource_status={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"css_broken": 1}, "issue_count": 1},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "resources_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "css",
+                    "src": "https://cdn.example.com/missing.css",
+                    "http_status": 404,
+                    "issues": ["css_broken"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_has_broken_css"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Page has broken CSS"
+    assert issues[0]["category"] == "css"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["css_broken_count"] == 1
+
+
 def test_technical_seo_model_flags_css_file_size_too_large() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
