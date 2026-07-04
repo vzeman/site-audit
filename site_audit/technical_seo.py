@@ -164,6 +164,8 @@ def _merge_page_signals(row: dict, metadata: dict | None, perf: dict | None, sea
         row["render_blocking_count"] = perf.get("render_blocking_count", "")
         row["image_count"] = perf.get("image_count", "")
         row["script_count"] = perf.get("script_count", "")
+        row["mixed_content_url_count"] = perf.get("mixed_content_url_count", 0)
+        row["mixed_content_urls"] = list(perf.get("mixed_content_urls") or [])
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -196,6 +198,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "heavy_page", "low", 0.68, "Review page weight and resource count."))
     if _safe_int(row.get("render_blocking_count")) > 0:
         issues.append(_issue(row, "performance", "render_blocking_resources", "low", 0.72, "Defer non-critical scripts and reduce blocking stylesheets."))
+    if _safe_int(row.get("mixed_content_url_count")) > 0:
+        issues.append(_issue(row, "internal_pages", "https_http_mixed_content", "medium", 0.92, _recommendation("https_http_mixed_content")))
     return issues
 
 
@@ -244,6 +248,7 @@ def _recommendation(issue_type: str) -> str:
         "500_page": "Fix the server error so the URL returns a stable 2xx response, or remove it from crawlable SEO surfaces.",
         "5xx_page": "Investigate server-side failures and make the URL reliably crawlable before keeping it in SEO surfaces.",
         "timed_out": "Reduce response time, fix blocking behavior, or remove the URL from crawlable SEO surfaces.",
+        "https_http_mixed_content": "Serve every embedded resource on the HTTPS page over HTTPS or remove the insecure resource.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

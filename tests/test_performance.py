@@ -54,6 +54,40 @@ def test_performance_payload_counts_resources_and_blocking_heuristics() -> None:
     assert payload["summary"]["pages_with_render_blocking"] == 1
 
 
+def test_performance_payload_detects_https_http_mixed_content() -> None:
+    html = """
+    <html><head>
+      <link rel="stylesheet" href="http://cdn.example.com/app.css">
+      <style>.hero{background:url('http://cdn.example.com/hero.jpg')}</style>
+    </head><body>
+      <img src="http://cdn.example.com/one.jpg">
+      <img srcset="https://cdn.example.com/two.jpg 1x, http://cdn.example.com/two-large.jpg 2x">
+      <script src="/safe.js"></script>
+      <a href="http://example.com/not-a-resource">plain link</a>
+    </body></html>
+    """
+
+    payload = to_payload(analyze([_Fetched("https://example.com/", html)]))
+    row = payload["per_page"][0]
+
+    assert row["mixed_content_url_count"] == 4
+    assert "http://cdn.example.com/app.css" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/hero.jpg" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/one.jpg" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/two-large.jpg" in row["mixed_content_urls"]
+    assert "http://example.com/not-a-resource" not in row["mixed_content_urls"]
+    assert payload["summary"]["pages_with_mixed_content"] == 1
+    assert payload["summary"]["total_mixed_content_urls"] == 4
+
+
+def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
+    html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
+
+    payload = to_payload(analyze([_Fetched("http://example.com/", html)]))
+
+    assert payload["per_page"][0]["mixed_content_url_count"] == 0
+
+
 def test_performance_payload_buckets_and_heavy_pages() -> None:
     payload = to_payload(analyze([
         _Fetched("https://example.com/light", "<html></html>", content_length_bytes=100_000),

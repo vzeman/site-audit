@@ -151,6 +151,28 @@ def test_technical_seo_model_flags_timed_out_pages() -> None:
     assert payload["issue_counts"]["timed_out"] == 1
 
 
+def test_technical_seo_model_flags_https_http_mixed_content() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/a",
+                    "status": 200,
+                    "mixed_content_url_count": 2,
+                    "mixed_content_urls": ["http://cdn.example.com/app.css", "http://cdn.example.com/hero.jpg"],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "https_http_mixed_content"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "HTTPS/HTTP mixed content"
+    assert issues[0]["importance"] == "Warning"
+    assert payload["pages"][0]["mixed_content_url_count"] == 2
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 

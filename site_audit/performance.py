@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import re
 from statistics import median
 from typing import Iterable
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -21,6 +23,15 @@ _SCRIPT_WEIGHT = 35_000
 _STYLE_WEIGHT = 20_000
 _FONT_WEIGHT = 40_000
 _PRELOAD_WEIGHT = 20_000
+_CSS_URL_RE = re.compile(r"url\(\s*['\"]?(http://[^)'\"\s]+)", re.I)
+_RESOURCE_LINK_RELS = {
+    "apple-touch-icon",
+    "icon",
+    "manifest",
+    "modulepreload",
+    "preload",
+    "stylesheet",
+}
 
 
 @dataclass
@@ -69,6 +80,69 @@ def _is_blocking_script(tag) -> bool:
     return not (tag.has_attr("async") or tag.has_attr("defer"))
 
 
+def _srcset_urls(value: str) -> list[str]:
+    urls: list[str] = []
+    for candidate in value.split(","):
+        url = candidate.strip().split(" ", 1)[0].strip()
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _resource_urls(soup: BeautifulSoup) -> list[str]:
+    urls: list[str] = []
+    attr_specs = [
+        ("img", "src"),
+        ("script", "src"),
+        ("iframe", "src"),
+        ("frame", "src"),
+        ("embed", "src"),
+        ("audio", "src"),
+        ("video", "src"),
+        ("video", "poster"),
+        ("source", "src"),
+        ("track", "src"),
+        ("object", "data"),
+        ("input", "src"),
+    ]
+    for tag_name, attr in attr_specs:
+        for tag in soup.find_all(tag_name):
+            value = str(tag.get(attr) or "").strip()
+            if value:
+                urls.append(value)
+    for tag_name in ("img", "source"):
+        for tag in soup.find_all(tag_name):
+            urls.extend(_srcset_urls(str(tag.get("srcset") or "")))
+    for tag in soup.find_all("link"):
+        rel_attr = tag.get("rel") or []
+        if isinstance(rel_attr, str):
+            rel_attr = rel_attr.split()
+        rel = {str(item).lower() for item in rel_attr}
+        if rel.intersection(_RESOURCE_LINK_RELS):
+            href = str(tag.get("href") or "").strip()
+            if href:
+                urls.append(href)
+    for tag in soup.find_all("style"):
+        urls.extend(_CSS_URL_RE.findall(tag.get_text(" ") or ""))
+    for tag in soup.select("[style]"):
+        urls.extend(_CSS_URL_RE.findall(str(tag.get("style") or "")))
+    return urls
+
+
+def _mixed_content_urls(page_url: str, soup: BeautifulSoup) -> list[str]:
+    if urlparse(page_url).scheme.lower() != "https":
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for raw_url in _resource_urls(soup):
+        absolute = urljoin(page_url, raw_url)
+        if urlparse(absolute).scheme.lower() != "http" or absolute in seen:
+            continue
+        seen.add(absolute)
+        urls.append(absolute)
+    return urls
+
+
 def _bucket(estimated_weight: int) -> str:
     if estimated_weight < 500_000:
         return "light"
@@ -92,6 +166,7 @@ def _percentile(values: list[float], q: float) -> float:
 
 def _row(fetch) -> dict:
     body = getattr(fetch, "body", "") or ""
+    page_url = getattr(fetch, "url", "") or ""
     soup = BeautifulSoup(body, "html.parser")
     scripts = soup.find_all("script")
     styles = soup.find_all("style")
@@ -108,6 +183,7 @@ def _row(fetch) -> dict:
     preload_count = sum(1 for tag in links if _has_rel(tag, "preload"))
     blocking_css_count = sum(1 for tag in links if _is_blocking_stylesheet(tag))
     blocking_script_count = sum(1 for tag in scripts if _is_blocking_script(tag))
+    mixed_content_urls = _mixed_content_urls(page_url, soup)
     html_weight_bytes = _html_weight(fetch)
     estimated_weight_bytes = (
         html_weight_bytes
@@ -119,7 +195,7 @@ def _row(fetch) -> dict:
     )
 
     return {
-        "url": getattr(fetch, "url", ""),
+        "url": page_url,
         "status": int(getattr(fetch, "status", 0) or 0),
         "content_type": getattr(fetch, "content_type", "") or "",
         "content_size_bytes": int(getattr(fetch, "content_length_bytes", 0) or html_weight_bytes),
@@ -139,6 +215,8 @@ def _row(fetch) -> dict:
         "render_blocking_css_count": blocking_css_count,
         "render_blocking_script_count": blocking_script_count,
         "render_blocking_count": blocking_css_count + blocking_script_count,
+        "mixed_content_url_count": len(mixed_content_urls),
+        "mixed_content_urls": mixed_content_urls[:25],
     }
 
 
@@ -150,6 +228,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     estimated_weights = [float(row["estimated_weight_bytes"]) for row in rows]
     total_pages = len(rows)
     pages_with_blocking = sum(1 for row in rows if row["render_blocking_count"] > 0)
+    pages_with_mixed_content = sum(1 for row in rows if row["mixed_content_url_count"] > 0)
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -169,6 +248,9 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "total_preloads": sum(row["preload_count"] for row in rows),
         "pages_with_render_blocking": pages_with_blocking,
         "render_blocking_share": pages_with_blocking / total_pages if total_pages else 0.0,
+        "pages_with_mixed_content": pages_with_mixed_content,
+        "mixed_content_share": pages_with_mixed_content / total_pages if total_pages else 0.0,
+        "total_mixed_content_urls": sum(row["mixed_content_url_count"] for row in rows),
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }
