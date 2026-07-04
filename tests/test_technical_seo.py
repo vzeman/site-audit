@@ -4335,6 +4335,46 @@ def test_technical_seo_model_flags_5xx_page_in_sitemap() -> None:
     assert page["in_sitemap"] is True
 
 
+def test_technical_seo_model_flags_noindex_page_in_sitemap() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "noindex_source": "meta",
+                }
+            ],
+            "noindex_pages": [],
+        },
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/noindex",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "http_status": 200,
+                    "sitemap_issue_types": ["noindex_page_in_sitemap"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "noindex_page_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex"
+    assert issues[0]["issue_name"] == "Noindex page in sitemap"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/noindex")
+    assert page["sitemap_noindex_count"] == 1
+    assert page["in_sitemap"] is True
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

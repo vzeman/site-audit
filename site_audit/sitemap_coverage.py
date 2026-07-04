@@ -16,6 +16,7 @@ ACTION_BY_STATUS = {
 SITEMAP_REDIRECT_ISSUE = "3xx_redirect_in_sitemap"
 SITEMAP_4XX_ISSUE = "4xx_page_in_sitemap"
 SITEMAP_5XX_ISSUE = "5xx_page_in_sitemap"
+SITEMAP_NOINDEX_ISSUE = "noindex_page_in_sitemap"
 
 
 def analyze(
@@ -63,6 +64,8 @@ def analyze(
             sitemap_issue_types.append(SITEMAP_4XX_ISSUE)
         if in_sitemap and 500 <= _safe_int(http_status) < 600:
             sitemap_issue_types.append(SITEMAP_5XX_ISSUE)
+        if in_sitemap and indexability_status == "noindex":
+            sitemap_issue_types.append(SITEMAP_NOINDEX_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -130,6 +133,9 @@ def analyze(
             "5xx_page_in_sitemap": sum(
                 1 for row in rows if SITEMAP_5XX_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "noindex_page_in_sitemap": sum(
+                1 for row in rows if SITEMAP_NOINDEX_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -161,6 +167,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Restore the URL or remove the 4XX page from XML sitemaps."
     if issue_type == SITEMAP_5XX_ISSUE:
         return "Fix the server error before keeping this URL in XML sitemaps."
+    if issue_type == SITEMAP_NOINDEX_ISSUE:
+        return "Remove noindex URLs from XML sitemaps or make the page indexable if it should rank."
     return "Review and fix this sitemap issue."
 
 
