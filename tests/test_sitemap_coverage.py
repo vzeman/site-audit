@@ -350,6 +350,29 @@ def test_sitemap_coverage_flags_sitemap_in_wrong_format() -> None:
     assert "urlset or sitemapindex" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_sitemap_includes_urls_out_of_scope() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/sitemap.xml",
+                "issue": "sitemap_includes_urls_out_of_its_scope",
+                "url_count": 2,
+                "message": "2 out-of-scope URLs",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_includes_urls_out_of_its_scope"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_includes_urls_out_of_its_scope"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/sitemap.xml"
+    assert issues[0]["url_count"] == 2
+    assert "outside the audited site scope" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},

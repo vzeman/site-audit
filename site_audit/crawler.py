@@ -332,6 +332,7 @@ class Crawler:
         seen_sitemaps: Set[str] = set()
         urls: Set[str] = set()
         entries: dict[str, SitemapEntry] = {}
+        out_of_scope_counts: collections.Counter[str] = collections.Counter()
         queue = collections.deque(dict.fromkeys(sm for sm in candidates if self._sitemap_allowed(sm)))
         self.sitemap_entries = []
         self.sitemap_urls_seen = []
@@ -401,6 +402,9 @@ class Crawler:
                     if not loc_text:
                         continue
                     url = normalize_url(loc_text)
+                    if not self._same_site(urlparse(url).netloc):
+                        out_of_scope_counts[sm] += 1
+                        continue
                     if self._url_pattern_allowed(url) and self._lastmod_allowed(lastmod_text):
                         urls.add(url)
                         entry = entries.setdefault(url, SitemapEntry(url=url))
@@ -438,6 +442,13 @@ class Crawler:
                     "url_count": url_count,
                     "message": f"{url_count} URLs",
                 })
+        for sitemap_url, url_count in out_of_scope_counts.items():
+            self.sitemap_errors.append({
+                "sitemap_url": sitemap_url,
+                "issue": "sitemap_includes_urls_out_of_its_scope",
+                "url_count": url_count,
+                "message": f"{url_count} out-of-scope URLs",
+            })
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
 

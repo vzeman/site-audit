@@ -4590,6 +4590,33 @@ def test_technical_seo_model_flags_sitemap_in_the_wrong_format() -> None:
     assert page["sitemap_error_message"] == "root element rss"
 
 
+def test_technical_seo_model_flags_sitemap_includes_urls_out_of_scope() -> None:
+    payload = build_technical_seo(
+        [],
+        sitemap_coverage={
+            "sitemap_errors": [
+                {
+                    "sitemap_url": "https://example.com/sitemap.xml",
+                    "issue": "sitemap_includes_urls_out_of_its_scope",
+                    "url_count": 2,
+                    "message": "2 out-of-scope URLs",
+                }
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "sitemap_includes_urls_out_of_its_scope"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/sitemap.xml"
+    assert issues[0]["issue_name"] == "Sitemap includes URLs out of its scope"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/sitemap.xml")
+    assert page["sitemap_out_of_scope_count"] == 1
+    assert page["sitemap_url_count"] == 2
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
