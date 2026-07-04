@@ -60,6 +60,8 @@ class LinkGraphResult:
     dead_ends: list[str]
     edge_count: int
     recommendations: list[dict]
+    internal_http_links: dict[str, list[str]] = field(default_factory=dict)
+    internal_https_links: dict[str, list[str]] = field(default_factory=dict)
     cluster_authorities: list[dict] = field(default_factory=list)
     anchor_analysis: list[dict] = field(default_factory=list)
 
@@ -88,6 +90,25 @@ def build_graph(
             clean.append(target)
         graph[url] = clean
     return graph, dict(anchors)
+
+
+def _outgoing_links_by_scheme(
+    pages_with_outlinks: list[tuple[str, list[tuple[str, str]]]],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    http_links: dict[str, list[str]] = {}
+    https_links: dict[str, list[str]] = {}
+    for url, outs in pages_with_outlinks:
+        seen_http: set[str] = set()
+        seen_https: set[str] = set()
+        for target, _anchor in outs:
+            scheme = urlparse(target or "").scheme.lower()
+            if scheme == "http" and target not in seen_http:
+                seen_http.add(target)
+                http_links.setdefault(url, []).append(target)
+            elif scheme == "https" and target not in seen_https:
+                seen_https.add(target)
+                https_links.setdefault(url, []).append(target)
+    return http_links, https_links
 
 
 # --- PageRank -------------------------------------------------------------
@@ -545,6 +566,7 @@ def analyze(
     top_recommendations: int = 75,
 ) -> LinkGraphResult:
     graph, anchors = build_graph(pages_with_outlinks)
+    internal_http_links, internal_https_links = _outgoing_links_by_scheme(pages_with_outlinks)
 
     in_deg: dict[str, int] = defaultdict(int)
     for outs in graph.values():
@@ -587,6 +609,8 @@ def analyze(
         dead_ends=dead_ends,
         edge_count=edge_count,
         recommendations=recs,
+        internal_http_links=internal_http_links,
+        internal_https_links=internal_https_links,
         cluster_authorities=cluster_auth,
         anchor_analysis=anchors_payload,
     )
@@ -626,6 +650,8 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
     # title + degrees + click_depth so the JSON stays small even on big sites.
     page_link_counts: list[dict] = []
     for p in pages:
+        http_links = result.internal_http_links.get(p.url, [])
+        https_links = result.internal_https_links.get(p.url, [])
         page_link_counts.append({
             "url": p.url,
             "title": p.title,
@@ -635,6 +661,10 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
             "hub_score": round(float(result.hub_score.get(p.url, 0.0)), 8),
             "in_degree": int(result.in_degree.get(p.url, 0)),
             "out_degree": int(result.out_degree.get(p.url, 0)),
+            "internal_http_link_count": len(http_links),
+            "internal_http_links": http_links[:25],
+            "internal_https_link_count": len(https_links),
+            "internal_https_links": https_links[:25],
             "click_depth": int(result.click_depth.get(p.url, -1)) if p.url in result.click_depth else None,
         })
 

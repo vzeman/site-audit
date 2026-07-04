@@ -1,7 +1,16 @@
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, high_demand_low_link_payload, hub_bottleneck_payload, link_flow_payload, link_recommendations, link_removal_simulation_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import (
+    analyze,
+    high_demand_low_link_payload,
+    hub_bottleneck_payload,
+    link_flow_payload,
+    link_recommendations,
+    link_removal_simulation_payload,
+    to_payload as linkgraph_payload,
+    traffic_weighted_pagerank_payload,
+)
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -49,6 +58,30 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
     assert target_edge["target_cluster"] == "guides"
     assert target_edge["target_page_type"] == "article"
     assert "guide" in target_edge["anchor_samples"]
+
+
+def test_linkgraph_payload_counts_internal_links_by_protocol() -> None:
+    pages = [
+        PageInfo(url="https://example.com/source", title="Source", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/target", title="Target", description="", section="root", word_count=100, language="en"),
+    ]
+    outlinks = [
+        (pages[0].url, [
+            ("http://example.com/legacy", "legacy"),
+            ("http://example.com/legacy", "legacy duplicate"),
+            (pages[1].url, "target"),
+        ]),
+        (pages[1].url, []),
+    ]
+
+    result = analyze(pages, np.eye(2, dtype=np.float32), outlinks, home_url=pages[0].url)
+    payload = linkgraph_payload(result, pages)
+    source = next(row for row in payload["page_link_counts"] if row["url"] == pages[0].url)
+
+    assert source["internal_http_link_count"] == 1
+    assert source["internal_http_links"] == ["http://example.com/legacy"]
+    assert source["internal_https_link_count"] == 1
+    assert source["internal_https_links"] == [pages[1].url]
 
 
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:

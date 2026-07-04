@@ -411,6 +411,51 @@ def test_technical_seo_model_flags_self_canonical_with_no_incoming_links() -> No
     assert payload["pages"][0]["in_degree"] == 0
 
 
+def test_technical_seo_model_flags_https_pages_linking_to_http() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+        SimpleNamespace(url="http://example.com/http-source", title="HTTP Source", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        linkgraph={
+            "page_link_counts": [
+                {
+                    "url": "https://example.com/bad",
+                    "in_degree": 2,
+                    "out_degree": 3,
+                    "internal_http_link_count": 2,
+                    "internal_http_links": ["http://example.com/legacy", "http://example.com/sale"],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "in_degree": 2,
+                    "out_degree": 1,
+                    "internal_http_link_count": 0,
+                    "internal_http_links": [],
+                },
+                {
+                    "url": "http://example.com/http-source",
+                    "in_degree": 2,
+                    "out_degree": 1,
+                    "internal_http_link_count": 1,
+                    "internal_http_links": ["http://example.com/legacy"],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_https_page_has_internal_links_to_http"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "HTTPS page has internal links to HTTP"
+    assert issues[0]["importance"] == "Error"
+    bad_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert bad_page["internal_http_link_count"] == 2
+    assert bad_page["internal_http_links"] == ["http://example.com/legacy", "http://example.com/sale"]
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

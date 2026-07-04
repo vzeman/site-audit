@@ -209,6 +209,10 @@ def _merge_page_signals(
         row["in_degree"] = _safe_int(links.get("in_degree"))
         row["out_degree"] = _safe_int(links.get("out_degree"))
         row["click_depth"] = links.get("click_depth", "")
+        row["internal_http_link_count"] = _safe_int(links.get("internal_http_link_count"))
+        row["internal_http_links"] = list(links.get("internal_http_links") or [])
+        row["internal_https_link_count"] = _safe_int(links.get("internal_https_link_count"))
+        row["internal_https_links"] = list(links.get("internal_https_links") or [])
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -265,6 +269,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "noindex_page_became_indexable", "low", 0.84, _recommendation("noindex_page_became_indexable")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
+    if status == "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
+        issues.append(_issue(row, "links", "indexable_https_page_has_internal_links_to_http", "high", 0.94, _recommendation("indexable_https_page_has_internal_links_to_http")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -335,6 +341,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_became_non_indexable": "Review the before/after snapshot and restore indexability if this URL should remain eligible for search.",
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
+        "indexable_https_page_has_internal_links_to_http": "Update internal links on this HTTPS page so they point directly to HTTPS URLs.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
@@ -382,6 +389,10 @@ def _normalize_url(url: str) -> str:
     netloc = parsed.netloc.lower().removeprefix("www.")
     path = (parsed.path or "/").rstrip("/") or "/"
     return f"{parsed.scheme.lower()}://{netloc}{path}"
+
+
+def _url_scheme(url: str) -> str:
+    return urlparse(url or "").scheme.lower()
 
 
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
