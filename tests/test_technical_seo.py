@@ -584,6 +584,40 @@ def test_technical_seo_model_flags_double_slash_in_url() -> None:
     assert "double_slash_in_url" not in clean_issue_types
 
 
+def test_technical_seo_model_flags_more_than_three_parameters_in_url() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/products?a=1&b=2&c=3&d=",
+                title="Parameterized",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/products?a=1&b=2&c=3",
+                title="Allowed",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ]
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "more_than_three_parameters_in_url"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/products?a=1&b=2&c=3&d="
+    assert issues[0]["issue_name"] == "More than three parameters in URL"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    clean_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/products?a=1&b=2&c=3"
+    }
+    assert "more_than_three_parameters_in_url" not in clean_issue_types
+
+
 def test_technical_seo_model_flags_noindex_page_receives_organic_traffic() -> None:
     payload = build_technical_seo(
         [],

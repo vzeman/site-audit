@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 import re
 from typing import Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CATALOG
 
@@ -757,6 +757,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "4xx_page_receives_organic_traffic", "high", 0.96, _recommendation("4xx_page_receives_organic_traffic")))
     if _has_double_slash_in_url(row.get("url", "")):
         issues.append(_issue(row, "other", "double_slash_in_url", "high", 0.94, _recommendation("double_slash_in_url")))
+    if _url_parameter_count(row.get("url", "")) > 3:
+        issues.append(_issue(row, "other", "more_than_three_parameters_in_url", "low", 0.82, _recommendation("more_than_three_parameters_in_url")))
     if _receives_organic_traffic(row) and status == "noindex":
         issues.append(_issue(row, "other", "noindex_page_receives_organic_traffic", "high", 0.96, _recommendation("noindex_page_receives_organic_traffic")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1276,6 +1278,7 @@ def _recommendation(issue_type: str) -> str:
         "403_page_receives_organic_traffic": "Restore crawler access for organic landing pages returning 403, or move rankings and links to an accessible replacement URL.",
         "4xx_page_receives_organic_traffic": "Restore the organic landing page, redirect it to a relevant live URL, or remove stale search demand signals pointing at the 4XX URL.",
         "double_slash_in_url": "Normalize the URL path to remove duplicate slashes and update internal links, canonicals, and sitemap entries to the clean URL.",
+        "more_than_three_parameters_in_url": "Review parameterized URLs and consolidate, canonicalize, or block low-value combinations that create crawl duplication.",
         "noindex_page_receives_organic_traffic": "Remove noindex if the page should keep receiving organic traffic, or consolidate the traffic to an indexable canonical replacement.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
@@ -1740,6 +1743,14 @@ def _has_double_slash_in_url(url: str) -> bool:
     except Exception:
         return False
     return "//" in (parsed.path or "")
+
+
+def _url_parameter_count(url: str) -> int:
+    try:
+        query = urlparse(url or "").query
+    except Exception:
+        return 0
+    return len(parse_qsl(query, keep_blank_values=True))
 
 
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
