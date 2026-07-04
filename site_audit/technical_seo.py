@@ -231,6 +231,8 @@ def _merge_page_signals(
         row["cls_rating"] = perf.get("cls_rating", perf.get("cwv_cls_rating", ""))
         row["fid_score"] = _safe_float(perf.get("fid_score", perf.get("fid", perf.get("first_input_delay", 0.0))))
         row["fid_rating"] = perf.get("fid_rating", perf.get("cwv_fid_rating", ""))
+        row["inp_score"] = _safe_float(perf.get("inp_score", perf.get("inp", perf.get("interaction_to_next_paint", 0.0))))
+        row["inp_rating"] = perf.get("inp_rating", perf.get("cwv_inp_rating", ""))
         row["html_weight_bytes"] = perf.get("html_weight_bytes", "")
         row["estimated_weight_bytes"] = perf.get("estimated_weight_bytes", "")
         row["weight_bucket"] = perf.get("weight_bucket", "")
@@ -673,6 +675,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "pages_with_poor_cls", "medium", 0.86, _recommendation("pages_with_poor_cls")))
     if _poor_cwv_metric(row, "fid", 300.0):
         issues.append(_issue(row, "performance", "pages_with_poor_fid", "medium", 0.86, _recommendation("pages_with_poor_fid")))
+    if _poor_cwv_metric(row, "inp", 500.0):
+        issues.append(_issue(row, "performance", "pages_with_poor_inp", "medium", 0.86, _recommendation("pages_with_poor_inp")))
     return issues
 
 
@@ -798,6 +802,7 @@ def _recommendation(issue_type: str) -> str:
         "page_stopped_passing_cwv_requirements": "Review the changed Core Web Vitals metrics and fix the regression that moved the page from passing to failing.",
         "pages_with_poor_cls": "Stabilize layout by reserving space for images, embeds, ads, and late-loading UI elements.",
         "pages_with_poor_fid": "Reduce main-thread blocking work and third-party JavaScript so pages respond quickly to first input.",
+        "pages_with_poor_inp": "Reduce long tasks and expensive interaction handlers so the page responds quickly throughout the visit.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
