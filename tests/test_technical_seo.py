@@ -3045,6 +3045,49 @@ def test_technical_seo_model_flags_content_is_not_sized_correctly() -> None:
     ]
 
 
+def test_technical_seo_model_flags_document_uses_plugins() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/bad",
+                    "status": 200,
+                    "plugin_element_count": 2,
+                    "plugin_elements": [
+                        {"tag": "object", "type": "application/x-shockwave-flash", "source": "/legacy.swf"},
+                        {"tag": "embed", "type": "application/x-shockwave-flash", "source": "/movie.swf"},
+                    ],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "status": 200,
+                    "plugin_element_count": 0,
+                    "plugin_elements": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "document_uses_plugins"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Document uses plugins"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["plugin_element_count"] == 2
+    assert page["plugin_elements"] == [
+        {"tag": "object", "type": "application/x-shockwave-flash", "source": "/legacy.swf"},
+        {"tag": "embed", "type": "application/x-shockwave-flash", "source": "/movie.swf"},
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

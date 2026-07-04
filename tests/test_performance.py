@@ -116,6 +116,33 @@ def test_performance_payload_detects_content_sizing_issues() -> None:
     assert payload["summary"]["content_sizing_issue_share"] == 0.5
 
 
+def test_performance_payload_detects_plugin_elements() -> None:
+    bad_html = """
+    <html><body>
+      <object data="/legacy.swf" type="application/x-shockwave-flash"></object>
+      <embed src="/movie.swf" type="application/x-shockwave-flash">
+      <applet code="legacy.class"></applet>
+    </body></html>
+    """
+    clean_html = "<html><body><video src='/movie.mp4'></video></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["plugin_element_count"] == 3
+    assert rows["https://example.com/bad"]["plugin_elements"] == [
+        {"tag": "object", "type": "application/x-shockwave-flash", "source": "/legacy.swf"},
+        {"tag": "embed", "type": "application/x-shockwave-flash", "source": "/movie.swf"},
+        {"tag": "applet", "type": "", "source": "legacy.class"},
+    ]
+    assert rows["https://example.com/clean"]["plugin_element_count"] == 0
+    assert payload["summary"]["pages_with_plugins"] == 1
+    assert payload["summary"]["plugin_usage_share"] == 0.5
+
+
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
     html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
 

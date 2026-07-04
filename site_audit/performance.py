@@ -168,6 +168,18 @@ def _oversized_fixed_widths(soup: BeautifulSoup) -> list[dict]:
     return issues[:25]
 
 
+def _plugin_elements(soup: BeautifulSoup) -> list[dict]:
+    plugins: list[dict] = []
+    for tag in soup.find_all(["applet", "embed", "object"]):
+        source = str(tag.get("src") or tag.get("data") or tag.get("code") or "").strip()
+        plugins.append({
+            "tag": tag.name,
+            "type": str(tag.get("type") or "").strip(),
+            "source": source,
+        })
+    return plugins[:25]
+
+
 def _bucket(estimated_weight: int) -> str:
     if estimated_weight < 500_000:
         return "light"
@@ -210,6 +222,7 @@ def _row(fetch) -> dict:
     blocking_script_count = sum(1 for tag in scripts if _is_blocking_script(tag))
     mixed_content_urls = _mixed_content_urls(page_url, soup)
     content_sizing_issues = _oversized_fixed_widths(soup)
+    plugin_elements = _plugin_elements(soup)
     html_weight_bytes = _html_weight(fetch)
     estimated_weight_bytes = (
         html_weight_bytes
@@ -247,6 +260,8 @@ def _row(fetch) -> dict:
         "content_width_exceeds_viewport": bool(content_sizing_issues),
         "max_fixed_width_px": max((issue["width_px"] for issue in content_sizing_issues), default=0),
         "content_sizing_issues": content_sizing_issues,
+        "plugin_element_count": len(plugin_elements),
+        "plugin_elements": plugin_elements,
     }
 
 
@@ -260,6 +275,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     pages_with_blocking = sum(1 for row in rows if row["render_blocking_count"] > 0)
     pages_with_mixed_content = sum(1 for row in rows if row["mixed_content_url_count"] > 0)
     pages_with_content_sizing_issues = sum(1 for row in rows if row["content_width_exceeds_viewport"])
+    pages_with_plugins = sum(1 for row in rows if row["plugin_element_count"] > 0)
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -284,6 +300,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "total_mixed_content_urls": sum(row["mixed_content_url_count"] for row in rows),
         "pages_with_content_sizing_issues": pages_with_content_sizing_issues,
         "content_sizing_issue_share": pages_with_content_sizing_issues / total_pages if total_pages else 0.0,
+        "pages_with_plugins": pages_with_plugins,
+        "plugin_usage_share": pages_with_plugins / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }
