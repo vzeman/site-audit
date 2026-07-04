@@ -210,6 +210,9 @@ def _merge_page_signals(
         row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
         row["previous_indexability_status"] = history.get("indexability_before", "")
         row["current_indexability_status"] = history.get("indexability_after", "")
+        row["previous_redirect_target_url"] = history.get("redirect_target_before", "")
+        row["current_redirect_target_url"] = history.get("redirect_target_after", "")
+        row["redirect_target_changed"] = "redirect_target" in (history.get("changed_fields") or [])
     if links:
         row["in_degree"] = _safe_int(links.get("in_degree"))
         row["out_degree"] = _safe_int(links.get("out_degree"))
@@ -320,6 +323,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "http_to_https_redirect", "low", 0.82, _recommendation("http_to_https_redirect")))
     if row.get("meta_refresh_redirect"):
         issues.append(_issue(row, "redirects", "meta_refresh_redirect", "low", 0.82, _recommendation("meta_refresh_redirect")))
+    if row.get("redirect_target_changed"):
+        issues.append(_issue(row, "redirects", "redirect_target_changed", "low", 0.8, _recommendation("redirect_target_changed")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -460,6 +465,7 @@ def _recommendation(issue_type: str) -> str:
         "https_to_http_redirect": "Change the redirect target to HTTPS so secure URLs do not downgrade users or crawl signals to HTTP.",
         "http_to_https_redirect": "Update internal links and sitemap URLs to the HTTPS destination so crawlers do not need the HTTP redirect hop.",
         "meta_refresh_redirect": "Replace the meta refresh with a server-side redirect or direct internal links to the target URL.",
+        "redirect_target_changed": "Review the changed redirect destination and confirm the new target is intentional.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

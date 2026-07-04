@@ -139,6 +139,7 @@ def build_history_snapshot(
     structured_data: dict | None = None,
     freshness: dict | None = None,
     metadata_quality: dict | None = None,
+    indexability: dict | None = None,
     search_payload: dict | None = None,
     snapshot_id: str | None = None,
 ) -> dict:
@@ -147,6 +148,7 @@ def build_history_snapshot(
     structured = _row_lookup((structured_data or {}).get("per_page") or [], ("url",))
     fresh = _row_lookup((freshness or {}).get("per_page") or [], ("url",))
     metadata = _row_lookup((metadata_quality or {}).get("per_page") or [], ("url",))
+    index_rows = _row_lookup((indexability or {}).get("per_page") or [], ("url",))
     search = _search_lookup(search_payload)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -179,11 +181,13 @@ def build_history_snapshot(
         structured_row = _lookup_url(structured, url)
         fresh_row = _lookup_url(fresh, url)
         metadata_row = _lookup_url(metadata, url)
+        index_row = _lookup_url(index_rows, url)
         search_row = _lookup_url(search, url)
         schema_types = sorted(set(structured_row.get("types") or getattr(ext, "schema_types", []) or []))
         title = getattr(page, "title", "") or getattr(ext, "title", "") or ""
         description = getattr(page, "description", "") or getattr(ext, "description", "") or ""
         canonical_url = metadata_row.get("canonical_url") or getattr(ext, "canonical_url", "") or ""
+        redirect_target_url = index_row.get("redirect_target_url") or ""
         page_rows.append({
             "url": url,
             "title": title,
@@ -193,6 +197,8 @@ def build_history_snapshot(
             "description_hash": _hash(description),
             "canonical_url": canonical_url,
             "canonical_hash": _hash(canonical_url),
+            "redirect_target_url": redirect_target_url,
+            "redirect_target_hash": _hash(redirect_target_url),
             "heading_hash": _hash("|".join(h["hash"] for h in headings)),
             "paragraph_hash": _hash("|".join(p["hash"] for p in paragraphs)),
             "link_hash": _hash("|".join(links)),
@@ -402,6 +408,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             ("title", "title_hash"),
             ("description", "description_hash"),
             ("canonical", "canonical_hash"),
+            ("redirect_target", "redirect_target_hash"),
             ("headings", "heading_hash"),
             ("paragraphs", "paragraph_hash"),
             ("links", "link_hash"),
@@ -458,6 +465,8 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "metadata_after": a.get("metadata_issues") or [],
             "canonical_before": b.get("canonical_url") or "",
             "canonical_after": a.get("canonical_url") or "",
+            "redirect_target_before": b.get("redirect_target_url") or "",
+            "redirect_target_after": a.get("redirect_target_url") or "",
             "freshness_before": b.get("freshness") or {},
             "freshness_after": a.get("freshness") or {},
             "traffic_before": round(traffic_before, 1),

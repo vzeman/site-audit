@@ -152,6 +152,38 @@ def test_compare_snapshots_reports_canonical_url_changes(tmp_path: Path) -> None
     assert row["canonical_after"] == "https://example.com/canonical"
 
 
+def test_compare_snapshots_reports_redirect_target_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        indexability={"per_page": [{"url": "https://example.com/a", "redirect_target_url": "https://example.com/old"}]},
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        indexability={"per_page": [{"url": "https://example.com/a", "redirect_target_url": "https://example.com/new"}]},
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "redirect_target" in row["changed_fields"]
+    assert row["redirect_target_before"] == "https://example.com/old"
+    assert row["redirect_target_after"] == "https://example.com/new"
+
+
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:
     report = tmp_path / "example.com" / "report"
     report.mkdir(parents=True)

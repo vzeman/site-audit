@@ -1852,6 +1852,7 @@ def run(config: PipelineConfig) -> dict:
         structured_data=structured_data_data,
         freshness=freshness_data,
         metadata_quality=metadata_quality_data,
+        indexability=indexability_data,
         search_payload=ahrefs_data,
     )
 

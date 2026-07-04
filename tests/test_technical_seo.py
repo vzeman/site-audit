@@ -497,6 +497,32 @@ def test_technical_seo_model_flags_meta_refresh_redirects() -> None:
     assert page["meta_refresh_target_url"] == "https://example.com/target"
 
 
+def test_technical_seo_model_flags_redirect_target_changes() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/source",
+                    "changed_fields": ["redirect_target"],
+                    "redirect_target_before": "https://example.com/old",
+                    "redirect_target_after": "https://example.com/new",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "redirect_target_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Redirect target changed"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Notice"
+    page = payload["pages"][0]
+    assert page["previous_redirect_target_url"] == "https://example.com/old"
+    assert page["current_redirect_target_url"] == "https://example.com/new"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
