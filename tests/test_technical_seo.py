@@ -584,6 +584,57 @@ def test_technical_seo_model_flags_double_slash_in_url() -> None:
     assert "double_slash_in_url" not in clean_issue_types
 
 
+def test_technical_seo_model_flags_noindex_page_receives_organic_traffic() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/no-traffic-noindex",
+                    "title": "No Traffic Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        search_payload={
+            "top_pages": [
+                {
+                    "matched_url": "https://example.com/noindex",
+                    "traffic": 95,
+                    "keywords": 6,
+                    "top_keyword": "noindex page",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "noindex_page_receives_organic_traffic"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex"
+    assert issues[0]["issue_name"] == "Noindex page receives organic traffic"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Error"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/noindex"]["receives_organic_traffic"] is True
+    assert by_url["https://example.com/noindex"]["traffic"] == 95
+    no_traffic_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/no-traffic-noindex"
+    }
+    assert "noindex_page_receives_organic_traffic" not in no_traffic_issue_types
+
+
 def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     payload = build_technical_seo(
         [],
