@@ -4453,6 +4453,45 @@ def test_technical_seo_model_flags_page_from_sitemap_timed_out() -> None:
     assert page["in_sitemap"] is True
 
 
+def test_technical_seo_model_flags_indexable_page_not_in_sitemap() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/listed", title="Listed", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/missing",
+                    "in_sitemap": False,
+                    "coverage_status": "crawled_not_in_sitemap",
+                    "indexability_status": "indexable",
+                    "sitemap_issue_types": ["indexable_page_not_in_sitemap"],
+                },
+                {
+                    "url": "https://example.com/listed",
+                    "in_sitemap": True,
+                    "coverage_status": "sitemap_indexable",
+                    "indexability_status": "indexable",
+                    "sitemap_issue_types": [],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_page_not_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "Indexable page not in sitemap"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert page["sitemap_indexable_missing_count"] == 1
+    assert page["in_sitemap"] is False
+
+
 def test_technical_seo_model_flags_sitemap_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

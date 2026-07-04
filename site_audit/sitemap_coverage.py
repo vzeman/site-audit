@@ -25,6 +25,7 @@ SITEMAP_TOO_LARGE_ISSUE = "sitemap_larger_than_50mb"
 SITEMAP_TOO_MANY_URLS_ISSUE = "sitemap_with_over_50k_urls"
 SITEMAP_WRONG_FORMAT_ISSUE = "sitemap_in_the_wrong_format"
 SITEMAP_OUT_OF_SCOPE_ISSUE = "sitemap_includes_urls_out_of_its_scope"
+SITEMAP_INDEXABLE_MISSING_ISSUE = "indexable_page_not_in_sitemap"
 
 
 def analyze(
@@ -93,6 +94,8 @@ def analyze(
         extraction_reason = extraction_row.get("reason", "")
         if in_sitemap and (fetch_error == "timed_out" or extraction_reason == "timed_out"):
             sitemap_issue_types.append(SITEMAP_TIMEOUT_ISSUE)
+        if coverage_status == "crawled_not_in_sitemap" and indexability_status == "indexable":
+            sitemap_issue_types.append(SITEMAP_INDEXABLE_MISSING_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -177,6 +180,9 @@ def analyze(
             "sitemap_with_over_50k_urls": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_TOO_MANY_URLS_ISSUE),
             "sitemap_in_the_wrong_format": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_WRONG_FORMAT_ISSUE),
             "sitemap_includes_urls_out_of_its_scope": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_OUT_OF_SCOPE_ISSUE),
+            "indexable_page_not_in_sitemap": sum(
+                1 for row in rows if SITEMAP_INDEXABLE_MISSING_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -242,6 +248,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Publish the sitemap as a valid XML urlset or sitemapindex file."
     if issue_type == SITEMAP_OUT_OF_SCOPE_ISSUE:
         return "Remove URLs outside the audited site scope from this XML sitemap."
+    if issue_type == SITEMAP_INDEXABLE_MISSING_ISSUE:
+        return "Add this indexable URL to the XML sitemap if it is an SEO landing page."
     return "Review and fix this sitemap issue."
 
 

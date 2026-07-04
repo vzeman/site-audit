@@ -70,6 +70,7 @@ def test_sitemap_coverage_classifies_matrix_and_actions() -> None:
     assert payload["summary"]["sitemap_non_indexable"] == 1
     assert payload["summary"]["noindex_page_in_sitemap"] == 1
     assert payload["summary"]["sitemap_indexable"] == 1
+    assert payload["summary"]["indexable_page_not_in_sitemap"] == 1
     assert payload["summary"]["crawled_not_in_sitemap"] == 1
     assert payload["summary"]["sitemap_fetch_coverage_share"] == 2 / 3
     assert payload["summary"]["sitemap_indexable_share"] == 1 / 3
@@ -80,9 +81,11 @@ def test_sitemap_coverage_classifies_matrix_and_actions() -> None:
     assert by_url["https://example.com/noindex"]["sitemap_issue_types"] == ["noindex_page_in_sitemap"]
     assert by_url["https://example.com/not-fetched"]["coverage_status"] == "sitemap_not_fetched"
     assert by_url["https://example.com/crawled-only"]["coverage_status"] == "crawled_not_in_sitemap"
+    assert by_url["https://example.com/crawled-only"]["sitemap_issue_types"] == ["indexable_page_not_in_sitemap"]
     assert "Remove non-indexable" in by_url["https://example.com/noindex"]["recommended_action"]
     assert {issue["issue"] for issue in payload["issues"]} == {
         "noindex_page_in_sitemap",
+        "indexable_page_not_in_sitemap",
         "sitemap_non_indexable",
         "sitemap_not_fetched",
         "crawled_not_in_sitemap",
