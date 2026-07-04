@@ -51,6 +51,7 @@ def build_technical_seo(
     page_types: dict | None = None,
     header_analysis: dict | None = None,
     content_quality: dict | None = None,
+    media_accessibility: dict | None = None,
     duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
@@ -64,17 +65,19 @@ def build_technical_seo(
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     headers = _lookup_rows((header_analysis or {}).get("per_page") or [])
     quality = _lookup_rows((content_quality or {}).get("per_page") or (content_quality or {}).get("rows") or [])
+    media = _lookup_rows((media_accessibility or {}).get("per_page") or [])
+    media_issues = _media_issue_lookup((media_accessibility or {}).get("media_with_issues") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), skip)
         by_url[url] = row
 
     duplicates = _duplicate_lookup(duplicate_rows or [])
@@ -188,6 +191,8 @@ def _merge_page_signals(
     page_type: dict | None,
     header: dict | None,
     quality: dict | None,
+    media: dict | None,
+    media_issues: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -344,6 +349,21 @@ def _merge_page_signals(
         row["ai_content_level"] = quality.get("ai_content_level", "")
         row["ai_content_score"] = _safe_float(quality.get("ai_content_score", quality.get("ai_content_probability", 0.0)))
         row["ai_content_probability"] = _safe_float(quality.get("ai_content_probability", quality.get("ai_content_score", 0.0)))
+    if media:
+        media_issue_counts = dict(media.get("issues") or {})
+        row["media_issue_counts"] = media_issue_counts
+        row["broken_image_count"] = _safe_int(media_issue_counts.get("image_broken"))
+    if media_issues:
+        broken_images = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+            }
+            for issue in (media_issues.get("image_broken") or [])
+        ]
+        if broken_images:
+            row["broken_images"] = broken_images
+            row["broken_image_count"] = len(broken_images)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -694,6 +714,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "tap_targets_too_small_or_too_close_together", "medium", 0.84, _recommendation("tap_targets_too_small_or_too_close_together")))
     if row.get("viewport_set") is False:
         issues.append(_issue(row, "performance", "viewport_not_set", "medium", 0.86, _recommendation("viewport_not_set")))
+    if _safe_int(row.get("broken_image_count")) > 0:
+        issues.append(_issue(row, "images", "image_broken", "high", 0.94, _recommendation("image_broken")))
     return issues
 
 
@@ -824,6 +846,7 @@ def _recommendation(issue_type: str) -> str:
         "slow_page": "Improve server response, reduce blocking resources, and optimize page weight so the page loads faster.",
         "tap_targets_too_small_or_too_close_together": "Increase interactive element dimensions and spacing so tap targets are at least 48px where possible.",
         "viewport_not_set": "Add a responsive viewport meta tag, for example width=device-width, initial-scale=1.",
+        "image_broken": "Restore the image URL, update it to a live image asset, or remove the broken image reference.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -890,6 +913,21 @@ def _duplicate_lookup(rows: list[dict]) -> dict[str, dict]:
             if partner not in data["duplicate_partner_urls"]:
                 data["duplicate_partner_urls"].append(partner)
             data["duplicate_similarity"] = max(_safe_float(data.get("duplicate_similarity")), similarity)
+    return out
+
+
+def _media_issue_lookup(rows: list[dict]) -> dict[str, dict[str, list[dict]]]:
+    out: dict[str, dict[str, list[dict]]] = {}
+    for row in rows:
+        url = row.get("url", "")
+        if not url:
+            continue
+        issues = [str(issue) for issue in (row.get("issues") or []) if issue]
+        if not issues:
+            continue
+        page = out.setdefault(str(url), {})
+        for issue in issues:
+            page.setdefault(issue, []).append(row)
     return out
 
 

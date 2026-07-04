@@ -39,6 +39,9 @@ def _image_issues(item: dict) -> list[str]:
     alt = (item.get("alt") or "").strip()
     alt_present = bool(item.get("alt_present"))
     decorative = _is_decorative(item)
+    status = _safe_int(item.get("http_status", item.get("status", 0)))
+    if item.get("broken") or status >= 400:
+        issues.append("image_broken")
     if not alt_present and not decorative:
         issues.append("image_missing_alt")
     if alt_present and not alt and item.get("in_link"):
@@ -53,6 +56,15 @@ def _image_issues(item: dict) -> list[str]:
         if filename and alt.lower() == filename:
             issues.append("image_filename_alt")
     return issues
+
+
+def _safe_int(value) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _media_issues(item: dict) -> list[str]:
@@ -99,6 +111,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
                 "index": idx,
                 "type": media_type,
                 "src": item.get("src", ""),
+                "http_status": item.get("http_status", item.get("status", "")),
                 "alt": item.get("alt", ""),
                 "issues": issues,
             })
@@ -125,6 +138,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MediaAccessibilityReport:
         "total_media": sum(media_type_counts.values()),
         "total_images": media_type_counts.get("image", 0),
         "decorative_images": decorative_images,
+        "broken_images": issues_by_type.get("image_broken", 0),
         "images_missing_alt": issues_by_type.get("image_missing_alt", 0),
         "linked_images_empty_alt": issues_by_type.get("linked_image_empty_alt", 0),
         "images_long_alt": issues_by_type.get("image_long_alt", 0),

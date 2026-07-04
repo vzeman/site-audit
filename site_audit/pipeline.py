@@ -1843,6 +1843,7 @@ def run(config: PipelineConfig) -> dict:
         search_payload=ahrefs_data,
         page_types=page_types_data,
         header_analysis=header_analysis_data,
+        media_accessibility=media_accessibility_data,
         duplicate_rows=duplicate_rows,
     )
     tech_summary = technical_seo_data.get("summary", {}) or {}

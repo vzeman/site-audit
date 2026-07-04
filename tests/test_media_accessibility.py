@@ -66,6 +66,7 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["pages_with_media"] == 2
     assert report["summary"]["pages_with_issues"] == 2
     assert report["summary"]["images_missing_alt"] == 1
+    assert report["summary"]["broken_images"] == 0
     assert report["summary"]["decorative_images"] == 1
     assert report["summary"]["linked_images_empty_alt"] == 1
     assert report["summary"]["images_filename_alt"] == 1
@@ -74,6 +75,23 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["iframes_missing_title"] == 1
     assert report["issues_by_type"]["image_missing_alt"] == 1
     assert any(row["type"] == "video" for row in report["media_with_issues"])
+
+
+def test_media_accessibility_payload_flags_broken_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "/broken.jpg", "alt_present": True, "alt": "Broken", "http_status": 404},
+            {"type": "image", "src": "/flagged.jpg", "alt_present": True, "alt": "Flagged", "broken": True},
+            {"type": "image", "src": "/ok.jpg", "alt_present": True, "alt": "OK", "http_status": 200},
+        ]),
+    ]))
+
+    assert report["summary"]["broken_images"] == 2
+    assert report["issues_by_type"]["image_broken"] == 2
+    assert report["per_page"][0]["issues"]["image_broken"] == 2
+    broken_rows = [row for row in report["media_with_issues"] if "image_broken" in row["issues"]]
+    assert [row["src"] for row in broken_rows] == ["/broken.jpg", "/flagged.jpg"]
+    assert broken_rows[0]["http_status"] == 404
 
 
 def test_compare_leaderboard_includes_media_accessibility_metrics(tmp_path: Path) -> None:
