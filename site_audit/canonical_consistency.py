@@ -15,6 +15,7 @@ ACTION_BY_ISSUE = {
     "canonical_points_to_redirect": "Point canonical tags directly at the final destination URL instead of a redirecting URL.",
     "non_canonical_page_specified_as_canonical_one": "Point the canonical tag at the final self-canonical URL instead of a non-canonical target.",
     "canonical_from_http_to_https": "Prefer crawling and linking the HTTPS URL directly instead of relying on HTTP canonicals.",
+    "canonical_from_https_to_http": "Avoid canonicalizing secure HTTPS pages to insecure HTTP URLs.",
     "canonical_target_not_crawled": "Make sure the canonical target is crawlable and included in the audit scope.",
     "canonical_target_non_indexable": "Point canonical tags only at indexable URLs or fix the target page indexability.",
     "canonical_target_shared": "Review whether multiple pages should consolidate to the same canonical target.",
@@ -121,6 +122,7 @@ def analyze(extraction_rows: list[dict], indexability: dict | None = None) -> di
             "canonical_points_to_redirect": issue_counts.get("canonical_points_to_redirect", 0),
             "non_canonical_page_specified_as_canonical_one": issue_counts.get("non_canonical_page_specified_as_canonical_one", 0),
             "canonical_from_http_to_https": issue_counts.get("canonical_from_http_to_https", 0),
+            "canonical_from_https_to_http": issue_counts.get("canonical_from_https_to_http", 0),
             "canonical_target_not_crawled": issue_counts.get("canonical_target_not_crawled", 0),
             "canonical_target_non_indexable": issue_counts.get("canonical_target_non_indexable", 0),
             "canonical_target_shared": issue_counts.get("canonical_target_shared", 0),
@@ -154,6 +156,8 @@ def _issues_for_page(
     canonical_scheme = urlparse(canonical_url).scheme.lower()
     if page_scheme == "http" and canonical_scheme == "https":
         issues.append("canonical_from_http_to_https")
+    if page_scheme == "https" and canonical_scheme == "http":
+        issues.append("canonical_from_https_to_http")
     if _normalize_url(url) != _normalize_url(canonical_url):
         issues.append("canonical_non_self")
     normalized_canonical = _normalize_url(canonical_url)
