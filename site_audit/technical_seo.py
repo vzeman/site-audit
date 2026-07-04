@@ -253,6 +253,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "canonical_url_changed", "low", 0.82, _recommendation("canonical_url_changed")))
     if row.get("previous_indexability_status") == "indexable" and row.get("current_indexability_status") not in {"", "indexable"}:
         issues.append(_issue(row, "indexability", "indexable_page_became_non_indexable", "low", 0.84, _recommendation("indexable_page_became_non_indexable")))
+    if row.get("previous_indexability_status") == "noindex" and row.get("current_indexability_status") == "indexable":
+        issues.append(_issue(row, "indexability", "noindex_page_became_indexable", "low", 0.84, _recommendation("noindex_page_became_indexable")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -321,6 +323,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_from_https_to_http": "Update the canonical tag to the HTTPS URL and avoid consolidating secure pages to HTTP.",
         "canonical_url_changed": "Review the canonical change against the previous snapshot and confirm the new canonical target is intentional.",
         "indexable_page_became_non_indexable": "Review the before/after snapshot and restore indexability if this URL should remain eligible for search.",
+        "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",

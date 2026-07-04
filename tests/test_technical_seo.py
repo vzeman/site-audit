@@ -362,6 +362,28 @@ def test_technical_seo_model_flags_indexable_page_became_non_indexable() -> None
     assert payload["pages"][0]["previous_indexability_status"] == "indexable"
 
 
+def test_technical_seo_model_flags_noindex_page_became_indexable() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=100, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["indexability"],
+                    "indexability_before": "noindex",
+                    "indexability_after": "indexable",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "noindex_page_became_indexable"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Noindex page became indexable"
+    assert issues[0]["importance"] == "Notice"
+    assert payload["pages"][0]["current_indexability_status"] == "indexable"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],
