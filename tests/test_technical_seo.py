@@ -836,6 +836,11 @@ def test_technical_seo_model_flags_indexable_pages_with_no_outgoing_links() -> N
     assert issues[0]["url"] == "https://example.com/dead-end"
     assert issues[0]["issue_name"] == "Page has no outgoing links"
     assert issues[0]["importance"] == "Error"
+    not_indexable_issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_page_has_no_outgoing_links"]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/non-indexable-dead-end"
+    assert not_indexable_issues[0]["issue_name"] == "Page has no outgoing links"
+    assert not_indexable_issues[0]["importance"] == "Warning"
 
 
 def test_technical_seo_model_flags_indexable_pages_with_only_nofollow_incoming_links() -> None:
