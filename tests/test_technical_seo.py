@@ -310,6 +310,44 @@ def test_technical_seo_model_flags_302_redirects() -> None:
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_3xx_redirects() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/start",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_status_codes": [307],
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/direct",
+                    "title": "Direct",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/direct",
+                    "redirect_target_url": "",
+                    "redirect_status_codes": [],
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "3xx_redirect"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "3XX redirect"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
