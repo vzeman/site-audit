@@ -504,6 +504,8 @@ def _merge_page_signals(
         row["sitemap_redirect_status_codes"] = [_safe_int(code) for code in (sitemap.get("redirect_status_codes") or [])]
         if "3xx_redirect_in_sitemap" in row["sitemap_issue_types"]:
             row["sitemap_redirect_count"] = 1
+        if "4xx_page_in_sitemap" in row["sitemap_issue_types"]:
+            row["sitemap_4xx_count"] = 1
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -892,6 +894,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "https_page_links_to_http_css", "medium", 0.88, _recommendation("https_page_links_to_http_css")))
     if _safe_int(row.get("sitemap_redirect_count")) > 0:
         issues.append(_issue(row, "sitemaps", "3xx_redirect_in_sitemap", "high", 0.92, _recommendation("3xx_redirect_in_sitemap")))
+    if _safe_int(row.get("sitemap_4xx_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "4xx_page_in_sitemap", "high", 0.94, _recommendation("4xx_page_in_sitemap")))
     return issues
 
 
@@ -1041,6 +1045,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_redirected_css": "Update redirected CSS references on the page so each stylesheet points directly to its final URL.",
         "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
+        "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

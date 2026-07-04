@@ -4257,6 +4257,45 @@ def test_technical_seo_model_flags_3xx_redirect_in_sitemap() -> None:
     assert page["sitemap_redirect_status_codes"] == [301]
 
 
+def test_technical_seo_model_flags_4xx_page_in_sitemap() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/missing",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "http_status": 404,
+                    "sitemap_issue_types": ["4xx_page_in_sitemap"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "4xx_page_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "4XX page in sitemap"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert page["sitemap_4xx_count"] == 1
+    assert page["in_sitemap"] is True
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
