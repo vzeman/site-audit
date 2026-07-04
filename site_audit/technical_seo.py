@@ -821,6 +821,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "javascript", "https_page_links_to_http_javascript", "medium", 0.88, _recommendation("https_page_links_to_http_javascript")))
     if _safe_int(row.get("redirected_javascript_count")) > 0:
         issues.append(_issue(row, "javascript", "javascript_redirects", "medium", 0.88, _recommendation("javascript_redirects")))
+    if _safe_int(row.get("redirected_javascript_count")) > 0:
+        issues.append(_issue(row, "javascript", "page_has_redirected_javascript", "medium", 0.86, _recommendation("page_has_redirected_javascript")))
     return issues
 
 
@@ -962,6 +964,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_broken_javascript": "Fix or remove broken JavaScript references on the page so users and crawlers receive live script assets.",
         "https_page_links_to_http_javascript": "Update JavaScript URLs on HTTPS pages so every script is loaded over HTTPS.",
         "javascript_redirects": "Update JavaScript references so they point directly to the final script URL instead of a redirecting URL.",
+        "page_has_redirected_javascript": "Update redirected JavaScript references on the page so each script points directly to its final URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
