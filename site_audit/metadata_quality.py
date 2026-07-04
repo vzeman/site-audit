@@ -74,6 +74,24 @@ def _has_open_graph_tags(page: ExtractedPage) -> bool:
     return any(_open_graph_values(page).values())
 
 
+def _twitter_values(page: ExtractedPage) -> dict[str, str]:
+    return {
+        "twitter_card": page.twitter_card or "",
+        "twitter_title": page.twitter_title or "",
+        "twitter_description": page.twitter_description or "",
+    }
+
+
+def _twitter_missing_fields(page: ExtractedPage) -> list[str]:
+    values = _twitter_values(page)
+    required = ("twitter_card", "twitter_title", "twitter_description")
+    return [field for field in required if not values[field]]
+
+
+def _has_twitter_tags(page: ExtractedPage) -> bool:
+    return any(_twitter_values(page).values())
+
+
 def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
     page_list = list(pages)
     title_counts = Counter(_norm(page.title) for page in page_list if _norm(page.title))
@@ -97,7 +115,10 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
         og_missing_fields = _open_graph_missing_fields(page)
         if _has_open_graph_tags(page) and og_missing_fields:
             issues.append("incomplete_open_graph")
-        if not page.twitter_card:
+        twitter_missing_fields = _twitter_missing_fields(page)
+        if _has_twitter_tags(page) and twitter_missing_fields:
+            issues.append("incomplete_twitter_card")
+        if not _has_twitter_tags(page):
             issues.append("missing_twitter_card")
         if page.noindex:
             issues.append("noindex")
@@ -121,7 +142,10 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             "og_tag_count": sum(1 for value in _open_graph_values(page).values() if value),
             "og_missing_fields": og_missing_fields,
             "og_complete": not og_missing_fields,
-            "twitter_card": page.twitter_card,
+            **_twitter_values(page),
+            "twitter_tag_count": sum(1 for value in _twitter_values(page).values() if value),
+            "twitter_missing_fields": twitter_missing_fields,
+            "twitter_complete": not twitter_missing_fields,
             "issues": issues,
         })
 
@@ -138,6 +162,7 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
         "missing_canonical": issues_by_type.get("missing_canonical", 0),
         "canonical_external_host": issues_by_type.get("canonical_external_host", 0),
         "incomplete_open_graph": issues_by_type.get("incomplete_open_graph", 0),
+        "incomplete_twitter_card": issues_by_type.get("incomplete_twitter_card", 0),
         "missing_twitter_card": issues_by_type.get("missing_twitter_card", 0),
     }
     rows.sort(key=lambda row: (-len(row["issues"]), row["url"]))

@@ -205,6 +205,12 @@ def _merge_page_signals(
         row["og_tag_count"] = _safe_int(metadata.get("og_tag_count"))
         row["og_missing_fields"] = list(metadata.get("og_missing_fields") or [])
         row["og_complete"] = bool(metadata.get("og_complete", False))
+        row["twitter_card"] = metadata.get("twitter_card", "")
+        row["twitter_title"] = metadata.get("twitter_title", "")
+        row["twitter_description"] = metadata.get("twitter_description", "")
+        row["twitter_tag_count"] = _safe_int(metadata.get("twitter_tag_count"))
+        row["twitter_missing_fields"] = list(metadata.get("twitter_missing_fields") or [])
+        row["twitter_complete"] = bool(metadata.get("twitter_complete", False))
         row["metadata_issues"] = list(metadata.get("issues") or [])
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
@@ -574,6 +580,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "social_tags", "open_graph_tags_incomplete", "medium", 0.86, _recommendation("open_graph_tags_incomplete")))
     if _urls_differ(row.get("og_url", ""), row.get("canonical_url", "")):
         issues.append(_issue(row, "social_tags", "open_graph_url_not_matching_canonical", "medium", 0.86, _recommendation("open_graph_url_not_matching_canonical")))
+    if "incomplete_twitter_card" in (row.get("metadata_issues") or []):
+        issues.append(_issue(row, "social_tags", "twitter_card_incomplete", "medium", 0.86, _recommendation("twitter_card_incomplete")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -682,6 +690,7 @@ def _recommendation(issue_type: str) -> str:
         "not_indexable_title_too_short": "Expand the title tag if this non-indexable page remains visible to users, previews, or future indexing plans.",
         "open_graph_tags_incomplete": "Add the missing Open Graph title or description tags so shared URLs render complete previews.",
         "open_graph_url_not_matching_canonical": "Set og:url to the canonical URL so social shares consolidate on the preferred page.",
+        "twitter_card_incomplete": "Add the missing Twitter/X card, title, or description tags so shared URLs render complete previews.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

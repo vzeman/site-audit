@@ -15,6 +15,8 @@ def _page(
     og_image: str = "",
     og_url: str = "",
     twitter_card: str = "summary",
+    twitter_title: str = "Twitter title",
+    twitter_description: str = "Twitter description",
 ) -> ExtractedPage:
     return ExtractedPage(
         url=url,
@@ -29,6 +31,8 @@ def _page(
         og_image=og_image,
         og_url=og_url,
         twitter_card=twitter_card,
+        twitter_title=twitter_title,
+        twitter_description=twitter_description,
     )
 
 
@@ -145,7 +149,7 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),
         _page("https://example.com/b", title="Same title", canonical_url="", og_description=""),
-        _page("https://example.com/c", canonical_url="https://other.example/c", twitter_card=""),
+        _page("https://example.com/c", canonical_url="https://other.example/c", twitter_card="", twitter_title="", twitter_description=""),
         _page(
             "https://example.com/d",
             title="Useful Search Title Long Enough",
@@ -171,6 +175,23 @@ def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/d")
     assert incomplete["og_missing_fields"] == ["og_description"]
     assert "incomplete_open_graph" not in missing["issues"]
+
+
+def test_metadata_quality_payload_distinguishes_incomplete_twitter_cards() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/incomplete", twitter_card="summary", twitter_title="", twitter_description="Preview description"),
+        _page("https://example.com/missing", twitter_card="", twitter_title="", twitter_description=""),
+        _page("https://example.com/complete"),
+    ]))
+
+    incomplete = next(row for row in report["per_page"] if row["url"] == "https://example.com/incomplete")
+    missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/missing")
+
+    assert report["summary"]["incomplete_twitter_card"] == 1
+    assert report["summary"]["missing_twitter_card"] == 1
+    assert incomplete["twitter_missing_fields"] == ["twitter_title"]
+    assert "incomplete_twitter_card" in incomplete["issues"]
+    assert "missing_twitter_card" in missing["issues"]
 
 
 def test_compare_leaderboard_includes_metadata_quality_metrics(tmp_path: Path) -> None:

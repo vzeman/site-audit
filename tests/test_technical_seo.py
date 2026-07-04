@@ -1876,6 +1876,77 @@ def test_technical_seo_model_flags_open_graph_url_not_matching_canonical() -> No
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_twitter_card_incomplete() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(url="https://example.com/incomplete", title="Incomplete", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/complete", title="Complete", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+        ],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-incomplete",
+                    "title": "Noindex Incomplete",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/incomplete",
+                    "title": "Incomplete",
+                    "twitter_card": "summary",
+                    "twitter_title": "",
+                    "twitter_description": "Preview description",
+                    "twitter_tag_count": 2,
+                    "twitter_missing_fields": ["twitter_title"],
+                    "issues": ["incomplete_twitter_card"],
+                },
+                {
+                    "url": "https://example.com/noindex-incomplete",
+                    "title": "Noindex Incomplete",
+                    "twitter_card": "summary",
+                    "twitter_title": "Noindex title",
+                    "twitter_description": "",
+                    "twitter_tag_count": 2,
+                    "twitter_missing_fields": ["twitter_description"],
+                    "issues": ["incomplete_twitter_card"],
+                },
+                {
+                    "url": "https://example.com/complete",
+                    "title": "Complete",
+                    "twitter_card": "summary",
+                    "twitter_title": "Complete title",
+                    "twitter_description": "Complete description",
+                    "twitter_tag_count": 3,
+                    "twitter_missing_fields": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "twitter_tag_count": 0,
+                    "twitter_missing_fields": ["twitter_card", "twitter_title", "twitter_description"],
+                    "issues": ["missing_twitter_card"],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "twitter_card_incomplete"]
+    assert {row["url"] for row in issues} == {"https://example.com/incomplete", "https://example.com/noindex-incomplete"}
+    assert all(row["issue_name"] == "X (Twitter) card incomplete" for row in issues)
+    assert all(row["category"] == "social_tags" for row in issues)
+    assert all(row["importance"] == "Warning" for row in issues)
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/incomplete")
+    assert page["twitter_missing_fields"] == ["twitter_title"]
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
