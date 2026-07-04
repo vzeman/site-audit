@@ -219,6 +219,9 @@ def _merge_page_signals(
         row["canonical_redirect_target_url"] = canonical.get("canonical_redirect_target_url", "")
         row["canonical_issues"] = list(canonical.get("issues") or [])
     if history:
+        row["previous_title"] = history.get("title_before", "")
+        row["current_title"] = history.get("title_after", "")
+        row["title_changed"] = "title" in (history.get("changed_fields") or [])
         row["previous_canonical_url"] = history.get("canonical_before", "")
         row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
         row["previous_description"] = history.get("description_before", "")
@@ -376,6 +379,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_page_and_serp_titles_do_not_match", "low", 0.82, _recommendation("indexable_page_and_serp_titles_do_not_match")))
     if status == "indexable" and row.get("serp_title_changed"):
         issues.append(_issue(row, "content", "indexable_serp_title_changed", "low", 0.8, _recommendation("indexable_serp_title_changed")))
+    if status == "indexable" and row.get("title_changed"):
+        issues.append(_issue(row, "content", "indexable_title_tag_changed", "low", 0.8, _recommendation("indexable_title_tag_changed")))
     if status == "indexable" and _has_high_ai_content(row):
         issues.append(_issue(row, "content", "indexable_pages_have_high_ai_content_levels", "low", 0.82, _recommendation("indexable_pages_have_high_ai_content_levels")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
@@ -578,6 +583,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
         "indexable_page_and_serp_titles_do_not_match": "Review the SERP title Google is showing and align the page title when the rewrite is not intentional.",
         "indexable_serp_title_changed": "Review the changed SERP title and confirm the displayed search result still matches page intent.",
+        "indexable_title_tag_changed": "Review the title tag change and confirm it still targets the intended search demand.",
         "indexable_pages_have_high_ai_content_levels": "Review pages with high AI-content scores and add original evidence, expert detail, and brand-specific value.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
