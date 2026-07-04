@@ -17,6 +17,7 @@ from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CAT
 
 _SEVERITY_WEIGHT = {"high": 100.0, "medium": 55.0, "low": 25.0}
 _GOOGLEBOT_HTML_LIMIT_BYTES = 2 * 1024 * 1024
+_LARGE_HTML_FILE_BYTES = 1024 * 1024
 _MAX_REDIRECT_HOPS = 5
 _LOW_WORD_COUNT_THRESHOLD = 200
 _METADATA_SEVERITY = {
@@ -592,6 +593,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "not_indexable_page_has_only_one_dofollow_incoming_internal_link", "low", 0.8, _recommendation("not_indexable_page_has_only_one_dofollow_incoming_internal_link")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
+    if _safe_int(row.get("html_weight_bytes")) > _LARGE_HTML_FILE_BYTES:
+        issues.append(_issue(row, "performance", "html_file_size_too_large", "medium", 0.86, _recommendation("html_file_size_too_large")))
     if "incomplete_open_graph" in (row.get("metadata_issues") or []):
         issues.append(_issue(row, "social_tags", "open_graph_tags_incomplete", "medium", 0.86, _recommendation("open_graph_tags_incomplete")))
     if _urls_differ(row.get("og_url", ""), row.get("canonical_url", "")):
@@ -771,6 +774,7 @@ def _recommendation(issue_type: str) -> str:
         "content_is_not_sized_correctly": "Remove fixed-width layout constraints that exceed mobile viewports or make them responsive with max-width and fluid sizing.",
         "document_uses_plugins": "Remove plugin-based embeds such as object, embed, or applet and replace them with native HTML alternatives.",
         "font_size_too_small": "Increase small text to at least 12px equivalent, and prefer readable responsive typography for mobile users.",
+        "html_file_size_too_large": "Reduce the HTML document size by removing excessive inline markup, scripts, styles, or embedded data.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

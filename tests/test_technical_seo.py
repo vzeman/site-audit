@@ -3129,6 +3129,32 @@ def test_technical_seo_model_flags_font_size_too_small() -> None:
     ]
 
 
+def test_technical_seo_model_flags_html_file_size_too_large() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {"url": "https://example.com/large", "status": 200, "html_weight_bytes": 1_200_000},
+                {"url": "https://example.com/clean", "status": 200, "html_weight_bytes": 900_000},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "html_file_size_too_large"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/large"
+    assert issues[0]["issue_name"] == "HTML file size too large"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/large")
+    assert page["html_weight_bytes"] == 1_200_000
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
