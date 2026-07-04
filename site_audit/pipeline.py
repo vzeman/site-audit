@@ -456,6 +456,7 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
                 "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
             continue
         if http_status and not 200 <= http_status < 400:
@@ -470,6 +471,7 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
                 "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
             continue
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
@@ -485,6 +487,7 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
                 "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
             continue
         if ext.noindex:
@@ -514,6 +517,7 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
                 "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
             continue
         section = section_for_url(r.url)
@@ -538,6 +542,7 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_target_url": getattr(r, "redirect_target_url", ""),
                 "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
             continue
         page = PageInfo(
@@ -572,6 +577,7 @@ def run(config: PipelineConfig) -> dict:
             "redirect_target_url": getattr(r, "redirect_target_url", ""),
             "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
             "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+            "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
         })
         if idx % 500 == 0 or idx == fetched_total:
             LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))

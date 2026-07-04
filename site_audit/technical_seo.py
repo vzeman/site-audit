@@ -236,6 +236,7 @@ def _merge_page_signals(
         row["redirect_target_url"] = indexability.get("redirect_target_url", "")
         row["redirect_chain"] = list(indexability.get("redirect_chain") or [])
         row["redirect_hop_count"] = _safe_int(indexability.get("redirect_hop_count"))
+        row["redirect_status_codes"] = [_safe_int(code) for code in (indexability.get("redirect_status_codes") or [])]
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -256,6 +257,7 @@ def _merge_page_signals(
         row["redirect_target_url"] = skipped.get("redirect_target_url", row.get("redirect_target_url", ""))
         row["redirect_chain"] = list(skipped.get("redirect_chain") or row.get("redirect_chain", []) or [])
         row["redirect_hop_count"] = _safe_int(skipped.get("redirect_hop_count", row.get("redirect_hop_count", 0)))
+        row["redirect_status_codes"] = [_safe_int(code) for code in (skipped.get("redirect_status_codes") or row.get("redirect_status_codes", []) or [])]
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -300,6 +302,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "broken_redirect", "high", 0.96, _recommendation("broken_redirect")))
     if _safe_int(row.get("redirect_hop_count")) > _MAX_REDIRECT_HOPS:
         issues.append(_issue(row, "redirects", "redirect_chain_too_long", "high", 0.94, _recommendation("redirect_chain_too_long")))
+    if 302 in (row.get("redirect_status_codes") or []):
+        issues.append(_issue(row, "redirects", "302_redirect", "medium", 0.9, _recommendation("302_redirect")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -434,6 +438,7 @@ def _recommendation(issue_type: str) -> str:
         "broken_redirect": "Update the redirect so it resolves to a live 2XX destination or remove links and sitemap references to the redirecting URL.",
         "redirect_chain_too_long": "Collapse the redirect path so the requested URL redirects directly to the final destination.",
         "redirect_loop": "Fix the redirect rules so the URL resolves to a final destination instead of cycling between URLs.",
+        "302_redirect": "Review whether the temporary redirect should be a permanent 301/308 redirect for SEO consolidation.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

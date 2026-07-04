@@ -96,6 +96,7 @@ def analyze(fetched: Iterable, extraction_rows: list[dict], analyzed_urls: set[s
             "redirect_target_url": row.get("redirect_target_url", ""),
             "redirect_chain": list(row.get("redirect_chain") or []),
             "redirect_hop_count": int(row.get("redirect_hop_count") or 0),
+            "redirect_status_codes": list(row.get("redirect_status_codes") or []),
             "language": row.get("language", ""),
             "word_count": row.get("word_count", ""),
         }
@@ -120,6 +121,7 @@ def analyze(fetched: Iterable, extraction_rows: list[dict], analyzed_urls: set[s
                 "redirect_target_url": normalized["redirect_target_url"],
                 "redirect_chain": list(normalized["redirect_chain"]),
                 "redirect_hop_count": normalized["redirect_hop_count"],
+                "redirect_status_codes": list(normalized["redirect_status_codes"]),
                 "x_robots_tag": normalized["x_robots_tag"],
                 "recommended_action": ACTION_BY_ISSUE.get(key, ACTION_BY_ISSUE["skipped"]),
             })

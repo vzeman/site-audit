@@ -272,6 +272,44 @@ def test_technical_seo_model_flags_redirect_chains_that_are_too_long() -> None:
     assert page["redirect_hop_count"] == 6
 
 
+def test_technical_seo_model_flags_302_redirects() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/start",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_status_codes": [301, 302],
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/permanent-final",
+                    "title": "Permanent Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/permanent-start",
+                    "redirect_target_url": "https://example.com/permanent-final",
+                    "redirect_status_codes": [301],
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "302_redirect"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "302 redirect"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

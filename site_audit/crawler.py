@@ -148,6 +148,7 @@ class FetchResult:
     redirect_target_url: str = ""
     redirect_chain: list[str] = field(default_factory=list)
     redirect_hop_count: int = 0
+    redirect_status_codes: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -177,6 +178,18 @@ def _response_redirect_chain(response, requested_url: str, final_url: str) -> li
     if final_url and (not chain or chain[-1] != final_url):
         chain.append(final_url)
     return chain
+
+
+def _response_redirect_status_codes(response) -> list[int]:
+    codes: list[int] = []
+    for item in list(getattr(response, "history", []) or []):
+        try:
+            code = int(getattr(item, "status_code", 0) or 0)
+        except Exception:
+            code = 0
+        if 300 <= code < 400:
+            codes.append(code)
+    return codes
 
 
 def _starting_url(domain: str) -> str:
@@ -679,6 +692,7 @@ class Crawler:
                     redirect_target_url=cached.canonical_url or "",
                     redirect_chain=[url, cached.canonical_url] if cached.canonical_url and cached.canonical_url != url else [],
                     redirect_hop_count=1 if cached.canonical_url and cached.canonical_url != url else 0,
+                    redirect_status_codes=[],
                 )
 
         if self.config.request_delay > 0:
@@ -694,6 +708,7 @@ class Crawler:
 
         redirect_chain = _response_redirect_chain(r, url, final_url)
         redirect_hop_count = max(len(redirect_chain) - 1, 0)
+        redirect_status_codes = _response_redirect_status_codes(r)
 
         if r.status_code <= 0:
             return FetchResult(
@@ -708,6 +723,7 @@ class Crawler:
                 redirect_target_url=final_url if url != final_url else "",
                 redirect_chain=redirect_chain,
                 redirect_hop_count=redirect_hop_count,
+                redirect_status_codes=redirect_status_codes,
             )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
@@ -733,6 +749,7 @@ class Crawler:
                 redirect_target_url=final_url if url != final_url else "",
                 redirect_chain=redirect_chain,
                 redirect_hop_count=redirect_hop_count,
+                redirect_status_codes=redirect_status_codes,
             )
         if "html" not in ctype:
             return None
@@ -754,6 +771,7 @@ class Crawler:
             redirect_target_url=final_url if url != final_url else "",
             redirect_chain=redirect_chain,
             redirect_hop_count=redirect_hop_count,
+            redirect_status_codes=redirect_status_codes,
         )
 
     def _prepare_html_body(self, body: str) -> str:

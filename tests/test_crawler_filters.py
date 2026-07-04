@@ -228,6 +228,7 @@ def test_fetch_preserves_redirect_chain_from_response_history() -> None:
         "https://example.com/final",
     ]
     assert result.redirect_hop_count == 2
+    assert result.redirect_status_codes == [301, 302]
 
 
 def test_request_with_retry_classifies_too_many_redirects_as_redirect_loop() -> None:
