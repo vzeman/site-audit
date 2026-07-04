@@ -2999,6 +2999,52 @@ def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     assert payload["pages"][0]["mixed_content_url_count"] == 2
 
 
+def test_technical_seo_model_flags_content_is_not_sized_correctly() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/bad",
+                    "status": 200,
+                    "content_sized_correctly": False,
+                    "content_width_exceeds_viewport": True,
+                    "max_fixed_width_px": 960,
+                    "content_sizing_issues": [
+                        {"source": "style_block", "tag": "style", "property": "min-width", "width_px": 960},
+                    ],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "status": 200,
+                    "content_sized_correctly": True,
+                    "content_width_exceeds_viewport": False,
+                    "max_fixed_width_px": 0,
+                    "content_sizing_issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "content_is_not_sized_correctly"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Content is not sized correctly"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["content_width_exceeds_viewport"] is True
+    assert page["max_fixed_width_px"] == 960
+    assert page["content_sizing_issues"] == [
+        {"source": "style_block", "tag": "style", "property": "min-width", "width_px": 960},
+    ]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

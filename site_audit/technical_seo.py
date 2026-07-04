@@ -232,6 +232,10 @@ def _merge_page_signals(
         row["script_count"] = perf.get("script_count", "")
         row["mixed_content_url_count"] = perf.get("mixed_content_url_count", 0)
         row["mixed_content_urls"] = list(perf.get("mixed_content_urls") or [])
+        row["content_sized_correctly"] = perf.get("content_sized_correctly", "")
+        row["content_width_exceeds_viewport"] = bool(perf.get("content_width_exceeds_viewport"))
+        row["max_fixed_width_px"] = _safe_int(perf.get("max_fixed_width_px"))
+        row["content_sizing_issues"] = list(perf.get("content_sizing_issues") or [])
     if canonical:
         row["canonical_url"] = row.get("canonical_url") or canonical.get("canonical_url", "")
         row["canonical_target_http_status"] = canonical.get("canonical_target_http_status", "")
@@ -637,6 +641,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "render_blocking_resources", "low", 0.72, "Defer non-critical scripts and reduce blocking stylesheets."))
     if _safe_int(row.get("mixed_content_url_count")) > 0:
         issues.append(_issue(row, "internal_pages", "https_http_mixed_content", "medium", 0.92, _recommendation("https_http_mixed_content")))
+    if _content_not_sized_correctly(row):
+        issues.append(_issue(row, "performance", "content_is_not_sized_correctly", "medium", 0.84, _recommendation("content_is_not_sized_correctly")))
     return issues
 
 
@@ -754,6 +760,7 @@ def _recommendation(issue_type: str) -> str:
         "page_referenced_for_more_than_one_language_in_hreflang": "Use one consistent hreflang language code for each alternate page across the hreflang set.",
         "not_all_pages_from_hreflang_group_were_crawled": "Include all hreflang alternate URLs in crawl discovery sources or verify why the missing alternates were not crawled.",
         "x_default_hreflang_annotation_missing": "Add an x-default hreflang annotation for users whose language or region does not match a specific alternate.",
+        "content_is_not_sized_correctly": "Remove fixed-width layout constraints that exceed mobile viewports or make them responsive with max-width and fluid sizing.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -985,6 +992,12 @@ def _x_default_hreflang_annotation_missing(row: dict) -> bool:
     if not hreflang_rows:
         return False
     return not any(str(item.get("hreflang") or "").strip().lower() == "x-default" for item in hreflang_rows)
+
+
+def _content_not_sized_correctly(row: dict) -> bool:
+    if row.get("content_sized_correctly") is False:
+        return True
+    return bool(row.get("content_width_exceeds_viewport") or row.get("content_sizing_issues"))
 
 
 def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:

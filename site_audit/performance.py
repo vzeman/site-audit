@@ -23,7 +23,10 @@ _SCRIPT_WEIGHT = 35_000
 _STYLE_WEIGHT = 20_000
 _FONT_WEIGHT = 40_000
 _PRELOAD_WEIGHT = 20_000
+_MOBILE_VIEWPORT_WIDTH = 390
 _CSS_URL_RE = re.compile(r"url\(\s*['\"]?(http://[^)'\"\s]+)", re.I)
+_FIXED_WIDTH_RE = re.compile(r"(?<![\w-])(width|min-width)\s*:\s*(\d+(?:\.\d+)?)px\b", re.I)
+_WIDTH_ATTR_RE = re.compile(r"\s*(\d+(?:\.\d+)?)(?:px)?\s*", re.I)
 _RESOURCE_LINK_RELS = {
     "apple-touch-icon",
     "icon",
@@ -143,6 +146,28 @@ def _mixed_content_urls(page_url: str, soup: BeautifulSoup) -> list[str]:
     return urls
 
 
+def _oversized_fixed_widths(soup: BeautifulSoup) -> list[dict]:
+    issues: list[dict] = []
+    for tag in soup.select("[style]"):
+        for prop, value in _FIXED_WIDTH_RE.findall(str(tag.get("style") or "")):
+            width = int(float(value))
+            if width > _MOBILE_VIEWPORT_WIDTH:
+                issues.append({"source": "inline_style", "tag": tag.name, "property": prop.lower(), "width_px": width})
+    for tag in soup.find_all("style"):
+        for prop, value in _FIXED_WIDTH_RE.findall(tag.get_text(" ") or ""):
+            width = int(float(value))
+            if width > _MOBILE_VIEWPORT_WIDTH:
+                issues.append({"source": "style_block", "tag": "style", "property": prop.lower(), "width_px": width})
+    for tag in soup.find_all(attrs={"width": True}):
+        match = _WIDTH_ATTR_RE.fullmatch(str(tag.get("width") or ""))
+        if not match:
+            continue
+        width = int(float(match.group(1)))
+        if width > _MOBILE_VIEWPORT_WIDTH:
+            issues.append({"source": "width_attribute", "tag": tag.name, "property": "width", "width_px": width})
+    return issues[:25]
+
+
 def _bucket(estimated_weight: int) -> str:
     if estimated_weight < 500_000:
         return "light"
@@ -184,6 +209,7 @@ def _row(fetch) -> dict:
     blocking_css_count = sum(1 for tag in links if _is_blocking_stylesheet(tag))
     blocking_script_count = sum(1 for tag in scripts if _is_blocking_script(tag))
     mixed_content_urls = _mixed_content_urls(page_url, soup)
+    content_sizing_issues = _oversized_fixed_widths(soup)
     html_weight_bytes = _html_weight(fetch)
     estimated_weight_bytes = (
         html_weight_bytes
@@ -217,6 +243,10 @@ def _row(fetch) -> dict:
         "render_blocking_count": blocking_css_count + blocking_script_count,
         "mixed_content_url_count": len(mixed_content_urls),
         "mixed_content_urls": mixed_content_urls[:25],
+        "content_sized_correctly": not bool(content_sizing_issues),
+        "content_width_exceeds_viewport": bool(content_sizing_issues),
+        "max_fixed_width_px": max((issue["width_px"] for issue in content_sizing_issues), default=0),
+        "content_sizing_issues": content_sizing_issues,
     }
 
 
@@ -229,6 +259,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     total_pages = len(rows)
     pages_with_blocking = sum(1 for row in rows if row["render_blocking_count"] > 0)
     pages_with_mixed_content = sum(1 for row in rows if row["mixed_content_url_count"] > 0)
+    pages_with_content_sizing_issues = sum(1 for row in rows if row["content_width_exceeds_viewport"])
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -251,6 +282,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "pages_with_mixed_content": pages_with_mixed_content,
         "mixed_content_share": pages_with_mixed_content / total_pages if total_pages else 0.0,
         "total_mixed_content_urls": sum(row["mixed_content_url_count"] for row in rows),
+        "pages_with_content_sizing_issues": pages_with_content_sizing_issues,
+        "content_sizing_issue_share": pages_with_content_sizing_issues / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }

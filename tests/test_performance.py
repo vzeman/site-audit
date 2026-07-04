@@ -80,6 +80,42 @@ def test_performance_payload_detects_https_http_mixed_content() -> None:
     assert payload["summary"]["total_mixed_content_urls"] == 4
 
 
+def test_performance_payload_detects_content_sizing_issues() -> None:
+    bad_html = """
+    <html><head>
+      <style>
+        .layout { min-width: 960px; }
+        .media { max-width: 1200px; }
+      </style>
+    </head><body>
+      <main style="width:720px"></main>
+      <table width="800"></table>
+    </body></html>
+    """
+    clean_html = """
+    <html><head><style>.media{max-width:1200px}</style></head>
+    <body><main style="width:100%"></main></body></html>
+    """
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["content_sized_correctly"] is False
+    assert rows["https://example.com/bad"]["content_width_exceeds_viewport"] is True
+    assert rows["https://example.com/bad"]["max_fixed_width_px"] == 960
+    assert rows["https://example.com/bad"]["content_sizing_issues"] == [
+        {"source": "inline_style", "tag": "main", "property": "width", "width_px": 720},
+        {"source": "style_block", "tag": "style", "property": "min-width", "width_px": 960},
+        {"source": "width_attribute", "tag": "table", "property": "width", "width_px": 800},
+    ]
+    assert rows["https://example.com/clean"]["content_sized_correctly"] is True
+    assert payload["summary"]["pages_with_content_sizing_issues"] == 1
+    assert payload["summary"]["content_sizing_issue_share"] == 0.5
+
+
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
     html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
 
