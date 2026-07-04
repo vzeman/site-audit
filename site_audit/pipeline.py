@@ -1858,6 +1858,7 @@ def run(config: PipelineConfig) -> dict:
         media_accessibility=media_accessibility_data,
         resource_status=resource_status_data,
         sitemap_coverage=sitemap_coverage_data,
+        external_links=external_payload_data,
         duplicate_rows=duplicate_rows,
     )
     tech_summary = technical_seo_data.get("summary", {}) or {}

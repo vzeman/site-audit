@@ -54,6 +54,7 @@ def build_technical_seo(
     media_accessibility: dict | None = None,
     resource_status: dict | None = None,
     sitemap_coverage: dict | None = None,
+    external_links: dict | None = None,
     duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
@@ -72,17 +73,56 @@ def build_technical_seo(
     resources = _lookup_rows((resource_status or {}).get("per_page") or [])
     resource_issues = _media_issue_lookup((resource_status or {}).get("resources_with_issues") or [])
     sitemap = _sitemap_lookup((sitemap_coverage or {}).get("rows") or [])
+    external = _lookup_rows((external_links or {}).get("per_page_issues") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), resources.get(url), resource_issues.get(url), sitemap.get(url), skipped.get(url))
+        _merge_page_signals(
+            row,
+            metadata.get(url),
+            perf.get(url),
+            canonical.get(url),
+            history.get(url),
+            links.get(url),
+            index_rows.get(url),
+            search.get(url),
+            types.get(url),
+            headers.get(url),
+            quality.get(url),
+            media.get(url),
+            media_issues.get(url),
+            resources.get(url),
+            resource_issues.get(url),
+            sitemap.get(url),
+            external.get(url),
+            skipped.get(url),
+        )
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), media.get(url), media_issues.get(url), resources.get(url), resource_issues.get(url), sitemap.get(url), skip)
+        _merge_page_signals(
+            row,
+            metadata.get(url),
+            perf.get(url),
+            canonical.get(url),
+            history.get(url),
+            links.get(url),
+            index_rows.get(url),
+            search.get(url),
+            types.get(url),
+            headers.get(url),
+            quality.get(url),
+            media.get(url),
+            media_issues.get(url),
+            resources.get(url),
+            resource_issues.get(url),
+            sitemap.get(url),
+            external.get(url),
+            skip,
+        )
         by_url[url] = row
 
     for error in (sitemap_coverage or {}).get("sitemap_errors") or []:
@@ -245,6 +285,7 @@ def _merge_page_signals(
     resource: dict | None,
     resource_issues: dict | None,
     sitemap: dict | None,
+    external: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -540,6 +581,24 @@ def _merge_page_signals(
         if http_css:
             row["http_css"] = http_css
             row["http_css_count"] = len(http_css)
+    if external:
+        external_issue_counts = dict(external.get("issues") or {})
+        row["external_issue_counts"] = external_issue_counts
+        row["external_3xx_redirect_count"] = _safe_int(external_issue_counts.get("external_3xx_redirect"))
+        external_redirects = [
+            {
+                "url": issue.get("url", ""),
+                "anchor": issue.get("anchor", ""),
+                "status": issue.get("status", ""),
+                "final_url": issue.get("final_url", ""),
+                "redirect_status_codes": list(issue.get("redirect_status_codes") or []),
+            }
+            for issue in (external.get("external_links_with_issues") or [])
+            if "external_3xx_redirect" in (issue.get("issues") or [])
+        ]
+        if external_redirects:
+            row["external_redirects"] = external_redirects
+            row["external_3xx_redirect_count"] = len(external_redirects)
     if sitemap:
         row["in_sitemap"] = bool(sitemap.get("in_sitemap"))
         row["source_sitemaps"] = list(sitemap.get("source_sitemaps") or [])
@@ -951,6 +1010,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "css", "page_has_redirected_css", "medium", 0.86, _recommendation("page_has_redirected_css")))
     if _safe_int(row.get("http_css_count")) > 0:
         issues.append(_issue(row, "css", "https_page_links_to_http_css", "medium", 0.88, _recommendation("https_page_links_to_http_css")))
+    if _safe_int(row.get("external_3xx_redirect_count")) > 0:
+        issues.append(_issue(row, "external_pages", "external_3xx_redirect", "low", 0.82, _recommendation("external_3xx_redirect")))
     if _safe_int(row.get("sitemap_redirect_count")) > 0:
         issues.append(_issue(row, "sitemaps", "3xx_redirect_in_sitemap", "high", 0.92, _recommendation("3xx_redirect_in_sitemap")))
     if _safe_int(row.get("sitemap_4xx_count")) > 0:
@@ -1133,6 +1194,7 @@ def _recommendation(issue_type: str) -> str:
         "css_redirects": "Update CSS references so they point directly to the final stylesheet URL instead of a redirecting URL.",
         "page_has_redirected_css": "Update redirected CSS references on the page so each stylesheet points directly to its final URL.",
         "https_page_links_to_http_css": "Update CSS URLs on HTTPS pages so every stylesheet is loaded over HTTPS.",
+        "external_3xx_redirect": "Update external links to point directly to the final destination URL where appropriate.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
