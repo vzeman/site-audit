@@ -491,6 +491,49 @@ def test_technical_seo_model_flags_https_pages_linking_to_http() -> None:
     assert bad_page["internal_http_links"] == ["http://example.com/legacy", "http://example.com/sale"]
 
 
+def test_technical_seo_model_flags_http_pages_linking_to_https() -> None:
+    pages = [
+        SimpleNamespace(url="http://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="http://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/https-source", title="HTTPS Source", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        linkgraph={
+            "page_link_counts": [
+                {
+                    "url": "http://example.com/bad",
+                    "in_degree": 2,
+                    "out_degree": 3,
+                    "internal_https_link_count": 2,
+                    "internal_https_links": ["https://example.com/secure", "https://example.com/sale"],
+                },
+                {
+                    "url": "http://example.com/clean",
+                    "in_degree": 2,
+                    "out_degree": 1,
+                    "internal_https_link_count": 0,
+                    "internal_https_links": [],
+                },
+                {
+                    "url": "https://example.com/https-source",
+                    "in_degree": 2,
+                    "out_degree": 1,
+                    "internal_https_link_count": 1,
+                    "internal_https_links": ["https://example.com/secure"],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_http_page_has_internal_links_to_https"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "http://example.com/bad"
+    assert issues[0]["issue_name"] == "HTTP page has internal links to HTTPS"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+
+
 def test_technical_seo_model_flags_indexable_pages_linking_to_broken_pages() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
