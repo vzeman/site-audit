@@ -417,6 +417,34 @@ def test_sitemap_coverage_flags_page_in_multiple_sitemaps() -> None:
     assert "one canonical sitemap" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_pages_added_to_sitemaps() -> None:
+    payload = analyze(
+        [
+            {"url": "https://example.com/existing", "source_sitemaps": ["https://example.com/sitemap.xml"]},
+            {"url": "https://example.com/new", "source_sitemaps": ["https://example.com/sitemap.xml"]},
+        ],
+        [_Fetched("https://example.com/existing"), _Fetched("https://example.com/new")],
+        [
+            {"url": "https://example.com/existing", "status": "analyzed", "http_status": 200},
+            {"url": "https://example.com/new", "status": "analyzed", "http_status": 200},
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/existing", "indexability_status": "indexable", "issues": []},
+                {"url": "https://example.com/new", "indexability_status": "indexable", "issues": []},
+            ]
+        },
+        previous_sitemap_urls=["https://example.com/existing"],
+    )
+
+    assert payload["summary"]["pages_added_to_sitemaps"] == 1
+    row = next(row for row in payload["rows"] if row["url"] == "https://example.com/new")
+    assert row["sitemap_issue_types"] == ["pages_added_to_sitemaps"]
+    issues = [row for row in payload["issues"] if row["issue"] == "pages_added_to_sitemaps"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/new"
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},

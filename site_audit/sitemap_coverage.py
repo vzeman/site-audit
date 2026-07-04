@@ -28,6 +28,7 @@ SITEMAP_OUT_OF_SCOPE_ISSUE = "sitemap_includes_urls_out_of_its_scope"
 SITEMAP_INDEXABLE_MISSING_ISSUE = "indexable_page_not_in_sitemap"
 SITEMAP_URL_COUNT_DECREASED_ISSUE = "no_of_urls_in_sitemap_decreased"
 SITEMAP_MULTIPLE_SITEMAPS_ISSUE = "page_in_multiple_sitemaps"
+SITEMAP_PAGE_ADDED_ISSUE = "pages_added_to_sitemaps"
 
 
 def analyze(
@@ -37,6 +38,7 @@ def analyze(
     indexability: dict | None = None,
     sitemap_errors: Iterable[dict] | None = None,
     previous_total_sitemap_urls: int | None = None,
+    previous_sitemap_urls: Iterable[str] | None = None,
 ) -> dict:
     sitemap_by_url = {row.get("url", ""): row for row in sitemap_entries if row.get("url")}
     fetched_by_url = {getattr(row, "url", ""): row for row in fetched}
@@ -51,6 +53,8 @@ def analyze(
         for row in (indexability or {}).get("per_page", [])
         if row.get("url")
     }
+    previous_sitemap_url_set = {str(url) for url in previous_sitemap_urls} if previous_sitemap_urls is not None else set()
+    compare_previous_urls = previous_sitemap_urls is not None
     urls = sorted(set(sitemap_by_url) | set(fetched_by_url))
     rows: list[dict] = []
     issues: list[dict] = []
@@ -102,6 +106,8 @@ def analyze(
         source_sitemaps = sitemap_row.get("source_sitemaps", [])
         if in_sitemap and len(source_sitemaps) > 1:
             sitemap_issue_types.append(SITEMAP_MULTIPLE_SITEMAPS_ISSUE)
+        if in_sitemap and compare_previous_urls and url not in previous_sitemap_url_set:
+            sitemap_issue_types.append(SITEMAP_PAGE_ADDED_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -203,6 +209,9 @@ def analyze(
             "page_in_multiple_sitemaps": sum(
                 1 for row in rows if SITEMAP_MULTIPLE_SITEMAPS_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "pages_added_to_sitemaps": sum(
+                1 for row in rows if SITEMAP_PAGE_ADDED_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -274,6 +283,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Review the sitemap URL decrease and confirm the removed URLs were intentionally dropped."
     if issue_type == SITEMAP_MULTIPLE_SITEMAPS_ISSUE:
         return "Keep the URL in one canonical sitemap location to avoid duplicate sitemap signals."
+    if issue_type == SITEMAP_PAGE_ADDED_ISSUE:
+        return "Review newly added sitemap URLs and confirm they should be submitted for indexing."
     return "Review and fix this sitemap issue."
 
 

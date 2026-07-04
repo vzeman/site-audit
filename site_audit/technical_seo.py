@@ -562,6 +562,8 @@ def _merge_page_signals(
             row["sitemap_indexable_missing_count"] = 1
         if "page_in_multiple_sitemaps" in row["sitemap_issue_types"]:
             row["sitemap_multiple_count"] = 1
+        if "pages_added_to_sitemaps" in row["sitemap_issue_types"]:
+            row["sitemap_added_count"] = 1
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -964,6 +966,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "indexable_page_not_in_sitemap", "low", 0.84, _recommendation("indexable_page_not_in_sitemap")))
     if _safe_int(row.get("sitemap_multiple_count")) > 0:
         issues.append(_issue(row, "sitemaps", "page_in_multiple_sitemaps", "low", 0.82, _recommendation("page_in_multiple_sitemaps")))
+    if _safe_int(row.get("sitemap_added_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "pages_added_to_sitemaps", "low", 0.8, _recommendation("pages_added_to_sitemaps")))
     if _safe_int(row.get("sitemap_syntax_error_count")) > 0:
         issues.append(_issue(row, "sitemaps", "sitemap_has_syntax_error", "high", 0.96, _recommendation("sitemap_has_syntax_error")))
     if _safe_int(row.get("sitemap_not_accessible_count")) > 0:
@@ -1134,6 +1138,7 @@ def _recommendation(issue_type: str) -> str:
         "page_from_sitemap_timed_out": "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably.",
         "indexable_page_not_in_sitemap": "Add this indexable URL to the XML sitemap if it is an SEO landing page.",
         "page_in_multiple_sitemaps": "Keep the URL in one canonical sitemap location to avoid duplicate sitemap signals.",
+        "pages_added_to_sitemaps": "Review newly added sitemap URLs and confirm they should be submitted for indexing.",
         "sitemap_has_syntax_error": "Fix the XML syntax error so crawlers can parse the sitemap.",
         "sitemap_is_not_accessible": "Restore access to the sitemap URL or remove the inaccessible sitemap reference.",
         "sitemap_larger_than_50mb": "Split the sitemap into smaller files under the 50MB uncompressed limit.",
