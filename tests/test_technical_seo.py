@@ -667,6 +667,44 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_title_t
     assert all(row["importance"] == "Error" for row in issues)
 
 
+def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        header_analysis={
+            "per_page": [
+                {"url": "https://example.com/missing", "h1": "", "h1_count": 0, "header_count": 2},
+                {"url": "https://example.com/ok", "h1": "Useful H1", "h1_count": 1, "header_count": 3},
+                {"url": "https://example.com/noindex", "h1": "", "h1_count": 0, "header_count": 1},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_h1_tag_missing_or_empty"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "H1 tag missing or empty"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Warning"
+    missing_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert missing_page["h1_count"] == 0
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

@@ -46,6 +46,7 @@ def build_technical_seo(
     linkgraph: dict | None = None,
     search_payload: dict | None = None,
     page_types: dict | None = None,
+    header_analysis: dict | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
     by_url = {row["url"]: row for row in page_rows if row.get("url")}
@@ -56,17 +57,18 @@ def build_technical_seo(
     links = _lookup_rows((linkgraph or {}).get("page_link_counts") or [])
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
+    headers = _lookup_rows((header_analysis or {}).get("per_page") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -174,6 +176,7 @@ def _merge_page_signals(
     indexability: dict | None,
     search: dict | None,
     page_type: dict | None,
+    header: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -257,6 +260,10 @@ def _merge_page_signals(
         row["template_family"] = page_type.get("template_family", "")
         row["template_signature"] = page_type.get("template_signature", "")
         row["fix_scope"] = "template" if page_type.get("template_family") else "page"
+    if header:
+        row["h1"] = header.get("h1", "")
+        row["h1_count"] = _safe_int(header.get("h1_count"))
+        row["header_count"] = _safe_int(header.get("header_count"))
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -335,6 +342,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status == "indexable" and _safe_int(row.get("title_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_title_tags", "high", 0.92, _recommendation("indexable_multiple_title_tags")))
+    if status == "indexable" and "h1_count" in row and (_safe_int(row.get("h1_count")) == 0 or not str(row.get("h1") or "").strip()):
+        issues.append(_issue(row, "content", "indexable_h1_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_h1_tag_missing_or_empty")))
     if (
         status == "indexable"
         and (
@@ -487,6 +496,7 @@ def _recommendation(issue_type: str) -> str:
         "redirect_target_changed": "Review the changed redirect destination and confirm the new target is intentional.",
         "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
+        "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "indexable_title_tag_missing_or_empty": "Add one descriptive title tag to the indexable page.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
