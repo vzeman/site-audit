@@ -309,6 +309,12 @@ def _issues_for_row(row: dict) -> list[dict]:
         and _safe_int(row.get("incoming_dofollow_internal_link_count")) == 0
     ):
         issues.append(_issue(row, "links", "indexable_page_has_nofollow_incoming_internal_links_only", "medium", 0.9, _recommendation("indexable_page_has_nofollow_incoming_internal_links_only")))
+    if (
+        status == "indexable"
+        and _safe_int(row.get("incoming_nofollow_internal_link_count")) > 0
+        and _safe_int(row.get("incoming_dofollow_internal_link_count")) > 0
+    ):
+        issues.append(_issue(row, "links", "indexable_page_has_nofollow_and_dofollow_incoming_internal_links", "low", 0.84, _recommendation("indexable_page_has_nofollow_and_dofollow_incoming_internal_links")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -387,6 +393,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_redirected_page_has_no_incoming_internal_links": "Add direct internal links to the final redirected URL or remove obsolete redirected URL references.",
         "indexable_page_has_no_outgoing_links": "Add relevant crawlable internal links from this page to useful destination pages.",
         "indexable_page_has_nofollow_incoming_internal_links_only": "Add at least one dofollow internal link to this page or remove nofollow from appropriate incoming internal links.",
+        "indexable_page_has_nofollow_and_dofollow_incoming_internal_links": "Review mixed incoming internal link directives and keep nofollow only where the link should not pass crawl signals.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
