@@ -6162,6 +6162,75 @@ def test_technical_seo_model_does_not_flag_external_5xx_without_payload() -> Non
     assert all(row["issue_type"] != "external_5xx" for row in payload["issues"])
 
 
+def test_technical_seo_model_flags_external_time_out() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/page",
+                title="Page",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/clean",
+                title="Clean",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        external_links={
+            "per_page_issues": [
+                {
+                    "url": "https://example.com/page",
+                    "issues": {"external_time_out": 1},
+                    "issue_count": 1,
+                    "external_links_with_issues": [
+                        {
+                            "url": "https://external.example/slow",
+                            "anchor": "Slow",
+                            "status": None,
+                            "error": "timed out",
+                            "issues": ["external_time_out"],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "external_time_out"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "External time out"
+    assert issues[0]["category"] == "external_pages"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/page"]["external_time_out_count"] == 1
+    assert by_url["https://example.com/page"]["external_time_out_links"][0]["error"] == "timed out"
+    clean_issue_types = {row["issue_type"] for row in payload["issues"] if row["url"] == "https://example.com/clean"}
+    assert "external_time_out" not in clean_issue_types
+
+
+def test_technical_seo_model_does_not_flag_external_time_out_without_payload() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/clean",
+                title="Clean",
+                section="",
+                word_count=500,
+                language="en",
+            )
+        ],
+        external_links={"per_page_issues": []},
+    )
+
+    assert "external_time_out" not in payload["issue_counts"]
+    assert all(row["issue_type"] != "external_time_out" for row in payload["issues"])
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 

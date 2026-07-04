@@ -125,3 +125,31 @@ def test_external_links_payload_keeps_external_5xx_as_broken_link(monkeypatch) -
 
     assert result["broken_links"] == result["link_issues"]
     assert result["per_page_issues"][0]["issues"] == {"external_5xx": 1}
+
+
+def test_external_links_payload_keeps_external_time_out_as_broken_link(monkeypatch) -> None:
+    def fake_check_links(targets, http_cache=None, max_workers=8, timeout=12.0):
+        return [
+            {
+                "url": "https://external.example/slow",
+                "anchor": "Slow",
+                "status": None,
+                "error": "timed out",
+                "issues": ["external_time_out"],
+                "from_cache": False,
+            }
+        ]
+
+    monkeypatch.setattr(external_links, "_check_links", fake_check_links)
+
+    result = external_links.to_payload(
+        external_links.analyze(
+            [SimpleNamespace(url="https://example.com/page")],
+            {"https://example.com/page": 500},
+            [("https://example.com/page", [("https://external.example/slow", "Slow")])],
+            check_links=True,
+        )
+    )
+
+    assert result["broken_links"] == result["link_issues"]
+    assert result["per_page_issues"][0]["issues"] == {"external_time_out": 1}
