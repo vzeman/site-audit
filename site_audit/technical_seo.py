@@ -765,6 +765,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "noindex_page_receives_organic_traffic", "high", 0.96, _recommendation("noindex_page_receives_organic_traffic")))
     if _referring_domains_dropped(row):
         issues.append(_issue(row, "other", "no_of_referring_domains_dropped", "low", 0.82, _recommendation("no_of_referring_domains_dropped")))
+    if _receives_organic_traffic(row) and _is_non_canonical(row):
+        issues.append(_issue(row, "other", "non_canonical_page_receives_organic_traffic", "low", 0.84, _recommendation("non_canonical_page_receives_organic_traffic")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1285,6 +1287,7 @@ def _recommendation(issue_type: str) -> str:
         "more_than_three_parameters_in_url": "Review parameterized URLs and consolidate, canonicalize, or block low-value combinations that create crawl duplication.",
         "noindex_page_receives_organic_traffic": "Remove noindex if the page should keep receiving organic traffic, or consolidate the traffic to an indexable canonical replacement.",
         "no_of_referring_domains_dropped": "Review lost referring domains and recover important links or replace them with stronger internal and external authority signals.",
+        "non_canonical_page_receives_organic_traffic": "Consolidate organic traffic to the canonical URL or update the canonical if this page should be the ranking URL.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
@@ -1702,6 +1705,14 @@ def _is_self_canonical(row: dict) -> bool:
     if not url or not canonical_url:
         return False
     return _normalize_url(url) == _normalize_url(canonical_url)
+
+
+def _is_non_canonical(row: dict) -> bool:
+    url = row.get("url", "")
+    canonical_url = row.get("canonical_url", "")
+    if not url or not canonical_url:
+        return False
+    return _normalize_url(url) != _normalize_url(canonical_url)
 
 
 def _normalize_url(url: str) -> str:

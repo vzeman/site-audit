@@ -718,6 +718,60 @@ def test_technical_seo_model_flags_referring_domains_dropped() -> None:
     assert "no_of_referring_domains_dropped" not in stable_issue_types
 
 
+def test_technical_seo_model_flags_non_canonical_page_receives_organic_traffic() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/non-canonical",
+                title="Non-canonical",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/self-canonical",
+                title="Self-canonical",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/non-canonical",
+                    "canonical_url": "https://example.com/canonical",
+                },
+                {
+                    "url": "https://example.com/self-canonical",
+                    "canonical_url": "https://example.com/self-canonical",
+                },
+            ]
+        },
+        search_payload={
+            "top_pages": [
+                {"matched_url": "https://example.com/non-canonical", "traffic": 55},
+                {"matched_url": "https://example.com/self-canonical", "traffic": 55},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "non_canonical_page_receives_organic_traffic"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/non-canonical"
+    assert issues[0]["issue_name"] == "Non-canonical page receives organic traffic"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/non-canonical"]["canonical_url"] == "https://example.com/canonical"
+    self_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/self-canonical"
+    }
+    assert "non_canonical_page_receives_organic_traffic" not in self_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],
