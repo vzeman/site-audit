@@ -838,6 +838,52 @@ def test_technical_seo_model_flags_indexable_pages_with_title_too_long() -> None
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_title_too_long() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=250, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-long",
+                    "title": "Noindex Long",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-length",
+                    "title": "Noindex Length",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Noindex OK",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {"url": "https://example.com/indexable", "title": "Indexable", "title_length": 80, "issues": ["long_title"]},
+                {"url": "https://example.com/noindex-long", "title": "Noindex Long", "title_length": 80, "issues": ["long_title"]},
+                {"url": "https://example.com/noindex-length", "title": "Noindex Length", "title_length": 70, "issues": []},
+                {"url": "https://example.com/noindex-ok", "title": "Noindex OK", "title_length": 45, "issues": []},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_title_too_long"]
+    assert {row["url"] for row in issues} == {"https://example.com/noindex-long", "https://example.com/noindex-length"}
+    assert all(row["issue_name"] == "Title too long" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Notice" for row in issues)
+
+
 def test_technical_seo_model_flags_indexable_pages_with_title_too_short() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/short", title="Short", section="", word_count=250, language="en"),
