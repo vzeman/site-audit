@@ -2928,6 +2928,55 @@ def test_technical_seo_model_flags_not_all_pages_from_hreflang_group_were_crawle
     assert "uncrawled_hreflang_targets" not in clean
 
 
+def test_technical_seo_model_flags_x_default_hreflang_annotation_missing() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/no-hreflang", title="No Hreflang", section="", word_count=250, language="cs"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "hreflang": [
+                        {"hreflang": "en", "href": "https://example.com/missing"},
+                        {"hreflang": "sk", "href": "https://example.com/sk"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "hreflang": [
+                        {"hreflang": "sk", "href": "https://example.com/ok"},
+                        {"hreflang": "x-default", "href": "https://example.com/"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/no-hreflang",
+                    "title": "No Hreflang",
+                    "hreflang": [],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "x_default_hreflang_annotation_missing"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/missing"
+    assert issues[0]["issue_name"] == "X-default hreflang annotation missing"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/missing")
+    assert page["x_default_hreflang_missing"] is True
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

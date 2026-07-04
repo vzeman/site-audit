@@ -626,6 +626,9 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "page_referenced_for_more_than_one_language_in_hreflang", "high", 0.9, _recommendation("page_referenced_for_more_than_one_language_in_hreflang")))
     if row.get("uncrawled_hreflang_targets"):
         issues.append(_issue(row, "localization", "not_all_pages_from_hreflang_group_were_crawled", "low", 0.8, _recommendation("not_all_pages_from_hreflang_group_were_crawled")))
+    if _x_default_hreflang_annotation_missing(row):
+        row["x_default_hreflang_missing"] = True
+        issues.append(_issue(row, "localization", "x_default_hreflang_annotation_missing", "low", 0.8, _recommendation("x_default_hreflang_annotation_missing")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -750,6 +753,7 @@ def _recommendation(issue_type: str) -> str:
         "more_than_one_page_for_same_language_in_hreflang": "Keep only one alternate URL for each hreflang language code on a page.",
         "page_referenced_for_more_than_one_language_in_hreflang": "Use one consistent hreflang language code for each alternate page across the hreflang set.",
         "not_all_pages_from_hreflang_group_were_crawled": "Include all hreflang alternate URLs in crawl discovery sources or verify why the missing alternates were not crawled.",
+        "x_default_hreflang_annotation_missing": "Add an x-default hreflang annotation for users whose language or region does not match a specific alternate.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -974,6 +978,13 @@ def _self_reference_hreflang_annotation_missing(row: dict) -> bool:
         if _normalize_url(href) in page_urls:
             return False
     return True
+
+
+def _x_default_hreflang_annotation_missing(row: dict) -> bool:
+    hreflang_rows = row.get("hreflang") or []
+    if not hreflang_rows:
+        return False
+    return not any(str(item.get("hreflang") or "").strip().lower() == "x-default" for item in hreflang_rows)
 
 
 def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:
