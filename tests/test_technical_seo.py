@@ -491,6 +491,65 @@ def test_technical_seo_model_flags_https_pages_linking_to_http() -> None:
     assert bad_page["internal_http_links"] == ["http://example.com/legacy", "http://example.com/sale"]
 
 
+def test_technical_seo_model_flags_not_indexable_https_pages_linking_to_http() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/clean-noindex",
+                    "title": "Clean Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {
+                    "url": "https://example.com/indexable",
+                    "in_degree": 2,
+                    "out_degree": 2,
+                    "internal_http_link_count": 1,
+                    "internal_http_links": ["http://example.com/legacy"],
+                },
+                {
+                    "url": "https://example.com/noindex",
+                    "in_degree": 1,
+                    "out_degree": 2,
+                    "internal_http_link_count": 1,
+                    "internal_http_links": ["http://example.com/legacy"],
+                },
+                {
+                    "url": "https://example.com/clean-noindex",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "internal_http_link_count": 0,
+                    "internal_http_links": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_https_page_has_internal_links_to_http"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex"
+    assert issues[0]["issue_name"] == "HTTPS page has internal links to HTTP"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_http_pages_linking_to_https() -> None:
     pages = [
         SimpleNamespace(url="http://example.com/bad", title="Bad", section="", word_count=100, language="en"),

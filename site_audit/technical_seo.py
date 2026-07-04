@@ -295,6 +295,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "indexable_orphan_page_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_orphan_page_has_no_incoming_internal_links")))
     if status == "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_https_page_has_internal_links_to_http", "high", 0.94, _recommendation("indexable_https_page_has_internal_links_to_http")))
+    if status != "indexable" and _url_scheme(row.get("url", "")) == "https" and _safe_int(row.get("internal_http_link_count")) > 0:
+        issues.append(_issue(row, "links", "not_indexable_https_page_has_internal_links_to_http", "medium", 0.9, _recommendation("not_indexable_https_page_has_internal_links_to_http")))
     if status == "indexable" and _url_scheme(row.get("url", "")) == "http" and _safe_int(row.get("internal_https_link_count")) > 0:
         issues.append(_issue(row, "links", "indexable_http_page_has_internal_links_to_https", "low", 0.86, _recommendation("indexable_http_page_has_internal_links_to_https")))
     if status == "indexable" and _safe_int(row.get("broken_internal_link_count")) > 0:
@@ -393,6 +395,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "indexable_https_page_has_internal_links_to_http": "Update internal links on this HTTPS page so they point directly to HTTPS URLs.",
+        "not_indexable_https_page_has_internal_links_to_http": "Update internal links on this non-indexable HTTPS page so they point directly to HTTPS URLs.",
         "indexable_http_page_has_internal_links_to_https": "Prefer serving and linking the HTTPS source page directly instead of relying on HTTP pages that link into HTTPS.",
         "indexable_page_has_links_to_broken_page": "Update or remove internal links that point to broken 4XX/5XX URLs.",
         "indexable_page_has_links_to_redirect": "Update internal links to point directly at the final destination URL instead of the redirecting URL.",
