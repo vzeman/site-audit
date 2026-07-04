@@ -2074,6 +2074,55 @@ def test_technical_seo_model_flags_twitter_card_missing() -> None:
     assert all(row["importance"] == "Notice" for row in issues)
 
 
+def test_technical_seo_model_flags_duplicate_pages_without_canonical() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/b", title="B", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/c", title="C", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/d", title="D", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=250, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {"url": "https://example.com/a", "title": "A", "canonical_url": "https://example.com/a", "issues": []},
+                {"url": "https://example.com/b", "title": "B", "canonical_url": "", "issues": []},
+                {"url": "https://example.com/c", "title": "C", "canonical_url": "https://example.com/d", "issues": []},
+                {"url": "https://example.com/d", "title": "D", "canonical_url": "https://example.com/d", "issues": []},
+                {"url": "https://example.com/clean", "title": "Clean", "canonical_url": "https://example.com/clean", "issues": []},
+            ]
+        },
+        duplicate_rows=[
+            {
+                "url_a": "https://example.com/a",
+                "title_a": "A",
+                "url_b": "https://example.com/b",
+                "title_b": "B",
+                "similarity": 0.98,
+            },
+            {
+                "url_a": "https://example.com/c",
+                "title_a": "C",
+                "url_b": "https://example.com/d",
+                "title_b": "D",
+                "similarity": 0.99,
+            },
+        ],
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "duplicate_pages_without_canonical"]
+    assert {row["url"] for row in issues} == {"https://example.com/a", "https://example.com/b"}
+    assert all(row["issue_name"] == "Duplicate pages without canonical" for row in issues)
+    assert all(row["category"] == "duplicates" for row in issues)
+    assert all(row["importance"] == "Error" for row in issues)
+    flagged_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/a")
+    consolidated_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/c")
+    assert flagged_page["duplicate_partner_urls"] == ["https://example.com/b"]
+    assert flagged_page["duplicate_without_canonical"] is True
+    assert consolidated_page["duplicate_without_canonical"] is False
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

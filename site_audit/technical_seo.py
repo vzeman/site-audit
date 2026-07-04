@@ -50,6 +50,7 @@ def build_technical_seo(
     page_types: dict | None = None,
     header_analysis: dict | None = None,
     content_quality: dict | None = None,
+    duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
     by_url = {row["url"]: row for row in page_rows if row.get("url")}
@@ -75,7 +76,9 @@ def build_technical_seo(
         _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), index_rows.get(url), search.get(url), types.get(url), headers.get(url), quality.get(url), skip)
         by_url[url] = row
 
+    duplicates = _duplicate_lookup(duplicate_rows or [])
     rows = list(by_url.values())
+    _apply_duplicate_signals(rows, duplicates)
     issues = []
     for row in rows:
         issues.extend(_issues_for_row(row))
@@ -586,6 +589,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "social_tags", "open_graph_tags_missing", "low", 0.8, _recommendation("open_graph_tags_missing")))
     if "missing_twitter_card" in (row.get("metadata_issues") or []):
         issues.append(_issue(row, "social_tags", "twitter_card_missing", "low", 0.8, _recommendation("twitter_card_missing")))
+    if row.get("duplicate_without_canonical"):
+        issues.append(_issue(row, "duplicates", "duplicate_pages_without_canonical", "high", 0.92, _recommendation("duplicate_pages_without_canonical")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -697,6 +702,7 @@ def _recommendation(issue_type: str) -> str:
         "twitter_card_incomplete": "Add the missing Twitter/X card, title, or description tags so shared URLs render complete previews.",
         "open_graph_tags_missing": "Add Open Graph tags for pages that need complete social sharing previews.",
         "twitter_card_missing": "Add Twitter/X card metadata for pages that need complete social sharing previews.",
+        "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -748,6 +754,42 @@ def _lookup_rows(rows: list[dict]) -> dict[str, dict]:
         if url:
             out[str(url)] = row
     return out
+
+
+def _duplicate_lookup(rows: list[dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in rows:
+        url_a = row.get("url_a") or row.get("source_url") or ""
+        url_b = row.get("url_b") or row.get("duplicate_url") or ""
+        if not url_a or not url_b:
+            continue
+        similarity = _safe_float(row.get("similarity"))
+        for url, partner in ((url_a, url_b), (url_b, url_a)):
+            data = out.setdefault(str(url), {"duplicate_partner_urls": [], "duplicate_similarity": 0.0})
+            if partner not in data["duplicate_partner_urls"]:
+                data["duplicate_partner_urls"].append(partner)
+            data["duplicate_similarity"] = max(_safe_float(data.get("duplicate_similarity")), similarity)
+    return out
+
+
+def _apply_duplicate_signals(rows: list[dict], duplicates: dict[str, dict]) -> None:
+    rows_by_normalized_url = {_normalize_url(row.get("url", "")): row for row in rows if row.get("url")}
+    for row in rows:
+        duplicate = duplicates.get(row.get("url", ""))
+        if not duplicate:
+            continue
+        partners = list(duplicate.get("duplicate_partner_urls") or [])
+        row["duplicate_partner_urls"] = partners
+        row["duplicate_similarity"] = duplicate.get("duplicate_similarity", 0.0)
+        group_urls = {_normalize_url(row.get("url", "")), *{_normalize_url(url) for url in partners if url}}
+        consolidates = False
+        for group_url in group_urls:
+            member = rows_by_normalized_url.get(group_url)
+            canonical_url = _normalize_url((member or {}).get("canonical_url", ""))
+            if canonical_url and canonical_url in group_urls and canonical_url != group_url:
+                consolidates = True
+                break
+        row["duplicate_without_canonical"] = not consolidates
 
 
 def _is_self_canonical(row: dict) -> bool:
