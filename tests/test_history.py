@@ -216,6 +216,40 @@ def test_compare_snapshots_reports_h1_changes(tmp_path: Path) -> None:
     assert row["h1_after"] == "New H1"
 
 
+def test_compare_snapshots_reports_description_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_pages[0].description = "Old meta description"
+    before_extracted[0].description = "Old meta description"
+    after_pages[0].description = "New meta description"
+    after_extracted[0].description = "New meta description"
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "description" in row["changed_fields"]
+    assert row["description_before"] == "Old meta description"
+    assert row["description_after"] == "New meta description"
+
+
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:
     report = tmp_path / "example.com" / "report"
     report.mkdir(parents=True)

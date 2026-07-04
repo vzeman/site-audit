@@ -217,6 +217,9 @@ def _merge_page_signals(
     if history:
         row["previous_canonical_url"] = history.get("canonical_before", "")
         row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
+        row["previous_description"] = history.get("description_before", "")
+        row["current_description"] = history.get("description_after", "")
+        row["description_changed"] = "description" in (history.get("changed_fields") or [])
         row["previous_indexability_status"] = history.get("indexability_before", "")
         row["current_indexability_status"] = history.get("indexability_after", "")
         row["previous_h1"] = history.get("h1_before", "")
@@ -353,6 +356,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_h1_tag_missing_or_empty", "medium", 0.9, _recommendation("indexable_h1_tag_missing_or_empty")))
     if status == "indexable" and row.get("h1_changed"):
         issues.append(_issue(row, "content", "indexable_h1_tag_changed", "low", 0.8, _recommendation("indexable_h1_tag_changed")))
+    if status == "indexable" and row.get("description_changed"):
+        issues.append(_issue(row, "content", "indexable_meta_description_changed", "low", 0.8, _recommendation("indexable_meta_description_changed")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
     if (
@@ -549,6 +554,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "indexable_h1_tag_missing_or_empty": "Add one clear H1 heading to the indexable page.",
         "indexable_h1_tag_changed": "Review the H1 change and confirm the new heading still matches the page intent.",
+        "indexable_meta_description_changed": "Review the meta description change and confirm the new snippet still matches search intent.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",

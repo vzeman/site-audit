@@ -816,6 +816,32 @@ def test_technical_seo_model_flags_indexable_h1_changes() -> None:
     assert page["current_h1"] == "New H1"
 
 
+def test_technical_seo_model_flags_indexable_meta_description_changes() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=250, language="en")],
+        history_changes={
+            "changes": [
+                {
+                    "url": "https://example.com/page",
+                    "changed_fields": ["description"],
+                    "description_before": "Old meta description",
+                    "description_after": "New meta description",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_meta_description_changed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "Meta description changed"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = payload["pages"][0]
+    assert page["previous_description"] == "Old meta description"
+    assert page["current_description"] == "New meta description"
+
+
 def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/thin", title="Thin", section="", word_count=80, language="en"),
