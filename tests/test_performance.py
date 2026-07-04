@@ -190,6 +190,33 @@ def test_performance_payload_detects_uncompressed_html() -> None:
     assert payload["summary"]["not_compressed_share"] == 0.5
 
 
+def test_performance_payload_detects_small_tap_targets() -> None:
+    bad_html = """
+    <html><body>
+      <button style="width:32px;height:40px">Go</button>
+      <a href="/x" style="height:30px">Tiny link</a>
+      <input width="36" height="52">
+    </body></html>
+    """
+    clean_html = "<html><body><button style='width:64px;height:52px'>Go</button></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["small_tap_target_count"] == 3
+    assert rows["https://example.com/bad"]["small_tap_targets"] == [
+        {"tag": "button", "text": "Go", "width_px": 32, "height_px": 40},
+        {"tag": "a", "text": "Tiny link", "height_px": 30},
+        {"tag": "input", "text": "", "width_px": 36},
+    ]
+    assert rows["https://example.com/clean"]["small_tap_target_count"] == 0
+    assert payload["summary"]["pages_with_small_tap_targets"] == 1
+    assert payload["summary"]["small_tap_target_share"] == 0.5
+
+
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
     html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
 

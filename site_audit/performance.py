@@ -25,9 +25,11 @@ _FONT_WEIGHT = 40_000
 _PRELOAD_WEIGHT = 20_000
 _MOBILE_VIEWPORT_WIDTH = 390
 _MIN_READABLE_FONT_PX = 12.0
+_MIN_TAP_TARGET_PX = 48
 _CSS_URL_RE = re.compile(r"url\(\s*['\"]?(http://[^)'\"\s]+)", re.I)
 _FIXED_WIDTH_RE = re.compile(r"(?<![\w-])(width|min-width)\s*:\s*(\d+(?:\.\d+)?)px\b", re.I)
 _FONT_SIZE_RE = re.compile(r"(?<![\w-])font-size\s*:\s*(\d+(?:\.\d+)?)(px|em|rem|%)(?![\w-])", re.I)
+_TAP_SIZE_RE = re.compile(r"(?<![\w-])(width|height)\s*:\s*(\d+(?:\.\d+)?)px\b", re.I)
 _WIDTH_ATTR_RE = re.compile(r"\s*(\d+(?:\.\d+)?)(?:px)?\s*", re.I)
 _RESOURCE_LINK_RELS = {
     "apple-touch-icon",
@@ -210,6 +212,25 @@ def _small_font_sizes(soup: BeautifulSoup) -> list[dict]:
     return issues[:25]
 
 
+def _small_tap_targets(soup: BeautifulSoup) -> list[dict]:
+    issues: list[dict] = []
+    selectors = "a,button,input,select,textarea,[role='button']"
+    for tag in soup.select(selectors):
+        dimensions: dict[str, int] = {}
+        for prop, value in _TAP_SIZE_RE.findall(str(tag.get("style") or "")):
+            dimensions[prop.lower()] = int(float(value))
+        for attr in ("width", "height"):
+            match = _WIDTH_ATTR_RE.fullmatch(str(tag.get(attr) or ""))
+            if match:
+                dimensions[attr] = int(float(match.group(1)))
+        small = {prop: value for prop, value in dimensions.items() if 0 < value < _MIN_TAP_TARGET_PX}
+        if small:
+            issue = {"tag": tag.name, "text": tag.get_text(" ", strip=True)[:80]}
+            issue.update({f"{prop}_px": value for prop, value in small.items()})
+            issues.append(issue)
+    return issues[:25]
+
+
 def _bucket(estimated_weight: int) -> str:
     if estimated_weight < 500_000:
         return "light"
@@ -256,6 +277,7 @@ def _row(fetch) -> dict:
     content_sizing_issues = _oversized_fixed_widths(soup)
     plugin_elements = _plugin_elements(soup)
     small_font_issues = _small_font_sizes(soup)
+    small_tap_targets = _small_tap_targets(soup)
     html_weight_bytes = _html_weight(fetch)
     estimated_weight_bytes = (
         html_weight_bytes
@@ -300,6 +322,8 @@ def _row(fetch) -> dict:
         "plugin_elements": plugin_elements,
         "small_font_size_count": len(small_font_issues),
         "small_font_size_issues": small_font_issues,
+        "small_tap_target_count": len(small_tap_targets),
+        "small_tap_targets": small_tap_targets,
     }
 
 
@@ -315,6 +339,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     pages_with_content_sizing_issues = sum(1 for row in rows if row["content_width_exceeds_viewport"])
     pages_with_plugins = sum(1 for row in rows if row["plugin_element_count"] > 0)
     pages_with_small_font_sizes = sum(1 for row in rows if row["small_font_size_count"] > 0)
+    pages_with_small_tap_targets = sum(1 for row in rows if row["small_tap_target_count"] > 0)
     pages_not_compressed = sum(1 for row in rows if row["not_compressed"])
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
@@ -344,6 +369,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "plugin_usage_share": pages_with_plugins / total_pages if total_pages else 0.0,
         "pages_with_small_font_sizes": pages_with_small_font_sizes,
         "small_font_size_share": pages_with_small_font_sizes / total_pages if total_pages else 0.0,
+        "pages_with_small_tap_targets": pages_with_small_tap_targets,
+        "small_tap_target_share": pages_with_small_tap_targets / total_pages if total_pages else 0.0,
         "pages_not_compressed": pages_not_compressed,
         "not_compressed_share": pages_not_compressed / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,

@@ -255,6 +255,8 @@ def _merge_page_signals(
         row["plugin_elements"] = list(perf.get("plugin_elements") or [])
         row["small_font_size_count"] = _safe_int(perf.get("small_font_size_count"))
         row["small_font_size_issues"] = list(perf.get("small_font_size_issues") or [])
+        row["small_tap_target_count"] = _safe_int(perf.get("small_tap_target_count"))
+        row["small_tap_targets"] = list(perf.get("small_tap_targets") or [])
     if canonical:
         row["canonical_url"] = row.get("canonical_url") or canonical.get("canonical_url", "")
         row["canonical_target_http_status"] = canonical.get("canonical_target_http_status", "")
@@ -686,6 +688,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "pages_with_poor_lcp", "medium", 0.86, _recommendation("pages_with_poor_lcp")))
     if _slow_page(row):
         issues.append(_issue(row, "performance", "slow_page", "medium", 0.84, _recommendation("slow_page")))
+    if _safe_int(row.get("small_tap_target_count")) > 0:
+        issues.append(_issue(row, "performance", "tap_targets_too_small_or_too_close_together", "medium", 0.84, _recommendation("tap_targets_too_small_or_too_close_together")))
     return issues
 
 
@@ -814,6 +818,7 @@ def _recommendation(issue_type: str) -> str:
         "pages_with_poor_inp": "Reduce long tasks and expensive interaction handlers so the page responds quickly throughout the visit.",
         "pages_with_poor_lcp": "Improve largest contentful paint by optimizing the hero asset, server response, render-blocking resources, and critical CSS.",
         "slow_page": "Improve server response, reduce blocking resources, and optimize page weight so the page loads faster.",
+        "tap_targets_too_small_or_too_close_together": "Increase interactive element dimensions and spacing so tap targets are at least 48px where possible.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

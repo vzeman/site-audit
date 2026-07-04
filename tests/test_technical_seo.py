@@ -3395,6 +3395,43 @@ def test_technical_seo_model_flags_slow_page() -> None:
     assert page["load_time_ms"] == 3500
 
 
+def test_technical_seo_model_flags_tap_targets_too_small_or_too_close_together() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/bad",
+                    "status": 200,
+                    "small_tap_target_count": 1,
+                    "small_tap_targets": [{"tag": "button", "text": "Go", "width_px": 32, "height_px": 40}],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "status": 200,
+                    "small_tap_target_count": 0,
+                    "small_tap_targets": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "tap_targets_too_small_or_too_close_together"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Tap targets too small or too close together"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["small_tap_target_count"] == 1
+    assert page["small_tap_targets"] == [{"tag": "button", "text": "Go", "width_px": 32, "height_px": 40}]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
