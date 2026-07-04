@@ -143,6 +143,40 @@ def test_canonical_consistency_flags_canonical_points_to_5xx() -> None:
     assert payload["summary"]["canonical_points_to_5xx"] == 1
 
 
+def test_canonical_consistency_flags_canonical_points_to_redirect() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/redirecting",
+            },
+            {
+                "url": "https://example.com/final",
+                "title": "Final",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/final",
+                "requested_url": "https://example.com/redirecting",
+                "redirect_target_url": "https://example.com/final",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/final", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_points_to_redirect" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_redirect_target_url"] == "https://example.com/final"
+    assert payload["summary"]["canonical_points_to_redirect"] == 1
+
+
 def test_canonical_consistency_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_pages": 1},

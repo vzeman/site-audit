@@ -180,6 +180,7 @@ def _merge_page_signals(
         row["canonical_url"] = row.get("canonical_url") or canonical.get("canonical_url", "")
         row["canonical_target_http_status"] = canonical.get("canonical_target_http_status", "")
         row["canonical_target_indexability_status"] = canonical.get("canonical_target_indexability_status", "")
+        row["canonical_redirect_target_url"] = canonical.get("canonical_redirect_target_url", "")
         row["canonical_issues"] = list(canonical.get("issues") or [])
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
@@ -208,7 +209,7 @@ def _issues_for_row(row: dict) -> list[dict]:
     for issue_type in row.get("metadata_issues") or []:
         issues.append(_issue(row, "metadata", issue_type, _METADATA_SEVERITY.get(issue_type, "medium"), 0.9, _recommendation(issue_type)))
     for issue_type in row.get("canonical_issues") or []:
-        if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx"}:
+        if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx", "canonical_points_to_redirect"}:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
@@ -269,6 +270,7 @@ def _recommendation(issue_type: str) -> str:
         "https_http_mixed_content": "Serve every embedded resource on the HTTPS page over HTTPS or remove the insecure resource.",
         "canonical_points_to_4xx": "Update the canonical tag to a live 2xx URL, restore the canonical target, or remove the broken canonical.",
         "canonical_points_to_5xx": "Fix the canonical target server error or update the canonical tag to a stable live 2xx URL.",
+        "canonical_points_to_redirect": "Change the canonical tag to the final destination URL and avoid canonicalizing through redirects.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

@@ -7,13 +7,20 @@ class _Cache:
 
 
 class _Response:
-    def __init__(self, body: str, url: str = "https://example.com/sitemap.xml", status_code: int = 200):
+    def __init__(
+        self,
+        body: str,
+        url: str = "https://example.com/sitemap.xml",
+        status_code: int = 200,
+        content_type: str = "application/xml",
+    ):
         self.status_code = status_code
         self.content = body.encode("utf-8")
         self.text = body
         self.url = url
-        self.headers = {"Content-Type": "application/xml"}
+        self.headers = {"Content-Type": content_type}
         self.reason = ""
+        self.encoding = "utf-8"
 
 
 def _crawler(config: CrawlConfig, responses: dict[str, str]) -> Crawler:
@@ -170,6 +177,26 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+
+
+def test_fetch_preserves_requested_url_and_redirect_target() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "<html><title>Final</title></html>",
+        url="https://example.com/final",
+        status_code=200,
+        content_type="text/html",
+    )
+
+    result = crawler._fetch("https://example.com/redirecting")
+
+    assert result is not None
+    assert result.url == "https://example.com/final"
+    assert result.requested_url == "https://example.com/redirecting"
+    assert result.redirect_target_url == "https://example.com/final"
 
 
 def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:

@@ -144,6 +144,8 @@ class FetchResult:
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
     error: str = ""
+    requested_url: str = ""
+    redirect_target_url: str = ""
 
 
 @dataclass
@@ -650,6 +652,8 @@ class Crawler:
                     from_cache=True,
                     content_length_bytes=len(cached.body or b""),
                     x_robots_tag=xrt,
+                    requested_url=url,
+                    redirect_target_url=cached.canonical_url or "",
                 )
 
         if self.config.request_delay > 0:
@@ -672,6 +676,8 @@ class Crawler:
                 from_cache=False,
                 content_length_bytes=0,
                 error=getattr(r, "reason", "") or "fetch_failed",
+                requested_url=url,
+                redirect_target_url=final_url if url != final_url else "",
             )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
@@ -693,6 +699,8 @@ class Crawler:
                 from_cache=False,
                 content_length_bytes=len(body_bytes or b""),
                 x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
+                requested_url=url,
+                redirect_target_url=final_url if url != final_url else "",
             )
         if "html" not in ctype:
             return None
@@ -710,6 +718,8 @@ class Crawler:
             from_cache=False,
             content_length_bytes=len(body_bytes or b""),
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
+            requested_url=url,
+            redirect_target_url=final_url if url != final_url else "",
         )
 
     def _prepare_html_body(self, body: str) -> str:

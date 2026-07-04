@@ -450,6 +450,8 @@ def run(config: PipelineConfig) -> dict:
                 "http_status": http_status,
                 "content_type": getattr(r, "content_type", ""),
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                "requested_url": getattr(r, "requested_url", ""),
+                "redirect_target_url": getattr(r, "redirect_target_url", ""),
             })
             continue
         if http_status and not 200 <= http_status < 400:
@@ -460,6 +462,8 @@ def run(config: PipelineConfig) -> dict:
                 "http_status": http_status,
                 "content_type": getattr(r, "content_type", ""),
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                "requested_url": getattr(r, "requested_url", ""),
+                "redirect_target_url": getattr(r, "redirect_target_url", ""),
             })
             continue
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
@@ -471,6 +475,8 @@ def run(config: PipelineConfig) -> dict:
                 "http_status": getattr(r, "status", 0),
                 "content_type": getattr(r, "content_type", ""),
                 "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                "requested_url": getattr(r, "requested_url", ""),
+                "redirect_target_url": getattr(r, "redirect_target_url", ""),
             })
             continue
         if ext.noindex:
@@ -494,6 +500,8 @@ def run(config: PipelineConfig) -> dict:
                 "noindex_source": ext.noindex_source,
                 "language": ext.language or "",
                 "word_count": ext.word_count,
+                "requested_url": getattr(r, "requested_url", ""),
+                "redirect_target_url": getattr(r, "redirect_target_url", ""),
             })
             continue
         section = section_for_url(r.url)
@@ -512,6 +520,8 @@ def run(config: PipelineConfig) -> dict:
                 "noindex_source": ext.noindex_source,
                 "language": ext.language or "",
                 "word_count": ext.word_count,
+                "requested_url": getattr(r, "requested_url", ""),
+                "redirect_target_url": getattr(r, "redirect_target_url", ""),
             })
             continue
         page = PageInfo(
@@ -540,6 +550,8 @@ def run(config: PipelineConfig) -> dict:
             "noindex_source": ext.noindex_source,
             "language": ext.language or "",
             "word_count": ext.word_count,
+            "requested_url": getattr(r, "requested_url", ""),
+            "redirect_target_url": getattr(r, "redirect_target_url", ""),
         })
         if idx % 500 == 0 or idx == fetched_total:
             LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))

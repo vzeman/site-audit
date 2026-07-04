@@ -219,6 +219,28 @@ def test_technical_seo_model_flags_canonical_points_to_5xx() -> None:
     assert payload["pages"][0]["canonical_target_http_status"] == 503
 
 
+def test_technical_seo_model_flags_canonical_points_to_redirect() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
+        canonical_consistency={
+            "rows": [
+                {
+                    "url": "https://example.com/source",
+                    "canonical_url": "https://example.com/redirecting",
+                    "canonical_redirect_target_url": "https://example.com/final",
+                    "issues": ["canonical_points_to_redirect"],
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "canonical_points_to_redirect"]
+    assert len(issues) == 1
+    assert issues[0]["category"] == "indexability"
+    assert issues[0]["issue_name"] == "Canonical points to redirect"
+    assert payload["pages"][0]["canonical_redirect_target_url"] == "https://example.com/final"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
