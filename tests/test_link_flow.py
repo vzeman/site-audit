@@ -83,6 +83,7 @@ def test_linkgraph_payload_counts_internal_links_by_protocol() -> None:
     assert source["internal_http_links"] == ["http://example.com/legacy"]
     assert source["internal_https_link_count"] == 1
     assert source["internal_https_links"] == [pages[1].url]
+    assert source["raw_internal_link_count"] == 2
 
 
 def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:

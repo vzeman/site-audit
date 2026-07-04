@@ -543,6 +543,41 @@ def test_technical_seo_model_flags_indexable_pages_linking_to_broken_pages() -> 
     assert bad_page["broken_internal_link_count"] == 2
 
 
+def test_technical_seo_model_flags_indexable_pages_with_no_outgoing_links() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/dead-end", title="Dead End", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/linked", title="Linked", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/non-indexable-dead-end",
+                    "title": "Noindex Dead End",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        linkgraph={
+            "page_link_counts": [
+                {"url": "https://example.com/dead-end", "in_degree": 2, "out_degree": 0, "raw_internal_link_count": 0},
+                {"url": "https://example.com/linked", "in_degree": 2, "out_degree": 0, "raw_internal_link_count": 1},
+                {"url": "https://example.com/non-indexable-dead-end", "in_degree": 0, "out_degree": 0, "raw_internal_link_count": 0},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_page_has_no_outgoing_links"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/dead-end"
+    assert issues[0]["issue_name"] == "Page has no outgoing links"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

@@ -652,6 +652,7 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
     for p in pages:
         http_links = result.internal_http_links.get(p.url, [])
         https_links = result.internal_https_links.get(p.url, [])
+        raw_internal_links = sorted(set(http_links + https_links))
         page_link_counts.append({
             "url": p.url,
             "title": p.title,
@@ -661,6 +662,7 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
             "hub_score": round(float(result.hub_score.get(p.url, 0.0)), 8),
             "in_degree": int(result.in_degree.get(p.url, 0)),
             "out_degree": int(result.out_degree.get(p.url, 0)),
+            "raw_internal_link_count": len(raw_internal_links),
             "internal_http_link_count": len(http_links),
             "internal_http_links": http_links[:25],
             "internal_https_link_count": len(https_links),
