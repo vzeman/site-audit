@@ -13,6 +13,8 @@ ACTION_BY_STATUS = {
     "crawled_not_in_sitemap": "Add this indexable URL to the XML sitemap if it is an SEO landing page.",
 }
 
+SITEMAP_REDIRECT_ISSUE = "3xx_redirect_in_sitemap"
+
 
 def analyze(
     sitemap_entries: Iterable[dict],
@@ -22,6 +24,11 @@ def analyze(
 ) -> dict:
     sitemap_by_url = {row.get("url", ""): row for row in sitemap_entries if row.get("url")}
     fetched_by_url = {getattr(row, "url", ""): row for row in fetched}
+    fetched_by_requested_url = {
+        getattr(row, "requested_url", ""): row
+        for row in fetched
+        if getattr(row, "requested_url", "")
+    }
     extraction_by_url = {row.get("url", ""): row for row in extraction_rows if row.get("url")}
     indexability_by_url = {
         row.get("url", ""): row
@@ -35,7 +42,7 @@ def analyze(
 
     for url in urls:
         sitemap_row = sitemap_by_url.get(url, {})
-        fetched_row = fetched_by_url.get(url)
+        fetched_row = fetched_by_url.get(url) or fetched_by_requested_url.get(url)
         extraction_row = extraction_by_url.get(url, {})
         indexability_row = indexability_by_url.get(url, {})
         in_sitemap = url in sitemap_by_url
@@ -44,6 +51,11 @@ def analyze(
             "indexable" if extraction_row.get("status") == "analyzed" else extraction_row.get("reason", "")
         )
         coverage_status = _coverage_status(in_sitemap, crawled, indexability_status)
+        redirect_status_codes = [_safe_int(code) for code in getattr(fetched_row, "redirect_status_codes", []) or []]
+        redirect_target_url = getattr(fetched_row, "redirect_target_url", "") or ""
+        sitemap_issue_types = []
+        if in_sitemap and any(300 <= code < 400 for code in redirect_status_codes):
+            sitemap_issue_types.append(SITEMAP_REDIRECT_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -53,13 +65,30 @@ def analyze(
             "lastmod": sitemap_row.get("lastmod", ""),
             "crawled": crawled,
             "http_status": extraction_row.get("http_status") or getattr(fetched_row, "status", ""),
+            "redirect_target_url": redirect_target_url,
+            "redirect_status_codes": redirect_status_codes,
+            "redirect_hop_count": _safe_int(getattr(fetched_row, "redirect_hop_count", 0)),
             "extraction_status": extraction_row.get("status", ""),
             "indexability_status": indexability_status,
             "coverage_status": coverage_status,
+            "sitemap_issue_types": sitemap_issue_types,
             "indexability_issues": indexability_row.get("issues", []),
             "recommended_action": ACTION_BY_STATUS.get(coverage_status, "Review sitemap coverage for this URL."),
         }
         rows.append(row)
+        for issue_type in sitemap_issue_types:
+            issues.append({
+                "url": url,
+                "title": row["title"],
+                "issue": issue_type,
+                "in_sitemap": in_sitemap,
+                "crawled": crawled,
+                "http_status": row["http_status"],
+                "redirect_target_url": row["redirect_target_url"],
+                "redirect_status_codes": row["redirect_status_codes"],
+                "source_sitemaps": row["source_sitemaps"],
+                "recommended_action": "Update the sitemap URL to the final destination instead of a redirecting URL.",
+            })
         if coverage_status != "sitemap_indexable":
             issues.append({
                 "url": url,
@@ -85,6 +114,9 @@ def analyze(
             "sitemap_not_fetched": status_counts.get("sitemap_not_fetched", 0),
             "sitemap_non_indexable": status_counts.get("sitemap_non_indexable", 0),
             "sitemap_indexable": indexable_sitemap,
+            "3xx_redirect_in_sitemap": sum(
+                1 for row in rows if SITEMAP_REDIRECT_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -107,3 +139,12 @@ def _coverage_status(in_sitemap: bool, crawled: bool, indexability_status: str) 
     if in_sitemap:
         return "sitemap_indexable"
     return "crawled_not_in_sitemap"
+
+
+def _safe_int(value) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0

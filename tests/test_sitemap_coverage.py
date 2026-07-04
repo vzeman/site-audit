@@ -8,6 +8,10 @@ from site_audit.sitemap_coverage import analyze
 class _Fetched:
     url: str
     status: int = 200
+    requested_url: str = ""
+    redirect_target_url: str = ""
+    redirect_status_codes: list[int] | None = None
+    redirect_hop_count: int = 0
 
 
 def test_sitemap_coverage_classifies_matrix_and_actions() -> None:
@@ -79,6 +83,40 @@ def test_sitemap_coverage_classifies_matrix_and_actions() -> None:
         "sitemap_not_fetched",
         "crawled_not_in_sitemap",
     }
+
+
+def test_sitemap_coverage_flags_3xx_redirect_in_sitemap() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/old",
+                "source_sitemaps": ["https://example.com/sitemap.xml"],
+                "lastmod": "2026-05-01",
+            },
+        ],
+        [
+            _Fetched(
+                "https://example.com/final",
+                requested_url="https://example.com/old",
+                redirect_target_url="https://example.com/final",
+                redirect_status_codes=[301],
+                redirect_hop_count=1,
+            ),
+        ],
+        [],
+        {"per_page": [{"url": "https://example.com/old", "indexability_status": "indexable", "issues": []}]},
+    )
+
+    assert payload["summary"]["3xx_redirect_in_sitemap"] == 1
+    row = next(row for row in payload["rows"] if row["url"] == "https://example.com/old")
+    assert row["url"] == "https://example.com/old"
+    assert row["crawled"] is True
+    assert row["redirect_target_url"] == "https://example.com/final"
+    assert row["redirect_status_codes"] == [301]
+    assert row["sitemap_issue_types"] == ["3xx_redirect_in_sitemap"]
+    issues = [row for row in payload["issues"] if row["issue"] == "3xx_redirect_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["redirect_target_url"] == "https://example.com/final"
 
 
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:

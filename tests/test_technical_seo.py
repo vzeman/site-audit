@@ -4216,6 +4216,47 @@ def test_technical_seo_model_flags_https_page_links_to_http_css() -> None:
     assert page["http_css"] == [{"src": "http://cdn.example.com/insecure.css"}]
 
 
+def test_technical_seo_model_flags_3xx_redirect_in_sitemap() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/final", title="Final", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/old",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_status_codes": [301],
+                    "sitemap_issue_types": ["3xx_redirect_in_sitemap"],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "redirect_status_codes": [],
+                    "sitemap_issue_types": [],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "3xx_redirect_in_sitemap"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "3XX redirect in sitemap"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/final")
+    assert page["sitemap_redirect_count"] == 1
+    assert page["sitemap_redirect_target_url"] == "https://example.com/final"
+    assert page["sitemap_redirect_status_codes"] == [301]
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
