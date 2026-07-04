@@ -624,6 +624,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "localization", "missing_reciprocal_hreflang_no_return_tag", "high", 0.9, _recommendation("missing_reciprocal_hreflang_no_return_tag")))
     if row.get("hreflang_multi_language_references"):
         issues.append(_issue(row, "localization", "page_referenced_for_more_than_one_language_in_hreflang", "high", 0.9, _recommendation("page_referenced_for_more_than_one_language_in_hreflang")))
+    if row.get("uncrawled_hreflang_targets"):
+        issues.append(_issue(row, "localization", "not_all_pages_from_hreflang_group_were_crawled", "low", 0.8, _recommendation("not_all_pages_from_hreflang_group_were_crawled")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -747,6 +749,7 @@ def _recommendation(issue_type: str) -> str:
         "missing_reciprocal_hreflang_no_return_tag": "Add return hreflang annotations on alternate pages so every language URL references the others in the group.",
         "more_than_one_page_for_same_language_in_hreflang": "Keep only one alternate URL for each hreflang language code on a page.",
         "page_referenced_for_more_than_one_language_in_hreflang": "Use one consistent hreflang language code for each alternate page across the hreflang set.",
+        "not_all_pages_from_hreflang_group_were_crawled": "Include all hreflang alternate URLs in crawl discovery sources or verify why the missing alternates were not crawled.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -842,13 +845,21 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
         non_canonical_targets = []
         redirect_or_broken_targets = []
         missing_reciprocal_targets = []
+        uncrawled_targets = []
         source_urls = {_normalize_url(row.get("url", ""))}
         if row.get("canonical_url"):
             source_urls.add(_normalize_url(row.get("canonical_url", "")))
         for item in row.get("hreflang") or []:
             href = item.get("href", "")
-            target = rows_by_normalized_url.get(_normalize_url(href))
+            hreflang = str(item.get("hreflang") or "").strip().lower().replace("_", "-")
+            normalized_href = _normalize_url(href)
+            target = rows_by_normalized_url.get(normalized_href)
             if not target:
+                if _valid_hreflang_code(hreflang) and _absolute_url(href):
+                    uncrawled_targets.append({
+                        "hreflang": item.get("hreflang", ""),
+                        "href": href,
+                    })
                 continue
             target_url = _normalize_url(target.get("url", ""))
             target_canonical = _normalize_url(target.get("canonical_url", ""))
@@ -887,6 +898,8 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
             row["hreflang_redirect_or_broken_targets"] = redirect_or_broken_targets
         if missing_reciprocal_targets:
             row["missing_reciprocal_hreflang_targets"] = missing_reciprocal_targets
+        if uncrawled_targets:
+            row["uncrawled_hreflang_targets"] = uncrawled_targets
 
 
 def _apply_hreflang_reference_signals(rows: list[dict]) -> None:

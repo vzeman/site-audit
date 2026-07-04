@@ -2859,6 +2859,75 @@ def test_technical_seo_model_flags_self_reference_hreflang_annotation_missing() 
     assert page["self_reference_hreflang_missing"] is True
 
 
+def test_technical_seo_model_flags_not_all_pages_from_hreflang_group_were_crawled() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/crawled-alt", title="Crawled Alt", section="", word_count=250, language="sk"),
+        SimpleNamespace(url="https://example.com/clean-source", title="Clean Source", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/clean-alt", title="Clean Alt", section="", word_count=250, language="cs"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/source",
+                    "title": "Source",
+                    "canonical_url": "https://example.com/source",
+                    "hreflang": [
+                        {"hreflang": "en", "href": "https://example.com/source"},
+                        {"hreflang": "sk", "href": "https://example.com/crawled-alt"},
+                        {"hreflang": "cs", "href": "https://example.com/not-crawled"},
+                        {"hreflang": "x-default", "href": "https://example.com/default-not-crawled"},
+                        {"hreflang": "english", "href": "https://example.com/invalid-code"},
+                        {"hreflang": "de", "href": "/relative"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/crawled-alt",
+                    "title": "Crawled Alt",
+                    "canonical_url": "https://example.com/crawled-alt",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/source"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-source",
+                    "title": "Clean Source",
+                    "canonical_url": "https://example.com/clean-source",
+                    "hreflang": [
+                        {"hreflang": "en", "href": "https://example.com/clean-source"},
+                        {"hreflang": "cs", "href": "https://example.com/clean-alt"},
+                    ],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/clean-alt",
+                    "title": "Clean Alt",
+                    "canonical_url": "https://example.com/clean-alt",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/clean-source"}],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_all_pages_from_hreflang_group_were_crawled"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/source"
+    assert issues[0]["issue_name"] == "Not all pages from hreflang group were crawled"
+    assert issues[0]["category"] == "localization"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    source = next(row for row in payload["pages"] if row["url"] == "https://example.com/source")
+    assert source["uncrawled_hreflang_targets"] == [
+        {"hreflang": "cs", "href": "https://example.com/not-crawled"},
+        {"hreflang": "x-default", "href": "https://example.com/default-not-crawled"},
+    ]
+    clean = next(row for row in payload["pages"] if row["url"] == "https://example.com/clean-source")
+    assert "uncrawled_hreflang_targets" not in clean
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
