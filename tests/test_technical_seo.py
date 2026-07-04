@@ -1283,6 +1283,50 @@ def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_low_word_count() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable-thin", title="Thin", section="", word_count=80, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-thin",
+                    "title": "Noindex Thin",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "word_count": 80,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-full",
+                    "title": "Noindex Full",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "word_count": 250,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-unknown",
+                    "title": "Noindex Unknown",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "word_count": 0,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_low_word_count"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/noindex-thin"
+    assert issues[0]["issue_name"] == "Low word count"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Notice"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/noindex-thin")
+    assert page["word_count"] == 80
+
+
 def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_meta_description() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),

@@ -299,6 +299,7 @@ def _merge_page_signals(
         row["noindex_source"] = skipped.get("noindex_source") or skipped.get("source") or row.get("noindex_source", "")
         row["nofollow"] = bool(skipped.get("nofollow", row.get("nofollow", False)))
         row["nofollow_source"] = skipped.get("nofollow_source", row.get("nofollow_source", ""))
+        row["word_count"] = _safe_int(skipped.get("word_count", row.get("word_count", 0)))
         row["requested_url"] = skipped.get("requested_url", row.get("requested_url", ""))
         row["redirect_target_url"] = skipped.get("redirect_target_url", row.get("redirect_target_url", ""))
         row["redirect_chain"] = list(skipped.get("redirect_chain") or row.get("redirect_chain", []) or [])
@@ -396,6 +397,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "content", "indexable_word_count_changed", "low", 0.8, _recommendation("indexable_word_count_changed")))
     if status == "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
         issues.append(_issue(row, "content", "indexable_low_word_count", "medium", 0.86, _recommendation("indexable_low_word_count")))
+    if status != "indexable" and 0 < _safe_int(row.get("word_count")) < _LOW_WORD_COUNT_THRESHOLD:
+        issues.append(_issue(row, "content", "not_indexable_low_word_count", "low", 0.8, _recommendation("not_indexable_low_word_count")))
     if (
         status == "indexable"
         and (
@@ -618,6 +621,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_pages_have_high_ai_content_levels": "Review pages with high AI-content scores and add original evidence, expert detail, and brand-specific value.",
         "indexable_word_count_changed": "Review the word count change and confirm the page still satisfies its search intent.",
         "indexable_low_word_count": "Review whether the indexable page has enough crawlable main content to satisfy its search intent.",
+        "not_indexable_low_word_count": "Review whether the non-indexable page needs more crawlable content if it remains useful to users or may become indexable later.",
         "indexable_meta_description_tag_missing_or_empty": "Add one concise meta description tag to the indexable page.",
         "not_indexable_meta_description_tag_missing_or_empty": "Review whether the non-indexable page still needs a meta description; add one if it appears in crawl paths, previews, or future indexing plans.",
         "indexable_meta_description_too_long": "Shorten the meta description so it is concise enough for search snippets.",
