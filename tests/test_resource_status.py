@@ -50,6 +50,31 @@ def test_resource_status_payload_flags_broken_javascript_from_cache() -> None:
     ]
 
 
+def test_resource_status_payload_flags_broken_css_from_cache() -> None:
+    fetch = SimpleNamespace(
+        url="https://example.com/page",
+        body="""
+        <html><head>
+          <link rel="stylesheet" href="/broken.css">
+          <link rel="stylesheet" href="https://cdn.example.com/ok.css">
+        </head><body></body></html>
+        """,
+    )
+    cache = _Cache({
+        "https://example.com/broken.css": 404,
+        "https://cdn.example.com/ok.css": 200,
+    })
+
+    report = to_payload(analyze([fetch], http_cache=cache))
+
+    assert report["summary"]["total_css"] == 2
+    assert report["summary"]["broken_css"] == 1
+    assert report["issues_by_type"]["css_broken"] == 1
+    assert report["per_page"][0]["issues"]["css_broken"] == 1
+    assert report["per_page"][0]["css_count"] == 2
+    assert report["resources_with_issues"][0]["src"] == "https://example.com/broken.css"
+
+
 def test_resource_status_payload_uses_explicit_resource_items() -> None:
     fetch = SimpleNamespace(
         url="https://example.com/page",

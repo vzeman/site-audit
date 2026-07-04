@@ -31,10 +31,12 @@ def _resource_type(value: str) -> str:
     resource_type = str(value or "").lower()
     if resource_type in {"script", "js"}:
         return "javascript"
+    if resource_type in {"stylesheet", "style"}:
+        return "css"
     return resource_type or "unknown"
 
 
-def _script_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
+def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
     soup = BeautifulSoup(body or "", "html.parser")
     resources: list[dict] = []
     for tag in soup.find_all("script"):
@@ -48,6 +50,22 @@ def _script_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
             "src": absolute_url,
             "http_status": getattr(cached, "status", "") if cached is not None else "",
         })
+    for tag in soup.find_all("link"):
+        rel = tag.get("rel") or []
+        if isinstance(rel, str):
+            rel = rel.split()
+        if "stylesheet" not in {str(item).lower() for item in rel}:
+            continue
+        href = str(tag.get("href") or "").strip()
+        if not href:
+            continue
+        absolute_url = urljoin(page_url, href)
+        cached = http_cache.get(absolute_url) if http_cache is not None else None
+        resources.append({
+            "type": "css",
+            "src": absolute_url,
+            "http_status": getattr(cached, "status", "") if cached is not None else "",
+        })
     return resources
 
 
@@ -55,7 +73,7 @@ def _resource_items(fetch, http_cache=None) -> list[dict]:
     explicit = getattr(fetch, "resource_items", None)
     if explicit is not None:
         return [dict(item) for item in explicit]
-    return _script_resources(getattr(fetch, "url", "") or "", getattr(fetch, "body", "") or "", http_cache)
+    return _linked_resources(getattr(fetch, "url", "") or "", getattr(fetch, "body", "") or "", http_cache)
 
 
 def _resource_issues(item: dict, page_url: str = "") -> list[str]:
@@ -65,6 +83,8 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
     redirect_target_url = str(item.get("redirect_target_url") or "")
     if resource_type in {"javascript", "script", "js"} and (item.get("broken") or status >= 400):
         issues.append("javascript_broken")
+    if resource_type == "css" and (item.get("broken") or status >= 400):
+        issues.append("css_broken")
     src = str(item.get("src") or item.get("url") or "")
     if resource_type == "javascript" and urlparse(page_url or "").scheme.lower() == "https" and urlparse(src).scheme.lower() == "http":
         issues.append("https_page_links_to_http_javascript")
@@ -113,6 +133,7 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
             "title": page_title,
             "resource_count": len(resources),
             "javascript_count": page_resource_type_counts.get("javascript", 0),
+            "css_count": page_resource_type_counts.get("css", 0),
             "issues": dict(page_issues),
             "issue_count": sum(page_issues.values()),
         })
@@ -124,7 +145,9 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "issue_share": pages_with_issues / total_pages if total_pages else 0.0,
         "total_resources": sum(resource_type_counts.values()),
         "total_javascript": resource_type_counts.get("javascript", 0),
+        "total_css": resource_type_counts.get("css", 0),
         "broken_javascript": issues_by_type.get("javascript_broken", 0),
+        "broken_css": issues_by_type.get("css_broken", 0),
         "https_pages_linking_to_http_javascript": issues_by_type.get("https_page_links_to_http_javascript", 0),
         "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
     }

@@ -418,6 +418,7 @@ def _merge_page_signals(
         row["javascript_broken_count"] = _safe_int(resource_issue_counts.get("javascript_broken"))
         row["http_javascript_count"] = _safe_int(resource_issue_counts.get("https_page_links_to_http_javascript"))
         row["redirected_javascript_count"] = _safe_int(resource_issue_counts.get("javascript_redirects"))
+        row["css_broken_count"] = _safe_int(resource_issue_counts.get("css_broken"))
     if resource_issues:
         broken_javascript = [
             {
@@ -449,6 +450,16 @@ def _merge_page_signals(
         if redirected_javascript:
             row["redirected_javascript"] = redirected_javascript
             row["redirected_javascript_count"] = len(redirected_javascript)
+        broken_css = [
+            {
+                "src": issue.get("src", ""),
+                "http_status": issue.get("http_status", ""),
+            }
+            for issue in (resource_issues.get("css_broken") or [])
+        ]
+        if broken_css:
+            row["broken_css"] = broken_css
+            row["css_broken_count"] = len(broken_css)
     if skipped:
         reason = skipped.get("reason") or row.get("indexability_status") or "skipped"
         row["indexability_status"] = "noindex" if reason == "noindex" else reason
@@ -823,6 +834,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "javascript", "javascript_redirects", "medium", 0.88, _recommendation("javascript_redirects")))
     if _safe_int(row.get("redirected_javascript_count")) > 0:
         issues.append(_issue(row, "javascript", "page_has_redirected_javascript", "medium", 0.86, _recommendation("page_has_redirected_javascript")))
+    if _safe_int(row.get("css_broken_count")) > 0:
+        issues.append(_issue(row, "css", "css_broken", "medium", 0.9, _recommendation("css_broken")))
     return issues
 
 
@@ -965,6 +978,7 @@ def _recommendation(issue_type: str) -> str:
         "https_page_links_to_http_javascript": "Update JavaScript URLs on HTTPS pages so every script is loaded over HTTPS.",
         "javascript_redirects": "Update JavaScript references so they point directly to the final script URL instead of a redirecting URL.",
         "page_has_redirected_javascript": "Update redirected JavaScript references on the page so each script points directly to its final URL.",
+        "css_broken": "Restore the CSS URL, update it to a live stylesheet asset, or remove the broken stylesheet reference.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
