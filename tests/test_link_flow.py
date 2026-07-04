@@ -98,6 +98,7 @@ def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
             ("https://example.com/missing", "missing"),
             ("https://example.com/missing", "duplicate"),
             ("https://example.com/error", "error"),
+            ("https://example.com/redirecting", "redirect"),
             ("https://example.com/live", "live"),
         ],
         "https://example.com/clean": [("https://example.com/live", "live")],
@@ -106,6 +107,12 @@ def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
         "per_page": [
             {"url": "https://example.com/missing", "http_status": 404},
             {"url": "https://example.com/error", "http_status": 500},
+            {
+                "url": "https://example.com/final",
+                "http_status": 200,
+                "requested_url": "https://example.com/redirecting",
+                "redirect_target_url": "https://example.com/final",
+            },
             {"url": "https://example.com/live", "http_status": 200},
         ]
     }
@@ -119,7 +126,12 @@ def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
         {"url": "https://example.com/missing", "http_status": 404},
         {"url": "https://example.com/error", "http_status": 500},
     ]
+    assert source["redirect_internal_link_count"] == 1
+    assert source["redirect_internal_links"] == [
+        {"url": "https://example.com/redirecting", "redirect_target_url": "https://example.com/final"}
+    ]
     assert clean["broken_internal_link_count"] == 0
+    assert clean["redirect_internal_link_count"] == 0
 
 
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:

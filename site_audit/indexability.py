@@ -91,6 +91,8 @@ def analyze(fetched: Iterable, extraction_rows: list[dict], analyzed_urls: set[s
             "noindex_source": row.get("noindex_source") or row.get("source", ""),
             "nofollow": bool(row.get("nofollow")),
             "nofollow_source": row.get("nofollow_source", ""),
+            "requested_url": row.get("requested_url", ""),
+            "redirect_target_url": row.get("redirect_target_url", ""),
             "language": row.get("language", ""),
             "word_count": row.get("word_count", ""),
         }
@@ -111,6 +113,8 @@ def analyze(fetched: Iterable, extraction_rows: list[dict], analyzed_urls: set[s
                 "noindex_source": normalized["noindex_source"],
                 "nofollow": normalized["nofollow"],
                 "nofollow_source": normalized["nofollow_source"],
+                "requested_url": normalized["requested_url"],
+                "redirect_target_url": normalized["redirect_target_url"],
                 "x_robots_tag": normalized["x_robots_tag"],
                 "recommended_action": ACTION_BY_ISSUE.get(key, ACTION_BY_ISSUE["skipped"]),
             })

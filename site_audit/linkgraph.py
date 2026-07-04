@@ -692,6 +692,7 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
 
 def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[str, list[tuple[str, str]]], indexability: dict | None) -> dict:
     status_by_url: dict[str, int] = {}
+    redirect_by_url: dict[str, str] = {}
     for row in (indexability or {}).get("per_page") or []:
         url = row.get("url")
         if not url:
@@ -699,10 +700,16 @@ def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[st
         status = _safe_int(row.get("http_status"))
         status_by_url[str(url)] = status
         status_by_url[_canonical_url(str(url))] = status
+        requested_url = row.get("requested_url") or ""
+        redirect_target_url = row.get("redirect_target_url") or ""
+        if requested_url and redirect_target_url and _canonical_url(requested_url) != _canonical_url(redirect_target_url):
+            redirect_by_url[str(requested_url)] = str(redirect_target_url)
+            redirect_by_url[_canonical_url(str(requested_url))] = str(redirect_target_url)
 
     for row in (linkgraph_payload or {}).get("page_link_counts") or []:
         source_url = row.get("url") or ""
         broken: list[dict] = []
+        redirects: list[dict] = []
         seen: set[str] = set()
         for target, _anchor in (outlinks_map or {}).get(source_url, []) or []:
             if not target or target in seen:
@@ -711,8 +718,13 @@ def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[st
             status = status_by_url.get(target, status_by_url.get(_canonical_url(target), 0))
             if 400 <= status < 600:
                 broken.append({"url": target, "http_status": status})
+            redirect_target_url = redirect_by_url.get(target, redirect_by_url.get(_canonical_url(target), ""))
+            if redirect_target_url:
+                redirects.append({"url": target, "redirect_target_url": redirect_target_url})
         row["broken_internal_link_count"] = len(broken)
         row["broken_internal_links"] = broken[:25]
+        row["redirect_internal_link_count"] = len(redirects)
+        row["redirect_internal_links"] = redirects[:25]
     return linkgraph_payload
 
 
