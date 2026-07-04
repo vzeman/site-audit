@@ -384,6 +384,33 @@ def test_technical_seo_model_flags_noindex_page_became_indexable() -> None:
     assert payload["pages"][0]["current_indexability_status"] == "indexable"
 
 
+def test_technical_seo_model_flags_self_canonical_with_no_incoming_links() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=100, language="en")],
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/page",
+                    "title": "Page",
+                    "canonical_url": "https://example.com/page",
+                    "issues": [],
+                }
+            ]
+        },
+        linkgraph={
+            "page_link_counts": [
+                {"url": "https://example.com/page", "in_degree": 0, "out_degree": 2, "click_depth": 2}
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_canonical_url_has_no_incoming_internal_links"]
+    assert len(issues) == 1
+    assert issues[0]["issue_name"] == "Canonical URL has no incoming internal links"
+    assert issues[0]["importance"] == "Error"
+    assert payload["pages"][0]["in_degree"] == 0
+
+
 def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],

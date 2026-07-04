@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from typing import Iterable
+from urllib.parse import urlparse
 
 from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CATALOG
 
@@ -41,6 +42,7 @@ def build_technical_seo(
     performance: dict | None = None,
     canonical_consistency: dict | None = None,
     history_changes: dict | None = None,
+    linkgraph: dict | None = None,
     search_payload: dict | None = None,
     page_types: dict | None = None,
 ) -> dict:
@@ -50,18 +52,19 @@ def build_technical_seo(
     perf = _lookup_rows((performance or {}).get("per_page") or [])
     canonical = _lookup_rows((canonical_consistency or {}).get("rows") or [])
     history = _lookup_rows((history_changes or {}).get("changes") or [])
+    links = _lookup_rows((linkgraph or {}).get("page_link_counts") or [])
     search = _search_lookup(search_payload)
     types = _lookup_rows((page_types or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
     for url, row in by_url.items():
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), search.get(url), types.get(url), skipped.get(url))
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), search.get(url), types.get(url), skipped.get(url))
 
     for url, skip in skipped.items():
         if url in by_url:
             continue
         row = _base_skipped_row(skip)
-        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), search.get(url), types.get(url), skip)
+        _merge_page_signals(row, metadata.get(url), perf.get(url), canonical.get(url), history.get(url), links.get(url), search.get(url), types.get(url), skip)
         by_url[url] = row
 
     rows = list(by_url.values())
@@ -165,6 +168,7 @@ def _merge_page_signals(
     perf: dict | None,
     canonical: dict | None,
     history: dict | None,
+    links: dict | None,
     search: dict | None,
     page_type: dict | None,
     skipped: dict | None,
@@ -201,6 +205,10 @@ def _merge_page_signals(
         row["canonical_changed"] = "canonical" in (history.get("changed_fields") or [])
         row["previous_indexability_status"] = history.get("indexability_before", "")
         row["current_indexability_status"] = history.get("indexability_after", "")
+    if links:
+        row["in_degree"] = _safe_int(links.get("in_degree"))
+        row["out_degree"] = _safe_int(links.get("out_degree"))
+        row["click_depth"] = links.get("click_depth", "")
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -255,6 +263,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "indexability", "indexable_page_became_non_indexable", "low", 0.84, _recommendation("indexable_page_became_non_indexable")))
     if row.get("previous_indexability_status") == "noindex" and row.get("current_indexability_status") == "indexable":
         issues.append(_issue(row, "indexability", "noindex_page_became_indexable", "low", 0.84, _recommendation("noindex_page_became_indexable")))
+    if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
+        issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
         issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
@@ -324,6 +334,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_url_changed": "Review the canonical change against the previous snapshot and confirm the new canonical target is intentional.",
         "indexable_page_became_non_indexable": "Review the before/after snapshot and restore indexability if this URL should remain eligible for search.",
         "noindex_page_became_indexable": "Review the before/after snapshot and confirm this formerly noindex URL should now be indexable.",
+        "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "nofollow_in_html_and_http_header": "Remove duplicate nofollow directives from either the HTML meta robots tag or the X-Robots-Tag header unless both are intentional.",
         "nofollow_page": "Review whether this page should prevent link discovery; remove the nofollow directive when internal links should pass crawl signals.",
@@ -352,6 +363,25 @@ def _lookup_rows(rows: list[dict]) -> dict[str, dict]:
         if url:
             out[str(url)] = row
     return out
+
+
+def _is_self_canonical(row: dict) -> bool:
+    if row.get("indexability_status") != "indexable":
+        return False
+    url = row.get("url", "")
+    canonical_url = row.get("canonical_url", "")
+    if not url or not canonical_url:
+        return False
+    return _normalize_url(url) == _normalize_url(canonical_url)
+
+
+def _normalize_url(url: str) -> str:
+    parsed = urlparse(url or "")
+    if not parsed.scheme or not parsed.netloc:
+        return (url or "").rstrip("/")
+    netloc = parsed.netloc.lower().removeprefix("www.")
+    path = (parsed.path or "/").rstrip("/") or "/"
+    return f"{parsed.scheme.lower()}://{netloc}{path}"
 
 
 def _search_lookup(payload: dict | None) -> dict[str, dict]:
