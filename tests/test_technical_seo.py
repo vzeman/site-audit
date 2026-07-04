@@ -606,6 +606,25 @@ def test_technical_seo_model_flags_http_pages_linking_to_https() -> None:
     ]
     payload = build_technical_seo(
         pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "http://example.com/noindex-bad",
+                    "title": "Noindex Bad",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "http://example.com/noindex-clean",
+                    "title": "Noindex Clean",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
         linkgraph={
             "page_link_counts": [
                 {
@@ -629,6 +648,20 @@ def test_technical_seo_model_flags_http_pages_linking_to_https() -> None:
                     "internal_https_link_count": 1,
                     "internal_https_links": ["https://example.com/secure"],
                 },
+                {
+                    "url": "http://example.com/noindex-bad",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "internal_https_link_count": 1,
+                    "internal_https_links": ["https://example.com/secure"],
+                },
+                {
+                    "url": "http://example.com/noindex-clean",
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "internal_https_link_count": 0,
+                    "internal_https_links": [],
+                },
             ]
         },
     )
@@ -639,6 +672,11 @@ def test_technical_seo_model_flags_http_pages_linking_to_https() -> None:
     assert issues[0]["issue_name"] == "HTTP page has internal links to HTTPS"
     assert issues[0]["importance"] == "Notice"
     assert issues[0]["severity"] == "low"
+    not_indexable_issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_http_page_has_internal_links_to_https"]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "http://example.com/noindex-bad"
+    assert not_indexable_issues[0]["issue_name"] == "HTTP page has internal links to HTTPS"
+    assert not_indexable_issues[0]["importance"] == "Notice"
 
 
 def test_technical_seo_model_flags_indexable_pages_linking_to_broken_pages() -> None:
