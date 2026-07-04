@@ -23,6 +23,7 @@ SITEMAP_SYNTAX_ISSUE = "sitemap_has_syntax_error"
 SITEMAP_NOT_ACCESSIBLE_ISSUE = "sitemap_is_not_accessible"
 SITEMAP_TOO_LARGE_ISSUE = "sitemap_larger_than_50mb"
 SITEMAP_TOO_MANY_URLS_ISSUE = "sitemap_with_over_50k_urls"
+SITEMAP_WRONG_FORMAT_ISSUE = "sitemap_in_the_wrong_format"
 
 
 def analyze(
@@ -173,6 +174,7 @@ def analyze(
             "sitemap_is_not_accessible": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_NOT_ACCESSIBLE_ISSUE),
             "sitemap_larger_than_50mb": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_TOO_LARGE_ISSUE),
             "sitemap_with_over_50k_urls": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_TOO_MANY_URLS_ISSUE),
+            "sitemap_in_the_wrong_format": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_WRONG_FORMAT_ISSUE),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -234,6 +236,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Split the sitemap into smaller files under the 50MB uncompressed limit."
     if issue_type == SITEMAP_TOO_MANY_URLS_ISSUE:
         return "Split the sitemap into smaller files with no more than 50,000 URLs each."
+    if issue_type == SITEMAP_WRONG_FORMAT_ISSUE:
+        return "Publish the sitemap as a valid XML urlset or sitemapindex file."
     return "Review and fix this sitemap issue."
 
 

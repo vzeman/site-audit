@@ -408,6 +408,13 @@ class Crawler:
                             entry.source_sitemaps.append(sm)
                         if lastmod_text and not entry.lastmod:
                             entry.lastmod = lastmod_text
+            else:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_in_the_wrong_format",
+                    "http_status": r.status_code,
+                    "message": f"root element {tag}",
+                })
 
         self.sitemap_urls_seen = sorted(seen_sitemaps)
         self.sitemap_entries = [

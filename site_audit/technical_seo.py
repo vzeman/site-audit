@@ -221,6 +221,7 @@ def _base_sitemap_error_row(row: dict) -> dict:
         "sitemap_not_accessible_count": 1 if issue_type == "sitemap_is_not_accessible" else 0,
         "sitemap_too_large_count": 1 if issue_type == "sitemap_larger_than_50mb" else 0,
         "sitemap_too_many_urls_count": 1 if issue_type == "sitemap_with_over_50k_urls" else 0,
+        "sitemap_wrong_format_count": 1 if issue_type == "sitemap_in_the_wrong_format" else 0,
     }
 
 
@@ -961,6 +962,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "sitemaps", "sitemap_larger_than_50mb", "high", 0.94, _recommendation("sitemap_larger_than_50mb")))
     if _safe_int(row.get("sitemap_too_many_urls_count")) > 0:
         issues.append(_issue(row, "sitemaps", "sitemap_with_over_50k_urls", "high", 0.94, _recommendation("sitemap_with_over_50k_urls")))
+    if _safe_int(row.get("sitemap_wrong_format_count")) > 0:
+        issues.append(_issue(row, "sitemaps", "sitemap_in_the_wrong_format", "medium", 0.9, _recommendation("sitemap_in_the_wrong_format")))
     return issues
 
 
@@ -1119,6 +1122,7 @@ def _recommendation(issue_type: str) -> str:
         "sitemap_is_not_accessible": "Restore access to the sitemap URL or remove the inaccessible sitemap reference.",
         "sitemap_larger_than_50mb": "Split the sitemap into smaller files under the 50MB uncompressed limit.",
         "sitemap_with_over_50k_urls": "Split the sitemap into smaller files with no more than 50,000 URLs each.",
+        "sitemap_in_the_wrong_format": "Publish the sitemap as a valid XML urlset or sitemapindex file.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

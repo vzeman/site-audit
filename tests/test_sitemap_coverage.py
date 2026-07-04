@@ -328,6 +328,28 @@ def test_sitemap_coverage_flags_sitemap_with_over_50k_urls() -> None:
     assert "50,000 URLs" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_sitemap_in_wrong_format() -> None:
+    payload = analyze(
+        [],
+        [],
+        [],
+        sitemap_errors=[
+            {
+                "sitemap_url": "https://example.com/feed.xml",
+                "issue": "sitemap_in_the_wrong_format",
+                "http_status": 200,
+                "message": "root element rss",
+            }
+        ],
+    )
+
+    assert payload["summary"]["sitemap_in_the_wrong_format"] == 1
+    issues = [row for row in payload["issues"] if row["issue"] == "sitemap_in_the_wrong_format"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/feed.xml"
+    assert "urlset or sitemapindex" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},
