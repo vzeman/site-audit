@@ -217,6 +217,8 @@ def _issues_for_row(row: dict) -> list[dict]:
     status = str(row.get("indexability_status") or "")
     if status == "timed_out":
         issues.append(_issue(row, "internal_pages", "timed_out", "high", 0.98, _recommendation("timed_out")))
+    elif status == "noindex":
+        issues.append(_issue(row, "indexability", "noindex_page", "medium", 0.95, _recommendation("noindex_page")))
     elif status and status != "indexable":
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
     if status == "noindex" and row.get("noindex_source") == "meta+header":
@@ -282,6 +284,7 @@ def _issue(row: dict, category: str, issue_type: str, severity: str, confidence:
 def _recommendation(issue_type: str) -> str:
     return {
         "noindex": "Decide whether this URL should be indexed; remove noindex only when it is a canonical search landing page.",
+        "noindex_page": "Decide whether this URL should be indexed; remove noindex only when it is a canonical search landing page.",
         "canonical_duplicate": "Remove this non-canonical URL from internal links and sitemaps, or change its canonical if it should be indexable.",
         "404_page": "Restore the page, redirect it to a relevant live URL, or remove internal links and sitemap references.",
         "4xx_page": "Fix the client error or remove internal links and sitemap references to this URL.",
