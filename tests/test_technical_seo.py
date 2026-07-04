@@ -930,6 +930,60 @@ def test_technical_seo_model_flags_indexable_pages_with_title_too_short() -> Non
     assert all(row["importance"] == "Warning" for row in issues)
 
 
+def test_technical_seo_model_flags_not_indexable_pages_with_title_too_short() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/indexable", title="Indexable", section="", word_count=250, language="en")],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-short",
+                    "title": "Noindex Short",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-length",
+                    "title": "Noindex Length",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-missing",
+                    "title": "",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-ok",
+                    "title": "Useful noindex page title",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {"url": "https://example.com/indexable", "title": "Indexable", "title_length": 12, "issues": ["short_title"]},
+                {"url": "https://example.com/noindex-short", "title": "Noindex Short", "title_length": 12, "issues": ["short_title"]},
+                {"url": "https://example.com/noindex-length", "title": "Noindex Length", "title_length": 18, "issues": []},
+                {"url": "https://example.com/noindex-missing", "title": "", "title_length": 0, "issues": ["missing_title"]},
+                {"url": "https://example.com/noindex-ok", "title": "Useful noindex page title", "title_length": 40, "issues": []},
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_indexable_title_too_short"]
+    assert {row["url"] for row in issues} == {"https://example.com/noindex-short", "https://example.com/noindex-length"}
+    assert all(row["issue_name"] == "Title too short" for row in issues)
+    assert all(row["category"] == "content" for row in issues)
+    assert all(row["importance"] == "Notice" for row in issues)
+
+
 def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=100, language="en"),
