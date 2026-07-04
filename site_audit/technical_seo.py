@@ -593,6 +593,10 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "social_tags", "twitter_card_missing", "low", 0.8, _recommendation("twitter_card_missing")))
     if row.get("duplicate_without_canonical"):
         issues.append(_issue(row, "duplicates", "duplicate_pages_without_canonical", "high", 0.92, _recommendation("duplicate_pages_without_canonical")))
+    invalid_hreflang = _invalid_hreflang_annotations(row.get("hreflang") or [])
+    if invalid_hreflang:
+        row["invalid_hreflang_annotations"] = invalid_hreflang
+        issues.append(_issue(row, "localization", "hreflang_annotation_invalid", "high", 0.9, _recommendation("hreflang_annotation_invalid")))
     if _hreflang_html_lang_mismatch(row):
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("weight_bucket") == "very_heavy":
@@ -707,6 +711,7 @@ def _recommendation(issue_type: str) -> str:
         "open_graph_tags_missing": "Add Open Graph tags for pages that need complete social sharing previews.",
         "twitter_card_missing": "Add Twitter/X card metadata for pages that need complete social sharing previews.",
         "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
+        "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
@@ -815,10 +820,39 @@ def _hreflang_html_lang_mismatch(row: dict) -> bool:
     return html_lang not in self_hreflangs
 
 
+def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:
+    invalid: list[dict] = []
+    for row in rows:
+        hreflang = str(row.get("hreflang") or "").strip()
+        href = str(row.get("href") or "").strip()
+        reasons = []
+        if not _valid_hreflang_code(hreflang):
+            reasons.append("invalid_hreflang")
+        if not _absolute_url(href):
+            reasons.append("invalid_href")
+        if reasons:
+            invalid.append({"hreflang": hreflang, "href": href, "reasons": reasons})
+    return invalid
+
+
+def _valid_hreflang_code(value: str) -> bool:
+    language = str(value or "").strip().lower().replace("_", "-")
+    if language == "x-default":
+        return True
+    return bool(re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}", language))
+
+
+def _absolute_url(value: str) -> bool:
+    parsed = urlparse(value or "")
+    return bool(parsed.scheme in {"http", "https"} and parsed.netloc)
+
+
 def _language_primary(value: str) -> str:
     language = str(value or "").strip().lower().replace("_", "-")
     if not language:
         return ""
+    if language == "x-default":
+        return "x-default"
     return language.split("-", 1)[0]
 
 

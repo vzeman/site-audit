@@ -2190,6 +2190,71 @@ def test_technical_seo_model_flags_hreflang_and_html_lang_mismatch() -> None:
     assert all(row["importance"] == "Error" for row in issues)
 
 
+def test_technical_seo_model_flags_invalid_hreflang_annotations() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(url="https://example.com/invalid-code", title="Invalid Code", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/invalid-href", title="Invalid Href", section="", word_count=250, language="en"),
+            SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="en"),
+        ],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-invalid",
+                    "title": "Noindex Invalid",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/invalid-code",
+                    "title": "Invalid Code",
+                    "hreflang": [{"hreflang": "english", "href": "https://example.com/invalid-code"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/invalid-href",
+                    "title": "Invalid Href",
+                    "hreflang": [{"hreflang": "en-US", "href": "/relative"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/noindex-invalid",
+                    "title": "Noindex Invalid",
+                    "hreflang": [{"hreflang": "", "href": ""}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "hreflang": [
+                        {"hreflang": "en-US", "href": "https://example.com/ok"},
+                        {"hreflang": "x-default", "href": "https://example.com/"},
+                    ],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "hreflang_annotation_invalid"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/invalid-code",
+        "https://example.com/invalid-href",
+        "https://example.com/noindex-invalid",
+    }
+    assert all(row["issue_name"] == "Hreflang annotation invalid" for row in issues)
+    assert all(row["category"] == "localization" for row in issues)
+    assert all(row["importance"] == "Error" for row in issues)
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/invalid-href")
+    assert page["invalid_hreflang_annotations"] == [{"hreflang": "en-US", "href": "/relative", "reasons": ["invalid_href"]}]
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
