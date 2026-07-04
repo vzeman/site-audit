@@ -14,6 +14,7 @@ from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CAT
 
 
 _SEVERITY_WEIGHT = {"high": 100.0, "medium": 55.0, "low": 25.0}
+_GOOGLEBOT_HTML_LIMIT_BYTES = 2 * 1024 * 1024
 _METADATA_SEVERITY = {
     "missing_title": "high",
     "missing_canonical": "high",
@@ -211,6 +212,8 @@ def _issues_for_row(row: dict) -> list[dict]:
     for issue_type in row.get("canonical_issues") or []:
         if issue_type in {"canonical_points_to_4xx", "canonical_points_to_5xx", "canonical_points_to_redirect"}:
             issues.append(_issue(row, "indexability", issue_type, "high", 0.96, _recommendation(issue_type)))
+    if _safe_int(row.get("html_weight_bytes")) > _GOOGLEBOT_HTML_LIMIT_BYTES:
+        issues.append(_issue(row, "indexability", "page_size_exceeds_googlebot_s_2_mb_crawl_limit", "high", 0.9, _recommendation("page_size_exceeds_googlebot_s_2_mb_crawl_limit")))
     if row.get("weight_bucket") == "very_heavy":
         issues.append(_issue(row, "performance", "very_heavy_page", "medium", 0.72, "Reduce page weight, heavy images, scripts, and fonts."))
     elif row.get("weight_bucket") == "heavy":
@@ -271,6 +274,7 @@ def _recommendation(issue_type: str) -> str:
         "canonical_points_to_4xx": "Update the canonical tag to a live 2xx URL, restore the canonical target, or remove the broken canonical.",
         "canonical_points_to_5xx": "Fix the canonical target server error or update the canonical tag to a stable live 2xx URL.",
         "canonical_points_to_redirect": "Change the canonical tag to the final destination URL and avoid canonicalizing through redirects.",
+        "page_size_exceeds_googlebot_s_2_mb_crawl_limit": "Reduce the HTML document below 2 MB by trimming inline markup, scripts, styles, or excessive embedded data.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

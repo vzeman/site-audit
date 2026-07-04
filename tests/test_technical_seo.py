@@ -241,6 +241,27 @@ def test_technical_seo_model_flags_canonical_points_to_redirect() -> None:
     assert payload["pages"][0]["canonical_redirect_target_url"] == "https://example.com/final"
 
 
+def test_technical_seo_model_flags_googlebot_html_size_limit() -> None:
+    payload = build_technical_seo(
+        [SimpleNamespace(url="https://example.com/large", title="Large", section="", word_count=100, language="en")],
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/large",
+                    "status": 200,
+                    "html_weight_bytes": 2 * 1024 * 1024 + 1,
+                    "weight_bucket": "very_heavy",
+                }
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_size_exceeds_googlebot_s_2_mb_crawl_limit"]
+    assert len(issues) == 1
+    assert issues[0]["category"] == "indexability"
+    assert issues[0]["issue_name"] == "Page size exceeds Googlebot's 2 MB crawl limit"
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 
