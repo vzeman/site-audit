@@ -313,6 +313,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "links", "not_indexable_page_has_links_to_redirect", "low", 0.82, _recommendation("not_indexable_page_has_links_to_redirect")))
     if status == "indexable" and _is_redirected_fetch(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_redirected_page_has_no_incoming_internal_links", "medium", 0.88, _recommendation("indexable_redirected_page_has_no_incoming_internal_links")))
+    if status != "indexable" and _is_redirected_fetch(row) and "in_degree" in row and _safe_int(row.get("in_degree")) == 0:
+        issues.append(_issue(row, "links", "not_indexable_redirected_page_has_no_incoming_internal_links", "low", 0.82, _recommendation("not_indexable_redirected_page_has_no_incoming_internal_links")))
     if status == "indexable" and row.get("internal_link_counts_available") and _safe_int(row.get("raw_internal_link_count")) == 0:
         issues.append(_issue(row, "links", "indexable_page_has_no_outgoing_links", "high", 0.9, _recommendation("indexable_page_has_no_outgoing_links")))
     if status != "indexable" and row.get("internal_link_counts_available") and _safe_int(row.get("raw_internal_link_count")) == 0:
@@ -430,6 +432,7 @@ def _recommendation(issue_type: str) -> str:
         "indexable_page_has_links_to_redirect": "Update internal links to point directly at the final destination URL instead of the redirecting URL.",
         "not_indexable_page_has_links_to_redirect": "Update redirected internal links from this non-indexable page when it remains part of crawlable navigation or content.",
         "indexable_redirected_page_has_no_incoming_internal_links": "Add direct internal links to the final redirected URL or remove obsolete redirected URL references.",
+        "not_indexable_redirected_page_has_no_incoming_internal_links": "Review whether this redirected non-indexable URL should receive direct internal links or be removed from crawl paths.",
         "indexable_page_has_no_outgoing_links": "Add relevant crawlable internal links from this page to useful destination pages.",
         "not_indexable_page_has_no_outgoing_links": "Review whether this non-indexable page should remain a crawl dead end; add relevant internal links if it remains useful.",
         "indexable_page_has_nofollow_incoming_internal_links_only": "Add at least one dofollow internal link to this page or remove nofollow from appropriate incoming internal links.",

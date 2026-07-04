@@ -825,7 +825,26 @@ def test_technical_seo_model_flags_redirected_indexable_pages_with_no_incoming_l
                     "indexability_status": "indexable",
                 },
             ],
-            "skipped": [],
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex-final",
+                    "title": "Noindex Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/noindex-redirecting",
+                    "redirect_target_url": "https://example.com/noindex-final",
+                    "nofollow": False,
+                },
+                {
+                    "url": "https://example.com/noindex-final-linked",
+                    "title": "Noindex Final Linked",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "https://example.com/noindex-redirecting-linked",
+                    "redirect_target_url": "https://example.com/noindex-final-linked",
+                    "nofollow": False,
+                },
+            ],
             "noindex_pages": [],
         },
         linkgraph={
@@ -833,6 +852,8 @@ def test_technical_seo_model_flags_redirected_indexable_pages_with_no_incoming_l
                 {"url": "https://example.com/final", "in_degree": 0, "out_degree": 1},
                 {"url": "https://example.com/final-linked", "in_degree": 2, "out_degree": 1},
                 {"url": "https://example.com/direct", "in_degree": 0, "out_degree": 1},
+                {"url": "https://example.com/noindex-final", "in_degree": 0, "out_degree": 1},
+                {"url": "https://example.com/noindex-final-linked", "in_degree": 2, "out_degree": 1},
             ]
         },
     )
@@ -844,6 +865,15 @@ def test_technical_seo_model_flags_redirected_indexable_pages_with_no_incoming_l
     assert issues[0]["importance"] == "Warning"
     final_page = next(row for row in payload["pages"] if row["url"] == "https://example.com/final")
     assert final_page["requested_url"] == "https://example.com/redirecting"
+    not_indexable_issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "not_indexable_redirected_page_has_no_incoming_internal_links"
+    ]
+    assert len(not_indexable_issues) == 1
+    assert not_indexable_issues[0]["url"] == "https://example.com/noindex-final"
+    assert not_indexable_issues[0]["issue_name"] == "Redirected page has no incoming internal links"
+    assert not_indexable_issues[0]["importance"] == "Notice"
 
 
 def test_technical_seo_model_flags_indexable_pages_with_no_outgoing_links() -> None:
