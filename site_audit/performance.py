@@ -37,6 +37,7 @@ _RESOURCE_LINK_RELS = {
     "preload",
     "stylesheet",
 }
+_COMPRESSED_ENCODINGS = {"br", "deflate", "gzip", "zstd"}
 
 
 @dataclass
@@ -233,6 +234,8 @@ def _percentile(values: list[float], q: float) -> float:
 def _row(fetch) -> dict:
     body = getattr(fetch, "body", "") or ""
     page_url = getattr(fetch, "url", "") or ""
+    content_type = getattr(fetch, "content_type", "") or ""
+    content_encoding = str(getattr(fetch, "content_encoding", "") or "").lower()
     soup = BeautifulSoup(body, "html.parser")
     scripts = soup.find_all("script")
     styles = soup.find_all("style")
@@ -266,7 +269,10 @@ def _row(fetch) -> dict:
     return {
         "url": page_url,
         "status": int(getattr(fetch, "status", 0) or 0),
-        "content_type": getattr(fetch, "content_type", "") or "",
+        "content_type": content_type,
+        "content_encoding": content_encoding,
+        "compressed": content_encoding in _COMPRESSED_ENCODINGS,
+        "not_compressed": "html" in content_type.lower() and content_encoding not in _COMPRESSED_ENCODINGS,
         "content_size_bytes": int(getattr(fetch, "content_length_bytes", 0) or html_weight_bytes),
         "html_weight_bytes": html_weight_bytes,
         "estimated_weight_bytes": estimated_weight_bytes,
@@ -309,6 +315,7 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
     pages_with_content_sizing_issues = sum(1 for row in rows if row["content_width_exceeds_viewport"])
     pages_with_plugins = sum(1 for row in rows if row["plugin_element_count"] > 0)
     pages_with_small_font_sizes = sum(1 for row in rows if row["small_font_size_count"] > 0)
+    pages_not_compressed = sum(1 for row in rows if row["not_compressed"])
     heavy_pages = sum(1 for row in rows if row["weight_bucket"] in {"heavy", "very_heavy"})
 
     summary = {
@@ -337,6 +344,8 @@ def analyze(fetched_pages: Iterable) -> PerformanceReport:
         "plugin_usage_share": pages_with_plugins / total_pages if total_pages else 0.0,
         "pages_with_small_font_sizes": pages_with_small_font_sizes,
         "small_font_size_share": pages_with_small_font_sizes / total_pages if total_pages else 0.0,
+        "pages_not_compressed": pages_not_compressed,
+        "not_compressed_share": pages_not_compressed / total_pages if total_pages else 0.0,
         "heavy_pages": heavy_pages,
         "heavy_page_share": heavy_pages / total_pages if total_pages else 0.0,
     }

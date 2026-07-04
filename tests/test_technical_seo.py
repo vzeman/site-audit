@@ -3155,6 +3155,47 @@ def test_technical_seo_model_flags_html_file_size_too_large() -> None:
     assert page["html_weight_bytes"] == 1_200_000
 
 
+def test_technical_seo_model_flags_not_compressed() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/plain", title="Plain", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/gzip", title="Gzip", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        performance={
+            "per_page": [
+                {
+                    "url": "https://example.com/plain",
+                    "status": 200,
+                    "content_type": "text/html",
+                    "content_encoding": "",
+                    "compressed": False,
+                    "not_compressed": True,
+                },
+                {
+                    "url": "https://example.com/gzip",
+                    "status": 200,
+                    "content_type": "text/html",
+                    "content_encoding": "gzip",
+                    "compressed": True,
+                    "not_compressed": False,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "not_compressed"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/plain"
+    assert issues[0]["issue_name"] == "Not compressed"
+    assert issues[0]["category"] == "performance"
+    assert issues[0]["importance"] == "Warning"
+    assert issues[0]["severity"] == "medium"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/plain")
+    assert page["content_encoding"] == ""
+    assert page["not_compressed"] is True
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],

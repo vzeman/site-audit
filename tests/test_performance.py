@@ -13,6 +13,7 @@ class _Fetched:
     status: int = 200
     content_type: str = "text/html"
     content_length_bytes: int = 0
+    content_encoding: str = ""
 
 
 def test_performance_payload_counts_resources_and_blocking_heuristics() -> None:
@@ -172,6 +173,21 @@ def test_performance_payload_detects_small_font_sizes() -> None:
     assert rows["https://example.com/clean"]["small_font_size_count"] == 0
     assert payload["summary"]["pages_with_small_font_sizes"] == 1
     assert payload["summary"]["small_font_size_share"] == 0.5
+
+
+def test_performance_payload_detects_uncompressed_html() -> None:
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/plain", "<html></html>"),
+        _Fetched("https://example.com/gzip", "<html></html>", content_encoding="gzip"),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/plain"]["not_compressed"] is True
+    assert rows["https://example.com/plain"]["compressed"] is False
+    assert rows["https://example.com/gzip"]["not_compressed"] is False
+    assert rows["https://example.com/gzip"]["compressed"] is True
+    assert payload["summary"]["pages_not_compressed"] == 1
+    assert payload["summary"]["not_compressed_share"] == 0.5
 
 
 def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:

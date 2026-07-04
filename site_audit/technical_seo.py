@@ -224,6 +224,9 @@ def _merge_page_signals(
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
         row["content_type"] = perf.get("content_type", "")
+        row["content_encoding"] = perf.get("content_encoding", "")
+        row["compressed"] = bool(perf.get("compressed"))
+        row["not_compressed"] = bool(perf.get("not_compressed"))
         row["html_weight_bytes"] = perf.get("html_weight_bytes", "")
         row["estimated_weight_bytes"] = perf.get("estimated_weight_bytes", "")
         row["weight_bucket"] = perf.get("weight_bucket", "")
@@ -654,6 +657,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "document_uses_plugins", "medium", 0.86, _recommendation("document_uses_plugins")))
     if _safe_int(row.get("small_font_size_count")) > 0:
         issues.append(_issue(row, "performance", "font_size_too_small", "medium", 0.86, _recommendation("font_size_too_small")))
+    if row.get("not_compressed"):
+        issues.append(_issue(row, "performance", "not_compressed", "medium", 0.86, _recommendation("not_compressed")))
     return issues
 
 
@@ -775,6 +780,7 @@ def _recommendation(issue_type: str) -> str:
         "document_uses_plugins": "Remove plugin-based embeds such as object, embed, or applet and replace them with native HTML alternatives.",
         "font_size_too_small": "Increase small text to at least 12px equivalent, and prefer readable responsive typography for mobile users.",
         "html_file_size_too_large": "Reduce the HTML document size by removing excessive inline markup, scripts, styles, or embedded data.",
+        "not_compressed": "Enable gzip, Brotli, deflate, or zstd compression for HTML responses.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

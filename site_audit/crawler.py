@@ -140,6 +140,7 @@ class FetchResult:
     content_type: str
     from_cache: bool
     content_length_bytes: int = 0
+    content_encoding: str = ""
     x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
@@ -676,10 +677,12 @@ class Crawler:
                 # case-insensitive lookup for X-Robots-Tag (cache may
                 # preserve original casing — be defensive).
                 xrt = ""
+                content_encoding = ""
                 for k, v in cached_headers.items():
                     if k.lower() == "x-robots-tag":
                         xrt = (v or "").lower()
-                        break
+                    if k.lower() == "content-encoding":
+                        content_encoding = (v or "").lower()
                 return FetchResult(
                     url=cached.canonical_url or url,
                     status=cached.status,
@@ -687,6 +690,7 @@ class Crawler:
                     content_type=cached_content_type,
                     from_cache=True,
                     content_length_bytes=len(cached.body or b""),
+                    content_encoding=content_encoding,
                     x_robots_tag=xrt,
                     requested_url=url,
                     redirect_target_url=cached.canonical_url or "",
@@ -704,6 +708,7 @@ class Crawler:
 
         final_url = normalize_url(r.url)
         ctype = r.headers.get("Content-Type", "").lower()
+        content_encoding = (r.headers.get("Content-Encoding", "") or "").lower()
         body_bytes = r.content
 
         redirect_chain = _response_redirect_chain(r, url, final_url)
@@ -718,6 +723,7 @@ class Crawler:
                 content_type=ctype,
                 from_cache=False,
                 content_length_bytes=0,
+                content_encoding=content_encoding,
                 error=getattr(r, "reason", "") or "fetch_failed",
                 requested_url=url,
                 redirect_target_url=final_url if url != final_url else "",
@@ -744,6 +750,7 @@ class Crawler:
                 content_type=ctype,
                 from_cache=False,
                 content_length_bytes=len(body_bytes or b""),
+                content_encoding=content_encoding,
                 x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
                 requested_url=url,
                 redirect_target_url=final_url if url != final_url else "",
@@ -766,6 +773,7 @@ class Crawler:
             content_type=ctype,
             from_cache=False,
             content_length_bytes=len(body_bytes or b""),
+            content_encoding=content_encoding,
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
             requested_url=url,
             redirect_target_url=final_url if url != final_url else "",
