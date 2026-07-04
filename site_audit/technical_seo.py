@@ -227,6 +227,8 @@ def _merge_page_signals(
         row["content_encoding"] = perf.get("content_encoding", "")
         row["compressed"] = bool(perf.get("compressed"))
         row["not_compressed"] = bool(perf.get("not_compressed"))
+        row["cls_score"] = _safe_float(perf.get("cls_score", perf.get("cls", perf.get("cumulative_layout_shift", 0.0))))
+        row["cls_rating"] = perf.get("cls_rating", perf.get("cwv_cls_rating", ""))
         row["html_weight_bytes"] = perf.get("html_weight_bytes", "")
         row["estimated_weight_bytes"] = perf.get("estimated_weight_bytes", "")
         row["weight_bucket"] = perf.get("weight_bucket", "")
@@ -665,6 +667,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "performance", "not_compressed", "medium", 0.86, _recommendation("not_compressed")))
     if _page_stopped_passing_cwv(row):
         issues.append(_issue(row, "performance", "page_stopped_passing_cwv_requirements", "medium", 0.86, _recommendation("page_stopped_passing_cwv_requirements")))
+    if _poor_cwv_metric(row, "cls", 0.25):
+        issues.append(_issue(row, "performance", "pages_with_poor_cls", "medium", 0.86, _recommendation("pages_with_poor_cls")))
     return issues
 
 
@@ -788,6 +792,7 @@ def _recommendation(issue_type: str) -> str:
         "html_file_size_too_large": "Reduce the HTML document size by removing excessive inline markup, scripts, styles, or embedded data.",
         "not_compressed": "Enable gzip, Brotli, deflate, or zstd compression for HTML responses.",
         "page_stopped_passing_cwv_requirements": "Review the changed Core Web Vitals metrics and fix the regression that moved the page from passing to failing.",
+        "pages_with_poor_cls": "Stabilize layout by reserving space for images, embeds, ads, and late-loading UI elements.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
@@ -1046,6 +1051,15 @@ def _cwv_passed(value) -> bool | None:
     if text in {"fail", "failed", "failing", "poor", "needs_improvement", "false", "no", "0"}:
         return False
     return None
+
+
+def _poor_cwv_metric(row: dict, metric: str, poor_threshold: float) -> bool:
+    rating = str(row.get(f"{metric}_rating") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if rating == "poor":
+        return True
+    if rating in {"good", "needs_improvement"}:
+        return False
+    return _safe_float(row.get(f"{metric}_score")) > poor_threshold
 
 
 def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:
