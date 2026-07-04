@@ -4492,6 +4492,43 @@ def test_technical_seo_model_flags_indexable_page_not_in_sitemap() -> None:
     assert page["in_sitemap"] is False
 
 
+def test_technical_seo_model_flags_page_in_multiple_sitemaps() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/page", title="Page", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/page",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/a.xml", "https://example.com/b.xml"],
+                    "sitemap_issue_types": ["page_in_multiple_sitemaps"],
+                },
+                {
+                    "url": "https://example.com/clean",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/a.xml"],
+                    "sitemap_issue_types": [],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_in_multiple_sitemaps"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/page"
+    assert issues[0]["issue_name"] == "Page in multiple sitemaps"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Notice"
+    assert issues[0]["severity"] == "low"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/page")
+    assert page["sitemap_multiple_count"] == 1
+    assert page["source_sitemaps"] == ["https://example.com/a.xml", "https://example.com/b.xml"]
+
+
 def test_technical_seo_model_flags_sitemap_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

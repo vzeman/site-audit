@@ -27,6 +27,7 @@ SITEMAP_WRONG_FORMAT_ISSUE = "sitemap_in_the_wrong_format"
 SITEMAP_OUT_OF_SCOPE_ISSUE = "sitemap_includes_urls_out_of_its_scope"
 SITEMAP_INDEXABLE_MISSING_ISSUE = "indexable_page_not_in_sitemap"
 SITEMAP_URL_COUNT_DECREASED_ISSUE = "no_of_urls_in_sitemap_decreased"
+SITEMAP_MULTIPLE_SITEMAPS_ISSUE = "page_in_multiple_sitemaps"
 
 
 def analyze(
@@ -98,12 +99,15 @@ def analyze(
             sitemap_issue_types.append(SITEMAP_TIMEOUT_ISSUE)
         if coverage_status == "crawled_not_in_sitemap" and indexability_status == "indexable":
             sitemap_issue_types.append(SITEMAP_INDEXABLE_MISSING_ISSUE)
+        source_sitemaps = sitemap_row.get("source_sitemaps", [])
+        if in_sitemap and len(source_sitemaps) > 1:
+            sitemap_issue_types.append(SITEMAP_MULTIPLE_SITEMAPS_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
             "title": extraction_row.get("title") or indexability_row.get("title", ""),
             "in_sitemap": in_sitemap,
-            "source_sitemaps": sitemap_row.get("source_sitemaps", []),
+            "source_sitemaps": source_sitemaps,
             "lastmod": sitemap_row.get("lastmod", ""),
             "crawled": crawled,
             "http_status": http_status,
@@ -196,6 +200,9 @@ def analyze(
                 1 for row in rows if SITEMAP_INDEXABLE_MISSING_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
             "no_of_urls_in_sitemap_decreased": sum(1 for row in sitemap_error_rows if row["issue"] == SITEMAP_URL_COUNT_DECREASED_ISSUE),
+            "page_in_multiple_sitemaps": sum(
+                1 for row in rows if SITEMAP_MULTIPLE_SITEMAPS_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -265,6 +272,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Add this indexable URL to the XML sitemap if it is an SEO landing page."
     if issue_type == SITEMAP_URL_COUNT_DECREASED_ISSUE:
         return "Review the sitemap URL decrease and confirm the removed URLs were intentionally dropped."
+    if issue_type == SITEMAP_MULTIPLE_SITEMAPS_ISSUE:
+        return "Keep the URL in one canonical sitemap location to avoid duplicate sitemap signals."
     return "Review and fix this sitemap issue."
 
 

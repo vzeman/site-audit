@@ -395,6 +395,28 @@ def test_sitemap_coverage_flags_sitemap_url_count_decreased() -> None:
     assert "decrease" in issues[0]["recommended_action"]
 
 
+def test_sitemap_coverage_flags_page_in_multiple_sitemaps() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/page",
+                "source_sitemaps": ["https://example.com/a.xml", "https://example.com/b.xml"],
+            },
+        ],
+        [_Fetched("https://example.com/page")],
+        [{"url": "https://example.com/page", "status": "analyzed", "http_status": 200}],
+        {"per_page": [{"url": "https://example.com/page", "indexability_status": "indexable", "issues": []}]},
+    )
+
+    assert payload["summary"]["page_in_multiple_sitemaps"] == 1
+    row = payload["rows"][0]
+    assert row["source_sitemaps"] == ["https://example.com/a.xml", "https://example.com/b.xml"]
+    assert row["sitemap_issue_types"] == ["page_in_multiple_sitemaps"]
+    issues = [row for row in payload["issues"] if row["issue"] == "page_in_multiple_sitemaps"]
+    assert len(issues) == 1
+    assert "one canonical sitemap" in issues[0]["recommended_action"]
+
+
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_sitemap_urls": 1},
