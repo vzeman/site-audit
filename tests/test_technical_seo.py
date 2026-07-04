@@ -876,6 +876,56 @@ def test_technical_seo_model_flags_pages_dropped_from_top_10() -> None:
     assert "pages_dropped_from_top_10" not in stable_issue_types
 
 
+def test_technical_seo_model_flags_pages_to_submit_to_indexnow() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/changed",
+                title="Changed",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/not-queued",
+                title="Not Queued",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        indexnow={
+            "per_page": [
+                {
+                    "url": "https://example.com/changed",
+                    "submit_to_indexnow": True,
+                    "reason": "content_changed",
+                },
+                {
+                    "url": "https://example.com/not-queued",
+                    "submit_to_indexnow": False,
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "pages_to_submit_to_indexnow"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/changed"
+    assert issues[0]["issue_name"] == "Pages to submit to IndexNow"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/changed"]["indexnow_submission_recommended"] is True
+    assert by_url["https://example.com/changed"]["indexnow_reason"] == "content_changed"
+    clean_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/not-queued"
+    }
+    assert "pages_to_submit_to_indexnow" not in clean_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

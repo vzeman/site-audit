@@ -56,6 +56,7 @@ def build_technical_seo(
     sitemap_coverage: dict | None = None,
     external_links: dict | None = None,
     robots_txt: dict | None = None,
+    indexnow: dict | None = None,
     duplicate_rows: list[dict] | None = None,
 ) -> dict:
     page_rows = [_base_page_row(page) for page in pages]
@@ -75,6 +76,7 @@ def build_technical_seo(
     resource_issues = _media_issue_lookup((resource_status or {}).get("resources_with_issues") or [])
     sitemap = _sitemap_lookup((sitemap_coverage or {}).get("rows") or [])
     external = _lookup_rows((external_links or {}).get("per_page_issues") or [])
+    indexnow_rows = _lookup_rows((indexnow or {}).get("per_page") or (indexnow or {}).get("pages") or [])
     index_rows = _lookup_rows((indexability or {}).get("per_page") or [])
     skipped = _lookup_rows(((indexability or {}).get("skipped") or []) + ((indexability or {}).get("noindex_pages") or []))
 
@@ -97,6 +99,7 @@ def build_technical_seo(
             resource_issues.get(url),
             sitemap.get(url),
             external.get(url),
+            indexnow_rows.get(url),
             skipped.get(url),
         )
 
@@ -122,6 +125,7 @@ def build_technical_seo(
             resource_issues.get(url),
             sitemap.get(url),
             external.get(url),
+            indexnow_rows.get(url),
             skip,
         )
         by_url[url] = row
@@ -330,6 +334,7 @@ def _merge_page_signals(
     resource_issues: dict | None,
     sitemap: dict | None,
     external: dict | None,
+    indexnow: dict | None,
     skipped: dict | None,
 ) -> None:
     if metadata:
@@ -654,6 +659,13 @@ def _merge_page_signals(
         if external_time_out_links:
             row["external_time_out_links"] = external_time_out_links
             row["external_time_out_count"] = len(external_time_out_links)
+    if indexnow:
+        row["indexnow_submission_recommended"] = bool(
+            indexnow.get("submit")
+            or indexnow.get("submit_to_indexnow")
+            or indexnow.get("indexnow_submission_recommended")
+        )
+        row["indexnow_reason"] = indexnow.get("reason", "")
     if sitemap:
         row["in_sitemap"] = bool(sitemap.get("in_sitemap"))
         row["source_sitemaps"] = list(sitemap.get("source_sitemaps") or [])
@@ -774,6 +786,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "organic_traffic_dropped", "low", 0.84, _recommendation("organic_traffic_dropped")))
     if _dropped_from_top_10(row):
         issues.append(_issue(row, "other", "pages_dropped_from_top_10", "low", 0.84, _recommendation("pages_dropped_from_top_10")))
+    if row.get("indexnow_submission_recommended"):
+        issues.append(_issue(row, "other", "pages_to_submit_to_indexnow", "low", 0.8, _recommendation("pages_to_submit_to_indexnow")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1297,6 +1311,7 @@ def _recommendation(issue_type: str) -> str:
         "non_canonical_page_receives_organic_traffic": "Consolidate organic traffic to the canonical URL or update the canonical if this page should be the ranking URL.",
         "organic_traffic_dropped": "Review the page changes, rankings, snippets, and technical status that may have caused organic traffic to decline.",
         "pages_dropped_from_top_10": "Review ranking, content, SERP, and technical changes for pages that fell out of the top 10 results.",
+        "pages_to_submit_to_indexnow": "Submit this changed or newly important URL through IndexNow so supported search engines can recrawl it sooner.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
