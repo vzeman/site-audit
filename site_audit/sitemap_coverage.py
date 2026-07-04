@@ -18,6 +18,7 @@ SITEMAP_4XX_ISSUE = "4xx_page_in_sitemap"
 SITEMAP_5XX_ISSUE = "5xx_page_in_sitemap"
 SITEMAP_NOINDEX_ISSUE = "noindex_page_in_sitemap"
 SITEMAP_NON_CANONICAL_ISSUE = "non_canonical_page_in_sitemap"
+SITEMAP_TIMEOUT_ISSUE = "page_from_sitemap_timed_out"
 
 
 def analyze(
@@ -70,6 +71,10 @@ def analyze(
         canonical_url = extraction_row.get("canonical_url", "")
         if in_sitemap and _canonical_differs(url, canonical_url):
             sitemap_issue_types.append(SITEMAP_NON_CANONICAL_ISSUE)
+        fetch_error = getattr(fetched_row, "error", "") or ""
+        extraction_reason = extraction_row.get("reason", "")
+        if in_sitemap and (fetch_error == "timed_out" or extraction_reason == "timed_out"):
+            sitemap_issue_types.append(SITEMAP_TIMEOUT_ISSUE)
         status_counts[coverage_status] += 1
         row = {
             "url": url,
@@ -84,6 +89,7 @@ def analyze(
             "redirect_status_codes": redirect_status_codes,
             "redirect_hop_count": _safe_int(getattr(fetched_row, "redirect_hop_count", 0)),
             "extraction_status": extraction_row.get("status", ""),
+            "extraction_reason": extraction_reason,
             "indexability_status": indexability_status,
             "coverage_status": coverage_status,
             "sitemap_issue_types": sitemap_issue_types,
@@ -144,6 +150,9 @@ def analyze(
             "non_canonical_page_in_sitemap": sum(
                 1 for row in rows if SITEMAP_NON_CANONICAL_ISSUE in (row.get("sitemap_issue_types") or [])
             ),
+            "page_from_sitemap_timed_out": sum(
+                1 for row in rows if SITEMAP_TIMEOUT_ISSUE in (row.get("sitemap_issue_types") or [])
+            ),
             "crawled_not_in_sitemap": status_counts.get("crawled_not_in_sitemap", 0),
             "sitemap_fetch_coverage_share": fetched_sitemap / sitemap_total if sitemap_total else 0.0,
             "sitemap_indexable_share": indexable_sitemap / sitemap_total if sitemap_total else 0.0,
@@ -179,6 +188,8 @@ def _sitemap_issue_action(issue_type: str) -> str:
         return "Remove noindex URLs from XML sitemaps or make the page indexable if it should rank."
     if issue_type == SITEMAP_NON_CANONICAL_ISSUE:
         return "Update XML sitemaps to list the canonical URL instead of a non-canonical URL."
+    if issue_type == SITEMAP_TIMEOUT_ISSUE:
+        return "Fix timeout behavior or remove the URL from XML sitemaps until it responds reliably."
     return "Review and fix this sitemap issue."
 
 

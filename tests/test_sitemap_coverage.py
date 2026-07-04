@@ -12,6 +12,7 @@ class _Fetched:
     redirect_target_url: str = ""
     redirect_status_codes: list[int] | None = None
     redirect_hop_count: int = 0
+    error: str = ""
 
 
 def test_sitemap_coverage_classifies_matrix_and_actions() -> None:
@@ -199,6 +200,29 @@ def test_sitemap_coverage_flags_non_canonical_page_in_sitemap() -> None:
     issues = [row for row in payload["issues"] if row["issue"] == "non_canonical_page_in_sitemap"]
     assert len(issues) == 1
     assert "canonical URL" in issues[0]["recommended_action"]
+
+
+def test_sitemap_coverage_flags_page_from_sitemap_timed_out() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/slow",
+                "source_sitemaps": ["https://example.com/sitemap.xml"],
+                "lastmod": "2026-05-01",
+            },
+        ],
+        [_Fetched("https://example.com/slow", status=0, error="timed_out")],
+        [{"url": "https://example.com/slow", "status": "skipped", "reason": "timed_out", "http_status": 0}],
+        {"per_page": [{"url": "https://example.com/slow", "indexability_status": "timed_out", "issues": []}]},
+    )
+
+    assert payload["summary"]["page_from_sitemap_timed_out"] == 1
+    row = payload["rows"][0]
+    assert row["extraction_reason"] == "timed_out"
+    assert row["sitemap_issue_types"] == ["page_from_sitemap_timed_out"]
+    issues = [row for row in payload["issues"] if row["issue"] == "page_from_sitemap_timed_out"]
+    assert len(issues) == 1
+    assert "timeout" in issues[0]["recommended_action"]
 
 
 def test_sitemap_coverage_exports_json_and_csv(tmp_path) -> None:

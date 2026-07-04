@@ -4414,6 +4414,45 @@ def test_technical_seo_model_flags_non_canonical_page_in_sitemap() -> None:
     assert page["sitemap_canonical_url"] == "https://example.com/canonical"
 
 
+def test_technical_seo_model_flags_page_from_sitemap_timed_out() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/slow",
+                    "title": "Slow",
+                    "reason": "timed_out",
+                    "http_status": 0,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        sitemap_coverage={
+            "rows": [
+                {
+                    "url": "https://example.com/slow",
+                    "in_sitemap": True,
+                    "source_sitemaps": ["https://example.com/sitemap.xml"],
+                    "http_status": 0,
+                    "sitemap_issue_types": ["page_from_sitemap_timed_out"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_from_sitemap_timed_out"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/slow"
+    assert issues[0]["issue_name"] == "Page from sitemap timed out"
+    assert issues[0]["category"] == "sitemaps"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/slow")
+    assert page["sitemap_timeout_count"] == 1
+    assert page["in_sitemap"] is True
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
