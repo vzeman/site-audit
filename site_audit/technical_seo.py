@@ -333,6 +333,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "redirect_target_changed", "low", 0.8, _recommendation("redirect_target_changed")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
+    if status == "indexable" and _safe_int(row.get("title_tag_count")) > 1:
+        issues.append(_issue(row, "content", "indexable_multiple_title_tags", "high", 0.92, _recommendation("indexable_multiple_title_tags")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -475,6 +477,7 @@ def _recommendation(issue_type: str) -> str:
         "meta_refresh_redirect": "Replace the meta refresh with a server-side redirect or direct internal links to the target URL.",
         "redirect_target_changed": "Review the changed redirect destination and confirm the new target is intentional.",
         "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
+        "indexable_multiple_title_tags": "Keep one title tag per indexable page and remove duplicate title tags from the template.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

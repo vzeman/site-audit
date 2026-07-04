@@ -569,6 +569,52 @@ def test_technical_seo_model_flags_indexable_pages_with_multiple_meta_descriptio
     assert issues[0]["importance"] == "Error"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_multiple_title_tags() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/multiple", title="Multiple", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/one", title="One", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "title_tag_count": 2,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/multiple",
+                    "title": "Multiple",
+                    "title_tag_count": 2,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/one",
+                    "title": "One",
+                    "title_tag_count": 1,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_multiple_title_tags"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/multiple"
+    assert issues[0]["issue_name"] == "Multiple title tags"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
