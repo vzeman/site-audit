@@ -93,6 +93,8 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             "robots_content": page.robots_content,
             "nofollow": page.nofollow,
             "nofollow_source": page.nofollow_source,
+            "meta_refresh_redirect": page.meta_refresh_redirect,
+            "meta_refresh_target_url": page.meta_refresh_target_url,
             "og_complete": bool(page.og_title and page.og_description),
             "twitter_card": page.twitter_card,
             "issues": issues,

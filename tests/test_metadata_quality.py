@@ -103,6 +103,21 @@ def test_extract_link_audit_rows_include_nofollow_rel() -> None:
     assert by_target["https://example.com/other"]["nofollow"] is False
 
 
+def test_extract_detects_meta_refresh_redirect_target() -> None:
+    html = """
+    <html><head>
+      <title>Refresh page</title>
+      <meta http-equiv="refresh" content="0; url=/target">
+    </head><body><main><p>Useful page content for extraction and metadata checks.</p></main></body></html>
+    """
+
+    page = extract("https://example.com/source", html, max_chars=2000)
+
+    assert page is not None
+    assert page.meta_refresh_redirect is True
+    assert page.meta_refresh_target_url == "https://example.com/target"
+
+
 def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),

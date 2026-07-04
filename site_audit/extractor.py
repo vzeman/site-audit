@@ -82,6 +82,8 @@ class ExtractedPage:
     noindex_source: str = ""  # "meta" | "header" | "meta+header" | "" — diagnostic only
     nofollow: bool = False  # set when meta robots / X-Robots-Tag asks search engines not to follow links on this URL
     nofollow_source: str = ""  # "meta" | "header" | "meta+header" | "" — diagnostic only
+    meta_refresh_redirect: bool = False
+    meta_refresh_target_url: str = ""
     link_quality: dict = field(default_factory=dict)  # per-page link quality counters (total, has_text, has_title, image_only, empty, …)
     link_audit_rows: list[dict] = field(default_factory=list)  # one row per <a href>: anchor + flags, used for site-level aggregation
     media_items: list[dict] = field(default_factory=list)  # images/video/audio/iframes with accessibility-relevant attributes
@@ -114,6 +116,17 @@ def _meta(soup: BeautifulSoup, name: str) -> str:
     if tag and tag.get("content"):
         return _clean(html.unescape(tag["content"]))
     return ""
+
+
+def _meta_refresh_target(soup: BeautifulSoup, base_url: str) -> str:
+    tag = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.I)})
+    if not tag:
+        return ""
+    content = str(tag.get("content") or "")
+    match = re.search(r"url\s*=\s*['\"]?([^'\";]+)", content, re.I)
+    if not match:
+        return ""
+    return urljoin(base_url, match.group(1).strip())
 
 
 def _schema_type_values(value) -> list[str]:
@@ -882,6 +895,7 @@ def extract(
     twitter_card = _meta(soup, "twitter:card")
     twitter_title = _meta(soup, "twitter:title")
     twitter_description = _meta(soup, "twitter:description")
+    meta_refresh_target_url = _meta_refresh_target(soup, url)
     lang_attr = soup.find("html")
     language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
 
@@ -965,6 +979,8 @@ def extract(
         noindex_source=str(robots_directives["noindex_source"]),
         nofollow=bool(robots_directives["nofollow"]),
         nofollow_source=str(robots_directives["nofollow_source"]),
+        meta_refresh_redirect=bool(meta_refresh_target_url),
+        meta_refresh_target_url=meta_refresh_target_url,
         link_quality=link_quality,
         link_audit_rows=link_audit_rows,
         media_items=media_items,

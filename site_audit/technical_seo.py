@@ -183,6 +183,8 @@ def _merge_page_signals(
         row["noindex_source"] = metadata.get("noindex_source", row.get("noindex_source", ""))
         row["nofollow"] = bool(metadata.get("nofollow"))
         row["nofollow_source"] = metadata.get("nofollow_source", "")
+        row["meta_refresh_redirect"] = bool(metadata.get("meta_refresh_redirect"))
+        row["meta_refresh_target_url"] = metadata.get("meta_refresh_target_url", "")
         row["metadata_issues"] = list(metadata.get("issues") or [])
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
@@ -237,6 +239,8 @@ def _merge_page_signals(
         row["redirect_chain"] = list(indexability.get("redirect_chain") or [])
         row["redirect_hop_count"] = _safe_int(indexability.get("redirect_hop_count"))
         row["redirect_status_codes"] = [_safe_int(code) for code in (indexability.get("redirect_status_codes") or [])]
+        row["meta_refresh_redirect"] = bool(indexability.get("meta_refresh_redirect", row.get("meta_refresh_redirect", False)))
+        row["meta_refresh_target_url"] = indexability.get("meta_refresh_target_url", row.get("meta_refresh_target_url", ""))
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -258,6 +262,8 @@ def _merge_page_signals(
         row["redirect_chain"] = list(skipped.get("redirect_chain") or row.get("redirect_chain", []) or [])
         row["redirect_hop_count"] = _safe_int(skipped.get("redirect_hop_count", row.get("redirect_hop_count", 0)))
         row["redirect_status_codes"] = [_safe_int(code) for code in (skipped.get("redirect_status_codes") or row.get("redirect_status_codes", []) or [])]
+        row["meta_refresh_redirect"] = bool(skipped.get("meta_refresh_redirect", row.get("meta_refresh_redirect", False)))
+        row["meta_refresh_target_url"] = skipped.get("meta_refresh_target_url", row.get("meta_refresh_target_url", ""))
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -310,6 +316,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "https_to_http_redirect", "medium", 0.9, _recommendation("https_to_http_redirect")))
     if _is_redirected_fetch(row) and _url_scheme(row.get("requested_url", "")) == "http" and _url_scheme(row.get("redirect_target_url", "")) == "https":
         issues.append(_issue(row, "redirects", "http_to_https_redirect", "low", 0.82, _recommendation("http_to_https_redirect")))
+    if row.get("meta_refresh_redirect"):
+        issues.append(_issue(row, "redirects", "meta_refresh_redirect", "low", 0.82, _recommendation("meta_refresh_redirect")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -448,6 +456,7 @@ def _recommendation(issue_type: str) -> str:
         "3xx_redirect": "Review redirecting URLs and update internal links or sitemap references to the final destination where appropriate.",
         "https_to_http_redirect": "Change the redirect target to HTTPS so secure URLs do not downgrade users or crawl signals to HTTP.",
         "http_to_https_redirect": "Update internal links and sitemap URLs to the HTTPS destination so crawlers do not need the HTTP redirect hop.",
+        "meta_refresh_redirect": "Replace the meta refresh with a server-side redirect or direct internal links to the target URL.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
