@@ -95,6 +95,8 @@ def analyze(pages: Iterable[ExtractedPage]) -> MetadataQualityReport:
             "nofollow_source": page.nofollow_source,
             "meta_refresh_redirect": page.meta_refresh_redirect,
             "meta_refresh_target_url": page.meta_refresh_target_url,
+            "title_tag_count": page.title_tag_count,
+            "meta_description_tag_count": page.meta_description_tag_count,
             "og_complete": bool(page.og_title and page.og_description),
             "twitter_card": page.twitter_card,
             "issues": issues,

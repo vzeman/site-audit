@@ -118,6 +118,23 @@ def test_extract_detects_meta_refresh_redirect_target() -> None:
     assert page.meta_refresh_target_url == "https://example.com/target"
 
 
+def test_extract_counts_title_and_meta_description_tags() -> None:
+    html = """
+    <html><head>
+      <title>Primary title</title>
+      <title>Duplicate title</title>
+      <meta name="description" content="First description">
+      <meta name="description" content="Second description">
+    </head><body><main><h1>Primary title</h1><p>Useful page content for extraction checks.</p></main></body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000)
+
+    assert page is not None
+    assert page.title_tag_count == 2
+    assert page.meta_description_tag_count == 2
+
+
 def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),

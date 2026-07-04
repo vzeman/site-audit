@@ -185,6 +185,8 @@ def _merge_page_signals(
         row["nofollow_source"] = metadata.get("nofollow_source", "")
         row["meta_refresh_redirect"] = bool(metadata.get("meta_refresh_redirect"))
         row["meta_refresh_target_url"] = metadata.get("meta_refresh_target_url", "")
+        row["title_tag_count"] = _safe_int(metadata.get("title_tag_count"))
+        row["meta_description_tag_count"] = _safe_int(metadata.get("meta_description_tag_count"))
         row["metadata_issues"] = list(metadata.get("issues") or [])
     if perf:
         row["http_status"] = perf.get("status", row.get("http_status", ""))
@@ -244,6 +246,8 @@ def _merge_page_signals(
         row["redirect_status_codes"] = [_safe_int(code) for code in (indexability.get("redirect_status_codes") or [])]
         row["meta_refresh_redirect"] = bool(indexability.get("meta_refresh_redirect", row.get("meta_refresh_redirect", False)))
         row["meta_refresh_target_url"] = indexability.get("meta_refresh_target_url", row.get("meta_refresh_target_url", ""))
+        row["title_tag_count"] = _safe_int(indexability.get("title_tag_count", row.get("title_tag_count", 0)))
+        row["meta_description_tag_count"] = _safe_int(indexability.get("meta_description_tag_count", row.get("meta_description_tag_count", 0)))
     if search:
         row["traffic"] = _safe_int(search.get("traffic"))
         row["keywords"] = _safe_int(search.get("keywords"))
@@ -267,6 +271,8 @@ def _merge_page_signals(
         row["redirect_status_codes"] = [_safe_int(code) for code in (skipped.get("redirect_status_codes") or row.get("redirect_status_codes", []) or [])]
         row["meta_refresh_redirect"] = bool(skipped.get("meta_refresh_redirect", row.get("meta_refresh_redirect", False)))
         row["meta_refresh_target_url"] = skipped.get("meta_refresh_target_url", row.get("meta_refresh_target_url", ""))
+        row["title_tag_count"] = _safe_int(skipped.get("title_tag_count", row.get("title_tag_count", 0)))
+        row["meta_description_tag_count"] = _safe_int(skipped.get("meta_description_tag_count", row.get("meta_description_tag_count", 0)))
 
 
 def _issues_for_row(row: dict) -> list[dict]:
@@ -325,6 +331,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "meta_refresh_redirect", "low", 0.82, _recommendation("meta_refresh_redirect")))
     if row.get("redirect_target_changed"):
         issues.append(_issue(row, "redirects", "redirect_target_changed", "low", 0.8, _recommendation("redirect_target_changed")))
+    if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
+        issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -466,6 +474,7 @@ def _recommendation(issue_type: str) -> str:
         "http_to_https_redirect": "Update internal links and sitemap URLs to the HTTPS destination so crawlers do not need the HTTP redirect hop.",
         "meta_refresh_redirect": "Replace the meta refresh with a server-side redirect or direct internal links to the target URL.",
         "redirect_target_changed": "Review the changed redirect destination and confirm the new target is intentional.",
+        "indexable_multiple_meta_description_tags": "Keep one meta description tag per indexable page and remove duplicate description tags from the template.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

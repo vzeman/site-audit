@@ -84,6 +84,8 @@ class ExtractedPage:
     nofollow_source: str = ""  # "meta" | "header" | "meta+header" | "" — diagnostic only
     meta_refresh_redirect: bool = False
     meta_refresh_target_url: str = ""
+    title_tag_count: int = 0
+    meta_description_tag_count: int = 0
     link_quality: dict = field(default_factory=dict)  # per-page link quality counters (total, has_text, has_title, image_only, empty, …)
     link_audit_rows: list[dict] = field(default_factory=list)  # one row per <a href>: anchor + flags, used for site-level aggregation
     media_items: list[dict] = field(default_factory=list)  # images/video/audio/iframes with accessibility-relevant attributes
@@ -127,6 +129,14 @@ def _meta_refresh_target(soup: BeautifulSoup, base_url: str) -> str:
     if not match:
         return ""
     return urljoin(base_url, match.group(1).strip())
+
+
+def _meta_description_tag_count(soup: BeautifulSoup) -> int:
+    return sum(
+        1
+        for tag in soup.find_all("meta")
+        if str(tag.get("name") or "").strip().lower() == "description"
+    )
 
 
 def _schema_type_values(value) -> list[str]:
@@ -896,6 +906,8 @@ def extract(
     twitter_title = _meta(soup, "twitter:title")
     twitter_description = _meta(soup, "twitter:description")
     meta_refresh_target_url = _meta_refresh_target(soup, url)
+    title_tag_count = len(soup.find_all("title"))
+    meta_description_tag_count = _meta_description_tag_count(soup)
     lang_attr = soup.find("html")
     language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
 
@@ -981,6 +993,8 @@ def extract(
         nofollow_source=str(robots_directives["nofollow_source"]),
         meta_refresh_redirect=bool(meta_refresh_target_url),
         meta_refresh_target_url=meta_refresh_target_url,
+        title_tag_count=title_tag_count,
+        meta_description_tag_count=meta_description_tag_count,
         link_quality=link_quality,
         link_audit_rows=link_audit_rows,
         media_items=media_items,

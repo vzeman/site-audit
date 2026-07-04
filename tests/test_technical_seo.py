@@ -523,6 +523,52 @@ def test_technical_seo_model_flags_redirect_target_changes() -> None:
     assert page["current_redirect_target_url"] == "https://example.com/new"
 
 
+def test_technical_seo_model_flags_indexable_pages_with_multiple_meta_description_tags() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/multiple", title="Multiple", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/one", title="One", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "meta_description_tag_count": 2,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/multiple",
+                    "title": "Multiple",
+                    "meta_description_tag_count": 2,
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/one",
+                    "title": "One",
+                    "meta_description_tag_count": 1,
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_multiple_meta_description_tags"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/multiple"
+    assert issues[0]["issue_name"] == "Multiple meta description tags"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Error"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
