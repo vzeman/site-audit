@@ -386,6 +386,44 @@ def test_technical_seo_model_flags_https_to_http_redirects() -> None:
     assert issues[0]["importance"] == "Warning"
 
 
+def test_technical_seo_model_flags_http_to_https_redirects() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/final",
+                    "title": "Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "http://example.com/start",
+                    "redirect_target_url": "https://example.com/final",
+                    "redirect_status_codes": [301],
+                    "nofollow": False,
+                },
+                {
+                    "url": "http://example.com/plain-final",
+                    "title": "Plain Final",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "requested_url": "http://example.com/plain-start",
+                    "redirect_target_url": "http://example.com/plain-final",
+                    "redirect_status_codes": [301],
+                    "nofollow": False,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "http_to_https_redirect"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/final"
+    assert issues[0]["issue_name"] == "HTTP to HTTPS redirect"
+    assert issues[0]["category"] == "redirects"
+    assert issues[0]["importance"] == "Notice"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],

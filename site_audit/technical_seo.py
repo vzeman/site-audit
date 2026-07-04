@@ -308,6 +308,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "redirects", "3xx_redirect", "medium", 0.88, _recommendation("3xx_redirect")))
     if _is_redirected_fetch(row) and _url_scheme(row.get("requested_url", "")) == "https" and _url_scheme(row.get("redirect_target_url", "")) == "http":
         issues.append(_issue(row, "redirects", "https_to_http_redirect", "medium", 0.9, _recommendation("https_to_http_redirect")))
+    if _is_redirected_fetch(row) and _url_scheme(row.get("requested_url", "")) == "http" and _url_scheme(row.get("redirect_target_url", "")) == "https":
+        issues.append(_issue(row, "redirects", "http_to_https_redirect", "low", 0.82, _recommendation("http_to_https_redirect")))
     if _is_self_canonical(row) and _safe_int(row.get("in_degree")) == 0:
         issues.append(_issue(row, "links", "indexable_canonical_url_has_no_incoming_internal_links", "high", 0.92, _recommendation("indexable_canonical_url_has_no_incoming_internal_links")))
     if status == "indexable" and _safe_int(row.get("in_degree")) == 0:
@@ -445,6 +447,7 @@ def _recommendation(issue_type: str) -> str:
         "302_redirect": "Review whether the temporary redirect should be a permanent 301/308 redirect for SEO consolidation.",
         "3xx_redirect": "Review redirecting URLs and update internal links or sitemap references to the final destination where appropriate.",
         "https_to_http_redirect": "Change the redirect target to HTTPS so secure URLs do not downgrade users or crawl signals to HTTP.",
+        "http_to_https_redirect": "Update internal links and sitemap URLs to the HTTPS destination so crawlers do not need the HTTP redirect hop.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",
