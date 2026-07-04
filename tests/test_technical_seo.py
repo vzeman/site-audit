@@ -984,6 +984,62 @@ def test_technical_seo_model_flags_google_rich_results_validation_error() -> Non
     assert "structured_data_has_google_rich_results_validation_error" not in clean_issue_types
 
 
+def test_technical_seo_model_flags_schema_org_validation_error() -> None:
+    payload = build_technical_seo(
+        [
+            SimpleNamespace(
+                url="https://example.com/schema-error",
+                title="Schema Error",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+            SimpleNamespace(
+                url="https://example.com/schema-clean",
+                title="Schema Clean",
+                section="",
+                word_count=500,
+                language="en",
+            ),
+        ],
+        structured_data={
+            "per_page": [
+                {
+                    "url": "https://example.com/schema-error",
+                    "types": ["Article"],
+                    "valid_blocks": 0,
+                    "invalid_blocks": 2,
+                },
+                {
+                    "url": "https://example.com/schema-clean",
+                    "types": ["Article"],
+                    "valid_blocks": 1,
+                    "invalid_blocks": 0,
+                },
+            ]
+        },
+    )
+
+    issues = [
+        row
+        for row in payload["issues"]
+        if row["issue_type"] == "structured_data_has_schema_org_validation_error"
+    ]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/schema-error"
+    assert issues[0]["issue_name"] == "Structured data has schema.org validation error"
+    assert issues[0]["category"] == "other"
+    assert issues[0]["importance"] == "Notice"
+    by_url = {row["url"]: row for row in payload["pages"]}
+    assert by_url["https://example.com/schema-error"]["schema_org_validation_error_count"] == 2
+    clean_issue_types = {
+        row["issue_type"]
+        for row in payload["issues"]
+        if row["url"] == "https://example.com/schema-clean"
+    }
+    assert "structured_data_has_schema_org_validation_error" not in clean_issue_types
+
+
 def test_technical_seo_model_flags_robots_txt_has_syntax_error() -> None:
     payload = build_technical_seo(
         [],

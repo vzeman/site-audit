@@ -547,6 +547,15 @@ def _merge_page_signals(
         row["google_rich_results_validation_error_count"] = _safe_int(
             structured.get("google_rich_results_validation_error_count", len(google_errors))
         )
+        schema_errors = list(
+            structured.get("schema_org_validation_errors")
+            or structured.get("schema_org_errors")
+            or []
+        )
+        row["schema_org_validation_errors"] = schema_errors
+        row["schema_org_validation_error_count"] = _safe_int(
+            structured.get("schema_org_validation_error_count", len(schema_errors) or row["structured_data_invalid_blocks"])
+        )
     if media:
         media_issue_counts = dict(media.get("issues") or {})
         row["media_issue_counts"] = media_issue_counts
@@ -840,6 +849,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "other", "pages_to_submit_to_indexnow", "low", 0.8, _recommendation("pages_to_submit_to_indexnow")))
     if _safe_int(row.get("google_rich_results_validation_error_count")) > 0:
         issues.append(_issue(row, "other", "structured_data_has_google_rich_results_validation_error", "low", 0.84, _recommendation("structured_data_has_google_rich_results_validation_error")))
+    if _safe_int(row.get("schema_org_validation_error_count")) > 0:
+        issues.append(_issue(row, "other", "structured_data_has_schema_org_validation_error", "low", 0.84, _recommendation("structured_data_has_schema_org_validation_error")))
     if status == "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
         issues.append(_issue(row, "content", "indexable_multiple_meta_description_tags", "high", 0.92, _recommendation("indexable_multiple_meta_description_tags")))
     if status != "indexable" and _safe_int(row.get("meta_description_tag_count")) > 1:
@@ -1367,6 +1378,7 @@ def _recommendation(issue_type: str) -> str:
         "pages_dropped_from_top_10": "Review ranking, content, SERP, and technical changes for pages that fell out of the top 10 results.",
         "pages_to_submit_to_indexnow": "Submit this changed or newly important URL through IndexNow so supported search engines can recrawl it sooner.",
         "structured_data_has_google_rich_results_validation_error": "Fix structured-data fields required for Google rich results and revalidate the page against Google Search rich result rules.",
+        "structured_data_has_schema_org_validation_error": "Fix schema.org structured-data syntax or property errors so parsers can understand the markup.",
         "3xx_redirect_in_sitemap": "Update XML sitemaps so they list the final canonical URL instead of a redirecting URL.",
         "4xx_page_in_sitemap": "Restore the URL, redirect it to a relevant live page, or remove the 4XX URL from XML sitemaps.",
         "5xx_page_in_sitemap": "Fix the server error or remove the failing URL from XML sitemaps until it returns a stable 2XX response.",
