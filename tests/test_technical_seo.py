@@ -705,6 +705,37 @@ def test_technical_seo_model_flags_indexable_pages_with_missing_or_empty_h1() ->
     assert missing_page["h1_count"] == 0
 
 
+def test_technical_seo_model_flags_indexable_pages_with_low_word_count() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/thin", title="Thin", section="", word_count=80, language="en"),
+        SimpleNamespace(url="https://example.com/full", title="Full", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/unknown", title="Unknown", section="", word_count=0, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/noindex",
+                    "title": "Noindex",
+                    "reason": "noindex",
+                    "http_status": 200,
+                    "word_count": 80,
+                    "nofollow": False,
+                }
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "indexable_low_word_count"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/thin"
+    assert issues[0]["issue_name"] == "Low word count"
+    assert issues[0]["category"] == "content"
+    assert issues[0]["importance"] == "Warning"
+
+
 def test_technical_seo_model_flags_https_http_mixed_content() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/a", title="A", section="", word_count=100, language="en")],
