@@ -793,6 +793,8 @@ def _issues_for_row(row: dict) -> list[dict]:
         issues.append(_issue(row, "images", "missing_alt_text", "medium", 0.88, _recommendation("missing_alt_text")))
     if _safe_int(row.get("javascript_broken_count")) > 0:
         issues.append(_issue(row, "javascript", "javascript_broken", "high", 0.94, _recommendation("javascript_broken")))
+    if _safe_int(row.get("javascript_broken_count")) > 0:
+        issues.append(_issue(row, "javascript", "page_has_broken_javascript", "high", 0.92, _recommendation("page_has_broken_javascript")))
     return issues
 
 
@@ -931,6 +933,7 @@ def _recommendation(issue_type: str) -> str:
         "page_has_redirected_image": "Update redirected image references on the page so each image points directly to its final URL.",
         "missing_alt_text": "Add descriptive alt text to meaningful images and mark decorative images with empty alt attributes.",
         "javascript_broken": "Restore the JavaScript URL, update it to a live script asset, or remove the broken script reference.",
+        "page_has_broken_javascript": "Fix or remove broken JavaScript references on the page so users and crawlers receive live script assets.",
         "indexable_canonical_url_has_no_incoming_internal_links": "Add at least one crawlable internal link to this canonical URL from a relevant page.",
         "indexable_orphan_page_has_no_incoming_internal_links": "Add crawlable internal links to this orphan page from relevant navigation, hub, or content pages.",
         "not_indexable_orphan_page_has_no_incoming_internal_links": "Review whether this non-indexable page still needs internal discovery, then add links or keep it intentionally isolated.",

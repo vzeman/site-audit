@@ -3800,6 +3800,41 @@ def test_technical_seo_model_flags_javascript_broken() -> None:
     ]
 
 
+def test_technical_seo_model_flags_page_has_broken_javascript() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/bad", title="Bad", section="", word_count=100, language="en"),
+        SimpleNamespace(url="https://example.com/clean", title="Clean", section="", word_count=100, language="en"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        resource_status={
+            "per_page": [
+                {"url": "https://example.com/bad", "issues": {"javascript_broken": 1}, "issue_count": 1},
+                {"url": "https://example.com/clean", "issues": {}, "issue_count": 0},
+            ],
+            "resources_with_issues": [
+                {
+                    "url": "https://example.com/bad",
+                    "type": "javascript",
+                    "src": "https://cdn.example.com/broken.js",
+                    "http_status": 404,
+                    "issues": ["javascript_broken"],
+                },
+            ],
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "page_has_broken_javascript"]
+    assert len(issues) == 1
+    assert issues[0]["url"] == "https://example.com/bad"
+    assert issues[0]["issue_name"] == "Page has broken JavaScript"
+    assert issues[0]["category"] == "javascript"
+    assert issues[0]["importance"] == "Error"
+    assert issues[0]["severity"] == "high"
+    page = next(row for row in payload["pages"] if row["url"] == "https://example.com/bad")
+    assert page["javascript_broken_count"] == 1
+
+
 def test_technical_seo_model_flags_canonical_points_to_4xx() -> None:
     payload = build_technical_seo(
         [SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=100, language="en")],
