@@ -598,6 +598,9 @@ def _issues_for_row(row: dict) -> list[dict]:
     if invalid_hreflang:
         row["invalid_hreflang_annotations"] = invalid_hreflang
         issues.append(_issue(row, "localization", "hreflang_annotation_invalid", "high", 0.9, _recommendation("hreflang_annotation_invalid")))
+    if _html_lang_attribute_invalid(row):
+        row["invalid_html_lang"] = str(row.get("html_lang") or "").strip()
+        issues.append(_issue(row, "localization", "html_lang_attribute_invalid", "high", 0.9, _recommendation("html_lang_attribute_invalid")))
     if _hreflang_html_lang_mismatch(row):
         issues.append(_issue(row, "localization", "hreflang_and_html_lang_mismatch", "high", 0.9, _recommendation("hreflang_and_html_lang_mismatch")))
     if row.get("hreflang_non_canonical_targets"):
@@ -717,6 +720,7 @@ def _recommendation(issue_type: str) -> str:
         "twitter_card_missing": "Add Twitter/X card metadata for pages that need complete social sharing previews.",
         "duplicate_pages_without_canonical": "Add canonical tags that consolidate duplicate pages to the preferred URL, or merge/remove the duplicates.",
         "hreflang_annotation_invalid": "Fix invalid hreflang codes and ensure each hreflang annotation points to an absolute URL.",
+        "html_lang_attribute_invalid": "Update the HTML lang attribute to a valid BCP 47 language code such as en, sk, or sk-SK.",
         "hreflang_and_html_lang_mismatch": "Align the page HTML lang attribute with its self-referencing hreflang annotation.",
         "hreflang_to_non_canonical": "Update hreflang annotations so every alternate URL points to its canonical page.",
         "hreflang_to_redirect_or_broken_page": "Update hreflang annotations so alternate URLs point directly to live 2xx canonical pages.",
@@ -845,7 +849,10 @@ def _apply_hreflang_target_signals(rows: list[dict]) -> None:
 
 
 def _hreflang_html_lang_mismatch(row: dict) -> bool:
-    html_lang = _language_primary(row.get("html_lang") or row.get("language") or "")
+    raw_html_lang = row.get("html_lang") or row.get("language") or ""
+    if raw_html_lang and not _valid_html_lang_code(raw_html_lang):
+        return False
+    html_lang = _language_primary(raw_html_lang)
     if not html_lang:
         return False
     page_urls = {_normalize_url(row.get("url", ""))}
@@ -875,6 +882,18 @@ def _invalid_hreflang_annotations(rows: list[dict]) -> list[dict]:
         if reasons:
             invalid.append({"hreflang": hreflang, "href": href, "reasons": reasons})
     return invalid
+
+
+def _html_lang_attribute_invalid(row: dict) -> bool:
+    html_lang = str(row.get("html_lang") or "").strip()
+    return bool(html_lang and not _valid_html_lang_code(html_lang))
+
+
+def _valid_html_lang_code(value: str) -> bool:
+    language = str(value or "").strip()
+    if not language or language.lower() == "x-default":
+        return False
+    return bool(re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}", language))
 
 
 def _valid_hreflang_code(value: str) -> bool:

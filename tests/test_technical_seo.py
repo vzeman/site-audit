@@ -2255,6 +2255,72 @@ def test_technical_seo_model_flags_invalid_hreflang_annotations() -> None:
     assert page["invalid_hreflang_annotations"] == [{"hreflang": "en-US", "href": "/relative", "reasons": ["invalid_href"]}]
 
 
+def test_technical_seo_model_flags_invalid_html_lang_attribute() -> None:
+    pages = [
+        SimpleNamespace(url="https://example.com/word", title="Word", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/x-default", title="X Default", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/underscore", title="Underscore", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/missing", title="Missing", section="", word_count=250, language="en"),
+        SimpleNamespace(url="https://example.com/ok", title="OK", section="", word_count=250, language="sk"),
+    ]
+    payload = build_technical_seo(
+        pages,
+        metadata_quality={
+            "per_page": [
+                {
+                    "url": "https://example.com/word",
+                    "title": "Word",
+                    "html_lang": "english",
+                    "hreflang": [{"hreflang": "en", "href": "https://example.com/word"}],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/x-default",
+                    "title": "X Default",
+                    "html_lang": "x-default",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/underscore",
+                    "title": "Underscore",
+                    "html_lang": "en_US",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/missing",
+                    "title": "Missing",
+                    "html_lang": "",
+                    "hreflang": [],
+                    "issues": [],
+                },
+                {
+                    "url": "https://example.com/ok",
+                    "title": "OK",
+                    "html_lang": "sk-SK",
+                    "hreflang": [{"hreflang": "sk", "href": "https://example.com/ok"}],
+                    "issues": [],
+                },
+            ]
+        },
+    )
+
+    issues = [row for row in payload["issues"] if row["issue_type"] == "html_lang_attribute_invalid"]
+    assert {row["url"] for row in issues} == {
+        "https://example.com/word",
+        "https://example.com/x-default",
+        "https://example.com/underscore",
+    }
+    assert all(row["issue_name"] == "HTML lang attribute invalid" for row in issues)
+    assert all(row["category"] == "localization" for row in issues)
+    assert all(row["importance"] == "Error" for row in issues)
+    word = next(row for row in payload["pages"] if row["url"] == "https://example.com/word")
+    assert word["invalid_html_lang"] == "english"
+    mismatch_urls = {row["url"] for row in payload["issues"] if row["issue_type"] == "hreflang_and_html_lang_mismatch"}
+    assert "https://example.com/word" not in mismatch_urls
+
+
 def test_technical_seo_model_flags_hreflang_to_non_canonical() -> None:
     pages = [
         SimpleNamespace(url="https://example.com/source", title="Source", section="", word_count=250, language="en"),
