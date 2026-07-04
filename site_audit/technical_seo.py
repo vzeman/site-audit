@@ -181,6 +181,8 @@ def _merge_page_signals(row: dict, metadata: dict | None, perf: dict | None, sea
 
 def _issues_for_row(row: dict) -> list[dict]:
     issues: list[dict] = []
+    for issue_type in _http_status_issue_types(row):
+        issues.append(_issue(row, "internal_pages", issue_type, "high", 0.98, _recommendation(issue_type)))
     status = str(row.get("indexability_status") or "")
     if status and status != "indexable":
         issues.append(_issue(row, "indexability", status, "high", 0.95, _recommendation(status)))
@@ -193,6 +195,19 @@ def _issues_for_row(row: dict) -> list[dict]:
     if _safe_int(row.get("render_blocking_count")) > 0:
         issues.append(_issue(row, "performance", "render_blocking_resources", "low", 0.72, "Defer non-critical scripts and reduce blocking stylesheets."))
     return issues
+
+
+def _http_status_issue_types(row: dict) -> list[str]:
+    status = _safe_int(row.get("http_status"))
+    if status == 404:
+        return ["404_page", "4xx_page"]
+    if 400 <= status < 500:
+        return ["4xx_page"]
+    if status == 500:
+        return ["500_page", "5xx_page"]
+    if 500 <= status < 600:
+        return ["5xx_page"]
+    return []
 
 
 def _issue(row: dict, category: str, issue_type: str, severity: str, confidence: float, recommendation: str) -> dict:
@@ -222,6 +237,10 @@ def _recommendation(issue_type: str) -> str:
     return {
         "noindex": "Decide whether this URL should be indexed; remove noindex only when it is a canonical search landing page.",
         "canonical_duplicate": "Remove this non-canonical URL from internal links and sitemaps, or change its canonical if it should be indexable.",
+        "404_page": "Restore the page, redirect it to a relevant live URL, or remove internal links and sitemap references.",
+        "4xx_page": "Fix the client error or remove internal links and sitemap references to this URL.",
+        "500_page": "Fix the server error so the URL returns a stable 2xx response, or remove it from crawlable SEO surfaces.",
+        "5xx_page": "Investigate server-side failures and make the URL reliably crawlable before keeping it in SEO surfaces.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",

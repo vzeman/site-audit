@@ -99,6 +99,37 @@ def test_technical_seo_model_includes_skipped_pages() -> None:
     assert payload["issues"][0]["category"] == "indexability"
 
 
+def test_technical_seo_model_flags_internal_4xx_and_5xx_pages() -> None:
+    payload = build_technical_seo(
+        [],
+        indexability={
+            "skipped": [
+                {
+                    "url": "https://example.com/missing",
+                    "title": "",
+                    "reason": "non_2xx_status",
+                    "http_status": 404,
+                },
+                {
+                    "url": "https://example.com/error",
+                    "title": "",
+                    "reason": "non_2xx_status",
+                    "http_status": 500,
+                },
+            ],
+            "noindex_pages": [],
+        },
+    )
+
+    by_url = {}
+    for issue in payload["issues"]:
+        by_url.setdefault(issue["url"], set()).add(issue["issue_type"])
+    assert {"404_page", "4xx_page"} <= by_url["https://example.com/missing"]
+    assert {"500_page", "5xx_page"} <= by_url["https://example.com/error"]
+    assert payload["issue_counts"]["404_page"] == 1
+    assert payload["issue_counts"]["5xx_page"] == 1
+
+
 def test_technical_seo_model_includes_full_issue_catalog() -> None:
     payload = build_technical_seo([])
 

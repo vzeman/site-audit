@@ -440,6 +440,17 @@ def run(config: PipelineConfig) -> dict:
     noindex_dropped = 0
     fetched_total = len(fetched)
     for idx, r in enumerate(fetched, 1):
+        http_status = int(getattr(r, "status", 0) or 0)
+        if http_status and not 200 <= http_status < 400:
+            extraction_rows.append({
+                "url": r.url,
+                "status": "skipped",
+                "reason": "non_2xx_status",
+                "http_status": http_status,
+                "content_type": getattr(r, "content_type", ""),
+                "x_robots_tag": getattr(r, "x_robots_tag", ""),
+            })
+            continue
         ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
         if ext is None or not ext.title:
             extraction_rows.append({

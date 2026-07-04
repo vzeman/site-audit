@@ -505,7 +505,7 @@ class Crawler:
                     seen.add(result.url)
                     results.append(result)
 
-                    if "html" in result.content_type:
+                    if 200 <= result.status < 400 and "html" in result.content_type:
                         page_outlinks: list[tuple[str, str]] = []
                         page_external: list[tuple[str, str]] = []
                         for link, anchor in self._extract_links(result.url, result.body):
@@ -665,9 +665,17 @@ class Crawler:
                 self.cache.put(url, r.status_code, dict(r.headers), body_bytes,
                                canonical_url=final_url)
 
-        if "html" not in ctype:
-            return None
         if r.status_code >= 400:
+            return FetchResult(
+                url=final_url,
+                status=r.status_code,
+                body="",
+                content_type=ctype,
+                from_cache=False,
+                content_length_bytes=len(body_bytes or b""),
+                x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
+            )
+        if "html" not in ctype:
             return None
 
         try:

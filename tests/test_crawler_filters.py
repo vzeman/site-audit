@@ -7,8 +7,8 @@ class _Cache:
 
 
 class _Response:
-    def __init__(self, body: str, url: str = "https://example.com/sitemap.xml"):
-        self.status_code = 200
+    def __init__(self, body: str, url: str = "https://example.com/sitemap.xml", status_code: int = 200):
+        self.status_code = status_code
         self.content = body.encode("utf-8")
         self.text = body
         self.url = url
@@ -289,3 +289,22 @@ def test_content_exclude_classes_apply_inside_included_scope() -> None:
     links = crawler._extract_links("https://example.com/", body)
 
     assert links == [("https://example.com/article", "Article")]
+
+
+def test_fetch_keeps_internal_error_page_for_technical_audit() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "Not found",
+        url="https://example.com/missing",
+        status_code=404,
+    )
+
+    result = crawler._fetch("https://example.com/missing")
+
+    assert result is not None
+    assert result.url == "https://example.com/missing"
+    assert result.status == 404
+    assert result.body == ""
