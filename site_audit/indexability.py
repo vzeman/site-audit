@@ -22,6 +22,7 @@ ACTION_BY_ISSUE = {
     "noindex": "Confirm the page should be excluded from Google. If it is a strategic SEO page, remove the noindex directive and recrawl.",
     "unusable": "Make the page return readable HTML with a crawlable title and body, or remove it from SEO crawl surfaces.",
     "empty_embedding_text": "Add crawlable main content so the page can be evaluated for topical relevance and internal linking.",
+    "canonical_duplicate": "Keep the canonical target in the SEO corpus and remove duplicate internal links/sitemap entries that point at this non-canonical URL.",
     "non_2xx_status": "Fix the HTTP response or update internal links and sitemaps so SEO pages resolve cleanly.",
     "skipped": "Review why extraction skipped this URL and decide whether it should be part of the SEO corpus.",
 }

@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterable
 
+from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CATALOG
+
 
 _SEVERITY_WEIGHT = {"high": 100.0, "medium": 55.0, "low": 25.0}
 _METADATA_SEVERITY = {
@@ -26,6 +28,7 @@ _METADATA_SEVERITY = {
     "incomplete_open_graph": "low",
     "missing_twitter_card": "low",
     "noindex": "high",
+    "canonical_duplicate": "medium",
 }
 
 
@@ -82,6 +85,7 @@ def build_technical_seo(
             "pages_with_issues": len(issue_urls),
             "issue_share": len(issue_urls) / total if total else 0.0,
             "total_issues": len(issues),
+            "catalog_issue_types": len(TECHNICAL_ISSUE_CATALOG),
             "high_issues": severity_counts.get("high", 0),
             "medium_issues": severity_counts.get("medium", 0),
             "low_issues": severity_counts.get("low", 0),
@@ -92,6 +96,7 @@ def build_technical_seo(
         "severity_counts": dict(severity_counts),
         "pages": rows,
         "issues": issues,
+        "issue_catalog": TECHNICAL_ISSUE_CATALOG,
         "interpretation": {
             "technical_severity_score": "Weighted count of technical SEO issues on the URL. High severity issues count more than medium/low issues.",
             "impact_score": "Issue-level prioritization score combining severity, confidence, and search traffic where available.",
@@ -193,11 +198,14 @@ def _issues_for_row(row: dict) -> list[dict]:
 def _issue(row: dict, category: str, issue_type: str, severity: str, confidence: float, recommendation: str) -> dict:
     traffic = _safe_int(row.get("traffic"))
     impact = _SEVERITY_WEIGHT.get(severity, 25.0) * confidence * (1.0 + min(3.0, traffic / 1000.0))
+    catalog = TECHNICAL_ISSUE_BY_KEY.get(issue_type, {})
     return {
         "url": row.get("url", ""),
         "title": row.get("title", ""),
         "category": category,
         "issue_type": issue_type,
+        "issue_name": catalog.get("name", issue_type.replace("_", " ")),
+        "importance": catalog.get("importance", severity),
         "severity": severity,
         "confidence": round(confidence, 2),
         "traffic": traffic,
@@ -213,6 +221,7 @@ def _issue(row: dict, category: str, issue_type: str, severity: str, confidence:
 def _recommendation(issue_type: str) -> str:
     return {
         "noindex": "Decide whether this URL should be indexed; remove noindex only when it is a canonical search landing page.",
+        "canonical_duplicate": "Remove this non-canonical URL from internal links and sitemaps, or change its canonical if it should be indexable.",
         "empty_embedding_text": "Add crawlable main content or remove the URL from SEO surfaces.",
         "unusable": "Review extraction/crawlability and ensure the page has readable HTML main content.",
         "missing_title": "Add a unique descriptive title.",
