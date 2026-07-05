@@ -241,6 +241,36 @@ def test_adaptive_concurrency_backs_off_and_recovers() -> None:
     assert adaptive.target_workers == 5
 
 
+def test_adaptive_concurrency_backs_off_on_slow_live_response() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=6, min_workers=1, slow_seconds=1.0, max_rss_mb=999_999)
+
+    previous = adaptive.record(FetchResult(
+        url="https://example.com/slow",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+        elapsed_seconds=2.5,
+    ))
+
+    assert previous == 6
+    assert adaptive.target_workers == 3
+
+
+def test_adaptive_concurrency_backs_off_on_local_memory_pressure() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=6, min_workers=1, max_rss_mb=1)
+
+    adaptive.record(FetchResult(
+        url="https://example.com/cache",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=True,
+    ))
+
+    assert adaptive.target_workers == 3
+
+
 def test_normalize_url_strips_tracking_params_but_keeps_business_query_params() -> None:
     assert normalize_url(
         "https://example.com/page?utm_source=newsletter&source=feed&page=2&sort=price#reviews"

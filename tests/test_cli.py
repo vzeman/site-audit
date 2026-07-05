@@ -147,6 +147,10 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "2",
             "--adaptive-success-threshold",
             "10",
+            "--adaptive-slow-seconds",
+            "1.5",
+            "--adaptive-max-rss-mb",
+            "4096",
             "--resume",
             "--no-checkpoints",
         ]
@@ -161,8 +165,27 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.no_adaptive_concurrency is True
     assert args.min_crawl_workers == 2
     assert args.adaptive_success_threshold == 10
+    assert args.adaptive_slow_seconds == 1.5
+    assert args.adaptive_max_rss_mb == 4096
     assert args.resume is True
     assert args.no_checkpoints is True
+
+
+def test_cache_migrate_parser_accepts_options() -> None:
+    args = build_parser().parse_args([
+        "cache-migrate",
+        "example.com",
+        "--batch-size",
+        "10",
+        "--progress-interval",
+        "100",
+        "--delete-original",
+    ])
+
+    assert args.domain == "example.com"
+    assert args.batch_size == 10
+    assert args.progress_interval == 100
+    assert args.delete_original is True
 
 
 def test_run_parser_strips_header_footer_by_default() -> None:

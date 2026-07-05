@@ -105,3 +105,33 @@ def test_http_cache_get_metadata_does_not_load_body(tmp_path) -> None:
     assert meta["status"] == 200
     assert meta["body_size_bytes"] == len(body)
     assert "body" not in meta
+
+
+def test_http_cache_migrates_legacy_bodies_to_files_and_rebuilds_sqlite(tmp_path) -> None:
+    cache = HttpCache(tmp_path / "http.sqlite")
+    legacy_url = "https://example.com/legacy/"
+    legacy_body = _html(legacy_url)
+    new_url = "https://example.com/new/"
+    new_body = _html(new_url)
+    cache.put(new_url, 200, {"Content-Type": "text/html"}, new_body)
+    with sqlite3.connect(tmp_path / "http.sqlite") as conn:
+        conn.execute(
+            "INSERT INTO responses "
+            "(url, status, headers, body, fetched_at, content_type, canonical_url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (legacy_url, 200, '{"Content-Type": "text/html"}', legacy_body, 1.0, "text/html", legacy_url),
+        )
+
+    result = cache.migrate_bodies_to_files(keep_backup=False, batch_size=1)
+
+    assert result["rows"] == 2
+    assert result["moved"] == 1
+    assert result["preserved"] == 1
+    assert cache.get(legacy_url).body == legacy_body
+    assert cache.get(new_url).body == new_body
+    with sqlite3.connect(tmp_path / "http.sqlite") as conn:
+        rows = conn.execute("SELECT url, body, body_path, body_size_bytes FROM responses").fetchall()
+    assert {row[0] for row in rows} == {legacy_url, new_url}
+    assert all(row[1] == b"" for row in rows)
+    assert all(row[2] for row in rows)
+    assert all(row[3] > 0 for row in rows)

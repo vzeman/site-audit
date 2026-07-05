@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .ai_agent import DEFAULT_OPENROUTER_MODEL, openrouter_model
 from . import compare as _compare
-from .cache import domain_slug
+from .cache import HttpCache, domain_slug
 from .config_env import apply_env_defaults
 from .embedder import DEFAULT_MODEL
 from .history import compare_snapshots, list_snapshots, save_report_snapshot, write_history_html
@@ -118,6 +118,8 @@ def _run_command(args: argparse.Namespace) -> int:
         adaptive_concurrency=not args.no_adaptive_concurrency,
         min_crawl_workers=args.min_crawl_workers,
         adaptive_success_threshold=args.adaptive_success_threshold,
+        adaptive_slow_seconds=args.adaptive_slow_seconds,
+        adaptive_max_rss_mb=args.adaptive_max_rss_mb,
         resume=args.resume,
         write_checkpoints=not args.no_checkpoints,
         request_delay=args.request_delay,
@@ -300,6 +302,58 @@ def _compare_command(args: argparse.Namespace) -> int:
     package_path = _compare.package_comparison(out_dir, projects_root, payload.get("domains", []))
     print(f"Wrote {package_path}")
 
+    return 0
+
+
+def _cache_migrate_command(args: argparse.Namespace) -> int:
+    if not args.domain and not args.cache_dir:
+        print("cache-migrate needs a domain or --cache-dir.")
+        return 1
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    else:
+        cfg = PipelineConfig(domain=args.domain, projects_root=Path(args.projects_root))
+        cache_dir, _ = project_paths(cfg)
+    cache_path = cache_dir / "http.sqlite"
+    if not cache_path.exists():
+        print(f"HTTP cache not found: {cache_path}")
+        return 1
+
+    cache = HttpCache(cache_path)
+    before = cache.stats()
+    print(f"Migrating HTTP cache: {cache_path}")
+    print(f"  rows:         {before.get('entries', 0)}")
+    print(f"  sqlite size:  {before.get('sqlite_size_bytes', 0):,} bytes")
+    print(f"  body size:    {before.get('body_size_bytes', 0):,} bytes")
+
+    last_reported = 0
+
+    def progress(row: dict) -> None:
+        nonlocal last_reported
+        processed = int(row.get("processed") or 0)
+        if processed - last_reported < args.progress_interval and processed != int(row.get("total") or 0):
+            return
+        last_reported = processed
+        print(
+            f"  processed {processed:,}/{int(row.get('total') or 0):,} "
+            f"(moved {int(row.get('moved') or 0):,})"
+        )
+
+    result = cache.migrate_bodies_to_files(
+        batch_size=args.batch_size,
+        keep_backup=not args.delete_original,
+        progress_callback=progress,
+    )
+    after = cache.stats()
+    print("Done.")
+    print(f"  rows:         {result['rows']:,}")
+    print(f"  moved:        {result['moved']:,}")
+    print(f"  preserved:    {result['preserved']:,}")
+    print(f"  body bytes:   {result['body_bytes_moved']:,}")
+    print(f"  sqlite size:  {after.get('sqlite_size_bytes', 0):,} bytes")
+    print(f"  body size:    {after.get('body_size_bytes', 0):,} bytes")
+    if result.get("backup_path"):
+        print(f"  backup:       {result['backup_path']}")
     return 0
 
 
@@ -1190,6 +1244,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Minimum worker count when adaptive crawl concurrency backs off")
     run_p.add_argument("--adaptive-success-threshold", type=int, default=50,
                        help="Successful responses needed before adaptive crawl concurrency increases by one")
+    run_p.add_argument("--adaptive-slow-seconds", type=float, default=3.0,
+                       help="Back off crawl workers when a live response takes longer than this many seconds")
+    run_p.add_argument("--adaptive-max-rss-mb", type=int, default=0,
+                       help="Back off crawl workers when process RSS exceeds this MB; default auto-selects a machine-based limit")
     run_p.add_argument("--extraction-workers", type=int, default=0,
                        help="Worker threads for HTML extraction; default uses --workers")
     run_p.add_argument("--analysis-workers", type=int, default=0,
@@ -1364,6 +1422,16 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--projects-root", default="projects")
     cmp_p.add_argument("--name", default="latest", help="Subdir under projects/_compare/ to write into (default: latest)")
     cmp_p.set_defaults(func=_compare_command)
+
+    cache_p = sub.add_parser("cache-migrate", help="Move legacy HTTP bodies from SQLite into cache/http_bodies and rebuild the DB")
+    cache_p.add_argument("domain", nargs="?", help="Domain whose projects/<domain>/cache/http.sqlite should be migrated")
+    cache_p.add_argument("--projects-root", default="projects")
+    cache_p.add_argument("--cache-dir", default=None, help="Direct cache directory containing http.sqlite")
+    cache_p.add_argument("--batch-size", type=int, default=500)
+    cache_p.add_argument("--progress-interval", type=int, default=5000)
+    cache_p.add_argument("--delete-original", action="store_true",
+                         help="Delete the legacy SQLite DB after the rebuilt compact DB is in place instead of keeping a .bak")
+    cache_p.set_defaults(func=_cache_migrate_command)
 
     serp_p = sub.add_parser("serp-gap", help="Analyze selected audited pages against live SERP competitors")
     serp_p.add_argument("domain", nargs="?", help="Domain with an existing site-audit report")

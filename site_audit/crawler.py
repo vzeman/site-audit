@@ -20,8 +20,10 @@ import collections
 import gzip
 import io
 import logging
+import os
 import random
 import re
+import resource
 import time
 import urllib.robotparser
 import xml.etree.ElementTree as ET
@@ -118,6 +120,8 @@ class CrawlConfig:
     adaptive_concurrency: bool = True
     min_crawl_workers: int = 1
     adaptive_success_threshold: int = 50
+    adaptive_slow_seconds: float = 3.0
+    adaptive_max_rss_mb: int = 0
     request_delay: float = 0.0  # extra delay per worker between requests
     timeout: float = 20.0
     follow_subdomains: bool = False
@@ -156,6 +160,7 @@ class FetchResult:
     redirect_chain: list[str] = field(default_factory=list)
     redirect_hop_count: int = 0
     redirect_status_codes: list[int] = field(default_factory=list)
+    elapsed_seconds: float = 0.0
 
 
 @dataclass
@@ -164,6 +169,8 @@ class AdaptiveConcurrency:
     min_workers: int = 1
     enabled: bool = True
     success_threshold: int = 50
+    slow_seconds: float = 3.0
+    max_rss_mb: int = 0
     target_workers: int = 0
     success_streak: int = 0
 
@@ -171,6 +178,8 @@ class AdaptiveConcurrency:
         self.max_workers = max(1, int(self.max_workers or 1))
         self.min_workers = max(1, min(int(self.min_workers or 1), self.max_workers))
         self.success_threshold = max(1, int(self.success_threshold or 1))
+        self.slow_seconds = max(0.0, float(self.slow_seconds or 0.0))
+        self.max_rss_mb = int(self.max_rss_mb or _auto_rss_limit_mb())
         self.target_workers = self.max_workers
 
     def record(self, result: FetchResult | None = None, *, error: str = "") -> int:
@@ -179,15 +188,19 @@ class AdaptiveConcurrency:
         status = int(getattr(result, "status", 0) or 0) if result is not None else 0
         result_error = (error or getattr(result, "error", "") or "").lower()
         from_cache = bool(getattr(result, "from_cache", False)) if result is not None else False
+        elapsed = float(getattr(result, "elapsed_seconds", 0.0) or 0.0) if result is not None else 0.0
+        rss_mb = _current_rss_mb()
         throttled = (
             not from_cache
             and (
                 status in {0, 408, 425, 429, 500, 502, 503, 504}
                 or result_error in {"timed_out", "fetch_failed"}
+                or (self.slow_seconds > 0 and elapsed > self.slow_seconds)
             )
         )
+        system_pressure = rss_mb > 0 and self.max_rss_mb > 0 and rss_mb > self.max_rss_mb
         previous = self.target_workers
-        if throttled:
+        if throttled or system_pressure:
             self.success_streak = 0
             self.target_workers = max(self.min_workers, max(1, self.target_workers // 2))
             return previous
@@ -197,6 +210,29 @@ class AdaptiveConcurrency:
                 self.target_workers += 1
                 self.success_streak = 0
         return previous
+
+
+def _current_rss_mb() -> int:
+    try:
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        return 0
+    # Linux reports KiB, macOS reports bytes.
+    if value > 10_000_000:
+        return int(value / 1024 / 1024)
+    return int(value / 1024)
+
+
+def _auto_rss_limit_mb() -> int:
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        total_mb = int((pages * page_size) / 1024 / 1024)
+    except Exception:
+        total_mb = 0
+    if total_mb <= 0:
+        return 8192
+    return max(2048, min(16384, int(total_mb * 0.25)))
 
 
 @dataclass
@@ -660,6 +696,8 @@ class Crawler:
             min_workers=self.config.min_crawl_workers,
             enabled=self.config.adaptive_concurrency,
             success_threshold=self.config.adaptive_success_threshold,
+            slow_seconds=self.config.adaptive_slow_seconds,
+            max_rss_mb=self.config.adaptive_max_rss_mb,
         )
 
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
@@ -840,6 +878,7 @@ class Crawler:
         return r  # last response (still 429)
 
     def _fetch(self, url: str) -> Optional[FetchResult]:
+        started = time.perf_counter()
         if self.config.use_cache:
             cached = self.cache.get(url)
             if cached and 200 <= cached.status < 400:
@@ -870,6 +909,7 @@ class Crawler:
                     redirect_chain=[url, cached.canonical_url] if cached.canonical_url and cached.canonical_url != url else [],
                     redirect_hop_count=1 if cached.canonical_url and cached.canonical_url != url else 0,
                     redirect_status_codes=[],
+                    elapsed_seconds=time.perf_counter() - started,
                 )
 
         if self.config.request_delay > 0:
@@ -903,6 +943,7 @@ class Crawler:
                 redirect_chain=redirect_chain,
                 redirect_hop_count=redirect_hop_count,
                 redirect_status_codes=redirect_status_codes,
+                elapsed_seconds=time.perf_counter() - started,
             )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
@@ -930,6 +971,7 @@ class Crawler:
                 redirect_chain=redirect_chain,
                 redirect_hop_count=redirect_hop_count,
                 redirect_status_codes=redirect_status_codes,
+                elapsed_seconds=time.perf_counter() - started,
             )
         if "html" not in ctype:
             return None
@@ -953,6 +995,7 @@ class Crawler:
             redirect_chain=redirect_chain,
             redirect_hop_count=redirect_hop_count,
             redirect_status_codes=redirect_status_codes,
+            elapsed_seconds=time.perf_counter() - started,
         )
 
     def _prepare_html_body(self, body: str) -> str:

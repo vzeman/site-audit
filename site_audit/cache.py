@@ -119,12 +119,7 @@ class HttpCache:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.body_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
-            conn.executescript(_HTTP_SCHEMA)
-            for migration in _HTTP_MIGRATIONS:
-                try:
-                    conn.execute(migration)
-                except sqlite3.OperationalError:
-                    pass  # column already exists
+            self._init_schema(conn)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -134,6 +129,15 @@ class HttpCache:
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _init_schema(conn: sqlite3.Connection) -> None:
+        conn.executescript(_HTTP_SCHEMA)
+        for migration in _HTTP_MIGRATIONS:
+            try:
+                conn.execute(migration)
+            except sqlite3.OperationalError:
+                pass
 
     def get(self, url: str) -> Optional[CachedResponse]:
         with self._connect() as conn:
@@ -268,6 +272,122 @@ class HttpCache:
             "size_bytes": sqlite_size + int(body_size or 0),
             "sqlite_size_bytes": sqlite_size,
             "body_size_bytes": int(body_size or 0),
+        }
+
+    def migrate_bodies_to_files(
+        self,
+        *,
+        batch_size: int = 500,
+        keep_backup: bool = True,
+        progress_callback=None,
+    ) -> dict:
+        """Move inline SQLite bodies to files and rebuild a compact metadata DB.
+
+        Existing file-backed rows are preserved. Legacy inline-body rows are
+        streamed out to ``http_bodies`` and inserted into a fresh SQLite file
+        with an empty ``body`` column. After a successful rebuild the fresh DB
+        atomically replaces the original one; optionally keep the old DB as a
+        ``.bak`` file for recovery.
+        """
+        tmp_db = self.db_path.with_suffix(self.db_path.suffix + ".rebuild.tmp")
+        backup_db = self.db_path.with_suffix(self.db_path.suffix + ".legacy-bodies.bak")
+        tmp_db.unlink(missing_ok=True)
+        backup_db.unlink(missing_ok=True)
+
+        moved = 0
+        preserved = 0
+        rows_total = 0
+        body_bytes = 0
+        started = time.time()
+        with sqlite3.connect(str(self.db_path)) as src, sqlite3.connect(str(tmp_db)) as dst:
+            self._init_schema(dst)
+            rows_total = int(src.execute("SELECT COUNT(*) FROM responses").fetchone()[0])
+            rows = src.execute(
+                "SELECT url, status, headers, body, fetched_at, etag, last_modified, "
+                "content_type, canonical_url, body_path, body_sha256, body_size_bytes "
+                "FROM responses"
+            )
+            pending = 0
+            for row in rows:
+                (
+                    url,
+                    status,
+                    headers,
+                    body,
+                    fetched_at,
+                    etag,
+                    last_modified,
+                    content_type,
+                    canonical_url,
+                    body_path,
+                    body_sha256,
+                    body_size_bytes,
+                ) = row
+                inline_body = body or b""
+                if inline_body and not body_path:
+                    body_path = self._write_body(url, inline_body)
+                    body_sha256 = hashlib.sha256(inline_body).hexdigest()
+                    body_size_bytes = len(inline_body)
+                    moved += 1
+                    body_bytes += len(inline_body)
+                else:
+                    preserved += 1
+                    body_size_bytes = _safe_int(body_size_bytes)
+                    if not body_size_bytes and body_path:
+                        path = self.body_dir / body_path
+                        try:
+                            body_size_bytes = path.stat().st_size
+                        except OSError:
+                            body_size_bytes = 0
+                    if not body_sha256 and body_path:
+                        path = self.body_dir / body_path
+                        try:
+                            body_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+                        except OSError:
+                            body_sha256 = ""
+
+                dst.execute(
+                    "INSERT OR REPLACE INTO responses "
+                    "(url, status, headers, body, fetched_at, etag, last_modified, "
+                    "content_type, canonical_url, body_path, body_sha256, body_size_bytes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        url,
+                        int(status),
+                        headers,
+                        b"",
+                        fetched_at,
+                        etag,
+                        last_modified,
+                        content_type,
+                        canonical_url,
+                        body_path,
+                        body_sha256,
+                        _safe_int(body_size_bytes),
+                    ),
+                )
+                pending += 1
+                if pending >= batch_size:
+                    dst.commit()
+                    pending = 0
+                    if progress_callback:
+                        progress_callback({"processed": moved + preserved, "total": rows_total, "moved": moved})
+            dst.commit()
+
+        if keep_backup:
+            self.db_path.replace(backup_db)
+        else:
+            self.db_path.unlink(missing_ok=True)
+        tmp_db.replace(self.db_path)
+
+        return {
+            "rows": rows_total,
+            "moved": moved,
+            "preserved": preserved,
+            "body_bytes_moved": body_bytes,
+            "sqlite_size_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0,
+            "backup_path": str(backup_db) if keep_backup else "",
+            "seconds": round(time.time() - started, 3),
         }
 
     def clean_tracking_duplicates(self, *, min_candidates: int = 100) -> dict:

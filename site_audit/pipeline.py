@@ -361,6 +361,8 @@ class PipelineConfig:
     adaptive_concurrency: bool = True
     min_crawl_workers: int = 1
     adaptive_success_threshold: int = 50
+    adaptive_slow_seconds: float = 3.0
+    adaptive_max_rss_mb: int = 0
     resume: bool = False
     write_checkpoints: bool = True
     request_delay: float = 0.0
@@ -606,6 +608,8 @@ def run(config: PipelineConfig) -> dict:
         adaptive_concurrency=config.adaptive_concurrency,
         min_crawl_workers=config.min_crawl_workers,
         adaptive_success_threshold=config.adaptive_success_threshold,
+        adaptive_slow_seconds=config.adaptive_slow_seconds,
+        adaptive_max_rss_mb=config.adaptive_max_rss_mb,
         request_delay=config.request_delay,
         follow_subdomains=config.follow_subdomains,
         respect_robots=config.respect_robots,
