@@ -109,3 +109,24 @@ def test_large_site_safeguard_writes_technical_bundle_without_embeddings(tmp_pat
     assert (report_dir / "technical_issues.csv").is_file()
     assert run_summary["mode"] == "large_site_embedding_safeguard"
 
+
+def test_pipeline_reuses_extraction_cache_on_second_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+
+    config = PipelineConfig(
+        domain="example.com",
+        projects_root=tmp_path,
+        technical_only=True,
+        save_snapshot=False,
+    )
+    run(config)
+
+    def fail_extract(*args, **kwargs):
+        raise AssertionError("extract should not run when artifact cache hits")
+
+    monkeypatch.setattr("site_audit.pipeline.extract", fail_extract)
+    summary = run(config)
+
+    assert summary["status"] == "technical_only"
+    assert summary["pages"] == 2

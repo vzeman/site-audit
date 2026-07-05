@@ -79,6 +79,7 @@ from .entities import to_payload as entities_payload
 from .entity_coverage import build_entity_coverage
 from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
+from .extraction_cache import ExtractionCache
 from .extractor import ExtractedPage, extract
 from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
@@ -544,6 +545,7 @@ def run(config: PipelineConfig) -> dict:
     outlinks_map: dict[str, list[tuple[str, str]]] = {}
     external_map: dict[str, list[tuple[str, str]]] = {}
     extraction_rows: list[dict] = []
+    extraction_cache = ExtractionCache(cache_dir / "extracted_pages")
 
     noindex_dropped = 0
     fetched_total = len(fetched)
@@ -581,7 +583,23 @@ def run(config: PipelineConfig) -> dict:
                     "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
                 })
                 continue
-            ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
+            x_robots_tag = getattr(r, "x_robots_tag", "")
+            ext = extraction_cache.get(
+                r.url,
+                r.body,
+                max_chars=config.max_chars,
+                x_robots_tag=x_robots_tag,
+            )
+            if ext is None:
+                ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=x_robots_tag)
+                if ext is not None:
+                    extraction_cache.put(
+                        r.url,
+                        r.body,
+                        ext,
+                        max_chars=config.max_chars,
+                        x_robots_tag=x_robots_tag,
+                    )
             if ext is None or not ext.title:
                 extraction_rows.append({
                     "url": r.url,
@@ -702,6 +720,13 @@ def run(config: PipelineConfig) -> dict:
                 LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
+    extraction_cache_stats = extraction_cache.stats()
+    LOG.info(
+        "  extraction cache: %d hits · %d misses · %d writes",
+        extraction_cache_stats.get("hits", 0),
+        extraction_cache_stats.get("misses", 0),
+        extraction_cache_stats.get("writes", 0),
+    )
 
     pages, extracted_pages, embed_inputs, canonical_dropped = filter_to_unique_canonical_pages(
         pages,
