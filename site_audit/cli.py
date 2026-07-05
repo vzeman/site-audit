@@ -118,6 +118,8 @@ def _run_command(args: argparse.Namespace) -> int:
         adaptive_concurrency=not args.no_adaptive_concurrency,
         min_crawl_workers=args.min_crawl_workers,
         adaptive_success_threshold=args.adaptive_success_threshold,
+        resume=args.resume,
+        write_checkpoints=not args.no_checkpoints,
         request_delay=args.request_delay,
         duplicate_threshold=args.duplicate_threshold,
         duplicate_knn=args.duplicate_knn,
@@ -1226,6 +1228,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--clean", action="store_true",
                        help="Delete the project's cache directory before running. "
                        "Use after a crawler/extractor/embedder change so every page is re-processed.")
+    run_p.add_argument("--resume", action="store_true",
+                       help="Resume from compatible stage checkpoints when available")
+    run_p.add_argument("--no-checkpoints", action="store_true",
+                       help="Do not write resumable stage checkpoints")
     run_p.add_argument("--no-scatterplot", action="store_true")
     run_p.add_argument("--no-cluster-labels", action="store_true")
     run_p.add_argument("--no-keyword-coverage", action="store_true")

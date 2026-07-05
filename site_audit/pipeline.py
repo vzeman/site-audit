@@ -25,7 +25,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
@@ -361,6 +361,8 @@ class PipelineConfig:
     adaptive_concurrency: bool = True
     min_crawl_workers: int = 1
     adaptive_success_threshold: int = 50
+    resume: bool = False
+    write_checkpoints: bool = True
     request_delay: float = 0.0
     duplicate_threshold: float = 0.92
     duplicate_knn: int = 10
@@ -490,6 +492,84 @@ def project_paths(config: PipelineConfig) -> tuple[Path, Path]:
     return cache_dir, report_dir
 
 
+def _checkpoint_path(cache_dir: Path, name: str) -> Path:
+    return Path(cache_dir) / "checkpoints" / f"{name}.json"
+
+
+def _write_checkpoint(cache_dir: Path, name: str, payload: dict) -> None:
+    path = _checkpoint_path(cache_dir, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _read_checkpoint(cache_dir: Path, name: str) -> dict | None:
+    path = _checkpoint_path(cache_dir, name)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _extraction_checkpoint_payload(
+    *,
+    domain: str,
+    max_chars: int,
+    pages: list[PageInfo],
+    extracted_pages: list[ExtractedPage],
+    embed_inputs: list[EmbedInput],
+    outlinks_map: dict[str, list[tuple[str, str]]],
+    external_map: dict[str, list[tuple[str, str]]],
+    extraction_rows: list[dict],
+    noindex_dropped: int,
+    canonical_dropped: int,
+) -> dict:
+    return {
+        "version": 1,
+        "domain": domain,
+        "max_chars": max_chars,
+        "pages": [asdict(page) for page in pages],
+        "extracted_pages": [asdict(page) for page in extracted_pages],
+        "embed_inputs": [asdict(item) for item in embed_inputs],
+        "outlinks_map": {url: [list(link) for link in links] for url, links in outlinks_map.items()},
+        "external_map": {url: [list(link) for link in links] for url, links in external_map.items()},
+        "extraction_rows": extraction_rows,
+        "noindex_dropped": noindex_dropped,
+        "canonical_dropped": canonical_dropped,
+        "created_at": time.time(),
+    }
+
+
+def _load_extraction_checkpoint(cache_dir: Path, *, domain: str, max_chars: int) -> dict | None:
+    payload = _read_checkpoint(cache_dir, "extraction")
+    if not payload:
+        return None
+    if payload.get("version") != 1:
+        return None
+    if payload.get("domain") != domain or int(payload.get("max_chars") or 0) != int(max_chars):
+        return None
+    try:
+        return {
+            "pages": [PageInfo(**row) for row in payload.get("pages") or []],
+            "extracted_pages": [ExtractedPage(**row) for row in payload.get("extracted_pages") or []],
+            "embed_inputs": [EmbedInput(**row) for row in payload.get("embed_inputs") or []],
+            "outlinks_map": {
+                url: [tuple(link) for link in links]
+                for url, links in (payload.get("outlinks_map") or {}).items()
+            },
+            "external_map": {
+                url: [tuple(link) for link in links]
+                for url, links in (payload.get("external_map") or {}).items()
+            },
+            "extraction_rows": list(payload.get("extraction_rows") or []),
+            "noindex_dropped": int(payload.get("noindex_dropped") or 0),
+            "canonical_dropped": int(payload.get("canonical_dropped") or 0),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
 def _search_payload_usable(payload: dict) -> bool:
     if not payload:
         return False
@@ -557,7 +637,9 @@ def run(config: PipelineConfig) -> dict:
     extraction_cache = ExtractionCache(cache_dir / "extracted_pages")
 
     noindex_dropped = 0
+    canonical_dropped = 0
     fetched_total = len(fetched)
+    loaded_extraction = _load_extraction_checkpoint(cache_dir, domain=host, max_chars=config.max_chars) if config.resume else None
 
     def _fetch_common_row(r) -> dict:
         return {
@@ -613,94 +695,105 @@ def run(config: PipelineConfig) -> dict:
             )
         return ext
 
-    with stage_timings.track("extraction", fetched_pages=fetched_total):
-        extractable: list[tuple[int, object]] = []
-        precomputed_rows: dict[int, dict] = {}
-        for idx, r in enumerate(fetched, 1):
-            http_status = int(getattr(r, "status", 0) or 0)
-            fetch_error = getattr(r, "error", "") or ""
-            if fetch_error:
-                row = _skip_row(r, fetch_error)
-                row["http_status"] = http_status
-                precomputed_rows[idx] = row
-                continue
-            if http_status and not 200 <= http_status < 400:
-                row = _skip_row(r, "non_2xx_status")
-                row["http_status"] = http_status
-                precomputed_rows[idx] = row
-                continue
-            extractable.append((idx, r))
+    if loaded_extraction is not None:
+        pages = loaded_extraction["pages"]
+        extracted_pages = loaded_extraction["extracted_pages"]
+        embed_inputs = loaded_extraction["embed_inputs"]
+        outlinks_map = loaded_extraction["outlinks_map"]
+        external_map = loaded_extraction["external_map"]
+        extraction_rows = loaded_extraction["extraction_rows"]
+        noindex_dropped = loaded_extraction["noindex_dropped"]
+        canonical_dropped = loaded_extraction["canonical_dropped"]
+        LOG.info("  resumed extraction checkpoint with %d usable pages", len(pages))
+    else:
+        with stage_timings.track("extraction", fetched_pages=fetched_total):
+            extractable: list[tuple[int, object]] = []
+            precomputed_rows: dict[int, dict] = {}
+            for idx, r in enumerate(fetched, 1):
+                http_status = int(getattr(r, "status", 0) or 0)
+                fetch_error = getattr(r, "error", "") or ""
+                if fetch_error:
+                    row = _skip_row(r, fetch_error)
+                    row["http_status"] = http_status
+                    precomputed_rows[idx] = row
+                    continue
+                if http_status and not 200 <= http_status < 400:
+                    row = _skip_row(r, "non_2xx_status")
+                    row["http_status"] = http_status
+                    precomputed_rows[idx] = row
+                    continue
+                extractable.append((idx, r))
 
-        extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
-        extraction_results: dict[int, ExtractedPage | None] = {}
-        if extraction_workers > 1 and len(extractable) > 1:
-            LOG.info("  extracting HTML with %d workers", extraction_workers)
-            with ThreadPoolExecutor(max_workers=extraction_workers) as pool:
-                extracted = pool.map(_extract_one, [r for _, r in extractable])
-                extraction_results = {
-                    idx: ext for (idx, _), ext in zip(extractable, extracted)
-                }
-        else:
-            extraction_results = {idx: _extract_one(r) for idx, r in extractable}
+            extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
+            extraction_results: dict[int, ExtractedPage | None] = {}
+            if extraction_workers > 1 and len(extractable) > 1:
+                LOG.info("  extracting HTML with %d workers", extraction_workers)
+                with ThreadPoolExecutor(max_workers=extraction_workers) as pool:
+                    extracted = pool.map(_extract_one, [r for _, r in extractable])
+                    extraction_results = {
+                        idx: ext for (idx, _), ext in zip(extractable, extracted)
+                    }
+            else:
+                extraction_results = {idx: _extract_one(r) for idx, r in extractable}
 
-        for idx, r in enumerate(fetched, 1):
-            precomputed = precomputed_rows.get(idx)
-            if precomputed is not None:
-                extraction_rows.append(precomputed)
-                continue
-            ext = extraction_results.get(idx)
-            if ext is None or not ext.title:
-                extraction_rows.append(_skip_row(r, "unusable"))
-                continue
-            if ext.noindex:
-                # The page asked search engines not to index it — exclude from
-                # the analysis corpus. We still consumed its outlinks during
-                # the crawl (so internal links from a noindex landing page
-                # contribute to authority), but the page itself does not
-                # count toward focus / clusters / coverage / recommendations.
-                noindex_dropped += 1
-                row = _skip_row(r, "noindex", ext)
-                row["source"] = ext.noindex_source
+            for idx, r in enumerate(fetched, 1):
+                precomputed = precomputed_rows.get(idx)
+                if precomputed is not None:
+                    extraction_rows.append(precomputed)
+                    continue
+                ext = extraction_results.get(idx)
+                if ext is None or not ext.title:
+                    extraction_rows.append(_skip_row(r, "unusable"))
+                    continue
+                if ext.noindex:
+                    # The page asked search engines not to index it — exclude from
+                    # the analysis corpus. We still consumed its outlinks during
+                    # the crawl (so internal links from a noindex landing page
+                    # contribute to authority), but the page itself does not
+                    # count toward focus / clusters / coverage / recommendations.
+                    noindex_dropped += 1
+                    row = _skip_row(r, "noindex", ext)
+                    row["source"] = ext.noindex_source
+                    extraction_rows.append(row)
+                    continue
+                section = section_for_url(r.url)
+                embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
+                if not embed_text.strip():
+                    extraction_rows.append(_skip_row(r, "empty_embedding_text", ext))
+                    continue
+                page = PageInfo(
+                    url=r.url,
+                    title=ext.title,
+                    description=ext.description,
+                    section=section,
+                    word_count=ext.word_count,
+                    language=ext.language,
+                )
+                pages.append(page)
+                extracted_pages.append(ext)
+                embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
+                outlinks_map[r.url] = r.outlinks or []
+                external_map[r.url] = r.external_links or []
+                row = _fetch_common_row(r)
+                row.update({
+                    "title": ext.title,
+                    "status": "analyzed",
+                    "reason": "",
+                    "canonical_url": ext.canonical_url,
+                    "robots_content": ext.robots_content,
+                    "noindex_source": ext.noindex_source,
+                    "nofollow": ext.nofollow,
+                    "nofollow_source": ext.nofollow_source,
+                    "meta_refresh_redirect": ext.meta_refresh_redirect,
+                    "meta_refresh_target_url": ext.meta_refresh_target_url,
+                    "title_tag_count": ext.title_tag_count,
+                    "meta_description_tag_count": ext.meta_description_tag_count,
+                    "language": ext.language or "",
+                    "word_count": ext.word_count,
+                })
                 extraction_rows.append(row)
-                continue
-            section = section_for_url(r.url)
-            embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
-            if not embed_text.strip():
-                extraction_rows.append(_skip_row(r, "empty_embedding_text", ext))
-                continue
-            page = PageInfo(
-                url=r.url,
-                title=ext.title,
-                description=ext.description,
-                section=section,
-                word_count=ext.word_count,
-                language=ext.language,
-            )
-            pages.append(page)
-            extracted_pages.append(ext)
-            embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
-            outlinks_map[r.url] = r.outlinks or []
-            external_map[r.url] = r.external_links or []
-            row = _fetch_common_row(r)
-            row.update({
-                "title": ext.title,
-                "status": "analyzed",
-                "reason": "",
-                "canonical_url": ext.canonical_url,
-                "robots_content": ext.robots_content,
-                "noindex_source": ext.noindex_source,
-                "nofollow": ext.nofollow,
-                "nofollow_source": ext.nofollow_source,
-                "meta_refresh_redirect": ext.meta_refresh_redirect,
-                "meta_refresh_target_url": ext.meta_refresh_target_url,
-                "title_tag_count": ext.title_tag_count,
-                "meta_description_tag_count": ext.meta_description_tag_count,
-                "language": ext.language or "",
-                "word_count": ext.word_count,
-            })
-            extraction_rows.append(row)
-            if idx % 500 == 0 or idx == fetched_total:
-                LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
+                if idx % 500 == 0 or idx == fetched_total:
+                    LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
     extraction_cache_stats = extraction_cache.stats()
@@ -711,17 +804,36 @@ def run(config: PipelineConfig) -> dict:
         extraction_cache_stats.get("writes", 0),
     )
 
-    pages, extracted_pages, embed_inputs, canonical_dropped = filter_to_unique_canonical_pages(
-        pages,
-        extracted_pages,
-        embed_inputs,
-        extraction_rows,
-    )
-    if canonical_dropped:
-        LOG.info(
-            "  dropped %d non-canonical duplicate pages before embedding",
-            canonical_dropped,
+    if loaded_extraction is None:
+        pages, extracted_pages, embed_inputs, canonical_dropped = filter_to_unique_canonical_pages(
+            pages,
+            extracted_pages,
+            embed_inputs,
+            extraction_rows,
         )
+        if canonical_dropped:
+            LOG.info(
+                "  dropped %d non-canonical duplicate pages before embedding",
+                canonical_dropped,
+            )
+        if config.write_checkpoints:
+            _write_checkpoint(
+                cache_dir,
+                "extraction",
+                _extraction_checkpoint_payload(
+                    domain=host,
+                    max_chars=config.max_chars,
+                    pages=pages,
+                    extracted_pages=extracted_pages,
+                    embed_inputs=embed_inputs,
+                    outlinks_map=outlinks_map,
+                    external_map=external_map,
+                    extraction_rows=extraction_rows,
+                    noindex_dropped=noindex_dropped,
+                    canonical_dropped=canonical_dropped,
+                ),
+            )
+            LOG.info("  checkpoint: extraction state saved")
 
     if not pages:
         LOG.warning("No usable pages — aborting before embedding.")

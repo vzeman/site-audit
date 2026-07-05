@@ -147,6 +147,8 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "2",
             "--adaptive-success-threshold",
             "10",
+            "--resume",
+            "--no-checkpoints",
         ]
     )
 
@@ -159,6 +161,8 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.no_adaptive_concurrency is True
     assert args.min_crawl_workers == 2
     assert args.adaptive_success_threshold == 10
+    assert args.resume is True
+    assert args.no_checkpoints is True
 
 
 def test_run_parser_strips_header_footer_by_default() -> None:

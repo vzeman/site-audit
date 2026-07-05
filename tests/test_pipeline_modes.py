@@ -132,6 +132,53 @@ def test_pipeline_reuses_extraction_cache_on_second_run(tmp_path, monkeypatch) -
     assert summary["pages"] == 2
 
 
+def test_pipeline_resume_uses_extraction_checkpoint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+
+    config = PipelineConfig(
+        domain="example.com",
+        projects_root=tmp_path,
+        technical_only=True,
+        save_snapshot=False,
+    )
+    run(config)
+    checkpoint = tmp_path / "example.com" / "cache" / "checkpoints" / "extraction.json"
+    assert checkpoint.is_file()
+
+    class NoExtractionCacheUse:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get(self, *args, **kwargs):
+            raise AssertionError("extraction cache should not be read when checkpoint resumes")
+
+        def put(self, *args, **kwargs):
+            raise AssertionError("extraction cache should not be written when checkpoint resumes")
+
+        def stats(self):
+            return {"hits": 0, "misses": 0, "writes": 0}
+
+    def fail_extract(*args, **kwargs):
+        raise AssertionError("extract should not run when checkpoint resumes")
+
+    monkeypatch.setattr("site_audit.pipeline.ExtractionCache", NoExtractionCacheUse)
+    monkeypatch.setattr("site_audit.pipeline.extract", fail_extract)
+
+    resumed = run(
+        PipelineConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            technical_only=True,
+            resume=True,
+            save_snapshot=False,
+        )
+    )
+
+    assert resumed["status"] == "technical_only"
+    assert resumed["pages"] == 2
+
+
 def test_pipeline_uses_configured_extraction_workers(tmp_path, monkeypatch) -> None:
     calls: list[int] = []
 
