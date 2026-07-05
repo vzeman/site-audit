@@ -160,9 +160,12 @@ def build_technical_seo(
     issue_counts = Counter(issue["issue_type"] for issue in issues)
     severity_counts = Counter(issue["severity"] for issue in issues)
     category_counts = Counter(issue["category"] for issue in issues)
-    issue_urls = {issue["url"] for issue in issues}
+    issues_by_url: dict[str, list[dict]] = {}
+    for issue in issues:
+        issues_by_url.setdefault(issue["url"], []).append(issue)
+    issue_urls = set(issues_by_url)
     for row in rows:
-        row_issues = [issue for issue in issues if issue["url"] == row["url"]]
+        row_issues = issues_by_url.get(row["url"], [])
         row["technical_issue_count"] = len(row_issues)
         row["technical_severity_score"] = round(sum(_SEVERITY_WEIGHT.get(issue["severity"], 0.0) * float(issue["confidence"] or 0.0) for issue in row_issues), 2)
         row["technical_high_issues"] = sum(1 for issue in row_issues if issue["severity"] == "high")
