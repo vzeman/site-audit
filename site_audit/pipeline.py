@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -355,6 +356,7 @@ class PipelineConfig:
     model: str = DEFAULT_MODEL
     max_pages: int = 10000
     max_workers: int = 8
+    extraction_workers: int = 0
     request_delay: float = 0.0
     duplicate_threshold: float = 0.92
     duplicate_knn: int = 10
@@ -549,71 +551,99 @@ def run(config: PipelineConfig) -> dict:
 
     noindex_dropped = 0
     fetched_total = len(fetched)
+
+    def _fetch_common_row(r) -> dict:
+        return {
+            "url": r.url,
+            "http_status": getattr(r, "status", 0),
+            "content_type": getattr(r, "content_type", ""),
+            "x_robots_tag": getattr(r, "x_robots_tag", ""),
+            "requested_url": getattr(r, "requested_url", ""),
+            "redirect_target_url": getattr(r, "redirect_target_url", ""),
+            "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+            "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+            "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+        }
+
+    def _skip_row(r, reason: str, ext: ExtractedPage | None = None) -> dict:
+        row = _fetch_common_row(r)
+        row.update({"status": "skipped", "reason": reason})
+        if ext is not None:
+            row.update({
+                "title": ext.title,
+                "canonical_url": ext.canonical_url,
+                "robots_content": ext.robots_content,
+                "noindex_source": ext.noindex_source,
+                "nofollow": ext.nofollow,
+                "nofollow_source": ext.nofollow_source,
+                "meta_refresh_redirect": ext.meta_refresh_redirect,
+                "meta_refresh_target_url": ext.meta_refresh_target_url,
+                "title_tag_count": ext.title_tag_count,
+                "meta_description_tag_count": ext.meta_description_tag_count,
+                "language": ext.language or "",
+                "word_count": ext.word_count,
+            })
+        return row
+
+    def _extract_one(r) -> ExtractedPage | None:
+        x_robots_tag = getattr(r, "x_robots_tag", "")
+        ext = extraction_cache.get(
+            r.url,
+            r.body,
+            max_chars=config.max_chars,
+            x_robots_tag=x_robots_tag,
+        )
+        if ext is not None:
+            return ext
+        ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=x_robots_tag)
+        if ext is not None:
+            extraction_cache.put(
+                r.url,
+                r.body,
+                ext,
+                max_chars=config.max_chars,
+                x_robots_tag=x_robots_tag,
+            )
+        return ext
+
     with stage_timings.track("extraction", fetched_pages=fetched_total):
+        extractable: list[tuple[int, object]] = []
+        precomputed_rows: dict[int, dict] = {}
         for idx, r in enumerate(fetched, 1):
             http_status = int(getattr(r, "status", 0) or 0)
             fetch_error = getattr(r, "error", "") or ""
             if fetch_error:
-                extraction_rows.append({
-                    "url": r.url,
-                    "status": "skipped",
-                    "reason": fetch_error,
-                    "http_status": http_status,
-                    "content_type": getattr(r, "content_type", ""),
-                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                    "requested_url": getattr(r, "requested_url", ""),
-                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-                })
+                row = _skip_row(r, fetch_error)
+                row["http_status"] = http_status
+                precomputed_rows[idx] = row
                 continue
             if http_status and not 200 <= http_status < 400:
-                extraction_rows.append({
-                    "url": r.url,
-                    "status": "skipped",
-                    "reason": "non_2xx_status",
-                    "http_status": http_status,
-                    "content_type": getattr(r, "content_type", ""),
-                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                    "requested_url": getattr(r, "requested_url", ""),
-                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-                })
+                row = _skip_row(r, "non_2xx_status")
+                row["http_status"] = http_status
+                precomputed_rows[idx] = row
                 continue
-            x_robots_tag = getattr(r, "x_robots_tag", "")
-            ext = extraction_cache.get(
-                r.url,
-                r.body,
-                max_chars=config.max_chars,
-                x_robots_tag=x_robots_tag,
-            )
-            if ext is None:
-                ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=x_robots_tag)
-                if ext is not None:
-                    extraction_cache.put(
-                        r.url,
-                        r.body,
-                        ext,
-                        max_chars=config.max_chars,
-                        x_robots_tag=x_robots_tag,
-                    )
+            extractable.append((idx, r))
+
+        extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
+        extraction_results: dict[int, ExtractedPage | None] = {}
+        if extraction_workers > 1 and len(extractable) > 1:
+            LOG.info("  extracting HTML with %d workers", extraction_workers)
+            with ThreadPoolExecutor(max_workers=extraction_workers) as pool:
+                extracted = pool.map(_extract_one, [r for _, r in extractable])
+                extraction_results = {
+                    idx: ext for (idx, _), ext in zip(extractable, extracted)
+                }
+        else:
+            extraction_results = {idx: _extract_one(r) for idx, r in extractable}
+
+        for idx, r in enumerate(fetched, 1):
+            precomputed = precomputed_rows.get(idx)
+            if precomputed is not None:
+                extraction_rows.append(precomputed)
+                continue
+            ext = extraction_results.get(idx)
             if ext is None or not ext.title:
-                extraction_rows.append({
-                    "url": r.url,
-                    "status": "skipped",
-                    "reason": "unusable",
-                    "http_status": getattr(r, "status", 0),
-                    "content_type": getattr(r, "content_type", ""),
-                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                    "requested_url": getattr(r, "requested_url", ""),
-                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-                })
+                extraction_rows.append(_skip_row(r, "unusable"))
                 continue
             if ext.noindex:
                 # The page asked search engines not to index it — exclude from
@@ -622,61 +652,14 @@ def run(config: PipelineConfig) -> dict:
                 # contribute to authority), but the page itself does not
                 # count toward focus / clusters / coverage / recommendations.
                 noindex_dropped += 1
-                extraction_rows.append({
-                    "url": r.url,
-                    "title": ext.title,
-                    "status": "skipped",
-                    "reason": "noindex",
-                    "source": ext.noindex_source,
-                    "http_status": getattr(r, "status", 0),
-                    "content_type": getattr(r, "content_type", ""),
-                    "canonical_url": ext.canonical_url,
-                    "robots_content": ext.robots_content,
-                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                    "noindex_source": ext.noindex_source,
-                    "nofollow": ext.nofollow,
-                    "nofollow_source": ext.nofollow_source,
-                    "meta_refresh_redirect": ext.meta_refresh_redirect,
-                    "meta_refresh_target_url": ext.meta_refresh_target_url,
-                    "title_tag_count": ext.title_tag_count,
-                    "meta_description_tag_count": ext.meta_description_tag_count,
-                    "language": ext.language or "",
-                    "word_count": ext.word_count,
-                    "requested_url": getattr(r, "requested_url", ""),
-                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-                })
+                row = _skip_row(r, "noindex", ext)
+                row["source"] = ext.noindex_source
+                extraction_rows.append(row)
                 continue
             section = section_for_url(r.url)
             embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
             if not embed_text.strip():
-                extraction_rows.append({
-                    "url": r.url,
-                    "title": ext.title,
-                    "status": "skipped",
-                    "reason": "empty_embedding_text",
-                    "http_status": getattr(r, "status", 0),
-                    "content_type": getattr(r, "content_type", ""),
-                    "canonical_url": ext.canonical_url,
-                    "robots_content": ext.robots_content,
-                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                    "noindex_source": ext.noindex_source,
-                    "nofollow": ext.nofollow,
-                    "nofollow_source": ext.nofollow_source,
-                    "meta_refresh_redirect": ext.meta_refresh_redirect,
-                    "meta_refresh_target_url": ext.meta_refresh_target_url,
-                    "title_tag_count": ext.title_tag_count,
-                    "meta_description_tag_count": ext.meta_description_tag_count,
-                    "language": ext.language or "",
-                    "word_count": ext.word_count,
-                    "requested_url": getattr(r, "requested_url", ""),
-                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-                })
+                extraction_rows.append(_skip_row(r, "empty_embedding_text", ext))
                 continue
             page = PageInfo(
                 url=r.url,
@@ -691,16 +674,13 @@ def run(config: PipelineConfig) -> dict:
             embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
             outlinks_map[r.url] = r.outlinks or []
             external_map[r.url] = r.external_links or []
-            extraction_rows.append({
-                "url": r.url,
+            row = _fetch_common_row(r)
+            row.update({
                 "title": ext.title,
                 "status": "analyzed",
                 "reason": "",
-                "http_status": getattr(r, "status", 0),
-                "content_type": getattr(r, "content_type", ""),
                 "canonical_url": ext.canonical_url,
                 "robots_content": ext.robots_content,
-                "x_robots_tag": getattr(r, "x_robots_tag", ""),
                 "noindex_source": ext.noindex_source,
                 "nofollow": ext.nofollow,
                 "nofollow_source": ext.nofollow_source,
@@ -710,12 +690,8 @@ def run(config: PipelineConfig) -> dict:
                 "meta_description_tag_count": ext.meta_description_tag_count,
                 "language": ext.language or "",
                 "word_count": ext.word_count,
-                "requested_url": getattr(r, "requested_url", ""),
-                "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
+            extraction_rows.append(row)
             if idx % 500 == 0 or idx == fetched_total:
                 LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:

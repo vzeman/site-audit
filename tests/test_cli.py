@@ -138,6 +138,8 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "--allow-large-embeddings",
             "--large-site-embedding-threshold",
             "50000",
+            "--extraction-workers",
+            "4",
         ]
     )
 
@@ -145,6 +147,7 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.technical_only is True
     assert args.allow_large_embeddings is True
     assert args.large_site_embedding_threshold == 50000
+    assert args.extraction_workers == 4
 
 
 def test_run_parser_strips_header_footer_by_default() -> None:

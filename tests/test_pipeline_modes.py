@@ -130,3 +130,37 @@ def test_pipeline_reuses_extraction_cache_on_second_run(tmp_path, monkeypatch) -
 
     assert summary["status"] == "technical_only"
     assert summary["pages"] == 2
+
+
+def test_pipeline_uses_configured_extraction_workers(tmp_path, monkeypatch) -> None:
+    calls: list[int] = []
+
+    class RecordingExecutor:
+        def __init__(self, max_workers):
+            calls.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, fn, items):
+            return [fn(item) for item in items]
+
+    monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+    monkeypatch.setattr("site_audit.pipeline.ThreadPoolExecutor", RecordingExecutor)
+
+    summary = run(
+        PipelineConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            technical_only=True,
+            extraction_workers=3,
+            save_snapshot=False,
+        )
+    )
+
+    assert summary["status"] == "technical_only"
+    assert calls == [3]
