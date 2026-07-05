@@ -91,3 +91,17 @@ def test_http_cache_reads_legacy_inline_bodies(tmp_path) -> None:
 
     assert cached is not None
     assert cached.body == body
+
+
+def test_http_cache_get_metadata_does_not_load_body(tmp_path) -> None:
+    cache = HttpCache(tmp_path / "http.sqlite")
+    url = "https://example.com/asset.js"
+    body = b"console.log('large asset');"
+    cache.put(url, 200, {"Content-Type": "application/javascript"}, body)
+
+    meta = cache.get_metadata(url)
+
+    assert meta is not None
+    assert meta["status"] == 200
+    assert meta["body_size_bytes"] == len(body)
+    assert "body" not in meta

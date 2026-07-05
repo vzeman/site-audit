@@ -14,6 +14,19 @@ class _Cache:
         return SimpleNamespace(status=status)
 
 
+class _MetadataCache:
+    def __init__(self, statuses: dict[str, int]) -> None:
+        self.statuses = statuses
+        self.calls: list[str] = []
+
+    def get_metadata(self, url: str):
+        self.calls.append(url)
+        status = self.statuses.get(url)
+        if status is None:
+            return None
+        return {"status": status, "body_size_bytes": 123}
+
+
 def test_resource_status_payload_flags_broken_javascript_from_cache() -> None:
     fetch = SimpleNamespace(
         url="https://example.com/page",
@@ -49,6 +62,28 @@ def test_resource_status_payload_flags_broken_javascript_from_cache() -> None:
             "issues": ["javascript_broken"],
         }
     ]
+
+
+def test_resource_status_memoizes_duplicate_resource_metadata_lookups() -> None:
+    shared_script = "https://example.com/shared.js"
+    fetches = [
+        SimpleNamespace(
+            url="https://example.com/one",
+            body=f"<html><head><script src='{shared_script}'></script></head></html>",
+        ),
+        SimpleNamespace(
+            url="https://example.com/two",
+            body=f"<html><head><script src='{shared_script}'></script></head></html>",
+        ),
+    ]
+    cache = _MetadataCache({shared_script: 404})
+
+    report = to_payload(analyze(fetches, http_cache=cache))
+
+    assert cache.calls == [shared_script]
+    assert report["summary"]["unique_resource_urls_checked"] == 1
+    assert report["summary"]["total_javascript"] == 2
+    assert report["summary"]["broken_javascript"] == 2
 
 
 def test_resource_status_payload_flags_broken_css_from_cache() -> None:

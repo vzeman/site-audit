@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 
 _LARGE_CSS_BYTES = 150_000
+_RESOURCE_ISSUE_SAMPLE_LIMIT = 300
 
 
 @dataclass
@@ -39,7 +40,32 @@ def _resource_type(value: str) -> str:
     return resource_type or "unknown"
 
 
-def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
+def _cached_resource_meta(url: str, http_cache=None, meta_cache: dict[str, dict | None] | None = None) -> dict | None:
+    if http_cache is None:
+        return None
+    if meta_cache is not None and url in meta_cache:
+        return meta_cache[url]
+    if hasattr(http_cache, "get_metadata"):
+        meta = http_cache.get_metadata(url)
+    else:
+        cached = http_cache.get(url)
+        meta = None
+        if cached is not None:
+            meta = {
+                "status": getattr(cached, "status", ""),
+                "body_size_bytes": len(getattr(cached, "body", b"") or b""),
+            }
+    if meta_cache is not None:
+        meta_cache[url] = meta
+    return meta
+
+
+def _linked_resources(
+    page_url: str,
+    body: str,
+    http_cache=None,
+    meta_cache: dict[str, dict | None] | None = None,
+) -> list[dict]:
     soup = BeautifulSoup(body or "", "html.parser")
     resources: list[dict] = []
     for tag in soup.find_all("script"):
@@ -47,12 +73,12 @@ def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
         if not src:
             continue
         absolute_url = urljoin(page_url, src)
-        cached = http_cache.get(absolute_url) if http_cache is not None else None
+        meta = _cached_resource_meta(absolute_url, http_cache, meta_cache)
         resources.append({
             "type": "javascript",
             "src": absolute_url,
-            "http_status": getattr(cached, "status", "") if cached is not None else "",
-            "size_bytes": len(getattr(cached, "body", b"") or b"") if cached is not None else "",
+            "http_status": (meta or {}).get("status", ""),
+            "size_bytes": (meta or {}).get("body_size_bytes", ""),
         })
     for tag in soup.find_all("link"):
         rel = tag.get("rel") or []
@@ -64,21 +90,26 @@ def _linked_resources(page_url: str, body: str, http_cache=None) -> list[dict]:
         if not href:
             continue
         absolute_url = urljoin(page_url, href)
-        cached = http_cache.get(absolute_url) if http_cache is not None else None
+        meta = _cached_resource_meta(absolute_url, http_cache, meta_cache)
         resources.append({
             "type": "css",
             "src": absolute_url,
-            "http_status": getattr(cached, "status", "") if cached is not None else "",
-            "size_bytes": len(getattr(cached, "body", b"") or b"") if cached is not None else "",
+            "http_status": (meta or {}).get("status", ""),
+            "size_bytes": (meta or {}).get("body_size_bytes", ""),
         })
     return resources
 
 
-def _resource_items(fetch, http_cache=None) -> list[dict]:
+def _resource_items(fetch, http_cache=None, meta_cache: dict[str, dict | None] | None = None) -> list[dict]:
     explicit = getattr(fetch, "resource_items", None)
     if explicit is not None:
         return [dict(item) for item in explicit]
-    return _linked_resources(getattr(fetch, "url", "") or "", getattr(fetch, "body", "") or "", http_cache)
+    return _linked_resources(
+        getattr(fetch, "url", "") or "",
+        getattr(fetch, "body", "") or "",
+        http_cache,
+        meta_cache,
+    )
 
 
 def _resource_issues(item: dict, page_url: str = "") -> list[str]:
@@ -105,18 +136,24 @@ def _resource_issues(item: dict, page_url: str = "") -> list[str]:
     return issues
 
 
-def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport:
+def analyze(
+    fetched_pages: Iterable,
+    *,
+    http_cache=None,
+    resource_issue_sample_limit: int = _RESOURCE_ISSUE_SAMPLE_LIMIT,
+) -> ResourceStatusReport:
     fetched_list = list(fetched_pages)
     issues_by_type: Counter[str] = Counter()
     resource_type_counts: Counter[str] = Counter()
     per_page: list[dict] = []
     resources_with_issues: list[dict] = []
     pages_with_issues = 0
+    resource_meta_cache: dict[str, dict | None] = {}
 
     for fetch in fetched_list:
         page_url = getattr(fetch, "url", "") or ""
         page_title = getattr(fetch, "title", "") or ""
-        resources = _resource_items(fetch, http_cache)
+        resources = _resource_items(fetch, http_cache, resource_meta_cache)
         page_issues: Counter[str] = Counter()
         page_resource_type_counts: Counter[str] = Counter()
         for idx, item in enumerate(resources):
@@ -128,17 +165,18 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
                 continue
             page_issues.update(issues)
             issues_by_type.update(issues)
-            resources_with_issues.append({
-                "url": page_url,
-                "title": page_title,
-                "index": idx,
-                "type": resource_type,
-                "src": item.get("src") or item.get("url") or "",
-                "http_status": item.get("http_status", item.get("status", "")),
-                "redirect_target_url": item.get("redirect_target_url", ""),
-                "size_bytes": item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", ""))),
-                "issues": issues,
-            })
+            if len(resources_with_issues) < resource_issue_sample_limit:
+                resources_with_issues.append({
+                    "url": page_url,
+                    "title": page_title,
+                    "index": idx,
+                    "type": resource_type,
+                    "src": item.get("src") or item.get("url") or "",
+                    "http_status": item.get("http_status", item.get("status", "")),
+                    "redirect_target_url": item.get("redirect_target_url", ""),
+                    "size_bytes": item.get("size_bytes", item.get("file_size_bytes", item.get("content_length_bytes", ""))),
+                    "issues": issues,
+                })
         if page_issues:
             pages_with_issues += 1
         per_page.append({
@@ -166,13 +204,15 @@ def analyze(fetched_pages: Iterable, *, http_cache=None) -> ResourceStatusReport
         "https_pages_linking_to_http_css": issues_by_type.get("https_page_links_to_http_css", 0),
         "redirected_javascript": issues_by_type.get("javascript_redirects", 0),
         "redirected_css": issues_by_type.get("css_redirects", 0),
+        "unique_resource_urls_checked": len(resource_meta_cache),
+        "resource_issue_sample_limit": resource_issue_sample_limit,
     }
     per_page.sort(key=lambda row: (-row["issue_count"], -row["resource_count"], row["url"]))
     return ResourceStatusReport(
         summary=summary,
         issues_by_type=dict(issues_by_type),
         per_page=per_page,
-        resources_with_issues=resources_with_issues[:300],
+        resources_with_issues=resources_with_issues,
     )
 
 

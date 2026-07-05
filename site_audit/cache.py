@@ -40,6 +40,15 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _safe_int(value) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 # --- HTTP cache --------------------------------------------------------------
 
 _HTTP_SCHEMA = """
@@ -147,6 +156,32 @@ class HttpCache:
             content_type=row[7],
             canonical_url=row[8],
         )
+
+    def get_metadata(self, url: str) -> Optional[dict]:
+        """Return cached response metadata without loading the response body."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status, headers, fetched_at, etag, last_modified, content_type, "
+                "canonical_url, body_size_bytes "
+                "FROM responses WHERE url = ?",
+                (url,),
+            ).fetchone()
+        if not row:
+            return None
+        headers = json.loads(row[1])
+        size = _safe_int(row[7])
+        if not size:
+            size = _safe_int(headers.get("Content-Length") or headers.get("content-length"))
+        return {
+            "status": int(row[0]),
+            "headers": headers,
+            "fetched_at": row[2],
+            "etag": row[3],
+            "last_modified": row[4],
+            "content_type": row[5],
+            "canonical_url": row[6],
+            "body_size_bytes": size,
+        }
 
     def put(
         self,
