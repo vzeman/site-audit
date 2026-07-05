@@ -127,6 +127,26 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.competitive_auto_refresh_serp is True
 
 
+def test_run_parser_accepts_large_audit_mode_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "example.com",
+            "--preset",
+            "technical",
+            "--technical-only",
+            "--allow-large-embeddings",
+            "--large-site-embedding-threshold",
+            "50000",
+        ]
+    )
+
+    assert args.preset == "technical"
+    assert args.technical_only is True
+    assert args.allow_large_embeddings is True
+    assert args.large_site_embedding_threshold == 50000
+
+
 def test_run_parser_strips_header_footer_by_default() -> None:
     args = build_parser().parse_args(["run", "example.com"])
 

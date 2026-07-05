@@ -101,6 +101,10 @@ def _run_command(args: argparse.Namespace) -> int:
             shutil.rmtree(cache_dir)
             print(f"  cleaned cache: {cache_dir}")
 
+    preset = args.preset
+    technical_only = args.technical_only or preset == "technical"
+    allow_large_embeddings = args.allow_large_embeddings or preset == "full-content"
+
     config = PipelineConfig(
         domain=args.domain,
         projects_root=Path(args.projects_root),
@@ -123,6 +127,10 @@ def _run_command(args: argparse.Namespace) -> int:
         content_exclude_classes=args.content_exclude_class,
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
+        audit_preset=preset,
+        technical_only=technical_only,
+        allow_large_embeddings=allow_large_embeddings,
+        large_site_embedding_threshold=args.large_site_embedding_threshold,
         enable_cluster_labels=not args.no_cluster_labels,
         enable_keyword_coverage=not args.no_keyword_coverage,
         enable_answerability=not args.no_answerability,
@@ -209,6 +217,19 @@ def _run_command(args: argparse.Namespace) -> int:
         print("No pages were processed — check the domain and try again.")
         return 1
     print("\nDone.")
+    if summary.get("status") in {"technical_only", "stopped_before_large_embedding"}:
+        print(f"  status:              {summary['status']}")
+        if summary.get("message"):
+            print(f"  note:                {summary['message']}")
+        print(f"  pages:               {summary['pages']}")
+        print(f"  technical issues:    {summary.get('technical_issues', 0)}")
+        print(f"  high issues:         {summary.get('high_technical_issues', 0)}")
+        print(f"  link edges:          {summary.get('linkgraph_edges', 0)}")
+        print(f"  orphans:             {summary.get('linkgraph_orphans', 0)}")
+        print(f"  cited domains:       {summary.get('external_domains', 0)}")
+        print(f"  broken outbound:     {summary.get('broken_external', 0)}")
+        print(f"  report dir:          {summary['report_dir']}")
+        return 0
     print(f"  pages:               {summary['pages']}")
     print(f"  raw focus:           {summary['site_focus_score']:.4f}")
     print(f"  calibrated focus:    {summary.get('calibrated_focus', 0):.4f}")
@@ -1147,6 +1168,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--output-dir", default=None, help="Override report directory")
     run_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
     run_p.add_argument("--max-pages", type=int, default=10000)
+    run_p.add_argument("--preset", choices=["technical", "standard", "full-content"], default="standard",
+                       help="Audit preset: technical skips embeddings, standard safeguards large crawls, full-content allows large embeddings")
+    run_p.add_argument("--technical-only", action="store_true",
+                       help="Write crawl/indexability/technical SEO exports and skip semantic embeddings")
+    run_p.add_argument("--allow-large-embeddings", action="store_true",
+                       help="Allow semantic embedding stages even when the crawl exceeds the large-site threshold")
+    run_p.add_argument("--large-site-embedding-threshold", type=int, default=20000,
+                       help="Page count above which standard runs stop after technical exports unless large embeddings are allowed")
     run_p.add_argument("--workers", type=int, default=8)
     run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)

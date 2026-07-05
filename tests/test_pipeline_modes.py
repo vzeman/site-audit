@@ -1,0 +1,111 @@
+import json
+
+import pytest
+
+from site_audit.crawler import FetchResult
+from site_audit.pipeline import PipelineConfig, run
+
+
+HTML = """
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>{title}</title>
+    <meta name="description" content="{title} description for testing">
+    <link rel="canonical" href="{url}">
+  </head>
+  <body>
+    <h1>{title}</h1>
+    <p>This page has enough body copy for extraction and technical audit tests.</p>
+    <a href="{next_url}">Next</a>
+    <a href="https://external.example/page">External</a>
+  </body>
+</html>
+"""
+
+
+class FakeCrawler:
+    sitemap_entries = []
+    sitemap_errors = []
+    robots_txt_info = {}
+
+    def __init__(self, config, cache):
+        self.config = config
+        self.cache = cache
+
+    def discover_and_crawl(self):
+        base = "https://example.com"
+        return [
+            FetchResult(
+                url=f"{base}/",
+                status=200,
+                body=HTML.format(title="Home", url=f"{base}/", next_url=f"{base}/two"),
+                content_type="text/html",
+                from_cache=False,
+                outlinks=[(f"{base}/two", "Next")],
+                external_links=[("https://external.example/page", "External")],
+            ),
+            FetchResult(
+                url=f"{base}/two",
+                status=200,
+                body=HTML.format(title="Second", url=f"{base}/two", next_url=f"{base}/"),
+                content_type="text/html",
+                from_cache=False,
+                outlinks=[(f"{base}/", "Home")],
+                external_links=[],
+            ),
+        ]
+
+
+class FailingEmbedder:
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("Embedder should not be loaded")
+
+
+def test_technical_only_pipeline_writes_bundle_without_embeddings(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+
+    summary = run(
+        PipelineConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            technical_only=True,
+            save_snapshot=False,
+        )
+    )
+
+    report_dir = tmp_path / "example.com" / "report"
+    run_summary = json.loads((report_dir / "run_summary.json").read_text())
+
+    assert summary["status"] == "technical_only"
+    assert summary["pages"] == 2
+    assert (report_dir / "technical_issues.json").is_file()
+    assert (report_dir / "technical_pages.csv").is_file()
+    assert (report_dir / "stage_timings.json").is_file()
+    assert run_summary["mode"] == "technical"
+    assert run_summary["summary"]["pages"] == 2
+
+
+def test_large_site_safeguard_writes_technical_bundle_without_embeddings(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+
+    summary = run(
+        PipelineConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            large_site_embedding_threshold=1,
+            save_snapshot=False,
+        )
+    )
+
+    report_dir = tmp_path / "example.com" / "report"
+    run_summary = json.loads((report_dir / "run_summary.json").read_text())
+
+    assert summary["status"] == "stopped_before_large_embedding"
+    assert summary["pages"] == 2
+    assert "Stopped before embedding 2 pages" in summary["message"]
+    assert (report_dir / "technical_issues.csv").is_file()
+    assert run_summary["mode"] == "large_site_embedding_safeguard"
+

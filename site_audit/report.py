@@ -36,8 +36,16 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
         path.write_text("")
         return
+    fieldnames: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            if key in seen:
+                continue
+            seen.add(key)
+            fieldnames.append(key)
     with open(path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -181,6 +189,78 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
     _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
     _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
     _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
+
+
+def write_technical_audit_bundle(
+    output_dir: Path,
+    *,
+    domain: str,
+    mode: str,
+    summary: dict,
+    timings: list[dict],
+    technical_seo: dict,
+    indexability: dict | None = None,
+    sitemap_coverage: dict | None = None,
+    canonical_consistency: dict | None = None,
+    performance: dict | None = None,
+    resource_status: dict | None = None,
+    metadata_quality: dict | None = None,
+    media_accessibility: dict | None = None,
+    page_types: dict | None = None,
+    entities: dict | None = None,
+    freshness: dict | None = None,
+    conversion: dict | None = None,
+    structured_data: dict | None = None,
+    external_links: dict | None = None,
+    linkgraph: dict | None = None,
+) -> None:
+    """Write the non-embedding technical audit bundle.
+
+    This is intentionally JSON/CSV-first. The existing rich HTML report assumes
+    an embedding-backed ``AuditResult``; technical-only runs should not have to
+    load a model just to serialize crawl/indexability/resource findings.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _copy_report_docs(output_dir)
+    _write_json(
+        output_dir / "run_summary.json",
+        {
+            "domain": domain,
+            "mode": mode,
+            "summary": summary,
+            "stage_timings": timings,
+        },
+    )
+    if indexability is not None:
+        _write_json(output_dir / "indexability.json", indexability)
+        write_indexability_issues_csv(output_dir, indexability)
+    if sitemap_coverage is not None:
+        write_sitemap_coverage_exports(output_dir, sitemap_coverage)
+    if canonical_consistency is not None:
+        write_canonical_consistency_exports(output_dir, canonical_consistency)
+    if performance is not None:
+        _write_json(output_dir / "performance.json", performance)
+    if resource_status is not None:
+        _write_json(output_dir / "resource_status.json", resource_status)
+    if metadata_quality is not None:
+        _write_json(output_dir / "metadata_quality.json", metadata_quality)
+    if media_accessibility is not None:
+        _write_json(output_dir / "media_accessibility.json", media_accessibility)
+    if page_types is not None:
+        _write_json(output_dir / "page_types.json", page_types)
+    if entities is not None:
+        _write_json(output_dir / "entities.json", entities)
+    if freshness is not None:
+        _write_json(output_dir / "freshness.json", freshness)
+    if conversion is not None:
+        _write_json(output_dir / "conversion.json", conversion)
+    if structured_data is not None:
+        _write_json(output_dir / "structured_data.json", structured_data)
+    if external_links is not None:
+        _write_json(output_dir / "external_links.json", external_links)
+    if linkgraph is not None:
+        _write_json(output_dir / "linkgraph.json", _slim_linkgraph_payload(linkgraph))
+    write_technical_seo_exports(output_dir, technical_seo)
 
 
 def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:

@@ -20,7 +20,10 @@ Library users can also call ``run`` directly with a ``PipelineConfig``.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -127,7 +130,7 @@ from .performance import to_payload as performance_payload
 from .performance_explainer import build_performance_explainer
 from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
-from .report import build_duplicate_rows, build_outlier_rows, write_all
+from .report import build_duplicate_rows, build_outlier_rows, write_all, write_technical_audit_bundle
 from .resource_status import analyze as analyze_resource_status
 from .resource_status import to_payload as resource_status_payload
 from .scatter import project
@@ -143,6 +146,104 @@ from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
+
+
+class StageTimings:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    @contextmanager
+    def track(self, name: str, **meta):
+        started = time.perf_counter()
+        LOG.info("  stage start: %s", name)
+        status = "ok"
+        try:
+            yield
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            elapsed = time.perf_counter() - started
+            row = {"stage": name, "status": status, "seconds": round(elapsed, 3)}
+            row.update({k: v for k, v in meta.items() if v is not None})
+            self.rows.append(row)
+            LOG.info("  stage done: %s in %.1fs (%s)", name, elapsed, status)
+
+    def write(self, report_dir: Path) -> None:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / "stage_timings.json").write_text(
+            json.dumps({"stages": self.rows}, indent=2),
+            encoding="utf-8",
+        )
+
+
+def _basic_linkgraph_payload(
+    pages: list[PageInfo],
+    outlinks_map: dict[str, list[tuple[str, str]]],
+    indexability: dict,
+) -> dict:
+    urls = {p.url for p in pages}
+    status_by_url: dict[str, int] = {}
+    for row in (
+        list((indexability or {}).get("per_page") or [])
+        + list((indexability or {}).get("skipped") or [])
+        + list((indexability or {}).get("noindex_pages") or [])
+    ):
+        url = row.get("url")
+        if url:
+            status_by_url[url] = int(row.get("http_status") or row.get("status_code") or 0)
+
+    incoming: dict[str, set[str]] = {url: set() for url in urls}
+    rows: list[dict] = []
+    edge_count = 0
+    for page in pages:
+        links = [(link, anchor) for link, anchor in outlinks_map.get(page.url, []) if link in urls]
+        edge_count += len(links)
+        for link, _ in links:
+            incoming.setdefault(link, set()).add(page.url)
+        http_links = [link for link, _ in links if urlparse(link).scheme.lower() == "http"]
+        https_links = [link for link, _ in links if urlparse(link).scheme.lower() == "https"]
+        broken_links = [link for link, _ in links if status_by_url.get(link, 0) >= 400]
+        redirect_links = [link for link, _ in links if 300 <= status_by_url.get(link, 0) < 400]
+        rows.append({
+            "url": page.url,
+            "in_degree": 0,
+            "out_degree": len(links),
+            "click_depth": "",
+            "raw_internal_link_count": len(links),
+            "internal_http_link_count": len(http_links),
+            "internal_http_links": http_links[:50],
+            "internal_https_link_count": len(https_links),
+            "internal_https_links": https_links[:50],
+            "broken_internal_link_count": len(broken_links),
+            "broken_internal_links": broken_links[:50],
+            "redirect_internal_link_count": len(redirect_links),
+            "redirect_internal_links": redirect_links[:50],
+            "incoming_nofollow_internal_link_count": 0,
+            "incoming_dofollow_internal_link_count": 0,
+            "incoming_nofollow_internal_links": [],
+            "incoming_dofollow_internal_links": [],
+            "outgoing_nofollow_internal_link_count": 0,
+            "outgoing_nofollow_internal_links": [],
+        })
+
+    row_by_url = {row["url"]: row for row in rows}
+    for url, sources in incoming.items():
+        row = row_by_url.get(url)
+        if row is None:
+            continue
+        row["in_degree"] = len(sources)
+        row["incoming_dofollow_internal_link_count"] = len(sources)
+        row["incoming_dofollow_internal_links"] = sorted(sources)[:50]
+
+    orphan_count = sum(1 for row in rows if int(row.get("in_degree") or 0) == 0)
+    return {
+        "edge_count": edge_count,
+        "orphan_count": orphan_count,
+        "max_click_depth": 0,
+        "page_link_counts": rows,
+        "recommendations": [],
+    }
 
 
 def _canonical_dedupe_key(url: str) -> str:
@@ -274,6 +375,10 @@ class PipelineConfig:
     sitemap_lastmod_within_days: Optional[int] = None
     skip_scatterplot: bool = False
     max_chars: int = 4000
+    audit_preset: str = "standard"
+    technical_only: bool = False
+    allow_large_embeddings: bool = False
+    large_site_embedding_threshold: int = 20000
 
     # New analyses
     enable_cluster_labels: bool = True
@@ -397,6 +502,7 @@ def _search_payload_usable(payload: dict) -> bool:
 def run(config: PipelineConfig) -> dict:
     host = _domain_only(config.domain)
     cache_dir, report_dir = project_paths(config)
+    stage_timings = StageTimings()
 
     LOG.info("=== site-audit run for %s ===", host)
     LOG.info("  cache:  %s", cache_dir)
@@ -404,9 +510,6 @@ def run(config: PipelineConfig) -> dict:
 
     http_cache = HttpCache(cache_dir / "http.sqlite")
     http_cache.clean_tracking_duplicates(min_candidates=100)
-    embed_cache = EmbeddingCache(
-        cache_dir / f"embeddings_{config.model.replace('/', '_').replace('-', '_')}.npz"
-    )
 
     # 1) Crawl
     crawl_config = CrawlConfig(
@@ -430,7 +533,8 @@ def run(config: PipelineConfig) -> dict:
         sitemap_lastmod_within_days=config.sitemap_lastmod_within_days,
     )
     crawler = Crawler(crawl_config, http_cache)
-    fetched = crawler.discover_and_crawl()
+    with stage_timings.track("crawl", max_pages=config.max_pages, workers=config.max_workers):
+        fetched = crawler.discover_and_crawl()
     LOG.info("  fetched %d pages (cache: %s)", len(fetched), http_cache.stats())
 
     # 2) Extract
@@ -443,68 +547,137 @@ def run(config: PipelineConfig) -> dict:
 
     noindex_dropped = 0
     fetched_total = len(fetched)
-    for idx, r in enumerate(fetched, 1):
-        http_status = int(getattr(r, "status", 0) or 0)
-        fetch_error = getattr(r, "error", "") or ""
-        if fetch_error:
-            extraction_rows.append({
-                "url": r.url,
-                "status": "skipped",
-                "reason": fetch_error,
-                "http_status": http_status,
-                "content_type": getattr(r, "content_type", ""),
-                "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                "requested_url": getattr(r, "requested_url", ""),
-                "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-            })
-            continue
-        if http_status and not 200 <= http_status < 400:
-            extraction_rows.append({
-                "url": r.url,
-                "status": "skipped",
-                "reason": "non_2xx_status",
-                "http_status": http_status,
-                "content_type": getattr(r, "content_type", ""),
-                "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                "requested_url": getattr(r, "requested_url", ""),
-                "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-            })
-            continue
-        ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
-        if ext is None or not ext.title:
-            extraction_rows.append({
-                "url": r.url,
-                "status": "skipped",
-                "reason": "unusable",
-                "http_status": getattr(r, "status", 0),
-                "content_type": getattr(r, "content_type", ""),
-                "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                "requested_url": getattr(r, "requested_url", ""),
-                "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-            })
-            continue
-        if ext.noindex:
-            # The page asked search engines not to index it — exclude from
-            # the analysis corpus. We still consumed its outlinks during
-            # the crawl (so internal links from a noindex landing page
-            # contribute to authority), but the page itself does not
-            # count toward focus / clusters / coverage / recommendations.
-            noindex_dropped += 1
+    with stage_timings.track("extraction", fetched_pages=fetched_total):
+        for idx, r in enumerate(fetched, 1):
+            http_status = int(getattr(r, "status", 0) or 0)
+            fetch_error = getattr(r, "error", "") or ""
+            if fetch_error:
+                extraction_rows.append({
+                    "url": r.url,
+                    "status": "skipped",
+                    "reason": fetch_error,
+                    "http_status": http_status,
+                    "content_type": getattr(r, "content_type", ""),
+                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                    "requested_url": getattr(r, "requested_url", ""),
+                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+                })
+                continue
+            if http_status and not 200 <= http_status < 400:
+                extraction_rows.append({
+                    "url": r.url,
+                    "status": "skipped",
+                    "reason": "non_2xx_status",
+                    "http_status": http_status,
+                    "content_type": getattr(r, "content_type", ""),
+                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                    "requested_url": getattr(r, "requested_url", ""),
+                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+                })
+                continue
+            ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=getattr(r, "x_robots_tag", ""))
+            if ext is None or not ext.title:
+                extraction_rows.append({
+                    "url": r.url,
+                    "status": "skipped",
+                    "reason": "unusable",
+                    "http_status": getattr(r, "status", 0),
+                    "content_type": getattr(r, "content_type", ""),
+                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                    "requested_url": getattr(r, "requested_url", ""),
+                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+                })
+                continue
+            if ext.noindex:
+                # The page asked search engines not to index it — exclude from
+                # the analysis corpus. We still consumed its outlinks during
+                # the crawl (so internal links from a noindex landing page
+                # contribute to authority), but the page itself does not
+                # count toward focus / clusters / coverage / recommendations.
+                noindex_dropped += 1
+                extraction_rows.append({
+                    "url": r.url,
+                    "title": ext.title,
+                    "status": "skipped",
+                    "reason": "noindex",
+                    "source": ext.noindex_source,
+                    "http_status": getattr(r, "status", 0),
+                    "content_type": getattr(r, "content_type", ""),
+                    "canonical_url": ext.canonical_url,
+                    "robots_content": ext.robots_content,
+                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                    "noindex_source": ext.noindex_source,
+                    "nofollow": ext.nofollow,
+                    "nofollow_source": ext.nofollow_source,
+                    "meta_refresh_redirect": ext.meta_refresh_redirect,
+                    "meta_refresh_target_url": ext.meta_refresh_target_url,
+                    "title_tag_count": ext.title_tag_count,
+                    "meta_description_tag_count": ext.meta_description_tag_count,
+                    "language": ext.language or "",
+                    "word_count": ext.word_count,
+                    "requested_url": getattr(r, "requested_url", ""),
+                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+                })
+                continue
+            section = section_for_url(r.url)
+            embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
+            if not embed_text.strip():
+                extraction_rows.append({
+                    "url": r.url,
+                    "title": ext.title,
+                    "status": "skipped",
+                    "reason": "empty_embedding_text",
+                    "http_status": getattr(r, "status", 0),
+                    "content_type": getattr(r, "content_type", ""),
+                    "canonical_url": ext.canonical_url,
+                    "robots_content": ext.robots_content,
+                    "x_robots_tag": getattr(r, "x_robots_tag", ""),
+                    "noindex_source": ext.noindex_source,
+                    "nofollow": ext.nofollow,
+                    "nofollow_source": ext.nofollow_source,
+                    "meta_refresh_redirect": ext.meta_refresh_redirect,
+                    "meta_refresh_target_url": ext.meta_refresh_target_url,
+                    "title_tag_count": ext.title_tag_count,
+                    "meta_description_tag_count": ext.meta_description_tag_count,
+                    "language": ext.language or "",
+                    "word_count": ext.word_count,
+                    "requested_url": getattr(r, "requested_url", ""),
+                    "redirect_target_url": getattr(r, "redirect_target_url", ""),
+                    "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
+                    "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
+                    "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
+                })
+                continue
+            page = PageInfo(
+                url=r.url,
+                title=ext.title,
+                description=ext.description,
+                section=section,
+                word_count=ext.word_count,
+                language=ext.language,
+            )
+            pages.append(page)
+            extracted_pages.append(ext)
+            embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
+            outlinks_map[r.url] = r.outlinks or []
+            external_map[r.url] = r.external_links or []
             extraction_rows.append({
                 "url": r.url,
                 "title": ext.title,
-                "status": "skipped",
-                "reason": "noindex",
-                "source": ext.noindex_source,
+                "status": "analyzed",
+                "reason": "",
                 "http_status": getattr(r, "status", 0),
                 "content_type": getattr(r, "content_type", ""),
                 "canonical_url": ext.canonical_url,
@@ -525,76 +698,8 @@ def run(config: PipelineConfig) -> dict:
                 "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
                 "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
             })
-            continue
-        section = section_for_url(r.url)
-        embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
-        if not embed_text.strip():
-            extraction_rows.append({
-                "url": r.url,
-                "title": ext.title,
-                "status": "skipped",
-                "reason": "empty_embedding_text",
-                "http_status": getattr(r, "status", 0),
-                "content_type": getattr(r, "content_type", ""),
-                "canonical_url": ext.canonical_url,
-                "robots_content": ext.robots_content,
-                "x_robots_tag": getattr(r, "x_robots_tag", ""),
-                "noindex_source": ext.noindex_source,
-                "nofollow": ext.nofollow,
-                "nofollow_source": ext.nofollow_source,
-                "meta_refresh_redirect": ext.meta_refresh_redirect,
-                "meta_refresh_target_url": ext.meta_refresh_target_url,
-                "title_tag_count": ext.title_tag_count,
-                "meta_description_tag_count": ext.meta_description_tag_count,
-                "language": ext.language or "",
-                "word_count": ext.word_count,
-                "requested_url": getattr(r, "requested_url", ""),
-                "redirect_target_url": getattr(r, "redirect_target_url", ""),
-                "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-                "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-                "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-            })
-            continue
-        page = PageInfo(
-            url=r.url,
-            title=ext.title,
-            description=ext.description,
-            section=section,
-            word_count=ext.word_count,
-            language=ext.language,
-        )
-        pages.append(page)
-        extracted_pages.append(ext)
-        embed_inputs.append(EmbedInput(url=r.url, text=embed_text))
-        outlinks_map[r.url] = r.outlinks or []
-        external_map[r.url] = r.external_links or []
-        extraction_rows.append({
-            "url": r.url,
-            "title": ext.title,
-            "status": "analyzed",
-            "reason": "",
-            "http_status": getattr(r, "status", 0),
-            "content_type": getattr(r, "content_type", ""),
-            "canonical_url": ext.canonical_url,
-            "robots_content": ext.robots_content,
-            "x_robots_tag": getattr(r, "x_robots_tag", ""),
-            "noindex_source": ext.noindex_source,
-            "nofollow": ext.nofollow,
-            "nofollow_source": ext.nofollow_source,
-            "meta_refresh_redirect": ext.meta_refresh_redirect,
-            "meta_refresh_target_url": ext.meta_refresh_target_url,
-            "title_tag_count": ext.title_tag_count,
-            "meta_description_tag_count": ext.meta_description_tag_count,
-            "language": ext.language or "",
-            "word_count": ext.word_count,
-            "requested_url": getattr(r, "requested_url", ""),
-            "redirect_target_url": getattr(r, "redirect_target_url", ""),
-            "redirect_chain": list(getattr(r, "redirect_chain", []) or []),
-            "redirect_hop_count": int(getattr(r, "redirect_hop_count", 0) or 0),
-            "redirect_status_codes": list(getattr(r, "redirect_status_codes", []) or []),
-        })
-        if idx % 500 == 0 or idx == fetched_total:
-            LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
+            if idx % 500 == 0 or idx == fetched_total:
+                LOG.info("  extracted %d / %d fetched pages (%d usable)", idx, fetched_total, len(pages))
     if noindex_dropped:
         LOG.info("  dropped %d noindex pages (meta robots / X-Robots-Tag)", noindex_dropped)
 
@@ -616,20 +721,21 @@ def run(config: PipelineConfig) -> dict:
 
     LOG.info("  prepared %d pages for embedding", len(pages))
 
-    indexability_data = indexability_payload(
-        analyze_indexability(fetched, extraction_rows, {p.url for p in pages})
-    )
-    sitemap_coverage_data = analyze_sitemap_coverage(
-        getattr(crawler, "sitemap_entries", []),
-        fetched,
-        extraction_rows,
-        indexability_data,
-        sitemap_errors=getattr(crawler, "sitemap_errors", []),
-    )
-    canonical_consistency_data = analyze_canonical_consistency(
-        extraction_rows,
-        indexability_data,
-    )
+    with stage_timings.track("technical-foundation", pages=len(pages)):
+        indexability_data = indexability_payload(
+            analyze_indexability(fetched, extraction_rows, {p.url for p in pages})
+        )
+        sitemap_coverage_data = analyze_sitemap_coverage(
+            getattr(crawler, "sitemap_entries", []),
+            fetched,
+            extraction_rows,
+            indexability_data,
+            sitemap_errors=getattr(crawler, "sitemap_errors", []),
+        )
+        canonical_consistency_data = analyze_canonical_consistency(
+            extraction_rows,
+            indexability_data,
+        )
     ix_summary = indexability_data.get("summary", {}) or {}
     LOG.info(
         "  indexability: %.0f%% analyzed · %d noindex · %d skipped",
@@ -672,13 +778,204 @@ def run(config: PipelineConfig) -> dict:
         rs_summary.get("broken_javascript", 0),
     )
 
-    # 3) Embed pages (model loaded here, reused below for queries)
-    embedder = Embedder(config.model)
-    embeddings = embedder.encode_pages(
-        embed_inputs,
-        embed_cache,
-        use_cache=config.use_embedding_cache,
+    metadata_quality_data = metadata_quality_payload(analyze_metadata_quality(extracted_pages))
+    mq_summary = metadata_quality_data.get("summary", {}) or {}
+    LOG.info(
+        "  metadata quality: %.0f%% pages with issues · %d missing descriptions · %d missing canonicals",
+        (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
+        mq_summary.get("missing_description", 0),
+        mq_summary.get("missing_canonical", 0),
     )
+
+    media_accessibility_data = media_accessibility_payload(analyze_media_accessibility(extracted_pages))
+    ma_summary = media_accessibility_data.get("summary", {}) or {}
+    LOG.info(
+        "  media accessibility: %.0f%% pages with issues · %d missing image alts · %d videos without captions",
+        (ma_summary.get("issue_share", 0.0) or 0.0) * 100,
+        ma_summary.get("images_missing_alt", 0),
+        ma_summary.get("videos_missing_captions", 0),
+    )
+
+    freshness_data = freshness_payload(analyze_freshness(extracted_pages))
+    fr_summary = freshness_data.get("summary", {}) or {}
+    LOG.info(
+        "  freshness: %.0f%% date coverage · %d stale · %d missing dates",
+        (fr_summary.get("date_coverage", 0.0) or 0.0) * 100,
+        fr_summary.get("pages_stale", 0),
+        fr_summary.get("missing_dates", 0),
+    )
+
+    conversion_data = conversion_payload(analyze_conversion(extracted_pages))
+    cv_summary = conversion_data.get("summary", {}) or {}
+    LOG.info(
+        "  conversion: %.0f%% CTA coverage · %.0f%% primary CTA coverage · %d forms · %d lead pages without capture",
+        (cv_summary.get("cta_coverage", 0.0) or 0.0) * 100,
+        (cv_summary.get("primary_cta_coverage", 0.0) or 0.0) * 100,
+        cv_summary.get("total_forms", 0),
+        cv_summary.get("lead_pages_without_capture", 0),
+    )
+
+    page_types_data = page_types_payload(analyze_page_types(extracted_pages))
+    pt_summary = page_types_data.get("summary", {}) or {}
+    LOG.info(
+        "  page types: %d types · %d template families · dominant %s / %s",
+        pt_summary.get("page_type_count", 0),
+        pt_summary.get("template_family_count", 0),
+        pt_summary.get("dominant_page_type", "—"),
+        pt_summary.get("dominant_template_family", "—"),
+    )
+
+    entities_data = entities_payload(analyze_entities(extracted_pages))
+    ent_summary = entities_data.get("summary", {}) or {}
+    LOG.info(
+        "  entities: %d unique · %.0f%% coverage · authority %.1f",
+        ent_summary.get("unique_entities", 0),
+        (ent_summary.get("entity_coverage", 0.0) or 0.0) * 100,
+        ent_summary.get("topical_authority_score", 0.0),
+    )
+
+    structured_data_data = structured_data_payload(analyze_structured_data(extracted_pages))
+    external_payload_data: dict = {}
+    if config.enable_external_links:
+        word_counts = {p.url: p.word_count for p in pages}
+        pages_with_external = [(p.url, external_map.get(p.url, [])) for p in pages]
+        ext_result = analyze_external(
+            pages,
+            word_counts,
+            pages_with_external,
+            check_links=config.check_external_links,
+            http_cache=http_cache,
+            max_workers=config.max_workers,
+        )
+        external_payload_data = external_payload(ext_result)
+        LOG.info(
+            "  external links: %d distinct domains, top %s ; %d broken (%s)",
+            len(ext_result.top_domains),
+            ext_result.top_domains[0]["domain"] if ext_result.top_domains else "—",
+            len(ext_result.broken_links),
+            "checked" if config.check_external_links else "not checked",
+        )
+
+    def _write_pre_embedding_technical(mode: str, status: str, message: str = "") -> dict:
+        with stage_timings.track("technical-report", mode=mode):
+            technical_link_payload = (
+                _basic_linkgraph_payload(pages, outlinks_map, indexability_data)
+                if config.enable_linkgraph
+                else {}
+            )
+            technical_seo_data = build_technical_seo(
+                pages,
+                indexability=indexability_data,
+                metadata_quality=metadata_quality_data,
+                performance=performance_data,
+                canonical_consistency=canonical_consistency_data,
+                linkgraph=technical_link_payload,
+                search_payload={},
+                page_types=page_types_data,
+                header_analysis={},
+                structured_data=structured_data_data,
+                media_accessibility=media_accessibility_data,
+                resource_status=resource_status_data,
+                sitemap_coverage=sitemap_coverage_data,
+                external_links=external_payload_data,
+                robots_txt=getattr(crawler, "robots_txt_info", {}),
+                duplicate_rows=[],
+            )
+            tech_summary = technical_seo_data.get("summary", {}) or {}
+            run_summary = {
+                "status": status,
+                "message": message,
+                "preset": config.audit_preset,
+                "pages": len(pages),
+                "fetched_pages": len(fetched),
+                "skipped_pages": len([r for r in extraction_rows if r.get("status") == "skipped"]),
+                "noindex_dropped": noindex_dropped,
+                "canonical_duplicates_dropped": canonical_dropped,
+                "technical_issues": tech_summary.get("total_issues", 0),
+                "high_technical_issues": tech_summary.get("high_issues", 0),
+                "embedding_threshold": config.large_site_embedding_threshold,
+            }
+            write_technical_audit_bundle(
+                report_dir,
+                domain=host,
+                mode=mode,
+                summary=run_summary,
+                timings=stage_timings.rows,
+                technical_seo=technical_seo_data,
+                indexability=indexability_data,
+                sitemap_coverage=sitemap_coverage_data,
+                canonical_consistency=canonical_consistency_data,
+                performance=performance_data,
+                resource_status=resource_status_data,
+                metadata_quality=metadata_quality_data,
+                media_accessibility=media_accessibility_data,
+                page_types=page_types_data,
+                entities=entities_data,
+                freshness=freshness_data,
+                conversion=conversion_data,
+                structured_data=structured_data_data,
+                external_links=external_payload_data,
+                linkgraph=technical_link_payload,
+            )
+        stage_timings.write(report_dir)
+        LOG.info("  technical audit bundle: %s", report_dir)
+        return {
+            "domain": host,
+            "status": status,
+            "message": message,
+            "pages": len(pages),
+            "site_focus_score": 0.0,
+            "calibrated_focus": 0.0,
+            "topic_dim": 0.0,
+            "section_coherence": 0.0,
+            "site_radius": 0.0,
+            "outliers": 0,
+            "duplicate_pairs": 0,
+            "clusters": 0,
+            "queries_evaluated": 0,
+            "linkgraph_edges": technical_link_payload.get("edge_count", 0),
+            "linkgraph_orphans": technical_link_payload.get("orphan_count", 0),
+            "max_click_depth": technical_link_payload.get("max_click_depth", 0),
+            "link_recommendations": 0,
+            "external_domains": len((external_payload_data or {}).get("top_domains", [])),
+            "broken_external": len((external_payload_data or {}).get("broken_links", [])),
+            "technical_issues": tech_summary.get("total_issues", 0),
+            "high_technical_issues": tech_summary.get("high_issues", 0),
+            "report_dir": str(report_dir),
+            "cache_dir": str(cache_dir),
+            "html_report": None,
+        }
+
+    if config.technical_only:
+        return _write_pre_embedding_technical(
+            "technical",
+            "technical_only",
+            "Technical-only audit completed without semantic embeddings.",
+        )
+
+    if len(embed_inputs) > config.large_site_embedding_threshold and not config.allow_large_embeddings:
+        message = (
+            f"Stopped before embedding {len(embed_inputs)} pages. "
+            "Use --allow-large-embeddings or --preset full-content to run semantic analysis."
+        )
+        LOG.warning("  %s", message)
+        return _write_pre_embedding_technical(
+            "large_site_embedding_safeguard",
+            "stopped_before_large_embedding",
+            message,
+        )
+
+    # 3) Embed pages (model loaded here, reused below for queries)
+    with stage_timings.track("page-embeddings", pages=len(embed_inputs)):
+        embed_cache = EmbeddingCache(
+            cache_dir / f"embeddings_{config.model.replace('/', '_').replace('-', '_')}.npz"
+        )
+        embedder = Embedder(config.model)
+        embeddings = embedder.encode_pages(
+            embed_inputs,
+            embed_cache,
+            use_cache=config.use_embedding_cache,
+        )
     LOG.info("  embeddings shape: %s", embeddings.shape)
 
     # Drop URL duplicates that snuck in via redirect collapses (different
@@ -745,62 +1042,6 @@ def run(config: PipelineConfig) -> dict:
         ans_payload = answerability_payload(score_answerability(extracted_pages))
         LOG.info("  scored %d pages for answerability", len(ans_payload))
 
-    metadata_quality_data = metadata_quality_payload(analyze_metadata_quality(extracted_pages))
-    mq_summary = metadata_quality_data.get("summary", {}) or {}
-    LOG.info(
-        "  metadata quality: %.0f%% pages with issues · %d missing descriptions · %d missing canonicals",
-        (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
-        mq_summary.get("missing_description", 0),
-        mq_summary.get("missing_canonical", 0),
-    )
-
-    media_accessibility_data = media_accessibility_payload(analyze_media_accessibility(extracted_pages))
-    ma_summary = media_accessibility_data.get("summary", {}) or {}
-    LOG.info(
-        "  media accessibility: %.0f%% pages with issues · %d missing image alts · %d videos without captions",
-        (ma_summary.get("issue_share", 0.0) or 0.0) * 100,
-        ma_summary.get("images_missing_alt", 0),
-        ma_summary.get("videos_missing_captions", 0),
-    )
-
-    freshness_data = freshness_payload(analyze_freshness(extracted_pages))
-    fr_summary = freshness_data.get("summary", {}) or {}
-    LOG.info(
-        "  freshness: %.0f%% date coverage · %d stale · %d missing dates",
-        (fr_summary.get("date_coverage", 0.0) or 0.0) * 100,
-        fr_summary.get("pages_stale", 0),
-        fr_summary.get("missing_dates", 0),
-    )
-
-    conversion_data = conversion_payload(analyze_conversion(extracted_pages))
-    cv_summary = conversion_data.get("summary", {}) or {}
-    LOG.info(
-        "  conversion: %.0f%% CTA coverage · %.0f%% primary CTA coverage · %d forms · %d lead pages without capture",
-        (cv_summary.get("cta_coverage", 0.0) or 0.0) * 100,
-        (cv_summary.get("primary_cta_coverage", 0.0) or 0.0) * 100,
-        cv_summary.get("total_forms", 0),
-        cv_summary.get("lead_pages_without_capture", 0),
-    )
-
-    page_types_data = page_types_payload(analyze_page_types(extracted_pages))
-    pt_summary = page_types_data.get("summary", {}) or {}
-    LOG.info(
-        "  page types: %d types · %d template families · dominant %s / %s",
-        pt_summary.get("page_type_count", 0),
-        pt_summary.get("template_family_count", 0),
-        pt_summary.get("dominant_page_type", "—"),
-        pt_summary.get("dominant_template_family", "—"),
-    )
-
-    entities_data = entities_payload(analyze_entities(extracted_pages))
-    ent_summary = entities_data.get("summary", {}) or {}
-    LOG.info(
-        "  entities: %d unique · %.0f%% coverage · authority %.1f",
-        ent_summary.get("unique_entities", 0),
-        (ent_summary.get("entity_coverage", 0.0) or 0.0) * 100,
-        ent_summary.get("topical_authority_score", 0.0),
-    )
-
     # 9) Link graph + recommendations
     link_payload: dict = {}
     link_result = None
@@ -826,28 +1067,6 @@ def run(config: PipelineConfig) -> dict:
             link_result.edge_count, len(link_result.orphans),
             len(link_result.dead_ends), len(link_result.recommendations),
             max(link_result.click_depth.values()) if link_result.click_depth else 0,
-        )
-
-    # 10) External link analysis
-    external_payload_data: dict = {}
-    if config.enable_external_links:
-        word_counts = {p.url: p.word_count for p in pages}
-        pages_with_external = [(p.url, external_map.get(p.url, [])) for p in pages]
-        ext_result = analyze_external(
-            pages,
-            word_counts,
-            pages_with_external,
-            check_links=config.check_external_links,
-            http_cache=http_cache,
-            max_workers=config.max_workers,
-        )
-        external_payload_data = external_payload(ext_result)
-        LOG.info(
-            "  external links: %d distinct domains, top %s ; %d broken (%s)",
-            len(ext_result.top_domains),
-            ext_result.top_domains[0]["domain"] if ext_result.top_domains else "—",
-            len(ext_result.broken_links),
-            "checked" if config.check_external_links else "not checked",
         )
 
     # 11) Paragraph extraction + embedding (shared by every paragraph-level analysis below)
@@ -2008,6 +2227,7 @@ def run(config: PipelineConfig) -> dict:
     if config.save_snapshot:
         snapshot_dir = save_report_snapshot(host, config.projects_root, report_dir)
         LOG.info("  history snapshot: %s", snapshot_dir)
+    stage_timings.write(report_dir)
 
     LOG.info("=== summary ===")
     LOG.info("  pages: %d", len(pages))
@@ -2042,4 +2262,5 @@ def run(config: PipelineConfig) -> dict:
         "report_dir": str(report_dir),
         "cache_dir": str(cache_dir),
         "html_report": str(html_path) if html_path else None,
+        "stage_timings": stage_timings.rows,
     }
