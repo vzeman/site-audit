@@ -1,6 +1,6 @@
 import requests
 
-from site_audit.crawler import CrawlConfig, Crawler, FetchResult
+from site_audit.crawler import CrawlConfig, Crawler, FetchResult, normalize_url
 
 
 class _Cache:
@@ -181,6 +181,56 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+
+
+def test_normalize_url_strips_tracking_params_but_keeps_business_query_params() -> None:
+    assert normalize_url(
+        "https://example.com/page?utm_source=newsletter&source=feed&page=2&sort=price#reviews"
+    ) == "https://example.com/page?page=2&sort=price"
+    assert normalize_url(
+        "https://example.com/page?gclid=abc&fbclid=def"
+    ) == "https://example.com/page"
+
+
+def test_bfs_dedupes_tracking_variants_before_enqueue() -> None:
+    fetched: list[str] = []
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=1,
+            respect_robots=False,
+        ),
+        _Cache(),
+    )
+
+    def fake_fetch(url: str) -> FetchResult:
+        fetched.append(url)
+        body = ""
+        if url == "https://example.com/start":
+            body = """
+                <a href="/target?utm_source=newsletter">One</a>
+                <a href="/target?source=feed">Two</a>
+                <a href="/target">Three</a>
+                <a href="/target?page=2&utm_campaign=spring">Paged</a>
+            """
+        return FetchResult(
+            url=url,
+            status=200,
+            body=body,
+            content_type="text/html",
+            from_cache=False,
+        )
+
+    crawler._fetch = fake_fetch
+    results = crawler._bfs(["https://example.com/start"])
+
+    assert fetched == [
+        "https://example.com/start",
+        "https://example.com/target",
+        "https://example.com/target?page=2",
+    ]
+    assert [result.url for result in results] == fetched
 
 
 def test_fetch_preserves_requested_url_and_redirect_target() -> None:

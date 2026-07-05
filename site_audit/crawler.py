@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional, Set
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse, urldefrag
 
 import requests
 from bs4 import BeautifulSoup
@@ -162,10 +162,41 @@ class SitemapEntry:
     lastmod: str = ""
 
 
+_TRACKING_QUERY_PARAMS = {
+    "source",
+    "fbclid",
+    "gclid",
+    "dclid",
+    "msclkid",
+    "gbraid",
+    "wbraid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+}
+
+
 def normalize_url(url: str) -> str:
-    """Strip fragments and trailing slashes consistently."""
+    """Strip fragments and known tracking query parameters consistently."""
     url, _ = urldefrag(url)
-    return url
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    kept = [
+        (key, value)
+        for key, value in params
+        if not _is_tracking_query_param(key)
+    ]
+    if len(kept) == len(params):
+        return url
+    query = urlencode(kept, doseq=True)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+
+
+def _is_tracking_query_param(name: str) -> bool:
+    lower = (name or "").lower()
+    return lower.startswith("utm_") or lower in _TRACKING_QUERY_PARAMS
 
 
 def _response_redirect_chain(response, requested_url: str, final_url: str) -> list[str]:
