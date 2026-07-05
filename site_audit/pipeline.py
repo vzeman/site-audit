@@ -852,9 +852,9 @@ def run(config: PipelineConfig) -> dict:
 
             extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
             extraction_results: dict[int, ExtractedPage | None] = {}
+            process_payloads = []
+            file_backed_extractable = 0
             if extraction_workers > 1 and len(extractable) >= 1000:
-                LOG.info("  extracting HTML with %d processes", extraction_workers)
-                payloads = []
                 for idx, r in extractable:
                     seen_paths: set[str] = set()
                     body_paths: list[str] = []
@@ -867,7 +867,9 @@ def run(config: PipelineConfig) -> dict:
                             continue
                         seen_paths.add(path_str)
                         body_paths.append(path_str)
-                    payloads.append({
+                    if body_paths or getattr(r, "body", ""):
+                        file_backed_extractable += 1
+                    process_payloads.append({
                         "idx": idx,
                         "url": r.url,
                         "body": getattr(r, "body", "") or "",
@@ -879,16 +881,30 @@ def run(config: PipelineConfig) -> dict:
                         "content_include_classes": config.content_include_classes,
                         "content_exclude_classes": config.content_exclude_classes,
                     })
+            if (
+                extraction_workers > 1
+                and len(extractable) >= 1000
+                and file_backed_extractable >= max(1000, int(len(extractable) * 0.8))
+            ):
+                LOG.info("  extracting HTML with %d processes", extraction_workers)
                 extraction_cache_counts: collections.Counter[str] = collections.Counter()
                 with ProcessPoolExecutor(max_workers=extraction_workers) as pool:
-                    for idx, ext, stats in pool.map(_extract_page_process_worker, payloads, chunksize=8):
+                    for idx, ext, stats in pool.map(_extract_page_process_worker, process_payloads, chunksize=8):
                         extraction_results[idx] = ext
                         extraction_cache_counts.update(stats or {})
                 extraction_cache.hits += extraction_cache_counts.get("hits", 0)
                 extraction_cache.misses += extraction_cache_counts.get("misses", 0)
                 extraction_cache.writes += extraction_cache_counts.get("writes", 0)
             elif extraction_workers > 1 and len(extractable) > 1:
-                LOG.info("  extracting HTML with %d workers", extraction_workers)
+                if len(extractable) >= 1000 and process_payloads:
+                    LOG.info(
+                        "  extracting HTML with %d workers (SQLite body fallback; %d/%d file-backed)",
+                        extraction_workers,
+                        file_backed_extractable,
+                        len(extractable),
+                    )
+                else:
+                    LOG.info("  extracting HTML with %d workers", extraction_workers)
                 with ThreadPoolExecutor(max_workers=extraction_workers) as pool:
                     extracted = pool.map(_extract_one, [r for _, r in extractable])
                     extraction_results = {
