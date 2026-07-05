@@ -35,6 +35,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse, ur
 
 import requests
 from bs4 import BeautifulSoup
+from lxml import html as lxml_html
 
 from .robots_txt import analyze as analyze_robots_txt
 
@@ -810,22 +811,33 @@ class Crawler:
     def _extract_links(self, base_url: str, body: str) -> list[tuple[str, str]]:
         """Return list of (absolute_url, anchor_text)."""
         try:
-            soup = BeautifulSoup(body, "lxml")
+            doc = lxml_html.fromstring(body)
         except Exception:
             try:
                 soup = BeautifulSoup(body, "html.parser")
             except Exception:
                 return []
+            out: list[tuple[str, str]] = []
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
+                    continue
+                absolute = urljoin(base_url, href)
+                absolute = normalize_url(absolute)
+                anchor = " ".join(a.get_text(" ").split())
+                if not anchor:
+                    anchor = (a.get("title") or a.get("aria-label") or "").strip()
+                out.append((absolute, anchor[:200]))
+            return out
+
         out: list[tuple[str, str]] = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"].strip()
+        for a in doc.iter("a"):
+            href = (a.get("href") or "").strip()
             if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
                 continue
-            absolute = urljoin(base_url, href)
-            absolute = normalize_url(absolute)
-            anchor = " ".join(a.get_text(" ").split())
+            absolute = normalize_url(urljoin(base_url, href))
+            anchor = " ".join(a.text_content().split())
             if not anchor:
-                # Fall back to title attribute or aria-label so image links aren't blank
                 anchor = (a.get("title") or a.get("aria-label") or "").strip()
             out.append((absolute, anchor[:200]))
         return out
