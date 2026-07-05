@@ -111,6 +111,10 @@ def _first_present(mapping: dict, keys: list[str]):
     return None
 
 
+def _inline_json(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+
+
 def _technical_report_links(output_dir: Path) -> str:
     files = [
         ("Run summary", "run_summary.json"),
@@ -154,6 +158,15 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
         ("High priority issues", _first_present(summary, ["high_issues", "high_technical_issues"])),
         ("Catalog issue types", summary.get("catalog_issue_types")),
     ]
+    bootstrap = {
+        "domain": domain_name,
+        "summaryRows": [(label, value) for label, value in summary_rows if value not in (None, "")],
+        "summary": summary,
+        "severityCounts": severity_counts,
+        "categoryCounts": category_counts,
+        "issueCounts": issue_counts,
+        "issueCatalog": (technical_seo or {}).get("issue_catalog") or [],
+    }
     html_text = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -169,6 +182,9 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
       --muted: #5f6b7a;
       --border: #d8e0ea;
       --accent: #0b6bcb;
+      --danger: #b42318;
+      --warn: #b54708;
+      --info: #175cd3;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -185,6 +201,13 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
     header {{
       margin-bottom: 24px;
     }}
+    .header-row {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
     h1 {{
       margin: 0 0 8px;
       font-size: 30px;
@@ -199,10 +222,37 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
       margin: 0 0 16px;
       color: var(--muted);
     }}
+    .cards {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 22px 0;
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    .card span {{
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .card strong {{
+      display: block;
+      margin-top: 6px;
+      font-size: 26px;
+      line-height: 1.1;
+    }}
     .grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
+    }}
+    .wide {{
+      grid-column: 1 / -1;
     }}
     section {{
       background: var(--panel);
@@ -234,6 +284,96 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
       font-variant-numeric: tabular-nums;
       font-weight: 650;
     }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) 86px;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }}
+    .bar-row:last-child {{
+      border-bottom: 0;
+    }}
+    .bar-label {{
+      overflow-wrap: anywhere;
+    }}
+    .bar-track {{
+      height: 10px;
+      background: #edf1f7;
+      border-radius: 999px;
+      overflow: hidden;
+    }}
+    .bar-fill {{
+      height: 100%;
+      min-width: 2px;
+      background: var(--accent);
+    }}
+    .bar-fill.high {{ background: var(--danger); }}
+    .bar-fill.medium {{ background: var(--warn); }}
+    .bar-fill.low {{ background: var(--info); }}
+    .bar-value {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .toolbar {{
+      display: grid;
+      grid-template-columns: 1fr 160px 160px;
+      gap: 10px;
+      margin: 12px 0 16px;
+    }}
+    input, select, button {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      min-height: 38px;
+      padding: 7px 10px;
+    }}
+    button {{
+      cursor: pointer;
+    }}
+    .issue-table-wrap {{
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }}
+    .issue-table th, .issue-table td {{
+      min-width: 130px;
+      padding: 10px 12px;
+      text-align: left;
+    }}
+    .issue-table th:first-child, .issue-table td:first-child {{
+      min-width: 260px;
+    }}
+    .issue-table th:last-child, .issue-table td:last-child {{
+      min-width: 360px;
+    }}
+    .pill {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      background: #eef2f6;
+      color: var(--muted);
+      text-transform: capitalize;
+    }}
+    .pill.high {{ background: #fee4e2; color: var(--danger); }}
+    .pill.medium {{ background: #fef0c7; color: var(--warn); }}
+    .pill.low {{ background: #d1e9ff; color: var(--info); }}
+    .pager {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+    }}
     .links {{
       display: flex;
       flex-wrap: wrap;
@@ -251,35 +391,214 @@ def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Op
     a:hover {{
       text-decoration: underline;
     }}
+    @media (max-width: 720px) {{
+      .toolbar {{
+        grid-template-columns: 1fr;
+      }}
+      .bar-row {{
+        grid-template-columns: 1fr 86px;
+      }}
+      .bar-track {{
+        grid-column: 1 / -1;
+      }}
+    }}
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>{_html_escape(domain_name)} technical SEO audit</h1>
-      <p>Static report generated from the technical audit exports. Large page and issue datasets are linked below instead of embedded into this HTML file.</p>
+      <div class="header-row">
+        <div>
+          <h1>{_html_escape(domain_name)} technical SEO audit</h1>
+          <p>Interactive technical SEO dashboard generated from the audit exports.</p>
+        </div>
+      </div>
     </header>
+    <div id="cards" class="cards"></div>
     <div class="grid">
-      {_technical_report_rows("Summary", summary_rows)}
       <section>
         <h2>Issue severity</h2>
-        {_technical_report_count_rows(severity_counts)}
+        <div id="severity-bars"></div>
       </section>
       <section>
         <h2>Issue categories</h2>
-        {_technical_report_count_rows(category_counts)}
+        <div id="category-bars"></div>
       </section>
-      <section>
+      <section class="wide">
         <h2>Top issue types</h2>
-        {_technical_report_count_rows(issue_counts)}
+        <div id="issue-bars"></div>
       </section>
-      <section>
+      <section class="wide">
+        <h2>All issues</h2>
+        <p id="issue-status">Loading technical_issues.json...</p>
+        <div class="toolbar">
+          <input id="issue-search" type="search" placeholder="Filter by URL, issue type, category, severity, or message">
+          <select id="severity-filter"><option value="">All severities</option></select>
+          <select id="category-filter"><option value="">All categories</option></select>
+        </div>
+        <div class="issue-table-wrap">
+          <table class="issue-table">
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Issue</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="issue-rows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="pager-label"></span>
+          <div>
+            <button id="prev-page" type="button">Previous</button>
+            <button id="next-page" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+      <section class="wide">
         <h2>Exports</h2>
-        <p>{_html_escape(interpretation.get("exports") or "Open the JSON or CSV files for row-level audit details.")}</p>
+        <p>{_html_escape(interpretation.get("exports") or "Open the JSON or CSV files for raw row-level audit data.")}</p>
         {_technical_report_links(output_dir)}
       </section>
     </div>
   </main>
+  <script id="technical-bootstrap" type="application/json">{_inline_json(bootstrap)}</script>
+  <script>
+    const bootstrap = JSON.parse(document.getElementById('technical-bootstrap').textContent);
+    const fmt = new Intl.NumberFormat();
+    const pageSize = 250;
+    let allIssues = [];
+    let filteredIssues = [];
+    let page = 0;
+
+    function escapeHtml(value) {{
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({{
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }}[ch]));
+    }}
+
+    function normalize(value) {{
+      return String(value ?? '').toLowerCase();
+    }}
+
+    function renderCards() {{
+      const cards = [
+        ['Pages analyzed', bootstrap.summary.total_pages ?? bootstrap.summary.pages],
+        ['Pages with issues', bootstrap.summary.pages_with_issues],
+        ['Technical issues', bootstrap.summary.total_issues ?? bootstrap.summary.technical_issues],
+        ['High priority issues', bootstrap.summary.high_issues ?? bootstrap.summary.high_technical_issues],
+        ['Catalog issue types', bootstrap.summary.catalog_issue_types],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+      document.getElementById('cards').innerHTML = cards.map(([label, value]) =>
+        `<div class="card"><span>${{escapeHtml(label)}}</span><strong>${{fmt.format(Number(value) || 0)}}</strong></div>`
+      ).join('');
+    }}
+
+    function renderBars(id, counts, limit = 12) {{
+      const entries = Object.entries(counts || {{}})
+        .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+        .slice(0, limit);
+      const max = Math.max(...entries.map(([, value]) => Number(value) || 0), 1);
+      document.getElementById(id).innerHTML = entries.map(([label, value]) => {{
+        const cls = ['high', 'medium', 'low'].includes(label) ? label : '';
+        const pct = Math.max(1, Math.round(((Number(value) || 0) / max) * 100));
+        return `<div class="bar-row">
+          <div class="bar-label">${{escapeHtml(label.replaceAll('_', ' '))}}</div>
+          <div class="bar-track"><div class="bar-fill ${{cls}}" style="width:${{pct}}%"></div></div>
+          <div class="bar-value">${{fmt.format(Number(value) || 0)}}</div>
+        </div>`;
+      }}).join('') || '<p>No issues recorded.</p>';
+    }}
+
+    function issueField(issue, names) {{
+      for (const name of names) {{
+        const value = issue?.[name];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }}
+      return '';
+    }}
+
+    function fillFilters() {{
+      const severities = [...new Set(allIssues.map(row => issueField(row, ['severity', 'importance'])).filter(Boolean))].sort();
+      const categories = [...new Set(allIssues.map(row => issueField(row, ['category'])).filter(Boolean))].sort();
+      document.getElementById('severity-filter').innerHTML = '<option value="">All severities</option>' + severities.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+      document.getElementById('category-filter').innerHTML = '<option value="">All categories</option>' + categories.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+    }}
+
+    function applyFilters() {{
+      const q = normalize(document.getElementById('issue-search').value);
+      const severity = document.getElementById('severity-filter').value;
+      const category = document.getElementById('category-filter').value;
+      filteredIssues = allIssues.filter(issue => {{
+        if (severity && issueField(issue, ['severity', 'importance']) !== severity) return false;
+        if (category && issueField(issue, ['category']) !== category) return false;
+        if (!q) return true;
+        return [
+          issueField(issue, ['url', 'page_url']),
+          issueField(issue, ['severity', 'importance']),
+          issueField(issue, ['category']),
+          issueField(issue, ['issue_type', 'name', 'issue']),
+          issueField(issue, ['message', 'details', 'description', 'recommendation']),
+        ].some(value => normalize(value).includes(q));
+      }});
+      page = 0;
+      renderIssuePage();
+    }}
+
+    function renderIssuePage() {{
+      const start = page * pageSize;
+      const rows = filteredIssues.slice(start, start + pageSize);
+      document.getElementById('issue-rows').innerHTML = rows.map(issue => {{
+        const severity = issueField(issue, ['severity', 'importance']);
+        const issueName = issueField(issue, ['issue_type', 'name', 'issue']).replaceAll('_', ' ');
+        const details = issueField(issue, ['message', 'details', 'description', 'recommendation']);
+        return `<tr>
+          <td>${{escapeHtml(issueField(issue, ['url', 'page_url']))}}</td>
+          <td><span class="pill ${{escapeHtml(normalize(severity))}}">${{escapeHtml(severity)}}</span></td>
+          <td>${{escapeHtml(issueField(issue, ['category']))}}</td>
+          <td>${{escapeHtml(issueName)}}</td>
+          <td>${{escapeHtml(details)}}</td>
+        </tr>`;
+      }}).join('');
+      const end = Math.min(start + rows.length, filteredIssues.length);
+      document.getElementById('pager-label').textContent = filteredIssues.length
+        ? `${{fmt.format(start + 1)}}-${{fmt.format(end)}} of ${{fmt.format(filteredIssues.length)}} issues`
+        : 'No matching issues';
+      document.getElementById('prev-page').disabled = page === 0;
+      document.getElementById('next-page').disabled = end >= filteredIssues.length;
+    }}
+
+    async function loadIssues() {{
+      try {{
+        const response = await fetch('technical_issues.json');
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        const payload = await response.json();
+        allIssues = Array.isArray(payload.issues) ? payload.issues : [];
+        filteredIssues = allIssues;
+        document.getElementById('issue-status').textContent = `${{fmt.format(allIssues.length)}} issues loaded from technical_issues.json.`;
+        fillFilters();
+        renderIssuePage();
+      }} catch (err) {{
+        document.getElementById('issue-status').innerHTML =
+          `Unable to load all issue rows in this browser context. Use <a href="technical_issues.csv">technical_issues.csv</a> or serve the report with <code>site-audit serve</code>.`;
+      }}
+    }}
+
+    document.getElementById('issue-search').addEventListener('input', applyFilters);
+    document.getElementById('severity-filter').addEventListener('change', applyFilters);
+    document.getElementById('category-filter').addEventListener('change', applyFilters);
+    document.getElementById('prev-page').addEventListener('click', () => {{ page = Math.max(0, page - 1); renderIssuePage(); }});
+    document.getElementById('next-page').addEventListener('click', () => {{ page += 1; renderIssuePage(); }});
+
+    renderCards();
+    renderBars('severity-bars', bootstrap.severityCounts, 6);
+    renderBars('category-bars', bootstrap.categoryCounts, 12);
+    renderBars('issue-bars', bootstrap.issueCounts, 25);
+    loadIssues();
+  </script>
 </body>
 </html>
 """
