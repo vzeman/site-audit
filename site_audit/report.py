@@ -19,6 +19,7 @@ viewer template can render against either source unchanged:
 from __future__ import annotations
 
 import csv
+import html
 import json
 import re
 import shutil
@@ -53,6 +54,238 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _html_escape(value) -> str:
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _format_number(value) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return _html_escape(value)
+
+
+def _technical_report_domain(domain: Optional[str], technical_seo: dict) -> str:
+    if domain:
+        return str(domain)
+    for page in (technical_seo or {}).get("pages") or []:
+        parsed = urlparse(str(page.get("url") or ""))
+        if parsed.netloc:
+            return parsed.netloc
+    return "Technical SEO audit"
+
+
+def _technical_report_rows(title: str, rows: list[tuple[str, object]]) -> str:
+    rendered = "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+        if value not in (None, "")
+    )
+    if not rendered:
+        return ""
+    return f"""
+      <section>
+        <h2>{_html_escape(title)}</h2>
+        <table>{rendered}</table>
+      </section>
+    """
+
+
+def _technical_report_count_rows(counts: dict, limit: int = 25) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "<p>No issues recorded.</p>"
+    rows = sorted(counts.items(), key=lambda item: item[1] or 0, reverse=True)[:limit]
+    return "<table>" + "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+    ) + "</table>"
+
+
+def _first_present(mapping: dict, keys: list[str]):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _technical_report_links(output_dir: Path) -> str:
+    files = [
+        ("Run summary", "run_summary.json"),
+        ("Technical pages JSON", "technical_pages.json"),
+        ("Technical pages CSV", "technical_pages.csv"),
+        ("Technical issues JSON", "technical_issues.json"),
+        ("Technical issues CSV", "technical_issues.csv"),
+        ("Issue catalog JSON", "technical_issue_catalog.json"),
+        ("Issue catalog CSV", "technical_issue_catalog.csv"),
+        ("Indexability JSON", "indexability.json"),
+        ("Sitemap coverage JSON", "sitemap_coverage.json"),
+        ("Canonical consistency JSON", "canonical_consistency.json"),
+        ("Performance JSON", "performance.json"),
+        ("Resource status JSON", "resource_status.json"),
+    ]
+    links = []
+    for label, filename in files:
+        if (output_dir / filename).is_file():
+            links.append(f'<a href="{_html_escape(filename)}">{_html_escape(label)}</a>')
+    if not links:
+        return ""
+    return "<div class=\"links\">" + "\n".join(links) + "</div>"
+
+
+def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    domain_name = _technical_report_domain(domain, technical_seo)
+    summary = (technical_seo or {}).get("summary") or {}
+    issue_counts = (technical_seo or {}).get("issue_counts") or {}
+    category_counts = (technical_seo or {}).get("category_counts") or {}
+    severity_counts = (technical_seo or {}).get("severity_counts") or {}
+    interpretation = (technical_seo or {}).get("interpretation") or {}
+    summary_rows = [
+        ("Pages analyzed", _first_present(summary, ["total_pages", "pages"])),
+        ("Pages fetched", summary.get("fetched_pages")),
+        ("Pages skipped", summary.get("skipped_pages")),
+        ("Noindex pages dropped", summary.get("noindex_dropped")),
+        ("Canonical duplicates dropped", summary.get("canonical_duplicates_dropped")),
+        ("Pages with issues", summary.get("pages_with_issues")),
+        ("Technical issues", _first_present(summary, ["total_issues", "technical_issues"])),
+        ("High priority issues", _first_present(summary, ["high_issues", "high_technical_issues"])),
+        ("Catalog issue types", summary.get("catalog_issue_types")),
+    ]
+    html_text = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_html_escape(domain_name)} technical SEO audit</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #5f6b7a;
+      --border: #d8e0ea;
+      --accent: #0b6bcb;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    header {{
+      margin-bottom: 24px;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+    }}
+    h2 {{
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 650;
+    }}
+    p {{
+      margin: 0 0 16px;
+      color: var(--muted);
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }}
+    section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    th, td {{
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }}
+    tr:last-child th, tr:last-child td {{
+      border-bottom: 0;
+    }}
+    th {{
+      width: 70%;
+      color: var(--muted);
+      font-weight: 500;
+      padding-right: 16px;
+    }}
+    td {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .links {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }}
+    a {{
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid #b8d6f3;
+      background: #eef6ff;
+      border-radius: 6px;
+      padding: 7px 10px;
+    }}
+    a:hover {{
+      text-decoration: underline;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>{_html_escape(domain_name)} technical SEO audit</h1>
+      <p>Static report generated from the technical audit exports. Large page and issue datasets are linked below instead of embedded into this HTML file.</p>
+    </header>
+    <div class="grid">
+      {_technical_report_rows("Summary", summary_rows)}
+      <section>
+        <h2>Issue severity</h2>
+        {_technical_report_count_rows(severity_counts)}
+      </section>
+      <section>
+        <h2>Issue categories</h2>
+        {_technical_report_count_rows(category_counts)}
+      </section>
+      <section>
+        <h2>Top issue types</h2>
+        {_technical_report_count_rows(issue_counts)}
+      </section>
+      <section>
+        <h2>Exports</h2>
+        <p>{_html_escape(interpretation.get("exports") or "Open the JSON or CSV files for row-level audit details.")}</p>
+        {_technical_report_links(output_dir)}
+      </section>
+    </div>
+  </main>
+</body>
+</html>
+"""
+    out_path = output_dir / "index.html"
+    out_path.write_text(html_text, encoding="utf-8")
+    return out_path
 
 
 def _slim_linkgraph_payload(payload: dict) -> dict:
@@ -161,7 +394,7 @@ def write_internal_linkbuilding_csv(
     return rows
 
 
-def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
+def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> None:
     pages = list((technical_seo or {}).get("pages") or [])
     issues = list((technical_seo or {}).get("issues") or [])
     catalog = list((technical_seo or {}).get("issue_catalog") or [])
@@ -189,6 +422,7 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
     _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
     _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
     _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
+    write_technical_index_html(output_dir, technical_seo, domain=domain)
 
 
 def write_technical_audit_bundle(
@@ -260,7 +494,7 @@ def write_technical_audit_bundle(
         _write_json(output_dir / "external_links.json", external_links)
     if linkgraph is not None:
         _write_json(output_dir / "linkgraph.json", _slim_linkgraph_payload(linkgraph))
-    write_technical_seo_exports(output_dir, technical_seo)
+    write_technical_seo_exports(output_dir, technical_seo, domain=domain)
 
 
 def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:
@@ -782,5 +1016,5 @@ def write_all(
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
     if technical_seo is not None:
-        write_technical_seo_exports(output_dir, technical_seo)
+        write_technical_seo_exports(output_dir, technical_seo, domain=domain)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}
