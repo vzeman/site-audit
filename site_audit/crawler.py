@@ -127,6 +127,7 @@ class CrawlConfig:
     follow_subdomains: bool = False
     respect_robots: bool = True
     use_cache: bool = True
+    retain_bodies: bool = False
     crawl_discovered_links: bool = True
     strip_header_footer: bool = False
     content_include_classes: list = field(default_factory=list)
@@ -161,6 +162,8 @@ class FetchResult:
     redirect_hop_count: int = 0
     redirect_status_codes: list[int] = field(default_factory=list)
     elapsed_seconds: float = 0.0
+    body_cache_url: str = ""
+    body_released: bool = False
 
 
 @dataclass
@@ -749,8 +752,6 @@ class Crawler:
                         continue
                     result_urls.add(result.url)
                     seen.add(result.url)
-                    results.append(result)
-
                     if 200 <= result.status < 400 and "html" in result.content_type:
                         page_outlinks: list[tuple[str, str]] = []
                         page_external: list[tuple[str, str]] = []
@@ -777,6 +778,16 @@ class Crawler:
                                 page_external.append((link, anchor))
                         result.outlinks = page_outlinks
                         result.external_links = page_external
+                        if (
+                            not self.config.retain_bodies
+                            and self.config.use_cache
+                            and result.body
+                            and result.body_cache_url
+                        ):
+                            result.body = ""
+                            result.body_released = True
+
+                    results.append(result)
 
                     if len(results) % 25 == 0:
                         LOG.info("crawled %d / queue %d / cache %s",
@@ -910,6 +921,7 @@ class Crawler:
                     redirect_hop_count=1 if cached.canonical_url and cached.canonical_url != url else 0,
                     redirect_status_codes=[],
                     elapsed_seconds=time.perf_counter() - started,
+                    body_cache_url=url,
                 )
 
         if self.config.request_delay > 0:
@@ -972,6 +984,7 @@ class Crawler:
                 redirect_hop_count=redirect_hop_count,
                 redirect_status_codes=redirect_status_codes,
                 elapsed_seconds=time.perf_counter() - started,
+                body_cache_url=final_url if self.config.use_cache else "",
             )
         if "html" not in ctype:
             return None
@@ -996,6 +1009,7 @@ class Crawler:
             redirect_hop_count=redirect_hop_count,
             redirect_status_codes=redirect_status_codes,
             elapsed_seconds=time.perf_counter() - started,
+            body_cache_url=final_url if self.config.use_cache else "",
         )
 
     def _prepare_html_body(self, body: str) -> str:

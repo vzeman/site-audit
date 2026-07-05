@@ -57,6 +57,34 @@ class FakeCrawler:
         ]
 
 
+class ReleasedBodyCrawler(FakeCrawler):
+    def discover_and_crawl(self):
+        base = "https://example.com"
+        rows = []
+        for path, title, next_path in [
+            ("/", "Home", "/two"),
+            ("/two", "Second", "/"),
+        ]:
+            url = f"{base}{path}"
+            next_url = f"{base}{next_path}"
+            html = HTML.format(title=title, url=url, next_url=next_url)
+            self.cache.put(url, 200, {"Content-Type": "text/html"}, html.encode("utf-8"))
+            rows.append(
+                FetchResult(
+                    url=url,
+                    status=200,
+                    body="",
+                    content_type="text/html",
+                    from_cache=True,
+                    outlinks=[(next_url, "Next")],
+                    external_links=[],
+                    body_cache_url=url,
+                    body_released=True,
+                )
+            )
+        return rows
+
+
 class FailingEmbedder:
     def __init__(self, *args, **kwargs):
         raise AssertionError("Embedder should not be loaded")
@@ -127,6 +155,23 @@ def test_pipeline_reuses_extraction_cache_on_second_run(tmp_path, monkeypatch) -
 
     monkeypatch.setattr("site_audit.pipeline.extract", fail_extract)
     summary = run(config)
+
+    assert summary["status"] == "technical_only"
+    assert summary["pages"] == 2
+
+
+def test_pipeline_extracts_released_bodies_from_http_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("site_audit.pipeline.Crawler", ReleasedBodyCrawler)
+    monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
+
+    summary = run(
+        PipelineConfig(
+            domain="example.com",
+            projects_root=tmp_path,
+            technical_only=True,
+            save_snapshot=False,
+        )
+    )
 
     assert summary["status"] == "technical_only"
     assert summary["pages"] == 2

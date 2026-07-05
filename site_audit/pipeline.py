@@ -678,21 +678,49 @@ def run(config: PipelineConfig) -> dict:
             })
         return row
 
+    def _body_for_fetch(r) -> str:
+        body = getattr(r, "body", "") or ""
+        if body:
+            return body
+        candidates = [
+            getattr(r, "body_cache_url", "") or "",
+            getattr(r, "requested_url", "") or "",
+            getattr(r, "url", "") or "",
+        ]
+        seen_candidates: set[str] = set()
+        for candidate in candidates:
+            if not candidate or candidate in seen_candidates:
+                continue
+            seen_candidates.add(candidate)
+            cached = http_cache.get(candidate)
+            if cached is None:
+                continue
+            text = cached.text
+            if text:
+                prepare_body = getattr(crawler, "_prepare_html_body", None)
+                if callable(prepare_body):
+                    return prepare_body(text)
+                return text
+        return ""
+
     def _extract_one(r) -> ExtractedPage | None:
         x_robots_tag = getattr(r, "x_robots_tag", "")
+        body = _body_for_fetch(r)
+        if not body:
+            return None
         ext = extraction_cache.get(
             r.url,
-            r.body,
+            body,
             max_chars=config.max_chars,
             x_robots_tag=x_robots_tag,
         )
         if ext is not None:
             return ext
-        ext = extract(r.url, r.body, max_chars=config.max_chars, x_robots_tag=x_robots_tag)
+        ext = extract(r.url, body, max_chars=config.max_chars, x_robots_tag=x_robots_tag)
         if ext is not None:
             extraction_cache.put(
                 r.url,
-                r.body,
+                body,
                 ext,
                 max_chars=config.max_chars,
                 x_robots_tag=x_robots_tag,

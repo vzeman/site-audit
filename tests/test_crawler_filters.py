@@ -175,12 +175,41 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
         body='<a href="https://example.com/linked">Linked</a>',
         content_type="text/html",
         from_cache=True,
+        body_cache_url=url,
     )
 
     results = crawler._bfs(["https://example.com/start"])
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+    assert results[0].body == ""
+    assert results[0].body_released is True
+
+
+def test_bfs_can_retain_bodies_when_requested() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=1,
+            respect_robots=False,
+            retain_bodies=True,
+        ),
+        _Cache(),
+    )
+    crawler._fetch = lambda url: FetchResult(
+        url=url,
+        status=200,
+        body='<a href="https://example.com/linked">Linked</a>',
+        content_type="text/html",
+        from_cache=True,
+        body_cache_url=url,
+    )
+
+    results = crawler._bfs(["https://example.com/start"])
+
+    assert results[0].body
+    assert results[0].body_released is False
 
 
 def test_bfs_drains_active_futures_when_frontier_is_empty() -> None:
