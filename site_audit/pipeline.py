@@ -23,7 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+import collections
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ from typing import Optional
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 import numpy as np
+from bs4 import BeautifulSoup
 
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
@@ -148,6 +150,93 @@ from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
+
+
+def _tag_has_any_class(tag, classes: set[str]) -> bool:
+    values = tag.get("class") or []
+    if isinstance(values, str):
+        values = values.split()
+    return any(value in classes for value in values)
+
+
+def _prepare_extraction_body(
+    body: str,
+    *,
+    strip_header_footer: bool,
+    include_classes: list[str],
+    exclude_classes: list[str],
+) -> str:
+    if not (strip_header_footer or include_classes or exclude_classes) or not body:
+        return body
+    try:
+        soup = BeautifulSoup(body, "html.parser")
+    except Exception:
+        return body
+    if strip_header_footer:
+        for tag in soup.find_all(["header", "footer"]):
+            tag.decompose()
+    if exclude_classes:
+        excluded = set(exclude_classes)
+        for tag in soup.find_all(True):
+            if _tag_has_any_class(tag, excluded):
+                tag.decompose()
+    if include_classes:
+        included = set(include_classes)
+        selected = []
+        selected_ids = set()
+        for tag in soup.find_all(True):
+            if not _tag_has_any_class(tag, included):
+                continue
+            if any(id(parent) in selected_ids for parent in tag.parents):
+                continue
+            selected.append(tag)
+            selected_ids.add(id(tag))
+        scoped = BeautifulSoup("<html><body></body></html>", "html.parser")
+        if soup.head:
+            scoped.html.insert(0, soup.head.extract())
+        target = scoped.body or scoped
+        for tag in selected:
+            target.append(tag.extract())
+        soup = scoped
+    return str(soup)
+
+
+def _read_first_body(body_paths: list[str]) -> str:
+    for path in body_paths:
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if text:
+            return text
+    return ""
+
+
+def _extract_page_process_worker(payload: dict) -> tuple[int, ExtractedPage | None, dict]:
+    idx = int(payload["idx"])
+    body = payload.get("body") or _read_first_body(payload.get("body_paths") or [])
+    if not body:
+        return idx, None, {"misses": 1}
+    body = _prepare_extraction_body(
+        body,
+        strip_header_footer=bool(payload.get("strip_header_footer")),
+        include_classes=list(payload.get("content_include_classes") or []),
+        exclude_classes=list(payload.get("content_exclude_classes") or []),
+    )
+    if not body:
+        return idx, None, {"misses": 1}
+    url = payload["url"]
+    max_chars = int(payload.get("max_chars") or 0)
+    x_robots_tag = payload.get("x_robots_tag") or ""
+    cache = ExtractionCache(Path(payload["extraction_cache_dir"]))
+    ext = cache.get(url, body, max_chars=max_chars, x_robots_tag=x_robots_tag)
+    if ext is not None:
+        return idx, ext, {"hits": 1}
+    ext = extract(url, body, max_chars=max_chars, x_robots_tag=x_robots_tag)
+    if ext is not None:
+        cache.put(url, body, ext, max_chars=max_chars, x_robots_tag=x_robots_tag)
+        return idx, ext, {"misses": 1, "writes": 1}
+    return idx, None, {"misses": 1}
 
 
 class StageTimings:
@@ -680,15 +769,18 @@ def run(config: PipelineConfig) -> dict:
             })
         return row
 
-    def _body_for_fetch(r) -> str:
-        body = getattr(r, "body", "") or ""
-        if body:
-            return body
-        candidates = [
+    def _body_candidate_urls(r) -> list[str]:
+        return [
             getattr(r, "body_cache_url", "") or "",
             getattr(r, "requested_url", "") or "",
             getattr(r, "url", "") or "",
         ]
+
+    def _body_for_fetch(r) -> str:
+        body = getattr(r, "body", "") or ""
+        if body:
+            return body
+        candidates = _body_candidate_urls(r)
         seen_candidates: set[str] = set()
         for candidate in candidates:
             if not candidate or candidate in seen_candidates:
@@ -760,7 +852,42 @@ def run(config: PipelineConfig) -> dict:
 
             extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
             extraction_results: dict[int, ExtractedPage | None] = {}
-            if extraction_workers > 1 and len(extractable) > 1:
+            if extraction_workers > 1 and len(extractable) >= 1000:
+                LOG.info("  extracting HTML with %d processes", extraction_workers)
+                payloads = []
+                for idx, r in extractable:
+                    seen_paths: set[str] = set()
+                    body_paths: list[str] = []
+                    for candidate in _body_candidate_urls(r):
+                        if not candidate:
+                            continue
+                        path = http_cache.body_file_path(candidate)
+                        path_str = str(path)
+                        if path_str in seen_paths or not path.is_file():
+                            continue
+                        seen_paths.add(path_str)
+                        body_paths.append(path_str)
+                    payloads.append({
+                        "idx": idx,
+                        "url": r.url,
+                        "body": getattr(r, "body", "") or "",
+                        "body_paths": body_paths,
+                        "max_chars": config.max_chars,
+                        "x_robots_tag": getattr(r, "x_robots_tag", "") or "",
+                        "extraction_cache_dir": str(extraction_cache.cache_dir),
+                        "strip_header_footer": config.strip_header_footer,
+                        "content_include_classes": config.content_include_classes,
+                        "content_exclude_classes": config.content_exclude_classes,
+                    })
+                extraction_cache_counts: collections.Counter[str] = collections.Counter()
+                with ProcessPoolExecutor(max_workers=extraction_workers) as pool:
+                    for idx, ext, stats in pool.map(_extract_page_process_worker, payloads, chunksize=8):
+                        extraction_results[idx] = ext
+                        extraction_cache_counts.update(stats or {})
+                extraction_cache.hits += extraction_cache_counts.get("hits", 0)
+                extraction_cache.misses += extraction_cache_counts.get("misses", 0)
+                extraction_cache.writes += extraction_cache_counts.get("writes", 0)
+            elif extraction_workers > 1 and len(extractable) > 1:
                 LOG.info("  extracting HTML with %d workers", extraction_workers)
                 with ThreadPoolExecutor(max_workers=extraction_workers) as pool:
                     extracted = pool.map(_extract_one, [r for _, r in extractable])
