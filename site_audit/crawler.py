@@ -153,6 +153,7 @@ class FetchResult:
     content_length_bytes: int = 0
     content_encoding: str = ""
     x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
+    page_links: list = field(default_factory=list)       # all extracted (target_url, anchor_text) pairs
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
     error: str = ""
@@ -707,7 +708,7 @@ class Crawler:
             while (frontier or active) and len(results) < max_pages:
                 while frontier and len(active) < adaptive.target_workers and len(active) + len(results) < max_pages:
                     url = frontier.popleft()
-                    fut = pool.submit(self._fetch, url)
+                    fut = pool.submit(self._fetch_with_links, url)
                     active[fut] = url
 
                 if not active:
@@ -755,7 +756,7 @@ class Crawler:
                     if 200 <= result.status < 400 and "html" in result.content_type:
                         page_outlinks: list[tuple[str, str]] = []
                         page_external: list[tuple[str, str]] = []
-                        for link, anchor in self._extract_links(result.url, result.body):
+                        for link, anchor in result.page_links or []:
                             try:
                                 netloc = urlparse(link).netloc
                             except Exception:
@@ -778,6 +779,7 @@ class Crawler:
                                 page_external.append((link, anchor))
                         result.outlinks = page_outlinks
                         result.external_links = page_external
+                        result.page_links = []
                         if (
                             not self.config.retain_bodies
                             and self.config.use_cache
@@ -797,12 +799,23 @@ class Crawler:
         LOG.info("Crawl finished: %d pages", len(results))
         return results
 
+    def _fetch_with_links(self, url: str) -> Optional[FetchResult]:
+        result = self._fetch(url)
+        if result is None:
+            return None
+        if 200 <= result.status < 400 and "html" in result.content_type and result.body:
+            result.page_links = self._extract_links(result.url, result.body)
+        return result
+
     def _extract_links(self, base_url: str, body: str) -> list[tuple[str, str]]:
         """Return list of (absolute_url, anchor_text)."""
         try:
-            soup = BeautifulSoup(body, "html.parser")
+            soup = BeautifulSoup(body, "lxml")
         except Exception:
-            return []
+            try:
+                soup = BeautifulSoup(body, "html.parser")
+            except Exception:
+                return []
         out: list[tuple[str, str]] = []
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
