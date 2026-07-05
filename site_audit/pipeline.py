@@ -357,6 +357,7 @@ class PipelineConfig:
     max_pages: int = 10000
     max_workers: int = 8
     extraction_workers: int = 0
+    analysis_workers: int = 0
     request_delay: float = 0.0
     duplicate_threshold: float = 0.92
     duplicate_knn: int = 10
@@ -761,83 +762,9 @@ def run(config: PipelineConfig) -> dict:
         cc_summary.get("canonical_non_self", 0),
     )
 
-    performance_data = performance_payload(analyze_performance(fetched))
-    pf_summary = performance_data.get("summary", {}) or {}
-    LOG.info(
-        "  performance: median HTML %.0f KB · %.0f%% render-blocking · %d heavy pages",
-        (pf_summary.get("median_html_weight_bytes", 0) or 0) / 1024,
-        (pf_summary.get("render_blocking_share", 0.0) or 0.0) * 100,
-        pf_summary.get("heavy_pages", 0),
-    )
-    resource_status_data = resource_status_payload(
-        analyze_resource_status(fetched, http_cache=getattr(crawler, "cache", None))
-    )
-    rs_summary = resource_status_data.get("summary", {}) or {}
-    LOG.info(
-        "  resource status: %d resources · %d broken JavaScript",
-        rs_summary.get("total_resources", 0),
-        rs_summary.get("broken_javascript", 0),
-    )
-
-    metadata_quality_data = metadata_quality_payload(analyze_metadata_quality(extracted_pages))
-    mq_summary = metadata_quality_data.get("summary", {}) or {}
-    LOG.info(
-        "  metadata quality: %.0f%% pages with issues · %d missing descriptions · %d missing canonicals",
-        (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
-        mq_summary.get("missing_description", 0),
-        mq_summary.get("missing_canonical", 0),
-    )
-
-    media_accessibility_data = media_accessibility_payload(analyze_media_accessibility(extracted_pages))
-    ma_summary = media_accessibility_data.get("summary", {}) or {}
-    LOG.info(
-        "  media accessibility: %.0f%% pages with issues · %d missing image alts · %d videos without captions",
-        (ma_summary.get("issue_share", 0.0) or 0.0) * 100,
-        ma_summary.get("images_missing_alt", 0),
-        ma_summary.get("videos_missing_captions", 0),
-    )
-
-    freshness_data = freshness_payload(analyze_freshness(extracted_pages))
-    fr_summary = freshness_data.get("summary", {}) or {}
-    LOG.info(
-        "  freshness: %.0f%% date coverage · %d stale · %d missing dates",
-        (fr_summary.get("date_coverage", 0.0) or 0.0) * 100,
-        fr_summary.get("pages_stale", 0),
-        fr_summary.get("missing_dates", 0),
-    )
-
-    conversion_data = conversion_payload(analyze_conversion(extracted_pages))
-    cv_summary = conversion_data.get("summary", {}) or {}
-    LOG.info(
-        "  conversion: %.0f%% CTA coverage · %.0f%% primary CTA coverage · %d forms · %d lead pages without capture",
-        (cv_summary.get("cta_coverage", 0.0) or 0.0) * 100,
-        (cv_summary.get("primary_cta_coverage", 0.0) or 0.0) * 100,
-        cv_summary.get("total_forms", 0),
-        cv_summary.get("lead_pages_without_capture", 0),
-    )
-
-    page_types_data = page_types_payload(analyze_page_types(extracted_pages))
-    pt_summary = page_types_data.get("summary", {}) or {}
-    LOG.info(
-        "  page types: %d types · %d template families · dominant %s / %s",
-        pt_summary.get("page_type_count", 0),
-        pt_summary.get("template_family_count", 0),
-        pt_summary.get("dominant_page_type", "—"),
-        pt_summary.get("dominant_template_family", "—"),
-    )
-
-    entities_data = entities_payload(analyze_entities(extracted_pages))
-    ent_summary = entities_data.get("summary", {}) or {}
-    LOG.info(
-        "  entities: %d unique · %.0f%% coverage · authority %.1f",
-        ent_summary.get("unique_entities", 0),
-        (ent_summary.get("entity_coverage", 0.0) or 0.0) * 100,
-        ent_summary.get("topical_authority_score", 0.0),
-    )
-
-    structured_data_data = structured_data_payload(analyze_structured_data(extracted_pages))
-    external_payload_data: dict = {}
-    if config.enable_external_links:
+    def _external_links_task() -> dict:
+        if not config.enable_external_links:
+            return {}
         word_counts = {p.url: p.word_count for p in pages}
         pages_with_external = [(p.url, external_map.get(p.url, [])) for p in pages]
         ext_result = analyze_external(
@@ -848,12 +775,122 @@ def run(config: PipelineConfig) -> dict:
             http_cache=http_cache,
             max_workers=config.max_workers,
         )
-        external_payload_data = external_payload(ext_result)
+        return external_payload(ext_result)
+
+    def _analysis_task(name: str, fn):
+        with stage_timings.track(f"analysis:{name}"):
+            return fn()
+
+    analysis_tasks = {
+        "performance": lambda: performance_payload(analyze_performance(fetched)),
+        "resource_status": lambda: resource_status_payload(
+            analyze_resource_status(fetched, http_cache=getattr(crawler, "cache", None))
+        ),
+        "metadata_quality": lambda: metadata_quality_payload(analyze_metadata_quality(extracted_pages)),
+        "media_accessibility": lambda: media_accessibility_payload(analyze_media_accessibility(extracted_pages)),
+        "freshness": lambda: freshness_payload(analyze_freshness(extracted_pages)),
+        "conversion": lambda: conversion_payload(analyze_conversion(extracted_pages)),
+        "page_types": lambda: page_types_payload(analyze_page_types(extracted_pages)),
+        "entities": lambda: entities_payload(analyze_entities(extracted_pages)),
+        "structured_data": lambda: structured_data_payload(analyze_structured_data(extracted_pages)),
+        "external_links": _external_links_task,
+    }
+    analysis_workers = max(1, int(config.analysis_workers or min(config.max_workers or 1, len(analysis_tasks))))
+    if analysis_workers > 1:
+        LOG.info("  running post-extraction analyses with %d workers", analysis_workers)
+        with ThreadPoolExecutor(max_workers=analysis_workers) as pool:
+            futures = {
+                name: pool.submit(_analysis_task, name, fn)
+                for name, fn in analysis_tasks.items()
+            }
+            analysis_results = {name: future.result() for name, future in futures.items()}
+    else:
+        analysis_results = {
+            name: _analysis_task(name, fn)
+            for name, fn in analysis_tasks.items()
+        }
+
+    performance_data = analysis_results["performance"]
+    pf_summary = performance_data.get("summary", {}) or {}
+    LOG.info(
+        "  performance: median HTML %.0f KB · %.0f%% render-blocking · %d heavy pages",
+        (pf_summary.get("median_html_weight_bytes", 0) or 0) / 1024,
+        (pf_summary.get("render_blocking_share", 0.0) or 0.0) * 100,
+        pf_summary.get("heavy_pages", 0),
+    )
+    resource_status_data = analysis_results["resource_status"]
+    rs_summary = resource_status_data.get("summary", {}) or {}
+    LOG.info(
+        "  resource status: %d resources · %d broken JavaScript",
+        rs_summary.get("total_resources", 0),
+        rs_summary.get("broken_javascript", 0),
+    )
+
+    metadata_quality_data = analysis_results["metadata_quality"]
+    mq_summary = metadata_quality_data.get("summary", {}) or {}
+    LOG.info(
+        "  metadata quality: %.0f%% pages with issues · %d missing descriptions · %d missing canonicals",
+        (mq_summary.get("issue_share", 0.0) or 0.0) * 100,
+        mq_summary.get("missing_description", 0),
+        mq_summary.get("missing_canonical", 0),
+    )
+
+    media_accessibility_data = analysis_results["media_accessibility"]
+    ma_summary = media_accessibility_data.get("summary", {}) or {}
+    LOG.info(
+        "  media accessibility: %.0f%% pages with issues · %d missing image alts · %d videos without captions",
+        (ma_summary.get("issue_share", 0.0) or 0.0) * 100,
+        ma_summary.get("images_missing_alt", 0),
+        ma_summary.get("videos_missing_captions", 0),
+    )
+
+    freshness_data = analysis_results["freshness"]
+    fr_summary = freshness_data.get("summary", {}) or {}
+    LOG.info(
+        "  freshness: %.0f%% date coverage · %d stale · %d missing dates",
+        (fr_summary.get("date_coverage", 0.0) or 0.0) * 100,
+        fr_summary.get("pages_stale", 0),
+        fr_summary.get("missing_dates", 0),
+    )
+
+    conversion_data = analysis_results["conversion"]
+    cv_summary = conversion_data.get("summary", {}) or {}
+    LOG.info(
+        "  conversion: %.0f%% CTA coverage · %.0f%% primary CTA coverage · %d forms · %d lead pages without capture",
+        (cv_summary.get("cta_coverage", 0.0) or 0.0) * 100,
+        (cv_summary.get("primary_cta_coverage", 0.0) or 0.0) * 100,
+        cv_summary.get("total_forms", 0),
+        cv_summary.get("lead_pages_without_capture", 0),
+    )
+
+    page_types_data = analysis_results["page_types"]
+    pt_summary = page_types_data.get("summary", {}) or {}
+    LOG.info(
+        "  page types: %d types · %d template families · dominant %s / %s",
+        pt_summary.get("page_type_count", 0),
+        pt_summary.get("template_family_count", 0),
+        pt_summary.get("dominant_page_type", "—"),
+        pt_summary.get("dominant_template_family", "—"),
+    )
+
+    entities_data = analysis_results["entities"]
+    ent_summary = entities_data.get("summary", {}) or {}
+    LOG.info(
+        "  entities: %d unique · %.0f%% coverage · authority %.1f",
+        ent_summary.get("unique_entities", 0),
+        (ent_summary.get("entity_coverage", 0.0) or 0.0) * 100,
+        ent_summary.get("topical_authority_score", 0.0),
+    )
+
+    structured_data_data = analysis_results["structured_data"]
+    external_payload_data: dict = analysis_results["external_links"]
+    if external_payload_data:
+        top_domains = external_payload_data.get("top_domains") or []
         LOG.info(
             "  external links: %d distinct domains, top %s ; %d broken (%s)",
-            len(ext_result.top_domains),
-            ext_result.top_domains[0]["domain"] if ext_result.top_domains else "—",
-            len(ext_result.broken_links),
+            len(top_domains),
+            top_domains[0]["domain"] if top_domains else "—",
+            len(external_payload_data.get("broken_links") or []),
             "checked" if config.check_external_links else "not checked",
         )
 

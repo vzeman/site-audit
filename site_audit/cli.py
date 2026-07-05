@@ -114,6 +114,7 @@ def _run_command(args: argparse.Namespace) -> int:
         max_pages=args.max_pages,
         max_workers=args.workers,
         extraction_workers=args.extraction_workers,
+        analysis_workers=args.analysis_workers,
         request_delay=args.request_delay,
         duplicate_threshold=args.duplicate_threshold,
         duplicate_knn=args.duplicate_knn,
@@ -1180,6 +1181,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--workers", type=int, default=8)
     run_p.add_argument("--extraction-workers", type=int, default=0,
                        help="Worker threads for HTML extraction; default uses --workers")
+    run_p.add_argument("--analysis-workers", type=int, default=0,
+                       help="Worker threads for independent post-extraction analyses; default uses --workers capped by task count")
     run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)
     run_p.add_argument("--duplicate-knn", type=int, default=10)
