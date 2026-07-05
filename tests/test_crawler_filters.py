@@ -233,10 +233,16 @@ def test_fetch_cached_with_links_reads_body_file_without_retaining_body(tmp_path
         url,
         200,
         {"Content-Type": "text/html", "X-Robots-Tag": "noindex"},
-        b'<html><body><a href="/linked">Linked</a></body></html>',
+        b"""
+        <html><body>
+          <header><a href="/header">Header</a></header>
+          <main><a href="/linked">Linked</a></main>
+          <footer><a href="/footer">Footer</a></footer>
+        </body></html>
+        """,
     )
     crawler = Crawler(
-        CrawlConfig("example.com", respect_robots=False),
+        CrawlConfig("example.com", respect_robots=False, strip_header_footer=True),
         cache,
     )
 

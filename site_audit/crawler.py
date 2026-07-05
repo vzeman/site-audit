@@ -320,7 +320,12 @@ def _starting_url(domain: str) -> str:
     return f"https://{domain.rstrip('/')}"
 
 
-def _extract_links_from_html(base_url: str, body: str) -> list[tuple[str, str]]:
+def _extract_links_from_html(
+    base_url: str,
+    body: str,
+    *,
+    strip_header_footer: bool = False,
+) -> list[tuple[str, str]]:
     try:
         doc = lxml_html.fromstring(body)
     except Exception:
@@ -328,6 +333,9 @@ def _extract_links_from_html(base_url: str, body: str) -> list[tuple[str, str]]:
             soup = BeautifulSoup(body, "html.parser")
         except Exception:
             return []
+        if strip_header_footer:
+            for tag in soup.find_all(["header", "footer"]):
+                tag.decompose()
         out: list[tuple[str, str]] = []
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
@@ -339,6 +347,12 @@ def _extract_links_from_html(base_url: str, body: str) -> list[tuple[str, str]]:
                 anchor = (a.get("title") or a.get("aria-label") or "").strip()
             out.append((absolute, anchor[:200]))
         return out
+
+    if strip_header_footer:
+        for el in doc.xpath("//header|//footer"):
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
 
     out: list[tuple[str, str]] = []
     for a in doc.iter("a"):
@@ -353,13 +367,17 @@ def _extract_links_from_html(base_url: str, body: str) -> list[tuple[str, str]]:
     return out
 
 
-def _extract_links_from_file(args: tuple[str, str]) -> list[tuple[str, str]]:
-    base_url, path = args
+def _extract_links_from_file(args: tuple[str, str, bool]) -> list[tuple[str, str]]:
+    base_url, path, strip_header_footer = args
     try:
         body = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-    return _extract_links_from_html(base_url, body)
+    return _extract_links_from_html(
+        base_url,
+        body,
+        strip_header_footer=strip_header_footer,
+    )
 
 
 class Crawler:
@@ -847,11 +865,16 @@ class Crawler:
                         if len(results) % 25 == 0:
                             parse_note = ""
                             if link_parse_pool is not None:
+                                top_fallback = self.link_parse_process_fallbacks.most_common(1)
+                                fallback_note = ""
+                                if top_fallback:
+                                    fallback_note = " %s=%d" % top_fallback[0]
                                 parse_note = (
-                                    " / parse proc %d fallback %d"
+                                    " / parse proc %d fallback %d%s"
                                     % (
                                         self.link_parse_process_hits,
                                         sum(self.link_parse_process_fallbacks.values()),
+                                        fallback_note,
                                     )
                                 )
                             LOG.info("crawled %d / queue %d / cache %s%s",
@@ -891,8 +914,7 @@ class Crawler:
 
     def _fetch_cached_with_links(self, url: str, link_parse_pool) -> Optional[FetchResult]:
         if (
-            self.config.strip_header_footer
-            or self.config.content_include_classes
+            self.config.content_include_classes
             or self.config.content_exclude_classes
         ):
             self.link_parse_process_fallbacks["content_scope"] += 1
@@ -922,7 +944,7 @@ class Crawler:
                 content_encoding = (v or "").lower()
         page_links = link_parse_pool.submit(
             _extract_links_from_file,
-            (final_url, str(body_path)),
+            (final_url, str(body_path), bool(self.config.strip_header_footer)),
         ).result()
         return FetchResult(
             url=final_url,
