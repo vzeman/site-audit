@@ -115,6 +115,9 @@ def _run_command(args: argparse.Namespace) -> int:
         max_workers=args.workers,
         extraction_workers=args.extraction_workers,
         analysis_workers=args.analysis_workers,
+        adaptive_concurrency=not args.no_adaptive_concurrency,
+        min_crawl_workers=args.min_crawl_workers,
+        adaptive_success_threshold=args.adaptive_success_threshold,
         request_delay=args.request_delay,
         duplicate_threshold=args.duplicate_threshold,
         duplicate_knn=args.duplicate_knn,
@@ -1179,6 +1182,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--large-site-embedding-threshold", type=int, default=20000,
                        help="Page count above which standard runs stop after technical exports unless large embeddings are allowed")
     run_p.add_argument("--workers", type=int, default=8)
+    run_p.add_argument("--no-adaptive-concurrency", action="store_true",
+                       help="Disable crawl worker auto-throttling on timeouts, 429s, and server errors")
+    run_p.add_argument("--min-crawl-workers", type=int, default=1,
+                       help="Minimum worker count when adaptive crawl concurrency backs off")
+    run_p.add_argument("--adaptive-success-threshold", type=int, default=50,
+                       help="Successful responses needed before adaptive crawl concurrency increases by one")
     run_p.add_argument("--extraction-workers", type=int, default=0,
                        help="Worker threads for HTML extraction; default uses --workers")
     run_p.add_argument("--analysis-workers", type=int, default=0,

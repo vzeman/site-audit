@@ -142,6 +142,11 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "4",
             "--analysis-workers",
             "5",
+            "--no-adaptive-concurrency",
+            "--min-crawl-workers",
+            "2",
+            "--adaptive-success-threshold",
+            "10",
         ]
     )
 
@@ -151,6 +156,9 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.large_site_embedding_threshold == 50000
     assert args.extraction_workers == 4
     assert args.analysis_workers == 5
+    assert args.no_adaptive_concurrency is True
+    assert args.min_crawl_workers == 2
+    assert args.adaptive_success_threshold == 10
 
 
 def test_run_parser_strips_header_footer_by_default() -> None:

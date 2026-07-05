@@ -358,6 +358,9 @@ class PipelineConfig:
     max_workers: int = 8
     extraction_workers: int = 0
     analysis_workers: int = 0
+    adaptive_concurrency: bool = True
+    min_crawl_workers: int = 1
+    adaptive_success_threshold: int = 50
     request_delay: float = 0.0
     duplicate_threshold: float = 0.92
     duplicate_knn: int = 10
@@ -520,6 +523,9 @@ def run(config: PipelineConfig) -> dict:
         domain=config.domain,
         max_pages=config.max_pages,
         max_workers=config.max_workers,
+        adaptive_concurrency=config.adaptive_concurrency,
+        min_crawl_workers=config.min_crawl_workers,
+        adaptive_success_threshold=config.adaptive_success_threshold,
         request_delay=config.request_delay,
         follow_subdomains=config.follow_subdomains,
         respect_robots=config.respect_robots,

@@ -1,6 +1,6 @@
 import requests
 
-from site_audit.crawler import CrawlConfig, Crawler, FetchResult, normalize_url
+from site_audit.crawler import AdaptiveConcurrency, CrawlConfig, Crawler, FetchResult, normalize_url
 
 
 class _Cache:
@@ -181,6 +181,64 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+
+
+def test_bfs_drains_active_futures_when_frontier_is_empty() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=2,
+            respect_robots=False,
+        ),
+        _Cache(),
+    )
+    crawler._fetch = lambda url: FetchResult(
+        url=url,
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    )
+
+    results = crawler._bfs(["https://example.com/a", "https://example.com/b"])
+
+    assert {result.url for result in results} == {
+        "https://example.com/a",
+        "https://example.com/b",
+    }
+
+
+def test_adaptive_concurrency_backs_off_and_recovers() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=8, min_workers=2, success_threshold=2)
+
+    previous = adaptive.record(FetchResult(
+        url="https://example.com/slow",
+        status=429,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+
+    assert previous == 8
+    assert adaptive.target_workers == 4
+
+    adaptive.record(FetchResult(
+        url="https://example.com/ok-1",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+    adaptive.record(FetchResult(
+        url="https://example.com/ok-2",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+
+    assert adaptive.target_workers == 5
 
 
 def test_normalize_url_strips_tracking_params_but_keeps_business_query_params() -> None:

@@ -115,6 +115,9 @@ class CrawlConfig:
     domain: str
     max_pages: int = 10000
     max_workers: int = 8
+    adaptive_concurrency: bool = True
+    min_crawl_workers: int = 1
+    adaptive_success_threshold: int = 50
     request_delay: float = 0.0  # extra delay per worker between requests
     timeout: float = 20.0
     follow_subdomains: bool = False
@@ -153,6 +156,47 @@ class FetchResult:
     redirect_chain: list[str] = field(default_factory=list)
     redirect_hop_count: int = 0
     redirect_status_codes: list[int] = field(default_factory=list)
+
+
+@dataclass
+class AdaptiveConcurrency:
+    max_workers: int
+    min_workers: int = 1
+    enabled: bool = True
+    success_threshold: int = 50
+    target_workers: int = 0
+    success_streak: int = 0
+
+    def __post_init__(self) -> None:
+        self.max_workers = max(1, int(self.max_workers or 1))
+        self.min_workers = max(1, min(int(self.min_workers or 1), self.max_workers))
+        self.success_threshold = max(1, int(self.success_threshold or 1))
+        self.target_workers = self.max_workers
+
+    def record(self, result: FetchResult | None = None, *, error: str = "") -> int:
+        if not self.enabled:
+            return self.target_workers
+        status = int(getattr(result, "status", 0) or 0) if result is not None else 0
+        result_error = (error or getattr(result, "error", "") or "").lower()
+        from_cache = bool(getattr(result, "from_cache", False)) if result is not None else False
+        throttled = (
+            not from_cache
+            and (
+                status in {0, 408, 425, 429, 500, 502, 503, 504}
+                or result_error in {"timed_out", "fetch_failed"}
+            )
+        )
+        previous = self.target_workers
+        if throttled:
+            self.success_streak = 0
+            self.target_workers = max(self.min_workers, max(1, self.target_workers // 2))
+            return previous
+        if 200 <= status < 400 or from_cache:
+            self.success_streak += 1
+            if self.success_streak >= self.success_threshold and self.target_workers < self.max_workers:
+                self.target_workers += 1
+                self.success_streak = 0
+        return previous
 
 
 @dataclass
@@ -611,10 +655,16 @@ class Crawler:
         results: list[FetchResult] = []
         max_pages = self.config.max_pages
         active: dict = {}
+        adaptive = AdaptiveConcurrency(
+            max_workers=self.config.max_workers,
+            min_workers=self.config.min_crawl_workers,
+            enabled=self.config.adaptive_concurrency,
+            success_threshold=self.config.adaptive_success_threshold,
+        )
 
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
-            while frontier and len(results) < max_pages:
-                while frontier and len(active) < self.config.max_workers and len(active) + len(results) < max_pages:
+            while (frontier or active) and len(results) < max_pages:
+                while frontier and len(active) < adaptive.target_workers and len(active) + len(results) < max_pages:
                     url = frontier.popleft()
                     fut = pool.submit(self._fetch, url)
                     active[fut] = url
@@ -633,9 +683,24 @@ class Crawler:
                         result = fut.result()
                     except Exception as exc:
                         LOG.warning("fetch failed %s: %s", url, exc)
+                        previous_workers = adaptive.record(None, error="fetch_failed")
+                        if adaptive.target_workers != previous_workers:
+                            LOG.info(
+                                "  adaptive crawl workers: %d -> %d after fetch exception",
+                                previous_workers,
+                                adaptive.target_workers,
+                            )
                         continue
                     if result is None:
                         continue
+                    previous_workers = adaptive.record(result)
+                    if adaptive.target_workers != previous_workers:
+                        LOG.info(
+                            "  adaptive crawl workers: %d -> %d after status %s",
+                            previous_workers,
+                            adaptive.target_workers,
+                            result.status,
+                        )
                     # Skip duplicates that arise when several request URLs
                     # redirect to the same canonical (with/without trailing
                     # slash, with/without www, redirected query params).
