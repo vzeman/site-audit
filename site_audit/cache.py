@@ -228,6 +228,9 @@ class HttpCache:
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
         return f"{digest[:2]}/{digest}.body"
 
+    def body_file_path(self, url: str) -> Path:
+        return self.body_dir / self._body_relative_path(url)
+
     def _write_body(self, url: str, body: bytes) -> str:
         rel = self._body_relative_path(url)
         path = self.body_dir / rel

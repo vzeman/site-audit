@@ -113,6 +113,7 @@ def _run_command(args: argparse.Namespace) -> int:
         model=args.model,
         max_pages=args.max_pages,
         max_workers=args.workers,
+        link_parse_processes=args.link_parse_processes,
         extraction_workers=args.extraction_workers,
         analysis_workers=args.analysis_workers,
         adaptive_concurrency=not args.no_adaptive_concurrency,
@@ -1238,6 +1239,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--large-site-embedding-threshold", type=int, default=20000,
                        help="Page count above which standard runs stop after technical exports unless large embeddings are allowed")
     run_p.add_argument("--workers", type=int, default=8)
+    run_p.add_argument("--link-parse-processes", type=int, default=0,
+                       help="Processes for cached crawl link parsing; 0 auto, 1 disables the process pool")
     run_p.add_argument("--no-adaptive-concurrency", action="store_true",
                        help="Disable crawl worker auto-throttling on timeouts, 429s, and server errors")
     run_p.add_argument("--min-crawl-workers", type=int, default=1,

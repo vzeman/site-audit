@@ -356,6 +356,7 @@ class PipelineConfig:
     model: str = DEFAULT_MODEL
     max_pages: int = 10000
     max_workers: int = 8
+    link_parse_processes: int = 0
     extraction_workers: int = 0
     analysis_workers: int = 0
     adaptive_concurrency: bool = True
@@ -605,6 +606,7 @@ def run(config: PipelineConfig) -> dict:
         domain=config.domain,
         max_pages=config.max_pages,
         max_workers=config.max_workers,
+        link_parse_processes=config.link_parse_processes,
         adaptive_concurrency=config.adaptive_concurrency,
         min_crawl_workers=config.min_crawl_workers,
         adaptive_success_threshold=config.adaptive_success_threshold,

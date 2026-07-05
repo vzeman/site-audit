@@ -1,5 +1,6 @@
 import requests
 
+from site_audit.cache import HttpCache
 from site_audit.crawler import AdaptiveConcurrency, CrawlConfig, Crawler, FetchResult, normalize_url
 
 
@@ -25,6 +26,19 @@ class _Response:
         self.reason = ""
         self.encoding = "utf-8"
         self.history = history or []
+
+
+class _InlineFuture:
+    def __init__(self, value):
+        self._value = value
+
+    def result(self):
+        return self._value
+
+
+class _InlinePool:
+    def submit(self, fn, *args):
+        return _InlineFuture(fn(*args))
 
 
 def _crawler(config: CrawlConfig, responses: dict[str, str]) -> Crawler:
@@ -210,6 +224,30 @@ def test_bfs_can_retain_bodies_when_requested() -> None:
 
     assert results[0].body
     assert results[0].body_released is False
+
+
+def test_fetch_cached_with_links_reads_body_file_without_retaining_body(tmp_path) -> None:
+    cache = HttpCache(tmp_path / "http.sqlite")
+    url = "https://example.com/start"
+    cache.put(
+        url,
+        200,
+        {"Content-Type": "text/html", "X-Robots-Tag": "noindex"},
+        b'<html><body><a href="/linked">Linked</a></body></html>',
+    )
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False),
+        cache,
+    )
+
+    result = crawler._fetch_cached_with_links(url, _InlinePool())
+
+    assert result is not None
+    assert result.body == ""
+    assert result.body_released is True
+    assert result.body_cache_url == url
+    assert result.x_robots_tag == "noindex"
+    assert result.page_links == [("https://example.com/linked", "Linked")]
 
 
 def test_bfs_drains_active_futures_when_frontier_is_empty() -> None:

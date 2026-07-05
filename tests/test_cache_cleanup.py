@@ -72,6 +72,7 @@ def test_http_cache_stores_new_bodies_outside_sqlite(tmp_path) -> None:
     assert row[2]
     assert row[3] == len(body)
     assert body_path.read_bytes() == body
+    assert cache.body_file_path(url) == body_path
     assert cache.stats()["body_size_bytes"] == len(body)
 
 
