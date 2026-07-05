@@ -52,13 +52,21 @@ CREATE TABLE IF NOT EXISTS responses (
     etag TEXT,
     last_modified TEXT,
     content_type TEXT,
-    canonical_url TEXT
+    canonical_url TEXT,
+    body_path TEXT,
+    body_sha256 TEXT,
+    body_size_bytes INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_responses_fetched ON responses(fetched_at);
 """
 
 # Migration: add canonical_url to databases created before this column existed.
-_HTTP_MIGRATION = "ALTER TABLE responses ADD COLUMN canonical_url TEXT"
+_HTTP_MIGRATIONS = (
+    "ALTER TABLE responses ADD COLUMN canonical_url TEXT",
+    "ALTER TABLE responses ADD COLUMN body_path TEXT",
+    "ALTER TABLE responses ADD COLUMN body_sha256 TEXT",
+    "ALTER TABLE responses ADD COLUMN body_size_bytes INTEGER DEFAULT 0",
+)
 
 _TRACKING_PARAM_RE = re.compile(r"(?:^|[?&])(?:utm_[^=&]+|source|fbclid)=", re.IGNORECASE)
 _TRACKING_SQL_WHERE = (
@@ -98,13 +106,16 @@ class HttpCache:
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
+        self.body_dir = self.db_path.parent / "http_bodies"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.body_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_HTTP_SCHEMA)
-            try:
-                conn.execute(_HTTP_MIGRATION)
-            except sqlite3.OperationalError:
-                pass  # column already exists
+            for migration in _HTTP_MIGRATIONS:
+                try:
+                    conn.execute(migration)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -119,7 +130,7 @@ class HttpCache:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT url, status, headers, body, fetched_at, etag, last_modified, "
-                "content_type, canonical_url "
+                "content_type, canonical_url, body_path "
                 "FROM responses WHERE url = ?",
                 (url,),
             ).fetchone()
@@ -129,7 +140,7 @@ class HttpCache:
             url=row[0],
             status=row[1],
             headers=json.loads(row[2]),
-            body=row[3],
+            body=self._read_body(row[3], row[9]),
             fetched_at=row[4],
             etag=row[5],
             last_modified=row[6],
@@ -145,27 +156,65 @@ class HttpCache:
         body: bytes,
         canonical_url: Optional[str] = None,
     ) -> None:
+        if isinstance(body, str):
+            body = body.encode("utf-8")
         etag = headers.get("ETag") or headers.get("etag")
         last_modified = headers.get("Last-Modified") or headers.get("last-modified")
         content_type = headers.get("Content-Type") or headers.get("content-type")
+        body_path = self._write_body(url, body)
+        body_hash = hashlib.sha256(body).hexdigest()
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO responses "
                 "(url, status, headers, body, fetched_at, etag, last_modified, "
-                "content_type, canonical_url) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "content_type, canonical_url, body_path, body_sha256, body_size_bytes) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     int(status),
                     json.dumps(dict(headers)),
-                    body,
+                    b"",
                     time.time(),
                     etag,
                     last_modified,
                     content_type,
                     canonical_url,
+                    body_path,
+                    body_hash,
+                    len(body),
                 ),
             )
+
+    def _body_relative_path(self, url: str) -> str:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        return f"{digest[:2]}/{digest}.body"
+
+    def _write_body(self, url: str, body: bytes) -> str:
+        rel = self._body_relative_path(url)
+        path = self.body_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_bytes(body)
+        tmp_path.replace(path)
+        return rel
+
+    def _read_body(self, inline_body: bytes | None, body_path: str | None) -> bytes:
+        if body_path:
+            path = self.body_dir / body_path
+            try:
+                return path.read_bytes()
+            except OSError:
+                LOG.warning("  cache body missing for %s", path)
+        return inline_body or b""
+
+    def _delete_body(self, url: str) -> None:
+        path = self.body_dir / self._body_relative_path(url)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            LOG.debug("could not delete cached body %s: %s", path, exc)
 
     def known_urls(self) -> Iterable[str]:
         with self._connect() as conn:
@@ -175,8 +224,16 @@ class HttpCache:
     def stats(self) -> dict:
         with self._connect() as conn:
             count = conn.execute("SELECT COUNT(*) FROM responses").fetchone()[0]
-            size = self.db_path.stat().st_size if self.db_path.exists() else 0
-        return {"entries": count, "size_bytes": size}
+            body_size = conn.execute(
+                "SELECT COALESCE(SUM(body_size_bytes), 0) FROM responses"
+            ).fetchone()[0]
+            sqlite_size = self.db_path.stat().st_size if self.db_path.exists() else 0
+        return {
+            "entries": count,
+            "size_bytes": sqlite_size + int(body_size or 0),
+            "sqlite_size_bytes": sqlite_size,
+            "body_size_bytes": int(body_size or 0),
+        }
 
     def clean_tracking_duplicates(self, *, min_candidates: int = 100) -> dict:
         """Delete cached tracking-param URL variants that point at another canonical.
@@ -195,15 +252,15 @@ class HttpCache:
 
             delete_urls: list[str] = []
             rows = conn.execute(
-                "SELECT url, canonical_url, body, content_type FROM responses "
+                "SELECT url, canonical_url, body, content_type, body_path FROM responses "
                 f"WHERE {_TRACKING_SQL_WHERE}"
             )
-            for url, stored_canonical, body, content_type in rows:
+            for url, stored_canonical, body, content_type, body_path in rows:
                 if not _has_tracking_param(url):
                     continue
                 canonical = _usable_canonical(url, stored_canonical)
                 if not canonical and "html" in (content_type or "").lower():
-                    canonical = _extract_html_canonical(url, body)
+                    canonical = _extract_html_canonical(url, self._read_body(body, body_path))
                 if (
                     canonical
                     and _normalize_for_cache_dedupe(canonical)
@@ -213,6 +270,8 @@ class HttpCache:
 
             if delete_urls:
                 conn.executemany("DELETE FROM responses WHERE url = ?", [(url,) for url in delete_urls])
+        for url in delete_urls:
+            self._delete_body(url)
 
         if delete_urls:
             LOG.info(
