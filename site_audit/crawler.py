@@ -380,6 +380,8 @@ class Crawler:
         self.sitemap_errors: list[dict] = []
         self.robots_txt_info: dict = {}
         self.robots_disallowed_urls: set[str] = set()
+        self.link_parse_process_hits = 0
+        self.link_parse_process_fallbacks: collections.Counter[str] = collections.Counter()
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -843,9 +845,19 @@ class Crawler:
                         results.append(result)
 
                         if len(results) % 25 == 0:
-                            LOG.info("crawled %d / queue %d / cache %s",
+                            parse_note = ""
+                            if link_parse_pool is not None:
+                                parse_note = (
+                                    " / parse proc %d fallback %d"
+                                    % (
+                                        self.link_parse_process_hits,
+                                        sum(self.link_parse_process_fallbacks.values()),
+                                    )
+                                )
+                            LOG.info("crawled %d / queue %d / cache %s%s",
                                      len(results), len(frontier),
-                                     "hit" if result.from_cache else "miss")
+                                     "hit" if result.from_cache else "miss",
+                                     parse_note)
         finally:
             if link_parse_pool is not None:
                 link_parse_pool.shutdown()
@@ -868,6 +880,7 @@ class Crawler:
         if link_parse_pool is not None:
             cached = self._fetch_cached_with_links(url, link_parse_pool)
             if cached is not None:
+                self.link_parse_process_hits += 1
                 return cached
         result = self._fetch(url)
         if result is None:
@@ -882,17 +895,21 @@ class Crawler:
             or self.config.content_include_classes
             or self.config.content_exclude_classes
         ):
+            self.link_parse_process_fallbacks["content_scope"] += 1
             return None
         started = time.perf_counter()
         meta = self.cache.get_metadata(url)
         if not meta:
+            self.link_parse_process_fallbacks["metadata_miss"] += 1
             return None
         status = int(meta.get("status") or 0)
         content_type = (meta.get("content_type") or "").lower()
         if not (200 <= status < 400) or "html" not in content_type:
+            self.link_parse_process_fallbacks["not_html_success"] += 1
             return None
         body_path = self.cache.body_file_path(url)
         if not body_path.is_file():
+            self.link_parse_process_fallbacks["body_file_missing"] += 1
             return None
         final_url = meta.get("canonical_url") or url
         headers = meta.get("headers") or {}
