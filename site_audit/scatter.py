@@ -53,6 +53,29 @@ def _pca_coords(matrix: np.ndarray) -> np.ndarray:
     return coords.astype(np.float32)
 
 
+def _fallback_labels(n: int, k: int) -> np.ndarray:
+    if n == 0:
+        return np.zeros(0, dtype=int)
+    return (np.arange(n, dtype=int) % max(1, k)).astype(int)
+
+
+def _sklearn_labels(matrix: np.ndarray, k: int) -> np.ndarray:
+    try:
+        from sklearn.cluster import MiniBatchKMeans
+
+        km = MiniBatchKMeans(
+            n_clusters=k,
+            random_state=42,
+            batch_size=min(4096, max(256, len(matrix))),
+            n_init=3,
+            max_iter=100,
+        )
+        return km.fit_predict(matrix).astype(int)
+    except Exception as exc:  # pragma: no cover - sklearn absent/native edge
+        LOG.warning("MiniBatchKMeans failed (%s); using deterministic fallback labels", exc)
+        return _fallback_labels(len(matrix), k)
+
+
 def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray, np.ndarray]:
     """Return (cluster_labels, coords[n, 2])."""
     n, d = embeddings.shape
@@ -64,10 +87,20 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
         labels = np.zeros(n, dtype=int)
         return labels, _stub_coords(n)
 
-    import faiss  # type: ignore
-
     k = max(2, min(num_clusters, max(2, n // 2)))
     emb_f32 = embeddings.astype(np.float32)
+
+    umap_max_points = _configured_umap_max_points()
+    if umap_max_points and n > umap_max_points:
+        LOG.info(
+            "Skipping FAISS/UMAP for %d points above SITE_AUDIT_UMAP_MAX_POINTS=%d; using MiniBatchKMeans/PCA",
+            n,
+            umap_max_points,
+        )
+        return _sklearn_labels(emb_f32, k), _pca_coords(emb_f32)
+
+    import faiss  # type: ignore
+
     kmeans = faiss.Kmeans(
         d=d,
         k=k,
@@ -79,15 +112,6 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
     kmeans.train(emb_f32)
     _, labels = kmeans.index.search(emb_f32, 1)
     cluster_labels = labels.flatten().astype(int)
-
-    umap_max_points = _configured_umap_max_points()
-    if umap_max_points and n > umap_max_points:
-        LOG.info(
-            "Skipping UMAP for %d points above SITE_AUDIT_UMAP_MAX_POINTS=%d; using PCA coords",
-            n,
-            umap_max_points,
-        )
-        return cluster_labels, _pca_coords(emb_f32)
 
     import umap  # type: ignore
 
