@@ -47,3 +47,24 @@ def test_anchor_relevance_handles_no_links() -> None:
 
     assert payload["summary"]["status"] == "no_links"
     assert payload["links"] == []
+
+
+def test_anchor_relevance_chunked_output_matches_sequential() -> None:
+    target_url = "https://example.com/product"
+    source = _page(
+        "https://example.com/source",
+        "Source",
+        links=[
+            {"is_internal": True, "target_url": target_url, "anchor": "product platform", "context": "A useful product platform", "has_text": True},
+            {"is_internal": True, "target_url": target_url, "anchor": "learn more", "context": "Read about the product", "has_text": True},
+            {"is_internal": True, "target_url": target_url, "anchor": "pricing", "context": "Product pricing details", "has_text": True},
+        ],
+    )
+    target = _page(target_url, "Product Platform")
+
+    sequential = build_anchor_relevance([source, target], max_workers=1)
+    chunked = build_anchor_relevance([source, target], max_workers=2, chunk_size=1)
+
+    assert chunked["summary"] == sequential["summary"]
+    assert chunked["links"] == sequential["links"]
+    assert chunked["weak_links"] == sequential["weak_links"]

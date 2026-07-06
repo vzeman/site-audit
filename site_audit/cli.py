@@ -1245,7 +1245,17 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Max transformer tokens per embedded text; 0 uses the model default (default: 512)")
     run_p.add_argument("--embedding-batch-size", type=int, default=32,
                        help="Page embedding batch size (default: 32)")
-    run_p.add_argument("--workers", type=int, default=8)
+    run_p.add_argument(
+        "--workers",
+        "--max-workers",
+        dest="workers",
+        type=int,
+        default=0,
+        help=(
+            "Maximum worker cap for adaptive crawl/extraction/analysis stages; "
+            "0 auto-selects from CPU count"
+        ),
+    )
     run_p.add_argument("--link-parse-processes", type=int, default=0,
                        help="Processes for cached crawl link parsing; 0 auto, 1 disables the process pool")
     run_p.add_argument("--no-adaptive-concurrency", action="store_true",
@@ -1259,9 +1269,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--adaptive-max-rss-mb", type=int, default=0,
                        help="Back off crawl workers when process RSS exceeds this MB; default auto-selects a machine-based limit")
     run_p.add_argument("--extraction-workers", type=int, default=0,
-                       help="Worker threads for HTML extraction; default uses --workers")
+                       help="Exact worker override for HTML extraction; 0 lets the adaptive controller choose")
     run_p.add_argument("--analysis-workers", type=int, default=0,
-                       help="Worker threads for independent post-extraction analyses; default uses --workers capped by task count")
+                       help="Exact worker override for independent post-extraction analyses; 0 lets the adaptive controller choose")
     run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)
     run_p.add_argument("--duplicate-knn", type=int, default=10)

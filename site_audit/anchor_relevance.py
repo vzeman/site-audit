@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import math
 import re
+import logging
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 import numpy as np
 
 from .extractor import ExtractedPage
 
+LOG = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.I)
 _GENERIC = {
     "click here", "here", "read more", "learn more", "more", "details", "view",
@@ -114,6 +117,73 @@ def _label(row: dict, target_anchor_counts: Counter[tuple[str, str]]) -> str:
     return "acceptable"
 
 
+def _chunked(items: list[dict], chunk_size: int) -> list[list[dict]]:
+    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+
+def _score_row_chunk(
+    rows: list[dict],
+    *,
+    target_features: dict[str, dict],
+    index_by_url: dict[str, int],
+    anchor_vectors: dict[str, np.ndarray],
+    page_embeddings: np.ndarray | None,
+    target_anchor_counts: Counter[tuple[str, str]],
+) -> list[dict]:
+    scored: list[dict] = []
+    for row in rows:
+        target_key = row["target_key"]
+        features = target_features[target_key]
+        anchor_tokens = _tokens(row["anchor"])
+        context_tokens = _tokens(row["context"])
+        target_tokens = features["target_tokens"]
+        keyword_tokens = features["keyword_tokens"]
+        entity_tokens = features["entity_tokens"]
+        overlap = len(anchor_tokens & target_tokens) / max(1, len(anchor_tokens)) if anchor_tokens else 0.0
+        context_overlap = len(context_tokens & target_tokens) / max(1, min(len(context_tokens), 24)) if context_tokens else 0.0
+        keyword_overlap = len(anchor_tokens & keyword_tokens) / max(1, len(anchor_tokens)) if anchor_tokens and keyword_tokens else 0.0
+        entity_overlap = len(anchor_tokens & entity_tokens) / max(1, len(anchor_tokens)) if anchor_tokens and entity_tokens else 0.0
+        semantic = 0.0
+        anchor_vec = anchor_vectors.get(row["anchor"])
+        target_idx = index_by_url.get(row["target_url"])
+        if anchor_vec is not None and page_embeddings is not None and target_idx is not None:
+            semantic = max(0.0, min(1.0, (float(np.clip(anchor_vec @ page_embeddings[target_idx], -1.0, 1.0)) + 1.0) / 2.0))
+        lexical_score = overlap * 100.0
+        semantic_score = semantic * 100.0 if semantic else lexical_score
+        score = (
+            semantic_score * 0.35
+            + lexical_score * 0.25
+            + max(keyword_overlap, entity_overlap) * 100.0 * 0.20
+            + context_overlap * 100.0 * 0.10
+            + (0.0 if row["is_empty"] else 10.0)
+        )
+        if row["is_image_only"]:
+            score -= 18.0
+        out = dict(row)
+        out.pop("target_key", None)
+        out.update({
+            "score": round(max(0.0, min(100.0, score)), 2),
+            "semantic_score": round(semantic_score, 2),
+            "lexical_overlap": round(overlap, 4),
+            "keyword_overlap": round(keyword_overlap, 4),
+            "entity_overlap": round(entity_overlap, 4),
+            "context_overlap": round(context_overlap, 4),
+            "suggested_anchor": features["suggested_anchor"],
+        })
+        out["label"] = _label(out, target_anchor_counts)
+        out["recommended_action"] = (
+            "Add visible descriptive anchor text or useful image alt text."
+            if out["label"] in {"empty", "image_only"}
+            else "Replace with a target-specific phrase from the suggested anchor."
+            if out["label"] in {"vague", "mismatched"}
+            else "Vary repeated anchors with natural alternatives from headings or entities."
+            if out["label"] in {"over_optimized", "duplicated"}
+            else "Keep this anchor."
+        )
+        scored.append(out)
+    return scored
+
+
 def build_anchor_relevance(
     extracted_pages: list[ExtractedPage],
     page_embeddings: np.ndarray | None = None,
@@ -122,6 +192,8 @@ def build_anchor_relevance(
     entities_payload: dict | None = None,
     embedder=None,
     semantic_anchor_cap: int = 3000,
+    max_workers: int = 1,
+    chunk_size: int = 50000,
 ) -> dict:
     if not extracted_pages:
         return {"summary": {"status": "no_pages", "total_internal_links": 0}, "links": []}
@@ -138,11 +210,13 @@ def build_anchor_relevance(
             target = target_by_canonical.get(_canonical(link.get("target_url") or ""))
             if target is None or target.url == source.url:
                 continue
+            target_key = _canonical(target.url)
             raw_rows.append({
                 "source_url": source.url,
                 "source_title": source.title,
                 "source_directory": _directory(source.url),
                 "target_url": target.url,
+                "target_key": target_key,
                 "target_title": target.title,
                 "target_directory": _directory(target.url),
                 "anchor": (link.get("anchor") or "").strip(),
@@ -162,59 +236,46 @@ def build_anchor_relevance(
             anchor_vectors = {anchor: vec for anchor, vec in zip(unique, embs)}
 
     target_anchor_counts = Counter((r["target_url"], r["anchor"].lower()) for r in raw_rows if r["anchor"])
-    links: list[dict] = []
-    for row in raw_rows:
-        target = target_by_canonical[_canonical(row["target_url"])]
-        target_key = _canonical(target.url)
+    target_features: dict[str, dict] = {}
+    for target_key, target in target_by_canonical.items():
         target_keywords = keywords_by_url.get(target_key, [])
         target_entities = entities_by_url.get(target_key, [])
         replacement_candidates = _phrase_candidates(target, target_keywords, target_entities)
         target_text = " ".join([target.title, target.h1, " ".join(target.headings or []), " ".join(target_keywords), " ".join(target_entities)])
-        target_tokens = _tokens(target_text)
-        anchor_tokens = _tokens(row["anchor"])
-        context_tokens = _tokens(row["context"])
-        overlap = len(anchor_tokens & target_tokens) / max(1, len(anchor_tokens)) if anchor_tokens else 0.0
-        context_overlap = len(context_tokens & target_tokens) / max(1, min(len(context_tokens), 24)) if context_tokens else 0.0
-        keyword_tokens = _tokens(" ".join(target_keywords))
-        entity_tokens = _tokens(" ".join(target_entities))
-        keyword_overlap = len(anchor_tokens & keyword_tokens) / max(1, len(anchor_tokens)) if anchor_tokens and keyword_tokens else 0.0
-        entity_overlap = len(anchor_tokens & entity_tokens) / max(1, len(anchor_tokens)) if anchor_tokens and entity_tokens else 0.0
-        semantic = 0.0
-        anchor_vec = anchor_vectors.get(row["anchor"])
-        target_idx = index_by_url.get(target.url)
-        if anchor_vec is not None and page_embeddings is not None and target_idx is not None:
-            semantic = max(0.0, min(1.0, (float(np.clip(anchor_vec @ page_embeddings[target_idx], -1.0, 1.0)) + 1.0) / 2.0))
-        lexical_score = overlap * 100.0
-        semantic_score = semantic * 100.0 if semantic else lexical_score
-        score = (
-            semantic_score * 0.35
-            + lexical_score * 0.25
-            + max(keyword_overlap, entity_overlap) * 100.0 * 0.20
-            + context_overlap * 100.0 * 0.10
-            + (0.0 if row["is_empty"] else 10.0)
-        )
-        if row["is_image_only"]:
-            score -= 18.0
-        row.update({
-            "score": round(max(0.0, min(100.0, score)), 2),
-            "semantic_score": round(semantic_score, 2),
-            "lexical_overlap": round(overlap, 4),
-            "keyword_overlap": round(keyword_overlap, 4),
-            "entity_overlap": round(entity_overlap, 4),
-            "context_overlap": round(context_overlap, 4),
+        target_features[target_key] = {
+            "target_tokens": _tokens(target_text),
+            "keyword_tokens": _tokens(" ".join(target_keywords)),
+            "entity_tokens": _tokens(" ".join(target_entities)),
             "suggested_anchor": replacement_candidates[0] if replacement_candidates else target.title,
-        })
-        row["label"] = _label(row, target_anchor_counts)
-        row["recommended_action"] = (
-            "Add visible descriptive anchor text or useful image alt text."
-            if row["label"] in {"empty", "image_only"}
-            else "Replace with a target-specific phrase from the suggested anchor."
-            if row["label"] in {"vague", "mismatched"}
-            else "Vary repeated anchors with natural alternatives from headings or entities."
-            if row["label"] in {"over_optimized", "duplicated"}
-            else "Keep this anchor."
+        }
+
+    workers = max(1, int(max_workers or 1))
+    if workers > 1 and len(raw_rows) > chunk_size:
+        chunks = _chunked(raw_rows, max(1, int(chunk_size)))
+        LOG.info("  anchor relevance: scoring %d links in %d chunks with %d workers", len(raw_rows), len(chunks), workers)
+        links = []
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for chunk_links in pool.map(
+                lambda chunk: _score_row_chunk(
+                    chunk,
+                    target_features=target_features,
+                    index_by_url=index_by_url,
+                    anchor_vectors=anchor_vectors,
+                    page_embeddings=page_embeddings,
+                    target_anchor_counts=target_anchor_counts,
+                ),
+                chunks,
+            ):
+                links.extend(chunk_links)
+    else:
+        links = _score_row_chunk(
+            raw_rows,
+            target_features=target_features,
+            index_by_url=index_by_url,
+            anchor_vectors=anchor_vectors,
+            page_embeddings=page_embeddings,
+            target_anchor_counts=target_anchor_counts,
         )
-        links.append(row)
 
     labels = Counter(row["label"] for row in links)
 

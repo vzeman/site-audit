@@ -301,7 +301,11 @@ def test_pipeline_uses_configured_analysis_workers(tmp_path, monkeypatch) -> Non
 
     monkeypatch.setattr("site_audit.pipeline.Crawler", FakeCrawler)
     monkeypatch.setattr("site_audit.pipeline.Embedder", FailingEmbedder)
-    monkeypatch.setattr("site_audit.pipeline.ThreadPoolExecutor", RecordingExecutor)
+    monkeypatch.setattr("site_audit.stage_scheduler.ThreadPoolExecutor", RecordingExecutor)
+    monkeypatch.setattr(
+        "site_audit.stage_scheduler.wait",
+        lambda running, return_when=None: (set(running), set()),
+    )
 
     summary = run(
         PipelineConfig(

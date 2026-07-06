@@ -157,6 +157,8 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "384",
             "--embedding-batch-size",
             "64",
+            "--max-workers",
+            "9",
             "--resume",
             "--no-checkpoints",
         ]
@@ -176,8 +178,15 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.embed_body_chars == 8000
     assert args.embed_max_seq_length == 384
     assert args.embedding_batch_size == 64
+    assert args.workers == 9
     assert args.resume is True
     assert args.no_checkpoints is True
+
+
+def test_run_parser_keeps_workers_alias_for_max_workers() -> None:
+    args = build_parser().parse_args(["run", "example.com", "--workers", "7"])
+
+    assert args.workers == 7
 
 
 def test_cache_migrate_parser_accepts_options() -> None:

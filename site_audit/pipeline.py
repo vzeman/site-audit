@@ -35,6 +35,7 @@ from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 import numpy as np
 from bs4 import BeautifulSoup
 
+from .adaptive_workers import AdaptiveWorkerController, StageProfile, configure_native_thread_limits
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
 from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
@@ -136,6 +137,7 @@ from .performance_explainer import build_performance_explainer
 from .recommendations import synthesize as synthesize_recommendations
 from .recommendations import to_payload as recommendations_payload
 from .report import build_duplicate_rows, build_outlier_rows, write_all, write_technical_audit_bundle
+from .report_lifecycle import begin_report_build, complete_report_build
 from .resource_status import analyze as analyze_resource_status
 from .resource_status import to_payload as resource_status_payload
 from .scatter import project
@@ -144,6 +146,7 @@ from .search_fusion import build_combined_search_analysis
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 from .sitemap_coverage import analyze as analyze_sitemap_coverage
+from .stage_scheduler import StageTask, run_stage_tasks
 from .template_patterns import build_template_patterns
 from .technical_seo import build_technical_seo
 from .trust_signals import build_trust_signals
@@ -515,7 +518,7 @@ class PipelineConfig:
 
     model: str = DEFAULT_MODEL
     max_pages: int = 10000
-    max_workers: int = 8
+    max_workers: int = 0
     link_parse_processes: int = 0
     extraction_workers: int = 0
     analysis_workers: int = 0
@@ -756,6 +759,9 @@ def run(config: PipelineConfig) -> dict:
     host = _domain_only(config.domain)
     cache_dir, report_dir = project_paths(config)
     stage_timings = StageTimings()
+    configure_native_thread_limits()
+    worker_controller = AdaptiveWorkerController(max_workers=config.max_workers)
+    crawl_worker_cap = worker_controller.max_workers
     embed_body_chars = _configured_embed_body_chars(config.embed_body_chars)
     embed_max_seq_length = _configured_embed_max_seq_length(config.embed_max_seq_length)
 
@@ -775,7 +781,7 @@ def run(config: PipelineConfig) -> dict:
     crawl_config = CrawlConfig(
         domain=config.domain,
         max_pages=config.max_pages,
-        max_workers=config.max_workers,
+        max_workers=crawl_worker_cap,
         link_parse_processes=config.link_parse_processes,
         adaptive_concurrency=config.adaptive_concurrency,
         min_crawl_workers=config.min_crawl_workers,
@@ -799,7 +805,7 @@ def run(config: PipelineConfig) -> dict:
         sitemap_lastmod_within_days=config.sitemap_lastmod_within_days,
     )
     crawler = Crawler(crawl_config, http_cache)
-    with stage_timings.track("crawl", max_pages=config.max_pages, workers=config.max_workers):
+    with stage_timings.track("crawl", max_pages=config.max_pages, workers=crawl_worker_cap):
         fetched = crawler.discover_and_crawl()
     LOG.info("  fetched %d pages (cache: %s)", len(fetched), http_cache.stats())
 
@@ -931,7 +937,18 @@ def run(config: PipelineConfig) -> dict:
                     continue
                 extractable.append((idx, r))
 
-            extraction_workers = max(1, int(config.extraction_workers or config.max_workers or 1))
+            extraction_decision = worker_controller.select(
+                StageProfile(
+                    "extraction",
+                    kind="mixed",
+                    max_workers=8,
+                    estimated_worker_rss_mb=512 if len(extractable) >= 1000 else None,
+                ),
+                item_count=len(extractable),
+                explicit_workers=config.extraction_workers,
+            )
+            extraction_workers = extraction_decision.workers
+            worker_controller.log_decision(extraction_decision)
             extraction_results: dict[int, ExtractedPage | None] = {}
             process_payloads = []
             file_backed_extractable = 0
@@ -1148,13 +1165,17 @@ def run(config: PipelineConfig) -> dict:
             return {}
         word_counts = {p.url: p.word_count for p in pages}
         pages_with_external = [(p.url, external_map.get(p.url, [])) for p in pages]
+        external_decision = worker_controller.select(
+            StageProfile("external-links", kind="io", io_cap=16),
+            item_count=len(pages_with_external),
+        )
         ext_result = analyze_external(
             pages,
             word_counts,
             pages_with_external,
             check_links=config.check_external_links,
             http_cache=http_cache,
-            max_workers=config.max_workers,
+            max_workers=external_decision.workers,
         )
         return external_payload(ext_result)
 
@@ -1176,15 +1197,27 @@ def run(config: PipelineConfig) -> dict:
         "structured_data": lambda: structured_data_payload(analyze_structured_data(extracted_pages)),
         "external_links": _external_links_task,
     }
-    analysis_workers = max(1, int(config.analysis_workers or min(config.max_workers or 1, len(analysis_tasks))))
+    analysis_decision = worker_controller.select(
+        StageProfile("post-extraction-analysis", kind="mixed"),
+        item_count=len(analysis_tasks),
+        explicit_workers=config.analysis_workers,
+    )
+    analysis_workers = analysis_decision.workers
+    worker_controller.log_decision(analysis_decision)
     if analysis_workers > 1:
         LOG.info("  running post-extraction analyses with %d workers", analysis_workers)
-        with ThreadPoolExecutor(max_workers=analysis_workers) as pool:
-            futures = {
-                name: pool.submit(_analysis_task, name, fn)
+        analysis_results = run_stage_tasks(
+            [
+                StageTask(
+                    name=name,
+                    run=lambda name=name, fn=fn: _analysis_task(name, fn),
+                    profile=StageProfile(f"analysis:{name}", kind="mixed"),
+                )
                 for name, fn in analysis_tasks.items()
-            }
-            analysis_results = {name: future.result() for name, future in futures.items()}
+            ],
+            controller=worker_controller,
+            max_workers=analysis_workers,
+        )
     else:
         analysis_results = {
             name: _analysis_task(name, fn)
@@ -1276,6 +1309,10 @@ def run(config: PipelineConfig) -> dict:
         )
 
     def _write_pre_embedding_technical(mode: str, status: str, message: str = "") -> dict:
+        begin_report_build(
+            report_dir,
+            metadata={"domain": host, "mode": mode, "status": status, "pages": len(pages)},
+        )
         with stage_timings.track("technical-report", mode=mode):
             technical_link_payload = (
                 _basic_linkgraph_payload(pages, outlinks_map, indexability_data)
@@ -1337,6 +1374,11 @@ def run(config: PipelineConfig) -> dict:
                 linkgraph=technical_link_payload,
             )
         stage_timings.write(report_dir)
+        complete_report_build(
+            report_dir,
+            metadata={"domain": host, "mode": mode, "status": status, "pages": len(pages)},
+            required_files=("index.html", "run_summary.json", "technical_issues.json"),
+        )
         LOG.info("  technical audit bundle: %s", report_dir)
         return {
             "domain": host,
@@ -2370,12 +2412,18 @@ def run(config: PipelineConfig) -> dict:
                 hdl_summary.get("opportunity_traffic", 0),
                 (hdl_summary.get("demand_support_alignment", 0.0) or 0.0) * 100,
             )
+        anchor_worker_decision = worker_controller.select(
+            StageProfile("anchor-relevance", kind="cpu", max_workers=8),
+            item_count=sum(len(ext.link_audit_rows or []) for ext in extracted_pages),
+        )
+        worker_controller.log_decision(anchor_worker_decision)
         link_payload["anchor_relevance"] = build_anchor_relevance(
             extracted_pages,
             embeddings,
             search_payload=ahrefs_data,
             entities_payload=entities_data,
             embedder=embedder,
+            max_workers=anchor_worker_decision.workers,
         )
         anchor_summary = (link_payload.get("anchor_relevance") or {}).get("summary", {}) or {}
         if anchor_summary.get("status") == "ok":
@@ -2537,6 +2585,10 @@ def run(config: PipelineConfig) -> dict:
     )
 
     # 13) Reports
+    begin_report_build(
+        report_dir,
+        metadata={"domain": host, "mode": "full", "pages": len(pages)},
+    )
     summary = write_all(
         report_dir,
         result,
@@ -2663,6 +2715,11 @@ def run(config: PipelineConfig) -> dict:
         snapshot_dir = save_report_snapshot(host, config.projects_root, report_dir)
         LOG.info("  history snapshot: %s", snapshot_dir)
     stage_timings.write(report_dir)
+    complete_report_build(
+        report_dir,
+        metadata={"domain": host, "mode": "full", "pages": len(pages)},
+        required_files=("index.html", "site_metrics.json", "technical_issues.json"),
+    )
 
     LOG.info("=== summary ===")
     LOG.info("  pages: %d", len(pages))
