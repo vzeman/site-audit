@@ -2805,7 +2805,8 @@
     const block = document.getElementById('action-plan-block');
     const r = state.recommendations || {};
     const items = (r.items || []);
-    if (!items.length) { block.style.display = 'none'; return; }
+    const suppressed = (r.suppressed || []);
+    if (!items.length && !suppressed.length) { block.style.display = 'none'; return; }
     prepareActionPlanControls(items);
 
     const meta = document.getElementById('action-plan-meta');
@@ -2816,7 +2817,7 @@
       .filter(k => catCounts[k])
       .map(k => `${REC_CAT_LABELS[k]} ${catCounts[k]}`)
       .join(' · ');
-    meta.textContent = `${r.total} actions · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} · avg priority ${Number(summary.avg_priority_score || 0).toFixed(1)} — ${catParts}`;
+    meta.textContent = `${r.total} actions · ${summary.cards || (r.cards || []).length || 0} cards · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} · suppressed ${summary.suppressed || suppressed.length || 0} · avg priority ${Number(summary.avg_priority_score || 0).toFixed(1)} — ${catParts}`;
 
     document.querySelectorAll('.rec-pri-btn').forEach(b => {
       const on = b.dataset.recPri === state.recPriFilter;
@@ -2833,12 +2834,6 @@
 
     const filtered = filteredActionItems();
     drawActionPriorityMatrix(filtered);
-
-    if (!filtered.length) {
-      document.getElementById('audit-action-plan').innerHTML =
-        '<div class="text-gray-500 text-xs py-3">No actions match this filter.</div>';
-      return;
-    }
 
     const renderRec = rec => {
       const priClass = rec.priority === 'high' ? 'bg-red-100 text-red-800'
@@ -2882,7 +2877,7 @@
           <div class="flex items-start gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${rec.priority}</span>
             <span class="text-xs px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${rec.effort}</span>
-            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${REC_CAT_LABELS[rec.category] || rec.category}</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[rec.category] || rec.category)}</span>
             ${rec.owner ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(rec.owner)}</span>` : ''}
             ${rec.cluster ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(truncateMiddle(rec.cluster, 32))}</span>` : ''}
             <span class="font-medium text-gray-900">${escapeHtml(rec.title)}</span>
@@ -2893,24 +2888,108 @@
           ${scoreLine}
         </div>`;
     };
+    const priorityRank = { high: 0, medium: 1, low: 2 };
+    const renderCard = (card, cardIndex) => {
+      const recs = card.recommendations || [];
+      const priClass = card.top_priority === 'high' ? 'bg-red-100 text-red-800'
+        : card.top_priority === 'medium' ? 'bg-orange-100 text-orange-800'
+        : 'bg-gray-100 text-gray-700';
+      const effortClass = card.effort_total === 'quick' ? 'bg-green-50 text-green-700'
+        : card.effort_total === 'deep' ? 'bg-purple-50 text-purple-700'
+        : 'bg-blue-50 text-blue-700';
+      const gainText = card.total_estimated_clicks_gain != null
+        ? `≈ +${Number(card.total_estimated_clicks_gain || 0).toFixed(0)} clicks/period`
+        : '—';
+      const cats = (card.categories || []).map(cat =>
+        `<span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[cat] || cat)}</span>`
+      ).join('');
+      const urlLine = card.url
+        ? `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">${escapeHtml(card.url)}</a>`
+        : `<span class="text-gray-600">New content: ${escapeHtml(card.query || card.title || '')}</span>`;
+      const related = (card.related_urls || []).slice(0, 5).map(u =>
+        `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`
+      ).join(' · ');
+      return `
+        <details class="border border-gray-200 rounded-lg bg-white mb-3"${cardIndex < 3 ? ' open' : ''}>
+          <summary class="cursor-pointer list-none p-3 hover:bg-gray-50">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="min-w-0">
+                <div class="font-semibold text-gray-900">${escapeHtml(card.title || card.url || card.query || 'Action group')}</div>
+                <div class="text-xs mt-1">${urlLine}</div>
+                ${related ? `<div class="text-xs text-gray-500 mt-1">Related: ${related}</div>` : ''}
+              </div>
+              <div class="flex items-center gap-2 flex-wrap justify-end text-xs">
+                <span class="px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${escapeHtml(card.top_priority || '')}</span>
+                <span class="px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${escapeHtml(card.effort_total || '')}</span>
+                ${cats}
+                <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(gainText)}</span>
+                <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${recs.length} actions</span>
+              </div>
+            </div>
+          </summary>
+          <div class="px-3 pb-1 border-t border-gray-100">${recs.map(renderRec).join('')}</div>
+        </details>`;
+    };
+    const renderSuppressed = rec => `
+      <div class="py-3 border-b border-gray-200 opacity-75">
+        <div class="flex items-start gap-2 flex-wrap">
+          <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 whitespace-nowrap">suppressed</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[rec.category] || rec.category)}</span>
+          <span class="font-medium text-gray-800">${escapeHtml(rec.title || '')}</span>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(rec.suppressed_reason || '')}</div>
+        <div class="text-sm text-gray-600 mt-1.5">${escapeHtml(rec.instruction || '')}</div>
+      </div>`;
+
+    const visibleIds = new Set(filtered.map(rec => rec.id));
+    const filteredCards = (r.cards || []).map(card => {
+      const recs = (card.recommendations || []).filter(rec => visibleIds.has(rec.id));
+      if (!recs.length) return null;
+      const gains = recs.filter(rec => rec.estimated_clicks_gain != null).map(rec => Number(rec.estimated_clicks_gain || 0));
+      const priorities = recs.map(rec => rec.priority || 'low').sort((a, b) => (priorityRank[a] ?? 9) - (priorityRank[b] ?? 9));
+      return {
+        ...card,
+        recommendations: recs,
+        recommendation_ids: recs.map(rec => rec.id),
+        categories: Array.from(new Set(recs.map(rec => rec.category).filter(Boolean))).sort(),
+        total_estimated_clicks_gain: gains.length ? gains.reduce((a, b) => a + b, 0) : null,
+        top_priority: priorities[0] || card.top_priority,
+        top_priority_score: Math.max(...recs.map(rec => Number(rec.priority_score || 0))),
+      };
+    }).filter(Boolean);
+
     let html = '';
-    if (state.recGroup) {
+    if (!filtered.length) {
+      html = '<div class="text-gray-500 text-xs py-3">No active actions match this filter.</div>';
+    } else {
+      html = `<div class="text-xs text-gray-500 mb-2">${filteredCards.length}/${(r.cards || []).length} cards shown · ${filtered.length}/${items.length} actions shown</div>` +
+        filteredCards.map(renderCard).join('') +
+        '<h4 class="text-sm font-semibold text-gray-900 mt-5 mb-1">All actions</h4>';
+    }
+    if (state.recGroup && filtered.length) {
       const groups = new Map();
       filtered.forEach(rec => {
         const key = rec[state.recGroup] || 'Unassigned';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(rec);
       });
-      html = Array.from(groups.entries()).map(([key, rows]) => `
+      html += Array.from(groups.entries()).map(([key, rows]) => `
         <div class="mt-4 first:mt-0">
           <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-1">${escapeHtml(String(key).replaceAll('_', ' '))} · ${rows.length}</div>
           ${rows.map(renderRec).join('')}
         </div>`).join('');
-    } else {
-      html = filtered.map(renderRec).join('');
+    } else if (filtered.length) {
+      html += filtered.map(renderRec).join('');
+    }
+    if (suppressed.length) {
+      html += `
+        <details class="mt-5 rounded-lg border border-gray-200 bg-gray-50">
+          <summary class="cursor-pointer p-3 text-sm font-semibold text-gray-700">${suppressed.length} suppressed actions</summary>
+          <div class="px-3 pb-1 border-t border-gray-200">${suppressed.map(renderSuppressed).join('')}</div>
+        </details>`;
     }
     document.getElementById('audit-action-plan').innerHTML =
-      `<div class="text-xs text-gray-500 mb-2">${filtered.length}/${items.length} actions shown</div>` + html;
+      html;
   }
 
   function drawActionPriorityMatrix(rows) {
