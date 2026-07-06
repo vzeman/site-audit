@@ -152,6 +152,7 @@ from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
 DEFAULT_EMBED_BODY_CHARS = 12000
+DEFAULT_CLUSTER_LABEL_MAX_PAGES = 20000
 
 
 def build_embed_text(
@@ -201,6 +202,21 @@ def _configured_embed_max_seq_length(default: int) -> int:
     except ValueError:
         LOG.warning(
             "Ignoring invalid SITE_AUDIT_EMBED_MAX_SEQ_LENGTH=%r; using %d",
+            raw,
+            default,
+        )
+        return default
+
+
+def _configured_cluster_label_max_pages(default: int = DEFAULT_CLUSTER_LABEL_MAX_PAGES) -> int:
+    raw = os.environ.get("SITE_AUDIT_CLUSTER_LABEL_MAX_PAGES")
+    if raw is None or raw == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        LOG.warning(
+            "Ignoring invalid SITE_AUDIT_CLUSTER_LABEL_MAX_PAGES=%r; using %d",
             raw,
             default,
         )
@@ -1412,7 +1428,19 @@ def run(config: PipelineConfig) -> dict:
 
     # 6) Cluster labeling (c-TF-IDF)
     cluster_summaries = []
-    if config.enable_cluster_labels and labels is not None:
+    cluster_label_max_pages = _configured_cluster_label_max_pages()
+    if (
+        config.enable_cluster_labels
+        and labels is not None
+        and cluster_label_max_pages
+        and len(pages) > cluster_label_max_pages
+    ):
+        LOG.info(
+            "  skipped cluster labels for %d pages above SITE_AUDIT_CLUSTER_LABEL_MAX_PAGES=%d",
+            len(pages),
+            cluster_label_max_pages,
+        )
+    elif config.enable_cluster_labels and labels is not None:
         cluster_summaries = label_clusters(
             pages,
             embeddings,
