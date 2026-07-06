@@ -2092,7 +2092,7 @@
 (function() {
   const reportPathParts = window.location.pathname.split('/').filter(Boolean);
   const servedReportDomain = reportPathParts[0] === 'reports' ? reportPathParts[1] : '';
-  const basePath = servedReportDomain ? `/reports-data/${servedReportDomain}` : '/data';
+  const basePath = servedReportDomain ? `/reports-data/${servedReportDomain}` : (window.location.protocol === 'file:' ? '.' : '/data');
   document.querySelectorAll('[data-report-csv]').forEach(link => {
     const filename = link.getAttribute('data-report-csv');
     if (filename) link.href = `${basePath}/${filename}`;

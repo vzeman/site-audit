@@ -10,6 +10,7 @@ or attach it to email.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -72,6 +73,15 @@ _PLACEHOLDERS = {
     "__BEST_PAGES_JSON__": "best_pages",
     "__PERFORMANCE_EXPLAINER_JSON__": "performance_explainer",
 }
+
+
+def _external_json_mode(result: AuditResult) -> bool:
+    raw = os.getenv("SITE_AUDIT_HTML_EXTERNAL_JSON_MAX_PAGES", "20000")
+    try:
+        max_pages = max(0, int(raw))
+    except ValueError:
+        max_pages = 20000
+    return len(result.pages) > max_pages
 
 
 def _scatterplot_payload(result: AuditResult, coords: Optional[np.ndarray], cluster_labels: Optional[np.ndarray]) -> Optional[dict]:
@@ -289,6 +299,12 @@ def write_html_report(
     performance_explainer: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
+    out_path = Path(output_dir) / "index.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if _external_json_mode(result):
+        out_path.write_text(template, encoding="utf-8")
+        return out_path
 
     payloads = {
         "scatter": _scatterplot_payload(result, coords, cluster_labels) or {},
@@ -349,7 +365,5 @@ def write_html_report(
     for placeholder, key in _PLACEHOLDERS.items():
         rendered = rendered.replace(placeholder, _safe_json(payloads[key]))
 
-    out_path = Path(output_dir) / "index.html"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(rendered, encoding="utf-8")
     return out_path
