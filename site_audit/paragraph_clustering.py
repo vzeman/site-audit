@@ -21,6 +21,7 @@ keeping the cluster information intact.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -29,6 +30,53 @@ import numpy as np
 from .cluster_labels import _compute_ctfidf
 
 LOG = logging.getLogger(__name__)
+
+
+def _native_max_points() -> int:
+    raw = os.getenv("SITE_AUDIT_PARAGRAPH_CLUSTER_NATIVE_MAX", "50000")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 50000
+
+
+def _pca_scores(embs: np.ndarray, dims: int = 2) -> np.ndarray:
+    if len(embs) == 0:
+        return np.zeros((0, dims), dtype=np.float32)
+    x = embs.astype(np.float32, copy=False)
+    centered = x - x.mean(axis=0, keepdims=True)
+    if len(x) < 2:
+        return np.zeros((len(x), dims), dtype=np.float32)
+    cov = (centered.T @ centered) / max(1, len(x) - 1)
+    _, vecs = np.linalg.eigh(cov)
+    comps = vecs[:, -dims:][:, ::-1].astype(np.float32, copy=False)
+    scores = centered @ comps
+    if scores.shape[1] < dims:
+        scores = np.pad(scores, ((0, 0), (0, dims - scores.shape[1])), mode="constant")
+    return scores.astype(np.float32, copy=False)
+
+
+def _quantile_bins(values: np.ndarray, bins: int) -> np.ndarray:
+    if bins <= 1 or len(values) == 0:
+        return np.zeros(len(values), dtype=int)
+    edges = np.quantile(values, np.linspace(0.0, 1.0, bins + 1)[1:-1])
+    edges = np.unique(edges)
+    if len(edges) == 0:
+        return np.zeros(len(values), dtype=int)
+    return np.searchsorted(edges, values, side="right").astype(int)
+
+
+def _large_site_labels(embs: np.ndarray, k: int) -> np.ndarray:
+    if len(embs) == 0:
+        return np.zeros(0, dtype=int)
+    scores = _pca_scores(embs, dims=2)
+    x_bins = max(1, int(np.ceil(np.sqrt(k))))
+    y_bins = max(1, int(np.ceil(k / x_bins)))
+    labels = _quantile_bins(scores[:, 0], x_bins) * y_bins + _quantile_bins(scores[:, 1], y_bins)
+    unique = sorted(int(v) for v in np.unique(labels))
+    remap = {old: idx for idx, old in enumerate(unique[:k])}
+    overflow = max(0, len(remap) - 1)
+    return np.array([remap.get(int(v), overflow) for v in labels], dtype=int)
 
 
 @dataclass
@@ -59,24 +107,33 @@ def cluster_and_label(
     n = len(embs)
     k = max(2, min(num_clusters, max(2, n // 8)))
 
-    import faiss  # type: ignore
+    if n > _native_max_points():
+        LOG.info(
+            "  paragraph clusters: using large-site PCA/quantile fallback for %d paragraphs",
+            n,
+        )
+        cluster_labels = _large_site_labels(embs, k)
+        k = int(max(cluster_labels) + 1) if len(cluster_labels) else 0
+    else:
+        import faiss  # type: ignore
 
-    kmeans = faiss.Kmeans(
-        d=embs.shape[1],
-        k=k,
-        niter=50,
-        verbose=False,
-        seed=42,
-        min_points_per_centroid=1,
-    )
-    kmeans.train(embs)
-    _, labels = kmeans.index.search(embs, 1)
-    cluster_labels = labels.flatten().astype(int)
+        kmeans = faiss.Kmeans(
+            d=embs.shape[1],
+            k=k,
+            niter=50,
+            verbose=False,
+            seed=42,
+            min_points_per_centroid=1,
+        )
+        kmeans.train(embs)
+        _, labels = kmeans.index.search(embs, 1)
+        cluster_labels = labels.flatten().astype(int)
 
     # c-TF-IDF over per-cluster aggregated paragraph text
-    docs = [""] * k
+    doc_parts: list[list[str]] = [[] for _ in range(k)]
     for i, c in enumerate(cluster_labels):
-        docs[int(c)] = (docs[int(c)] + " " + paragraph_records[i][2]).strip()
+        doc_parts[int(c)].append(paragraph_records[i][2])
+    docs = [" ".join(parts) for parts in doc_parts]
     try:
         ctfidf, words = _compute_ctfidf(docs, ngram_range=(1, 2), min_df=2)
     except Exception as exc:
@@ -168,6 +225,14 @@ def project_paragraphs(embs: np.ndarray, sample_cap: int = 5000, seed: int = 42)
         for i in range(len(sub)):
             coords[i, 0] = float(i)
         return chosen, coords
+
+    if n > _native_max_points():
+        coords = _pca_scores(sub.astype(np.float32), dims=2)
+        mins = coords.min(axis=0, keepdims=True)
+        spans = coords.max(axis=0, keepdims=True) - mins
+        spans[spans == 0] = 1.0
+        coords = (coords - mins) / spans
+        return chosen, coords.astype(np.float32)
 
     import umap  # type: ignore
 
