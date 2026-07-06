@@ -250,6 +250,13 @@ Reports simple page-weight and render-blocking indicators.
 
 Action: use this as a triage signal. Run Lighthouse/WebPageTest before major performance engineering.
 
+<a id="cwv-block"></a>
+## Core Web Vitals (field data)
+
+Shows CrUX Core Web Vitals p75 LCP, INP, and CLS from real Chrome users by URL and form factor, with origin-level fallback where URL data is unavailable.
+
+Action: prioritize poor mobile URL-level metrics on pages with traffic. Run Lighthouse on the affected URL to find the failing element because CrUX field data does not identify the element.
+
 <a id="performance-explainer-block"></a>
 ## Performance explainer
 

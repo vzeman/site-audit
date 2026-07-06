@@ -128,6 +128,12 @@ FIELD_DETAILS = {
         "format": "Secret token.",
         "example": "ahrefs_xxx",
     },
+    "CRUX_API_KEY": {
+        "what": "Chrome UX Report API key.",
+        "why": "Enables Core Web Vitals field data from real Chrome users.",
+        "format": "Google API key with Chrome UX Report API access.",
+        "example": "AIza...",
+    },
     "OPENROUTER_API_KEY": {
         "what": "OpenRouter API key.",
         "why": "Enables AI-agent keyword inference and paragraph-level SERP gap TODO briefs.",
@@ -201,6 +207,7 @@ EXTRA_SETTINGS = [
     {"command": "credentials", "env_key": "GSC_ACCESS_TOKEN", "flag": "GSC access token", "default": "", "help": "Optional short-lived Search Console access token.", "choices": [], "kind": "secret"},
     {"command": "credentials", "env_key": "GSC_SERVICE_ACCOUNT_FILE", "flag": "GSC service account file", "default": "", "help": "Absolute path to a Search Console service-account JSON file.", "choices": [], "kind": "text"},
     {"command": "credentials", "env_key": "AHREFS_API_KEY", "flag": "Ahrefs API key", "default": "", "help": "Ahrefs API key for organic search-demand enrichment.", "choices": [], "kind": "secret"},
+    {"command": "credentials", "env_key": "CRUX_API_KEY", "flag": "CrUX API key", "default": "", "help": "Google Chrome UX Report API key for Core Web Vitals field data.", "choices": [], "kind": "secret"},
     {"command": "credentials", "env_key": "DATAFORSEO_LOGIN", "flag": "DataForSEO login", "default": "", "help": "DataForSEO API login/email.", "choices": [], "kind": "text"},
     {"command": "credentials", "env_key": "DATAFORSEO_PASSWORD", "flag": "DataForSEO password", "default": "", "help": "DataForSEO API password.", "choices": [], "kind": "secret"},
     {"command": "credentials", "env_key": "GOOGLE_ADS_DEVELOPER_TOKEN", "flag": "Google Ads developer token", "default": "", "help": "Developer token from the Google Ads API Center.", "choices": [], "kind": "secret"},

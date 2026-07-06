@@ -411,6 +411,7 @@
           <button data-rec-cat="geo" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">GEO</button>
           <button data-rec-cat="linking" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Linking</button>
           <button data-rec-cat="onpage" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">On-page</button>
+          <button data-rec-cat="technical" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Technical</button>
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
@@ -1414,6 +1415,33 @@
       </div>
     </div>
 
+    <!-- Core Web Vitals field data -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cwv-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Core Web Vitals (field data)</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          CrUX is a 28-day rolling window of real Chrome users. Origin-level rows are aggregates used when URL-level data is unavailable.
+        </p>
+      </div>
+      <div id="audit-cwv-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-5"></div>
+      <div id="audit-cwv-caption" class="text-xs bg-blue-50 text-blue-900 border border-blue-100 rounded p-3 mb-4"></div>
+      <div class="overflow-x-auto max-h-[560px]">
+        <table class="min-w-full text-xs">
+          <thead class="sticky top-0 bg-white">
+            <tr>
+              <th class="text-left py-2 pr-3">URL</th>
+              <th class="text-left py-2 pr-3">Form factor</th>
+              <th class="text-left py-2 pr-3">Level</th>
+              <th class="text-left py-2 pr-3">LCP p75</th>
+              <th class="text-left py-2 pr-3">INP p75</th>
+              <th class="text-left py-2 pr-3">CLS p75</th>
+            </tr>
+          </thead>
+          <tbody id="audit-cwv-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Performance explainer -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-explainer-block">
       <div class="mb-3">
@@ -2301,6 +2329,7 @@
 <script type="application/json" id="data-ctr-anomalies">__CTR_ANOMALIES_JSON__</script>
 <script type="application/json" id="data-ai-access">__AI_ACCESS_JSON__</script>
 <script type="application/json" id="data-ai-citations">__AI_CITATIONS_JSON__</script>
+<script type="application/json" id="data-crux">__CRUX_JSON__</script>
 <script type="application/json" id="data-chunk-retrievability">__CHUNK_RETRIEVABILITY_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
@@ -2369,7 +2398,7 @@
     {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'technical-seo-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
     {key: 'authority', label: 'Authority and trust', ids: ['trust-signals-block', 'entities-block', 'entity-coverage-block', 'information-gain-block']},
     {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
-    {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
+    {key: 'performance', label: 'Performance', ids: ['performance-block', 'cwv-block', 'performance-explainer-block']},
     {key: 'conversion', label: 'Conversion', ids: ['conversion-balance-block', 'conversion-block']},
     {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'fanout-block']},
     {key: 'duplication', label: 'Cannibalization', ids: ['cannibalization-block', 'duplicate-fragments-block', 'wrong-home-block', 'para-clusters-block']},
@@ -2385,7 +2414,7 @@
     'indexability-block', 'technical-seo-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
     'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
-    'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
+    'freshness-impact-block', 'performance-block', 'cwv-block', 'performance-explainer-block', 'conversion-block',
     'ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'cannibalization-block', 'duplicate-fragments-block',
     'linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block',
     'hub-bottleneck-block', 'link-removal-block', 'link-addition-block', 'linkbuilding-block',
@@ -2574,6 +2603,7 @@
       const inlinedCtrAnomalies = readInlined('data-ctr-anomalies');
       const inlinedAiAccess = readInlined('data-ai-access');
       const inlinedAiCitations = readInlined('data-ai-citations');
+      const inlinedCrux = readInlined('data-crux');
       const inlinedChunkRetrievability = readInlined('data-chunk-retrievability');
       const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
@@ -2621,7 +2651,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, crux, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2636,6 +2666,7 @@
         ctrAnomalies = inlinedCtrAnomalies || {};
         aiAccess = inlinedAiAccess || {};
         aiCitations = inlinedAiCitations || {};
+        crux = inlinedCrux || {};
         chunkRetrievability = inlinedChunkRetrievability || {};
         cannibalization = inlinedCannibalization || {};
         duplicateFragments = inlinedDuplicateFragments || {};
@@ -2683,7 +2714,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, crux, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2697,6 +2728,7 @@
           loadJSON('ctr_anomalies.json').catch(() => ({})),
           loadJSON('ai_access.json').catch(() => ({})),
           loadJSON('ai_citations.json').catch(() => ({})),
+          loadJSON('crux.json').catch(() => ({})),
           loadJSON('chunk_retrievability.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('duplicate_fragments.json').catch(() => ({})),
@@ -2759,6 +2791,7 @@
       state.ctrAnomalies = ctrAnomalies || {};
       state.aiAccess = aiAccess || {};
       state.aiCitations = aiCitations || {};
+      state.crux = crux || {};
       state.chunkRetrievability = chunkRetrievability || {};
       state.cannibalization = cannibalization || {};
       state.duplicateFragments = duplicateFragments || {};
@@ -2857,6 +2890,7 @@
       renderFreshness();
       renderFreshnessImpact();
       renderPerformance();
+      renderCrux();
       renderPerformanceExplainer();
       renderConversion();
       renderAnswerability();
@@ -2918,6 +2952,7 @@
     geo: 'GEO',
     linking: 'Linking',
     onpage: 'On-page',
+    technical: 'Technical',
   };
   const REC_CAT_COLORS = {
     content_debt: '#dc2626',
@@ -2925,6 +2960,7 @@
     geo: '#7c3aed',
     linking: '#16a34a',
     onpage: '#f59e0b',
+    technical: '#0891b2',
   };
 
   function renderRecommendationOutcomes() {
@@ -6804,6 +6840,57 @@
       (data.top_heavy_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No heavy pages found.</div>';
     document.getElementById('audit-performance-blocking').innerHTML =
       (data.render_blocking_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No render-blocking resources found.</div>';
+  }
+
+  function renderCrux() {
+    const block = document.getElementById('cwv-block');
+    const data = state.crux || {};
+    if (!data.available) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const period = data.collection_period || {};
+    const share = summary.phone_good_share || {};
+    const pct = metric => `${(Number(share[metric] || 0) * 100).toFixed(0)}%`;
+    const periodText = period.first_date && period.last_date ? `${period.first_date} to ${period.last_date}` : 'Collection window unavailable';
+    document.getElementById('audit-cwv-summary').innerHTML =
+      card('Phone LCP good', pct('largest_contentful_paint'), 'URL/origin rows with good p75') +
+      card('Phone INP good', pct('interaction_to_next_paint'), 'URL/origin rows with good p75') +
+      card('Phone CLS good', pct('cumulative_layout_shift'), 'URL/origin rows with good p75') +
+      card('Collection window', period.last_date || 'n/a', periodText);
+    document.getElementById('audit-cwv-caption').textContent =
+      `${Number(summary.total_rows || 0).toLocaleString()} CrUX rows · ${Number(summary.url_rows || 0).toLocaleString()} URL-level · ${Number(summary.origin_rows || 0).toLocaleString()} origin fallback${data.truncated ? ` · URL selection capped at ${Number(data.max_urls || 0).toLocaleString()}` : ''}.`;
+    const chip = value => {
+      const label = String(value || 'n/a').replaceAll('_', ' ');
+      const cls = value === 'good' ? 'bg-green-100 text-green-800' : value === 'poor' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800';
+      return `<span class="inline-block rounded px-1.5 py-0.5 ${cls}">${escapeHtml(label)}</span>`;
+    };
+    // Neutral chip for the url/origin level column: assessment colors would
+    // wrongly read as a warning.
+    const levelChip = value =>
+      `<span class="inline-block rounded px-1.5 py-0.5 bg-gray-100 text-gray-700">${escapeHtml(String(value || 'n/a'))}</span>`;
+    const metricCell = (row, short) => {
+      const p75 = row[`${short}_p75`];
+      const assessment = row[`${short}_assessment`];
+      if (p75 === undefined || p75 === null || p75 === '') return '<td class="py-2 pr-3 text-gray-400">n/a</td>';
+      const value = short === 'lcp' ? `${(Number(p75 || 0) / 1000).toFixed(1)}s` : short === 'inp' ? `${Number(p75 || 0).toFixed(0)}ms` : Number(p75 || 0).toFixed(2).replace(/0+$/,'').replace(/\.$/,'');
+      return `<td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${escapeHtml(value)}</span> ${chip(assessment)}</td>`;
+    };
+    document.getElementById('audit-cwv-rows').innerHTML =
+      (data.rows || []).slice(0, 250).map(row => `
+        <tr class="border-b border-gray-100">
+          <td class="py-2 pr-3 min-w-[22rem]">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '')}" target="_blank" rel="noopener">${escapeHtml(row.title || row.url || '')}</a>
+            <div class="text-gray-500 break-all">${escapeHtml(row.url || '')}${Number(row.traffic || 0) > 0 ? ` · traffic ${Number(row.traffic || 0).toLocaleString()}` : ''}</div>
+          </td>
+          <td class="py-2 pr-3">${escapeHtml(row.form_factor || '')}</td>
+          <td class="py-2 pr-3">${levelChip(row.level)}</td>
+          ${metricCell(row, 'lcp')}
+          ${metricCell(row, 'inp')}
+          ${metricCell(row, 'cls')}
+        </tr>`).join('') || '<tr><td colspan="6" class="py-3 text-gray-500">No CrUX rows.</td></tr>';
   }
 
   function renderPerformanceExplainer() {
