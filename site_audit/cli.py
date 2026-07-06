@@ -137,6 +137,7 @@ def _run_command(args: argparse.Namespace) -> int:
         content_exclude_classes=args.content_exclude_class,
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
+        embed_body_chars=args.embed_body_chars,
         audit_preset=preset,
         technical_only=technical_only,
         allow_large_embeddings=allow_large_embeddings,
@@ -1260,6 +1261,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--duplicate-knn", type=int, default=10)
     run_p.add_argument("--scatter-clusters", type=int, default=30)
     run_p.add_argument("--max-chars", type=int, default=4000)
+    run_p.add_argument(
+        "--embed-body-chars",
+        type=int,
+        default=12000,
+        help=(
+            "Maximum extracted body characters used for page-level embeddings; "
+            "0 disables the cap. Can also be overridden with SITE_AUDIT_EMBED_BODY_CHARS."
+        ),
+    )
     run_p.add_argument("--follow-subdomains", action="store_true")
     run_p.add_argument("--ignore-robots", action="store_true", help="Ignore robots.txt (use sparingly)")
     run_p.add_argument("--sitemap-url", action="append", default=[],

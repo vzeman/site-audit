@@ -3,7 +3,7 @@ import json
 import pytest
 
 from site_audit.crawler import FetchResult
-from site_audit.pipeline import PipelineConfig, run
+from site_audit.pipeline import PipelineConfig, build_embed_text, run
 
 
 HTML = """
@@ -22,6 +22,23 @@ HTML = """
   </body>
 </html>
 """
+
+
+def test_build_embed_text_caps_body_but_keeps_metadata() -> None:
+    text = build_embed_text(
+        "A title",
+        "A description",
+        "abcdefghij",
+        body_char_limit=4,
+    )
+
+    assert text == "A title. A description. abcd"
+
+
+def test_build_embed_text_can_disable_body_cap() -> None:
+    text = build_embed_text("A title", "", "abcdefghij", body_char_limit=0)
+
+    assert text == "A title. abcdefghij"
 
 
 class FakeCrawler:

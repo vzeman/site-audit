@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import collections
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -150,6 +151,45 @@ from .weak_paragraphs import build_weak_paragraphs
 from .winning_paragraphs import build_winning_paragraphs
 
 LOG = logging.getLogger(__name__)
+DEFAULT_EMBED_BODY_CHARS = 12000
+
+
+def build_embed_text(
+    title: str,
+    description: str,
+    body: str,
+    *,
+    body_char_limit: int = DEFAULT_EMBED_BODY_CHARS,
+) -> str:
+    """Build bounded text for page-level embeddings.
+
+    Sentence-transformer models truncate to their token window. Capping large
+    page bodies before tokenization avoids spending minutes on text the model
+    cannot use.
+    """
+    body_text = (body or "").strip()
+    if body_char_limit > 0 and len(body_text) > body_char_limit:
+        body_text = body_text[:body_char_limit]
+    return ". ".join(
+        part.strip()
+        for part in [title or "", description or "", body_text]
+        if part and part.strip()
+    )
+
+
+def _configured_embed_body_chars(default: int) -> int:
+    raw = os.environ.get("SITE_AUDIT_EMBED_BODY_CHARS")
+    if raw is None or raw == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        LOG.warning(
+            "Ignoring invalid SITE_AUDIT_EMBED_BODY_CHARS=%r; using %d",
+            raw,
+            default,
+        )
+        return default
 
 
 def _tag_has_any_class(tag, classes: set[str]) -> bool:
@@ -476,6 +516,7 @@ class PipelineConfig:
     sitemap_lastmod_within_days: Optional[int] = None
     skip_scatterplot: bool = False
     max_chars: int = 4000
+    embed_body_chars: int = DEFAULT_EMBED_BODY_CHARS
     audit_preset: str = "standard"
     technical_only: bool = False
     allow_large_embeddings: bool = False
@@ -682,10 +723,12 @@ def run(config: PipelineConfig) -> dict:
     host = _domain_only(config.domain)
     cache_dir, report_dir = project_paths(config)
     stage_timings = StageTimings()
+    embed_body_chars = _configured_embed_body_chars(config.embed_body_chars)
 
     LOG.info("=== site-audit run for %s ===", host)
     LOG.info("  cache:  %s", cache_dir)
     LOG.info("  report: %s", report_dir)
+    LOG.info("  embed body chars: %d", embed_body_chars)
 
     http_cache = HttpCache(cache_dir / "http.sqlite")
     http_cache.clean_tracking_duplicates(min_candidates=100)
@@ -934,7 +977,12 @@ def run(config: PipelineConfig) -> dict:
                     extraction_rows.append(row)
                     continue
                 section = section_for_url(r.url)
-                embed_text = ". ".join(part for part in [ext.title, ext.description, ext.body] if part)
+                embed_text = build_embed_text(
+                    ext.title,
+                    ext.description,
+                    ext.body,
+                    body_char_limit=embed_body_chars,
+                )
                 if not embed_text.strip():
                     extraction_rows.append(_skip_row(r, "empty_embedding_text", ext))
                     continue

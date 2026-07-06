@@ -151,6 +151,8 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
             "1.5",
             "--adaptive-max-rss-mb",
             "4096",
+            "--embed-body-chars",
+            "8000",
             "--resume",
             "--no-checkpoints",
         ]
@@ -167,6 +169,7 @@ def test_run_parser_accepts_large_audit_mode_flags() -> None:
     assert args.adaptive_success_threshold == 10
     assert args.adaptive_slow_seconds == 1.5
     assert args.adaptive_max_rss_mb == 4096
+    assert args.embed_body_chars == 8000
     assert args.resume is True
     assert args.no_checkpoints is True
 
