@@ -1,4 +1,4 @@
-from site_audit.robots_txt import analyze
+from site_audit.robots_txt import analyze, evaluate_path, has_blanket_disallow
 
 
 def test_robots_txt_analyzer_flags_syntax_error() -> None:
@@ -68,3 +68,66 @@ def test_robots_txt_analyzer_does_not_flag_unchanged_content() -> None:
     payload = analyze("https://example.com/robots.txt", 200, body, previous_body=body)
 
     assert payload["issues"] == []
+
+
+def test_evaluate_path_matches_user_agent_token_case_insensitively() -> None:
+    body = "User-agent: gptbot\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+
+    decision = evaluate_path(body, "GPTBot", "/")
+    assert decision["allowed"] is False
+    assert decision["explicitly_named"] is True
+    assert evaluate_path(body, "ClaudeBot", "/")["allowed"] is True
+
+
+def test_evaluate_path_treats_empty_disallow_as_allow_all() -> None:
+    body = "User-agent: GPTBot\nDisallow:\n\nUser-agent: *\nDisallow: /\n"
+
+    assert evaluate_path(body, "GPTBot", "/")["allowed"] is True
+    assert evaluate_path(body, "CCBot", "/")["allowed"] is False
+
+
+def test_evaluate_path_ignores_rules_before_user_agent_and_strips_comments() -> None:
+    body = (
+        "Disallow: /\n"          # rule before any group — ignored
+        "# global comment\n"
+        "  User-agent: *   # everyone\n"
+        "\tDisallow: /private  # trailing comment\n"
+    )
+
+    assert evaluate_path(body, "GPTBot", "/")["allowed"] is True
+    assert evaluate_path(body, "GPTBot", "/private/x")["allowed"] is False
+
+
+def test_evaluate_path_supports_wildcard_and_anchor_patterns() -> None:
+    body = "User-agent: *\nDisallow: /*.pdf$\nDisallow: /tmp*/x\nAllow: /\n"
+
+    assert evaluate_path(body, "GPTBot", "/")["allowed"] is True
+    assert evaluate_path(body, "GPTBot", "/doc.pdf")["allowed"] is False
+    assert evaluate_path(body, "GPTBot", "/doc.pdf.html")["allowed"] is True
+    assert evaluate_path(body, "GPTBot", "/tmp123/x")["allowed"] is False
+
+
+def test_evaluate_path_merges_duplicate_groups_for_same_token() -> None:
+    body = (
+        "User-agent: GPTBot\n"
+        "Allow: /public\n\n"
+        "User-agent: GPTBot\n"
+        "Disallow: /\n\n"
+        "User-agent: *\n"
+        "Allow: /\n"
+    )
+
+    # RFC 9309 section 2.2.1: rules of groups sharing a token are combined.
+    assert evaluate_path(body, "GPTBot", "/")["allowed"] is False
+    assert evaluate_path(body, "GPTBot", "/public/page")["allowed"] is True
+
+
+def test_has_blanket_disallow_defeated_by_equal_allow() -> None:
+    assert has_blanket_disallow("User-agent: *\nDisallow: /\n") is True
+    assert has_blanket_disallow("User-agent: *\nDisallow: /\nAllow: /\n") is False
+
+
+def test_has_blanket_disallow_detects_wildcard_path_variants() -> None:
+    assert has_blanket_disallow("User-agent: *\nDisallow: /*\n") is True
+    assert has_blanket_disallow("User-agent: *\nDisallow: *\n") is True
+    assert has_blanket_disallow("User-agent: *\nDisallow: /private\n") is False

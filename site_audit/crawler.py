@@ -397,6 +397,8 @@ class Crawler:
         self.sitemap_urls_seen: list[str] = []
         self.sitemap_errors: list[dict] = []
         self.robots_txt_info: dict = {}
+        self.llms_txt_info: dict | None = None
+        self.llms_full_txt_info: dict | None = None
         self.robots_disallowed_urls: set[str] = set()
         self.link_parse_process_hits = 0
         self.link_parse_process_fallbacks: collections.Counter[str] = collections.Counter()
@@ -416,6 +418,7 @@ class Crawler:
         # Manager) 429 the first request from a fresh client until the
         # homepage has been visited and a session cookie has been issued.
         self._warm_session()
+        self._load_ai_text_files()
         sitemap_urls = self._discover_via_sitemaps()
         seeds = [normalize_url(urljoin(self.base_url, p)) for p in self.config.seed_paths]
         frontier_seed: Set[str] = set()
@@ -486,10 +489,26 @@ class Crawler:
 
     def _load_robots(self) -> Optional[urllib.robotparser.RobotFileParser]:
         if not self.config.respect_robots:
+            # Still fetch robots.txt for reporting (AI access, technical SEO)
+            # without enforcing it against the crawl frontier.
+            self._fetch_robots_info()
             return None
         if self._robots is not None:
             return self._robots
+        self._fetch_robots_info()
         rp = urllib.robotparser.RobotFileParser()
+        body = self.robots_txt_info.get("body")
+        if int(self.robots_txt_info.get("status") or 0) == 200 and body is not None:
+            rp.parse(body.splitlines())
+        else:
+            rp.parse([])
+        self._robots = rp
+        return rp
+
+    def _fetch_robots_info(self) -> None:
+        """Fetch and analyze robots.txt once, retaining the raw body on 200."""
+        if self.robots_txt_info:
+            return
         robots_url = f"{self.base_url}/robots.txt"
         r = self._request_with_retry(robots_url)
         if r is not None and r.status_code == 200:
@@ -500,7 +519,7 @@ class Crawler:
                 final_url=r.url,
                 redirect_status_codes=_response_redirect_status_codes(r),
             )
-            rp.parse(r.text.splitlines())
+            self.robots_txt_info["body"] = r.text
         else:
             status = r.status_code if r is not None else 0
             self.robots_txt_info = analyze_robots_txt(
@@ -511,9 +530,34 @@ class Crawler:
                 error=(getattr(r, "reason", "") if r is not None else "request_failed"),
                 redirect_status_codes=(_response_redirect_status_codes(r) if r is not None else []),
             )
-            rp.parse([])
-        self._robots = rp
-        return rp
+
+    def _load_ai_text_files(self) -> None:
+        self._fetch_robots_info()
+        self.llms_txt_info = self._fetch_ai_text_file("/llms.txt")
+        self.llms_full_txt_info = self._fetch_ai_text_file("/llms-full.txt")
+
+    def _fetch_ai_text_file(self, path: str) -> dict:
+        url = f"{self.base_url}{path}"
+        r = self._request_with_retry(url)
+        content_type = str((r.headers.get("Content-Type") if r is not None else "") or "").lower()
+        if r is None or r.status_code != 200 or "html" in content_type:
+            # A 200 with an HTML content type is almost always an SPA /
+            # soft-404 catch-all page, not a real llms.txt file.
+            return {
+                "present": False,
+                "url": url,
+                "size_bytes": 0,
+                "first_lines": [],
+                "status": r.status_code if r is not None else 0,
+            }
+        text = r.text or ""
+        return {
+            "present": True,
+            "url": str(r.url or url),
+            "size_bytes": len(text.encode("utf-8", errors="ignore")),
+            "first_lines": text.splitlines()[:20],
+            "status": r.status_code,
+        }
 
     def _sitemaps_from_robots(self) -> list[str]:
         rp = self._load_robots()

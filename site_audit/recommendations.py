@@ -27,10 +27,12 @@ high-PageRank pages — fixing the load-bearing pages compounds.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from .ai_access import format_blocked_agent_recommendation
 from .ctr_curve import estimate_clicks_gain, expected_ctr
 
 
@@ -92,6 +94,7 @@ _TYPE_BY_PREFIX = {
     "cann": "cannibalization",
     "geo": "answerability",
     "geo-cite": "citation_gap",
+    "geo-access": "ai_crawler_access",
     "link": "internal_link",
     "plink": "paragraph_link",
     "orphan": "orphan_page",
@@ -257,6 +260,8 @@ def _lookup_context(context: dict[str, dict], targets: Iterable[str]) -> dict:
 
 
 def _rec_type(rec: Recommendation) -> str:
+    if rec.id.startswith("geo-access"):
+        return "ai_crawler_access"
     prefix = rec.id.split("-", 1)[0]
     if rec.id.startswith("geo-cite"):
         return "citation_gap"
@@ -865,8 +870,10 @@ def _geo(
     answerability_payload: list[dict],
     pr: dict[str, float],
     external_per_page: list[dict] | None,
+    ai_access_payload: dict | None = None,
 ) -> list[Recommendation]:
     out: list[Recommendation] = []
+    out.extend(_ai_access_recommendations(ai_access_payload))
 
     # Bias to high-PR pages — fixing the load-bearing ones moves the needle.
     if answerability_payload:
@@ -932,6 +939,71 @@ def _geo(
                 if len(out) >= 30:
                     break
 
+    return out
+
+
+def _agent_slug(agent: str, index: int) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", agent.lower()).strip("-")
+    return slug or f"agent-{index}"
+
+
+def _ai_access_recommendations(payload: dict | None) -> list[Recommendation]:
+    if not isinstance(payload, dict):
+        return []
+    recommendations = list(payload.get("recommendations") or [])
+    if not recommendations:
+        return []
+    summary = payload.get("summary") or {}
+    agents = list(payload.get("agents") or [])
+    if summary.get("blanket_block"):
+        return [Recommendation(
+            id="geo-access-blanket",
+            category="geo",
+            priority="high",
+            title="AI search and fetch crawlers blocked by robots.txt",
+            instruction=str(recommendations[0]),
+            targets=[str(payload.get("base_url") or "")],
+            evidence={
+                "blanket_block": True,
+                "search_blocked": _safe_int(summary.get("search_blocked")),
+                "user_fetch_blocked": _safe_int(summary.get("user_fetch_blocked")),
+            },
+            effort="quick",
+            score=95.0,
+        )]
+
+    out: list[Recommendation] = []
+    blocked = [
+        row for row in agents
+        if row.get("allowed_root") is False and row.get("purpose") in {"search", "user_fetch"}
+    ]
+    for i, row in enumerate(blocked[:10]):
+        # The payload's recommendation strings are built from the same
+        # blocked rows in the same order; fall back to the shared formatter
+        # only when a hand-crafted payload disagrees.
+        instruction = (
+            str(recommendations[i])
+            if i < len(recommendations)
+            else format_blocked_agent_recommendation(row)
+        )
+        agent_slug = _agent_slug(str(row.get("agent") or ""), i)
+        out.append(Recommendation(
+            id=f"geo-access-{agent_slug}",
+            category="geo",
+            priority="high",
+            title=f"robots.txt blocks {row.get('agent')}",
+            instruction=instruction,
+            targets=[str(payload.get("base_url") or "")],
+            evidence={
+                "agent": row.get("agent", ""),
+                "operator": row.get("operator", ""),
+                "purpose": row.get("purpose", ""),
+                "matched_group": row.get("matched_group", ""),
+                "explicitly_named": bool(row.get("explicitly_named")),
+            },
+            effort="quick",
+            score=90.0 - i,
+        ))
     return out
 
 
@@ -1151,6 +1223,7 @@ def synthesize(
     wrong_home_payload: list[dict] | None = None,
     title_mismatch: list[dict] | None = None,
     ctr_anomalies_payload: dict | list | None = None,
+    ai_access_payload: dict | None = None,
     external_links_payload: dict | None = None,
     max_total: int = 100,
 ) -> list[Recommendation]:
@@ -1162,7 +1235,7 @@ def synthesize(
     recs: list[Recommendation] = []
     recs += _content_debt(duplicates_rows or [], outliers_rows or [], wrong_home_payload or [], pr)
     recs += _coverage(coverage_payload or [])
-    recs += _geo(answerability_payload or [], pr, external_per_page)
+    recs += _geo(answerability_payload or [], pr, external_per_page, ai_access_payload)
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
 

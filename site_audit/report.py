@@ -1244,6 +1244,7 @@ def write_all(
     freshness_impact: Optional[dict] = None,
     striking_distance: Optional[dict] = None,
     ctr_anomalies: Optional[dict] = None,
+    ai_access: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
     template_patterns: Optional[dict] = None,
@@ -1329,6 +1330,8 @@ def write_all(
         _write_json(output_dir / "striking_distance.json", striking_distance)
     if ctr_anomalies is not None:
         _write_json(output_dir / "ctr_anomalies.json", ctr_anomalies)
+    if ai_access is not None:
+        _write_json(output_dir / "ai_access.json", ai_access)
     if cannibalization is not None:
         _write_json(output_dir / "cannibalization.json", cannibalization)
     if duplicate_fragments is not None:

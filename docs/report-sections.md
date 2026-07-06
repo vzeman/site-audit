@@ -257,6 +257,13 @@ Audits CTAs, forms, contacts, and conversion paths.
 
 Action: ensure commercial pages have clear next steps and informational pages have appropriate soft conversions.
 
+<a id="ai-access-block"></a>
+## AI crawler access
+
+Shows whether major AI search, user-fetch, and training crawlers can access `/` according to robots.txt, and whether llms.txt / llms-full.txt are present.
+
+Action: unblock AI search and user-fetch agents when generative-search visibility matters. Treat training-bot blocks as a policy choice, not automatically an SEO defect.
+
 <a id="answerability-block"></a>
 ## GEO answer-ability score
 
