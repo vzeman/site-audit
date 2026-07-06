@@ -440,6 +440,33 @@
       </div>
     </div>
 
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="rec-outcomes-block">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Past recommendations scoreboard</h3>
+          <p class="text-xs text-gray-500" id="rec-outcomes-meta">recommendation implementation and follow-on metric movement from the previous audit</p>
+        </div>
+      </div>
+      <div id="rec-outcomes-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto max-h-[32rem] overflow-y-auto">
+        <table class="min-w-full text-xs">
+          <thead class="sticky top-0 bg-white border-b border-gray-200">
+            <tr>
+              <th class="text-left px-2 py-2">Recommendation</th>
+              <th class="text-left px-2 py-2">Category</th>
+              <th class="text-left px-2 py-2">Issued</th>
+              <th class="text-left px-2 py-2">Status</th>
+              <th class="text-right px-2 py-2">Position Δ</th>
+              <th class="text-right px-2 py-2">Clicks Δ</th>
+              <th class="text-left px-2 py-2">Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="rec-outcomes-rows"></tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-500 mt-3" id="rec-outcomes-caveat"></p>
+    </div>
+
     <!-- GEO: pages most in need of editing -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="improvement-block">
       <div class="mb-3">
@@ -2295,6 +2322,7 @@
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
 <script type="application/json" id="data-competitive">__COMPETITIVE_JSON__</script>
 <script type="application/json" id="data-recommendations">__RECOMMENDATIONS_JSON__</script>
+<script type="application/json" id="data-recommendation-outcomes">__RECOMMENDATION_OUTCOMES_JSON__</script>
 <script type="application/json" id="data-paragraph-density">__PARAGRAPH_DENSITY_JSON__</script>
 <script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
@@ -2331,7 +2359,7 @@
   const REPORT_SECTION_GUIDE_URL = 'https://github.com/vzeman/site-audit/blob/main/docs/report-sections.md';
   const REPORT_NAV_SECTIONS = [
     {key: 'overview', label: 'Overview', selectors: ['body > .max-w-7xl > header'], ids: ['audit-metrics-primary', 'audit-metrics-secondary', 'hist-block']},
-    {key: 'action-plan', label: 'Action plan', ids: ['action-plan-block']},
+    {key: 'action-plan', label: 'Action plan', ids: ['action-plan-block', 'rec-outcomes-block']},
     {key: 'editing', label: 'Pages needing edits', ids: ['improvement-block']},
     {key: 'titles', label: 'Titles and headings', ids: ['title-mismatch-block', 'headers-block', 'heading-impact-block']},
     {key: 'semantic-map', label: 'Semantic map', ids: ['scatter-block', 'section-outliers-block', 'link-addition-block']},
@@ -2350,7 +2378,7 @@
     {key: 'crawl', label: 'Crawl diagnostics', ids: ['hits-block', 'depth-block', 'external-block', 'broken-block', 'report-summary-note']},
   ];
   const SECTION_DOC_BLOCKS = [
-    'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
+    'hist-block', 'action-plan-block', 'rec-outcomes-block', 'improvement-block', 'title-mismatch-block',
     'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block',
     'ahrefs-block', 'best-pages-block', 'striking-distance-block', 'ctr-anomalies-block', 'paragraph-impact-block', 'weak-paragraphs-block',
     'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
@@ -2567,6 +2595,7 @@
       const inlinedImprovement = readInlined('data-page-improvement');
       const inlinedCompetitive = readInlined('data-competitive');
       const inlinedRecommendations = readInlined('data-recommendations');
+      const inlinedRecommendationOutcomes = readInlined('data-recommendation-outcomes');
       const inlinedParaDensity = readInlined('data-paragraph-density');
       const inlinedHeaderAnalysis = readInlined('data-header-analysis');
       const inlinedHeaderScatter = readInlined('data-header-scatter');
@@ -2592,7 +2621,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2628,6 +2657,7 @@
         improvement = inlinedImprovement || [];
         competitive = inlinedCompetitive || [];
         recommendations = inlinedRecommendations || {};
+        recommendationOutcomes = inlinedRecommendationOutcomes || {};
         paraDensity = inlinedParaDensity || {};
         headerAnalysis = inlinedHeaderAnalysis || {};
         headerScatter = inlinedHeaderScatter || {};
@@ -2653,7 +2683,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2688,6 +2718,7 @@
           loadJSON('page_improvement.json').catch(() => []),
           loadJSON('competitive_analysis.json').catch(() => []),
           loadJSON('recommendations.json').catch(() => ({})),
+          loadJSON('recommendation_outcomes.json').catch(() => ({})),
           loadJSON('paragraph_density.json').catch(() => ({})),
           loadJSON('header_analysis.json').catch(() => ({})),
           loadJSON('header_scatter.json').catch(() => ({})),
@@ -2749,6 +2780,7 @@
       state.improvement = improvement;
       state.competitive = competitive;
       state.recommendations = recommendations || {};
+      state.recommendationOutcomes = recommendationOutcomes || {};
       state.recPriFilter = 'all';
       state.recCatFilter = 'all';
       state.recOwnerFilter = 'all';
@@ -2785,6 +2817,7 @@
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
       renderActionPlan();
+      renderRecommendationOutcomes();
       wireActionPlanButtons();
       if (state.pages.length) {
         renderScatter();
@@ -2893,6 +2926,53 @@
     linking: '#16a34a',
     onpage: '#f59e0b',
   };
+
+  function renderRecommendationOutcomes() {
+    const block = document.getElementById('rec-outcomes-block');
+    if (!block) return;
+    const data = state.recommendationOutcomes || {};
+    const rows = data.rows || [];
+    if (data.available !== true || !rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const aggregates = data.aggregates || {};
+    const byStatus = aggregates.by_status || {};
+    const statusCounts = Object.entries(byStatus)
+      .map(([status, row]) => `${String(status).replaceAll('_', ' ')} ${Number(row.count || 0).toLocaleString()}`)
+      .join(' · ');
+    document.getElementById('rec-outcomes-meta').textContent =
+      `${Number(summary.total || rows.length).toLocaleString()} previous recommendations` +
+      (summary.issued_at ? ` · issued ${String(summary.issued_at).slice(0, 10)}` : '') +
+      (statusCounts ? ` · ${statusCounts}` : '');
+    document.getElementById('rec-outcomes-summary').innerHTML =
+      card('Implemented', Number(summary.implemented || aggregates.implemented_count || 0).toLocaleString(), 'tracked changes detected') +
+      card('Not implemented', Number(summary.not_implemented || aggregates.not_implemented_count || 0).toLocaleString(), 'baseline comparison') +
+      card('Avg position Δ implemented', aggregates.avg_position_delta_implemented ?? 'n/a', 'lower is better') +
+      card('Avg position Δ not implemented', aggregates.avg_position_delta_not_implemented ?? 'n/a', 'honest baseline');
+    const statusClass = status => status === 'implemented' ? 'bg-green-100 text-green-800'
+      : status === 'partially' ? 'bg-amber-100 text-amber-800'
+      : status === 'not_implemented' ? 'bg-gray-100 text-gray-700'
+      : status === 'page_removed' ? 'bg-red-100 text-red-800'
+      : 'bg-slate-100 text-slate-700';
+    document.getElementById('rec-outcomes-rows').innerHTML = rows.slice(0, 100).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top">
+          <div class="font-medium text-gray-900">${escapeHtml(row.title || row.id || '')}</div>
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.primary_url || row.matched_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.primary_url || row.matched_url || '', 74))}</a>
+        </td>
+        <td class="px-2 py-2 align-top">${escapeHtml(REC_CAT_LABELS[row.category] || row.category || '')}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(String(row.issued_at || '').slice(0, 10))}</td>
+        <td class="px-2 py-2 align-top"><span class="px-1.5 py-0.5 rounded ${statusClass(row.change_status)}">${escapeHtml(String(row.change_status || '').replaceAll('_', ' '))}</span></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${row.position_delta === null || row.position_delta === undefined ? 'n/a' : Number(row.position_delta).toFixed(2)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${row.clicks_delta === null || row.clicks_delta === undefined ? 'n/a' : Number(row.clicks_delta).toLocaleString()}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(row.confidence || '')}</td>
+      </tr>`).join('');
+    document.getElementById('rec-outcomes-caveat').textContent =
+      data.caveat || (data.caveats || [])[0] || '';
+  }
 
   function setSelectOptions(select, values, allLabel) {
     if (!select) return;

@@ -1282,6 +1282,7 @@ def write_all(
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
     history_snapshot: Optional[dict] = None,
+    recommendation_outcomes: Optional[dict] = None,
     technical_seo: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1414,6 +1415,8 @@ def write_all(
         _write_json(output_dir / "performance_explainer.json", performance_explainer)
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
+    if recommendation_outcomes is not None:
+        _write_json(output_dir / "recommendation_outcomes.json", recommendation_outcomes)
     if technical_seo is not None:
         LOG.info("  report export: technical SEO exports")
         write_technical_seo_exports(output_dir, technical_seo, domain=domain)

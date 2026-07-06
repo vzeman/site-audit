@@ -724,7 +724,7 @@ def _content_debt(
     out: list[Recommendation] = []
 
     # Duplicates: pick canonical = the side with higher PR; 301 the other.
-    for i, d in enumerate(duplicates_rows[:30]):
+    for d in duplicates_rows[:30]:
         sim = float(d.get("similarity", 0.0))
         url_a = d.get("url_a", "")
         url_b = d.get("url_b", "")
@@ -734,8 +734,9 @@ def _content_debt(
         pr_b = pr.get(url_b, 0.0)
         canonical, drop = (url_a, url_b) if pr_a >= pr_b else (url_b, url_a)
         priority = "high" if sim >= 0.95 else "medium"
+        pair_key = sorted([url_a, url_b])
         out.append(Recommendation(
-            id=f"dup-{i}",
+            id=_stable_rec_id("dup", "content_debt", "merge_duplicate", *pair_key),
             category="content_debt",
             priority=priority,
             title=f"Merge near-duplicate (sim {sim:.2f})",
@@ -752,7 +753,7 @@ def _content_debt(
         ))
 
     # Off-topic outliers: refocus or move to a different section.
-    for i, o in enumerate(outliers_rows[:15]):
+    for o in outliers_rows[:15]:
         drift = float(o.get("distance_to_section_centroid", 0.0))
         p95 = float(o.get("section_p95_distance", drift))
         # keep only true outliers
@@ -765,7 +766,7 @@ def _content_debt(
         page_pr = pr.get(url, 0.0)
         priority = "high" if page_pr >= 0.005 else "medium"
         out.append(Recommendation(
-            id=f"out-{i}",
+            id=_stable_rec_id("out", "content_debt", "refocus_outlier", url, o.get("section") or ""),
             category="content_debt",
             priority=priority,
             title=f"Off-topic page in {o.get('section') or '(root)'}",
@@ -785,12 +786,20 @@ def _content_debt(
 
     # Paragraphs on the wrong page: move to suggested home.
     wh_sorted = sorted(wrong_home_payload or [], key=lambda r: float(r.get("lift", 0.0)), reverse=True)
-    for i, w in enumerate(wh_sorted[:15]):
+    for w in wh_sorted[:15]:
         lift = float(w.get("lift", 0.0))
         if lift < 0.10:
             break
         out.append(Recommendation(
-            id=f"wh-{i}",
+            id=_stable_rec_id(
+                "wh",
+                "content_debt",
+                "move_paragraph",
+                w.get("source_url", ""),
+                w.get("paragraph_index", ""),
+                w.get("suggested_home_url", ""),
+                (w.get("paragraph_excerpt") or "")[:120],
+            ),
             category="content_debt",
             priority="medium" if lift < 0.20 else "high",
             title="Paragraph belongs on a different page",
@@ -818,9 +827,9 @@ def _coverage(coverage_payload: list[dict]) -> list[Recommendation]:
 
     gaps = [c for c in coverage_payload if c.get("status") == "gap"]
     gaps.sort(key=lambda c: float(c.get("best_similarity", 0.0)))
-    for i, c in enumerate(gaps[:15]):
+    for c in gaps[:15]:
         out.append(Recommendation(
-            id=f"gap-{i}",
+            id=_stable_rec_id("gap", "coverage", "coverage_gap", c.get("best_url", ""), c.get("query", "")),
             category="coverage",
             priority="high",
             title=f'No page answers "{c.get("query", "")}"',
@@ -842,13 +851,13 @@ def _coverage(coverage_payload: list[dict]) -> list[Recommendation]:
 
     cann = [c for c in coverage_payload if c.get("status") == "cannibalized"]
     cann.sort(key=lambda c: c.get("candidates_above_threshold", 0), reverse=True)
-    for i, c in enumerate(cann[:15]):
+    for c in cann[:15]:
         n = int(c.get("candidates_above_threshold", 0))
         runners = c.get("runner_ups") or []
         urls = [c.get("best_url", "")] + [r.get("url") for r in runners[:3] if r.get("url")]
         urls = [u for u in urls if u]
         out.append(Recommendation(
-            id=f"cann-{i}",
+            id=_stable_rec_id("cann", "coverage", "cannibalization", c.get("query", ""), *urls),
             category="coverage",
             priority="high",
             title=f'{n} pages compete for "{c.get("query", "")}"',
@@ -888,7 +897,7 @@ def _geo(
             answerability_payload,
             key=lambda r: (float(r.get("score", 10.0)), -pr.get(r.get("url", ""), 0.0)),
         )
-        for i, p in enumerate(ranked):
+        for p in ranked:
             score = float(p.get("score", 10.0))
             if score >= 4.0:
                 break  # rest are fine
@@ -899,7 +908,7 @@ def _geo(
             page_label = p.get("title") or p.get("url") or "page"
             authority_label = "high-PR page" if page_pr >= 0.005 else "page"
             out.append(Recommendation(
-                id=f"geo-{i}",
+                id=_stable_rec_id("geo", "geo", "answerability", p.get("url", "")),
                 category="geo",
                 priority=priority,
                 title=f"Low answer-ability ({score:.1f}/10) on {authority_label}: {page_label}",
@@ -930,7 +939,7 @@ def _geo(
                 continue
             if int(row.get("external_count", 0)) == 0 and page_pr >= 0.003:
                 out.append(Recommendation(
-                    id=f"geo-cite-{len(out)}",
+                    id=_stable_rec_id("geo-cite", "geo", "citation_gap", url),
                     category="geo",
                     priority="medium",
                     title="Authority page has no outbound citations",
@@ -962,6 +971,15 @@ def _stable_slug(value: object, fallback: str = "item") -> str:
         digest = hashlib.sha1(slug.encode("utf-8")).hexdigest()[:8]
         slug = f"{slug[:80].strip('-')}-{digest}"
     return slug or fallback
+
+
+def _stable_rec_id(prefix: str, category: str, action_type: str, *parts: object) -> str:
+    raw_parts = [str(part) for part in (category, action_type, *parts) if part not in (None, "")]
+    raw = "\u241f".join(raw_parts)
+    slug_parts = [str(part) for part in parts if part not in (None, "")]
+    slug = _stable_slug("\u241f".join(slug_parts), prefix)
+    digest = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    return f"{prefix}-{slug}-{digest}"
 
 
 def _ai_citation_recommendations(payload: dict | None) -> list[Recommendation]:
@@ -1130,14 +1148,14 @@ def _linking(
     lg = linkgraph_payload or {}
 
     # Page-level link recs
-    for i, r in enumerate((lg.get("recommendations") or [])[:15]):
+    for r in (lg.get("recommendations") or [])[:15]:
         sim = float(r.get("similarity", 0.0))
         source_url = r.get("source_url") or r.get("url_a") or ""
         target_url = r.get("target_url") or r.get("url_b") or ""
         source_label = r.get("source_title") or r.get("title_a") or source_url or "source page"
         target_label = r.get("target_title") or r.get("title_b") or target_url or "target page"
         out.append(Recommendation(
-            id=f"link-{i}",
+            id=_stable_rec_id("link", "linking", "internal_link", source_url, target_url, r.get("suggested_anchor") or ""),
             category="linking",
             priority="medium",
             title="Add internal link",
@@ -1155,10 +1173,18 @@ def _linking(
     # they tell the editor *which paragraph* to edit.
     if paragraph_links:
         pl_sorted = sorted(paragraph_links, key=lambda r: float(r.get("lift", 0.0)), reverse=True)
-        for i, r in enumerate(pl_sorted[:15]):
+        for r in pl_sorted[:15]:
             lift = float(r.get("lift", 0.0))
             out.append(Recommendation(
-                id=f"plink-{i}",
+                id=_stable_rec_id(
+                    "plink",
+                    "linking",
+                    "paragraph_link",
+                    r.get("source_url", ""),
+                    r.get("paragraph_index", ""),
+                    r.get("target_url", ""),
+                    r.get("suggested_anchor", ""),
+                ),
                 category="linking",
                 priority="medium" if lift < 0.15 else "high",
                 title="Add in-paragraph internal link",
@@ -1182,11 +1208,11 @@ def _linking(
                         if ca.get("authority")}
     orphans = lg.get("orphans") or []
     orphans_sorted = sorted(orphans, key=lambda r: float(r.get("pagerank", 0.0)), reverse=True)
-    for i, o in enumerate(orphans_sorted[:10]):
+    for o in orphans_sorted[:10]:
         url = o.get("url", "")
         is_auth = url in cluster_auth_urls
         out.append(Recommendation(
-            id=f"orphan-{i}",
+            id=_stable_rec_id("orphan", "linking", "orphan_page", url),
             category="linking",
             priority="high" if is_auth else "medium",
             title="Orphan page" + (" (cluster authority)" if is_auth else ""),
@@ -1210,11 +1236,11 @@ def _linking(
         url = d.get("url", "")
         deep_with_pr.append((url, pr_lookup_full.get(url, 0.0), d))
     deep_with_pr.sort(key=lambda x: x[1], reverse=True)
-    for i, (url, page_pr, d) in enumerate(deep_with_pr[:8]):
+    for url, page_pr, d in deep_with_pr[:8]:
         if int(d.get("click_depth", 0)) < 4:
             continue
         out.append(Recommendation(
-            id=f"deep-{i}",
+            id=_stable_rec_id("deep", "linking", "click_depth", url),
             category="linking",
             priority="medium",
             title=f"Buried page (depth {d.get('click_depth')})",
@@ -1242,13 +1268,13 @@ def _onpage(
 
     if ctr_anomalies:
         rows = sorted(ctr_anomalies, key=lambda r: _safe_float(r.get("missed_clicks")), reverse=True)
-        for i, r in enumerate(rows[:20]):
+        for r in rows[:20]:
             url = r.get("url", "")
             missed = _safe_float(r.get("missed_clicks") or r.get("estimated_clicks_gain"))
             if not url or missed <= 0:
                 continue
             out.append(Recommendation(
-                id=f"ctr-{i}",
+                id=_stable_rec_id("ctr", "onpage", "title_rewrite", url, r.get("query", "")),
                 category="onpage",
                 priority="medium",
                 title=str(r.get("title") or ""),
@@ -1271,7 +1297,7 @@ def _onpage(
 
     if title_mismatch:
         tm_sorted = sorted(title_mismatch, key=lambda r: float(r.get("title_to_content", 1.0)))
-        for i, r in enumerate(tm_sorted[:15]):
+        for r in tm_sorted[:15]:
             ratio = float(r.get("title_to_content", 1.0))
             if ratio >= 0.55:
                 break
@@ -1281,7 +1307,7 @@ def _onpage(
             kws = r.get("suggested_keywords") or []
             kw_text = ", ".join(kws[:4]) if kws else "the page's actual topic"
             out.append(Recommendation(
-                id=f"title-{i}",
+                id=_stable_rec_id("title", "onpage", "title_rewrite", url),
                 category="onpage",
                 priority=priority,
                 title=f"Misleading title (cosine {ratio:.2f})",
@@ -1303,10 +1329,10 @@ def _onpage(
                if float(a.get("generic_anchor_share", 0.0)) >= 0.5
                and int(a.get("inbound_link_count", 0)) >= 3]
         bad.sort(key=lambda a: float(a.get("generic_anchor_share", 0.0)), reverse=True)
-        for i, a in enumerate(bad[:8]):
+        for a in bad[:8]:
             share = float(a.get("generic_anchor_share", 0.0))
             out.append(Recommendation(
-                id=f"anchor-{i}",
+                id=_stable_rec_id("anchor", "onpage", "anchor_rewrite", a.get("target_url", "")),
                 category="onpage",
                 priority="medium",
                 title=f"Generic anchors dominate ({int(share*100)}%)",

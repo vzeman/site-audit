@@ -350,7 +350,7 @@ def test_no_search_provider_reproduces_legacy_ordering_and_buckets() -> None:
 
     items = to_payload(recs)["items"]
 
-    assert [item["id"] for item in items] == ["link-0", "dup-0", "title-0", "geo-0", "orphan-0", "out-0"]
+    assert [item["id"].split("-", 1)[0] for item in items] == ["link", "dup", "title", "geo", "orphan", "out"]
     assert [item["impact"] for item in items] == [72.0, 62.0, 49.0, 54.2, 10.0, 0.0]
     assert [item["priority"] for item in items] == ["medium", "low", "low", "low", "low", "low"]
     assert all(item["estimated_clicks_gain"] is None for item in items)
