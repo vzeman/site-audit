@@ -875,10 +875,12 @@ def _geo(
     external_per_page: list[dict] | None,
     ai_access_payload: dict | None = None,
     ai_citations_payload: dict | None = None,
+    chunk_retrievability_payload: dict | None = None,
 ) -> list[Recommendation]:
     out: list[Recommendation] = []
     out.extend(_ai_access_recommendations(ai_access_payload))
     out.extend(_ai_citation_recommendations(ai_citations_payload))
+    out.extend(_chunk_retrievability_recommendations(chunk_retrievability_payload))
 
     # Bias to high-PR pages — fixing the load-bearing ones moves the needle.
     if answerability_payload:
@@ -1078,6 +1080,43 @@ def _ai_access_recommendations(payload: dict | None) -> list[Recommendation]:
             },
             effort="quick",
             score=90.0 - i,
+        ))
+    return out
+
+
+def _chunk_retrievability_recommendations(payload: dict | None) -> list[Recommendation]:
+    if not isinstance(payload, dict) or payload.get("available") is not True:
+        return []
+    out: list[Recommendation] = []
+    for i, row in enumerate(payload.get("recommendations") or []):
+        rec_id = str(row.get("id") or "")
+        text = str(row.get("text") or "")
+        url = str(row.get("url") or "")
+        query = str(row.get("query") or "")
+        if not rec_id or not text or not url:
+            continue
+        status = str(row.get("status") or "")
+        title = (
+            "Consolidate split answer into one retrievable chunk"
+            if status == "split_answer"
+            else "Add missing retrievable answer chunk"
+        )
+        out.append(Recommendation(
+            id=rec_id,
+            category="geo",
+            priority="medium",
+            title=title,
+            instruction=text,
+            targets=[url],
+            evidence={
+                "query": query,
+                "status": status,
+                "best_similarity": _safe_float(row.get("best_similarity")),
+                "heading_a": row.get("heading_a", ""),
+                "heading_b": row.get("heading_b", ""),
+            },
+            effort=str(row.get("effort") or "medium"),
+            score=68.0 - i + max(0.0, 0.65 - _safe_float(row.get("best_similarity"))) * 20.0,
         ))
     return out
 
@@ -1300,6 +1339,7 @@ def synthesize(
     ctr_anomalies_payload: dict | list | None = None,
     ai_access_payload: dict | None = None,
     ai_citations_payload: dict | None = None,
+    chunk_retrievability_payload: dict | None = None,
     external_links_payload: dict | None = None,
     max_total: int = 100,
 ) -> list[Recommendation]:
@@ -1311,7 +1351,14 @@ def synthesize(
     recs: list[Recommendation] = []
     recs += _content_debt(duplicates_rows or [], outliers_rows or [], wrong_home_payload or [], pr)
     recs += _coverage(coverage_payload or [])
-    recs += _geo(answerability_payload or [], pr, external_per_page, ai_access_payload, ai_citations_payload)
+    recs += _geo(
+        answerability_payload or [],
+        pr,
+        external_per_page,
+        ai_access_payload,
+        ai_citations_payload,
+        chunk_retrievability_payload,
+    )
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
 

@@ -1567,6 +1567,31 @@
       </div>
     </div>
 
+    <!-- Chunk retrievability -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="chunk-retrievability-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">RAG chunk retrievability</h3>
+        <p class="text-xs text-gray-500 mt-1" id="chunk-retrievability-meta">
+          Checks whether each mapped query has one self-contained retrieval chunk on its best page.
+        </p>
+      </div>
+      <div id="chunk-retrievability-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto max-h-[36rem] overflow-y-auto">
+        <table class="min-w-full text-xs">
+          <thead class="text-gray-500 sticky top-0 bg-white">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Query</th>
+              <th class="px-2 py-1.5 text-left">Page</th>
+              <th class="px-2 py-1.5 text-right">Best chunk</th>
+              <th class="px-2 py-1.5 text-left">Status</th>
+              <th class="px-2 py-1.5 text-left">Chunk heading(s)</th>
+            </tr>
+          </thead>
+          <tbody id="chunk-retrievability-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Cannibalization -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cannibalization-block">
       <div class="mb-4">
@@ -2249,6 +2274,7 @@
 <script type="application/json" id="data-ctr-anomalies">__CTR_ANOMALIES_JSON__</script>
 <script type="application/json" id="data-ai-access">__AI_ACCESS_JSON__</script>
 <script type="application/json" id="data-ai-citations">__AI_CITATIONS_JSON__</script>
+<script type="application/json" id="data-chunk-retrievability">__CHUNK_RETRIEVABILITY_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
@@ -2317,7 +2343,7 @@
     {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
     {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
     {key: 'conversion', label: 'Conversion', ids: ['conversion-balance-block', 'conversion-block']},
-    {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'fanout-block']},
+    {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'fanout-block']},
     {key: 'duplication', label: 'Cannibalization', ids: ['cannibalization-block', 'duplicate-fragments-block', 'wrong-home-block', 'para-clusters-block']},
     {key: 'links', label: 'Internal links', ids: ['linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block', 'hub-bottleneck-block', 'link-removal-block', 'linkbuilding-block', 'link-counts-block', 'para-density-block', 'para-links-block', 'cluster-auth-block', 'anchor-block', 'contextual-link-block', 'internal-link-patterns-block']},
     {key: 'competitive', label: 'SERP competitors', ids: ['competitive-block']},
@@ -2332,7 +2358,7 @@
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
     'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
     'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
-    'ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'cannibalization-block', 'duplicate-fragments-block',
+    'ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'cannibalization-block', 'duplicate-fragments-block',
     'linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block',
     'hub-bottleneck-block', 'link-removal-block', 'link-addition-block', 'linkbuilding-block',
     'link-counts-block', 'para-density-block', 'para-links-block', 'wrong-home-block',
@@ -2520,6 +2546,7 @@
       const inlinedCtrAnomalies = readInlined('data-ctr-anomalies');
       const inlinedAiAccess = readInlined('data-ai-access');
       const inlinedAiCitations = readInlined('data-ai-citations');
+      const inlinedChunkRetrievability = readInlined('data-chunk-retrievability');
       const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
       const inlinedLinkgraph = readInlined('data-linkgraph');
@@ -2565,7 +2592,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2580,6 +2607,7 @@
         ctrAnomalies = inlinedCtrAnomalies || {};
         aiAccess = inlinedAiAccess || {};
         aiCitations = inlinedAiCitations || {};
+        chunkRetrievability = inlinedChunkRetrievability || {};
         cannibalization = inlinedCannibalization || {};
         duplicateFragments = inlinedDuplicateFragments || {};
         linkgraph = inlinedLinkgraph || {};
@@ -2625,7 +2653,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2639,6 +2667,7 @@
           loadJSON('ctr_anomalies.json').catch(() => ({})),
           loadJSON('ai_access.json').catch(() => ({})),
           loadJSON('ai_citations.json').catch(() => ({})),
+          loadJSON('chunk_retrievability.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('duplicate_fragments.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
@@ -2699,6 +2728,7 @@
       state.ctrAnomalies = ctrAnomalies || {};
       state.aiAccess = aiAccess || {};
       state.aiCitations = aiCitations || {};
+      state.chunkRetrievability = chunkRetrievability || {};
       state.cannibalization = cannibalization || {};
       state.duplicateFragments = duplicateFragments || {};
       state.linkgraph = linkgraph;
@@ -2798,6 +2828,7 @@
       renderConversion();
       renderAnswerability();
       renderAnswerBlocks();
+      renderChunkRetrievability();
       renderCannibalization('all');
       renderDuplicateFragments();
       renderLinkgraph();
@@ -5563,6 +5594,49 @@
         <div class="mt-1">${evidence}${risks}</div>
       </div>`;
     }).join('') || '<div class="text-gray-500">No candidate snippets.</div>';
+  }
+
+  function renderChunkRetrievability() {
+    const block = document.getElementById('chunk-retrievability-block');
+    const data = state.chunkRetrievability || {};
+    if (!block) return;
+    if (data.available !== true) {
+      block.style.display = 'none';
+      return;
+    }
+    const summary = data.summary || {};
+    const model = data.model || {};
+    const rows = data.queries || [];
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const truncated = summary.truncated ? ` · ${Number(summary.truncated).toLocaleString()} truncated by importance` : '';
+    document.getElementById('chunk-retrievability-meta').textContent =
+      `${Number(summary.queries || rows.length).toLocaleString()} mapped queries · strong threshold ${Number(model.strong_similarity || 0.65).toFixed(2)} · chunk target ≤${Number(model.chunk_max_words || 250)} words${truncated}.`;
+    document.getElementById('chunk-retrievability-summary').innerHTML =
+      card('retrievable', Number(summary.retrievable || 0).toLocaleString(), `${Math.round(Number(summary.retrievable_share || 0) * 100)}% of queries`) +
+      card('split answers', Number(summary.split_answer || 0).toLocaleString(), 'fragmented across near-tied chunks') +
+      card('missing', Number(summary.missing || 0).toLocaleString(), 'no chunk clears the floor') +
+      card('recommendations', Number(summary.recommendations || 0).toLocaleString(), summary.recommendations_truncated ? `${Number(summary.recommendations_truncated).toLocaleString()} capped` : 'demand-filtered');
+    const badge = status => status === 'retrievable' ? 'bg-green-100 text-green-800'
+      : status === 'split_answer' ? 'bg-amber-100 text-amber-800'
+      : 'bg-red-100 text-red-800';
+    document.getElementById('chunk-retrievability-rows').innerHTML = rows.slice(0, 200).map(row => {
+      const status = row.status || 'missing';
+      const headings = status === 'split_answer'
+        ? `${escapeHtml(row.chunk_heading || '')}<div class="text-gray-500">${escapeHtml(row.second_heading || '')}</div>`
+        : escapeHtml(row.chunk_heading || '');
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top font-medium">${escapeHtml(row.query || '')}<div class="text-gray-500 font-normal">${escapeHtml(row.source || '')}</div></td>
+          <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 58))}</a><div class="text-gray-500">${escapeHtml(row.title || '')}</div></td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(row.best_similarity || 0).toFixed(3)}</td>
+          <td class="px-2 py-2 align-top"><span class="px-1.5 py-0.5 rounded ${badge(status)}">${escapeHtml(status.replaceAll('_', ' '))}</span></td>
+          <td class="px-2 py-2 align-top">${headings}<div class="text-gray-500">¶ ${(row.paragraph_indexes || []).join(', ')}</div></td>
+        </tr>`;
+    }).join('');
   }
 
   function renderCannibalization(filter='all') {

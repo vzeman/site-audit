@@ -149,6 +149,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_keyword_coverage=not args.no_keyword_coverage,
         enable_answerability=not args.no_answerability,
         enable_answer_blocks=not args.no_answer_blocks,
+        enable_chunk_retrievability=not args.no_chunk_retrievability,
         enable_freshness_impact=not args.no_freshness_impact,
         enable_cannibalization=not args.no_cannibalization,
         enable_duplicate_fragments=not args.no_duplicate_fragments,
@@ -1352,6 +1353,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-keyword-coverage", action="store_true")
     run_p.add_argument("--no-answerability", action="store_true")
     run_p.add_argument("--no-answer-blocks", action="store_true")
+    run_p.add_argument("--no-chunk-retrievability", action="store_true")
     run_p.add_argument("--no-freshness-impact", action="store_true")
     run_p.add_argument("--no-cannibalization", action="store_true")
     run_p.add_argument("--no-duplicate-fragments", action="store_true")

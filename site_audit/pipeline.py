@@ -52,6 +52,7 @@ from .best_pages import build_best_page_explainers
 from .cache import EmbeddingCache, HttpCache, ParagraphEmbeddingCache, content_hash, domain_slug
 from .cannibalization import build_cannibalization
 from .canonical_consistency import analyze as analyze_canonical_consistency
+from .chunk_retrievability import build_chunk_retrievability
 from .duplicate_fragments import build_duplicate_fragments
 from .cluster_labels import cluster_overlap_matrix, label_clusters
 from .competitive_analysis import (
@@ -228,6 +229,69 @@ def _configured_cluster_label_max_pages(default: int = DEFAULT_CLUSTER_LABEL_MAX
             default,
         )
         return default
+
+
+def _safe_int(value) -> int:
+    if value is None or value == "":
+        return 0
+    try:
+        return int(float(str(value).replace(",", "")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _url_variants(url: str) -> list[str]:
+    if not url:
+        return []
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    # Force https in the canonical variant so http-reported search URLs
+    # still match the crawled https pages (and vice versa).
+    base = urlunparse(("https", parsed.netloc.lower(), path, "", "", ""))
+    return list(dict.fromkeys([url, url.rstrip("/"), base, base.rstrip("/")]))
+
+
+def _chunk_query_rows(coverage_payload: list[dict], search_payload: dict | None) -> list[dict]:
+    """Add demand hints to keyword-coverage mappings without changing mapping."""
+    if not coverage_payload:
+        return []
+    rows = [dict(row) for row in coverage_payload]
+    by_query: dict[str, dict] = {}
+    top_page_traffic: dict[str, int] = {}
+    top_traffic_urls: set[str] = set()
+    if search_payload:
+        for row in search_payload.get("organic_keywords") or []:
+            query = str(row.get("keyword") or row.get("query") or "").strip().lower()
+            if not query:
+                continue
+            current = by_query.setdefault(query, {"impressions": 0, "clicks": 0, "volume": 0, "traffic": 0})
+            current["impressions"] += _safe_int(row.get("impressions"))
+            current["clicks"] += _safe_int(row.get("clicks"))
+            current["volume"] = max(current["volume"], _safe_int(row.get("volume") or row.get("search_volume")))
+            current["traffic"] += _safe_int(row.get("traffic"))
+        top_pages = sorted(
+            list(search_payload.get("top_pages") or []),
+            key=lambda row: _safe_int(row.get("traffic")),
+            reverse=True,
+        )
+        for row in top_pages[:50]:
+            traffic = _safe_int(row.get("traffic"))
+            url = str(row.get("matched_url") or row.get("url") or "")
+            if traffic <= 0 or not url:
+                continue
+            for variant in _url_variants(url):
+                top_page_traffic[variant] = max(top_page_traffic.get(variant, 0), traffic)
+                top_traffic_urls.add(variant)
+    for row in rows:
+        demand = by_query.get(str(row.get("query") or "").strip().lower()) or {}
+        row.update({key: value for key, value in demand.items() if value})
+        page_traffic = max((top_page_traffic.get(variant, 0) for variant in _url_variants(str(row.get("best_url") or ""))), default=0)
+        if page_traffic:
+            row["page_traffic"] = page_traffic
+            row["top_traffic_page"] = any(variant in top_traffic_urls for variant in _url_variants(str(row.get("best_url") or "")))
+    return rows
 
 
 def _tag_has_any_class(tag, classes: set[str]) -> bool:
@@ -567,6 +631,7 @@ class PipelineConfig:
     enable_keyword_coverage: bool = True
     enable_answerability: bool = True
     enable_answer_blocks: bool = True
+    enable_chunk_retrievability: bool = True
     enable_freshness_impact: bool = True
     enable_cannibalization: bool = True
     enable_duplicate_fragments: bool = True
@@ -1509,19 +1574,20 @@ def run(config: PipelineConfig) -> dict:
 
     # 7) Keyword coverage
     coverage_payload: list[dict] = []
+    coverage_queries: list[tuple[str, str]] = []
+    coverage_query_embeddings: np.ndarray | None = None
     if config.enable_keyword_coverage:
-        queries: list[tuple[str, str]] = []
         if config.queries_file:
             for q in load_queries_from_file(Path(config.queries_file)):
-                queries.append((q, "manual"))
-        if not queries:
-            queries = auto_mine_queries(extracted_pages, max_queries=config.auto_queries_max)
+                coverage_queries.append((q, "manual"))
+        if not coverage_queries:
+            coverage_queries = auto_mine_queries(extracted_pages, max_queries=config.auto_queries_max)
 
-        if queries:
-            LOG.info("  matching %d queries against %d pages", len(queries), len(pages))
-            q_embs = embedder.encode([q for q, _ in queries], show_progress=False)
+        if coverage_queries:
+            LOG.info("  matching %d queries against %d pages", len(coverage_queries), len(pages))
+            coverage_query_embeddings = embedder.encode([q for q, _ in coverage_queries], show_progress=False)
             matches = match_queries(
-                queries, q_embs, pages, embeddings,
+                coverage_queries, coverage_query_embeddings, pages, embeddings,
                 coverage_threshold=config.coverage_threshold,
                 cannibalization_threshold=config.cannibalization_threshold,
             )
@@ -1571,6 +1637,7 @@ def run(config: PipelineConfig) -> dict:
         or config.enable_weak_paragraphs
         or config.enable_heading_impact
         or config.enable_answer_blocks
+        or config.enable_chunk_retrievability
         or config.enable_freshness_impact
         or config.enable_cannibalization
         or config.enable_duplicate_fragments
@@ -1714,11 +1781,10 @@ def run(config: PipelineConfig) -> dict:
         # reuse the queries from coverage_payload so we share embeddings work
         # (the queries are auto-mined or from --queries-file)
         queries_for_fanout: list[tuple[str, str]] = [(q["query"], q["source"]) for q in coverage_payload]
-        if queries_for_fanout:
-            q_embs_fanout = embedder.encode([q for q, _ in queries_for_fanout], show_progress=False)
+        if queries_for_fanout and coverage_query_embeddings is not None:
             from .keyword_coverage import match_queries_to_paragraphs as _match
             fanout = _match(
-                queries_for_fanout, q_embs_fanout, pages, paragraph_records,
+                queries_for_fanout, coverage_query_embeddings, pages, paragraph_records,
                 paragraph_floor=config.paragraph_similarity_floor,
             )
             paragraph_fanout_payload = paragraph_match_payload(fanout)
@@ -1988,6 +2054,40 @@ def run(config: PipelineConfig) -> dict:
             )
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
+
+    # 11.g) RAG-style chunk retrievability. Runs after search enrichment so
+    # demand gating sees volume/impressions/traffic from ahrefs_data. It
+    # reuses the coverage query embeddings and paragraph embeddings computed
+    # above; it must not call the embedder.
+    chunk_retrievability_data: dict = {}
+    if config.enable_chunk_retrievability:
+        paragraph_embedding_matrix = (
+            np.stack([r[3] for r in paragraph_records]).astype(np.float32)
+            if paragraph_records
+            else None
+        )
+        chunk_retrievability_data = build_chunk_retrievability(
+            {
+                "pages": pages,
+                "extracted_pages": extracted_pages,
+                "paragraph_records": paragraph_records,
+            },
+            paragraph_embedding_matrix,
+            _chunk_query_rows(coverage_payload, ahrefs_data),
+            coverage_query_embeddings,
+            strong=config.paragraph_similarity_floor,
+        )
+        chunk_summary = chunk_retrievability_data.get("summary", {}) or {}
+        if chunk_retrievability_data.get("available"):
+            LOG.info(
+                "  chunk retrievability: %d queries → %d retrievable, %d split, %d missing",
+                chunk_summary.get("queries", 0),
+                chunk_summary.get("retrievable", 0),
+                chunk_summary.get("split_answer", 0),
+                chunk_summary.get("missing", 0),
+            )
+        else:
+            LOG.info("  chunk retrievability: %s", chunk_retrievability_data.get("reason", "unavailable"))
 
     ai_citations_data = build_ai_citations(dataforseo_data, ahrefs_data, pages, freshness_data)
     aio_summary = ai_citations_data.get("summary", {}) or {}
@@ -2534,6 +2634,7 @@ def run(config: PipelineConfig) -> dict:
         ctr_anomalies_payload=ctr_anomalies_data,
         ai_access_payload=ai_access_data,
         ai_citations_payload=ai_citations_data,
+        chunk_retrievability_payload=chunk_retrievability_data,
         external_links_payload=external_payload_data,
     )
     recommendations_data = recommendations_payload(recommendations)
@@ -2664,6 +2765,7 @@ def run(config: PipelineConfig) -> dict:
         ctr_anomalies=ctr_anomalies_data,
         ai_access=ai_access_data,
         ai_citations=ai_citations_data,
+        chunk_retrievability=chunk_retrievability_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
         template_patterns=template_patterns_data,
@@ -2733,6 +2835,7 @@ def run(config: PipelineConfig) -> dict:
             ctr_anomalies=ctr_anomalies_data,
             ai_access=ai_access_data,
             ai_citations=ai_citations_data,
+            chunk_retrievability=chunk_retrievability_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
             template_patterns=template_patterns_data,

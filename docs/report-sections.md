@@ -287,6 +287,13 @@ Finds paragraphs that could serve as answer/snippet blocks.
 
 Action: improve weak answer blocks with direct wording, specificity, and source-backed facts.
 
+<a id="chunk-retrievability-block"></a>
+## RAG chunk retrievability
+
+Checks whether each target query's mapped page has one retrieval-sized chunk that semantically answers it. Chunks merge consecutive same-heading paragraphs and target ≤250 words each; a leftover chunk under 120 words folds back into the previous chunk when both share a heading. Statuses: retrievable means the best chunk clears the strong similarity threshold; split answer means two near-tied chunks are both close to the threshold but neither is strong enough alone; missing means no chunk is a plausible answer.
+
+Action: consolidate split answers into one self-contained passage under a question H2, or add a concise 40–90 word answer block for missing demand queries. Chunking approximates retrieval windows, so validate wording and page layout before editing.
+
 <a id="cannibalization-block"></a>
 ## Content cannibalization by intent
 
