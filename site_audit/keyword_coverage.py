@@ -16,6 +16,7 @@ Queries can be:
 
 from __future__ import annotations
 
+import heapq
 import logging
 import re
 from dataclasses import dataclass
@@ -210,19 +211,39 @@ def match_queries_to_paragraphs(
         return []
 
     para_embs = np.stack([r[3] for r in paragraph_records]).astype(np.float32)
-    sims = np.clip(query_embeddings @ para_embs.T, -1.0, 1.0)
+    block_size = 20000
+    candidate_limit = max(1, top_k_paragraphs * 4)
 
     out: list[ParagraphQueryMatch] = []
     for qi, (query, source) in enumerate(queries_with_source):
-        row = sims[qi]
-        order = np.argsort(-row)
+        q = query_embeddings[qi].astype(np.float32, copy=False)
+        heap: list[tuple[float, int]] = []
+        pages_above_floor: set[str] = set()
+        for start in range(0, len(para_embs), block_size):
+            row = np.clip(para_embs[start : start + block_size] @ q, -1.0, 1.0)
+            above = np.flatnonzero(row >= paragraph_floor)
+            for local_idx in above:
+                page_i = paragraph_records[start + int(local_idx)][0]
+                pages_above_floor.add(pages[page_i].url)
+            if len(row) <= candidate_limit:
+                top_local = np.arange(len(row))
+            else:
+                top_local = np.argpartition(row, -candidate_limit)[-candidate_limit:]
+            for local_idx in top_local:
+                sim = float(row[int(local_idx)])
+                global_idx = start + int(local_idx)
+                if len(heap) < candidate_limit:
+                    heapq.heappush(heap, (sim, global_idx))
+                elif sim > heap[0][0]:
+                    heapq.heapreplace(heap, (sim, global_idx))
+        order = [idx for _, idx in sorted(heap, reverse=True)]
 
         top: list[dict] = []
         seen_urls: list[str] = []
-        for pi in order[: top_k_paragraphs * 4]:
+        for pi in order:
             page_i, para_i, text, _ = paragraph_records[int(pi)]
             url = pages[page_i].url
-            sim = float(row[int(pi)])
+            sim = float(np.clip(para_embs[int(pi)] @ q, -1.0, 1.0))
             if sim < paragraph_floor and len(top) >= 1:
                 break
             top.append({
@@ -239,9 +260,7 @@ def match_queries_to_paragraphs(
         best_url = top[0]["url"] if top else ""
         best_para = top[0]["excerpt"] if top else ""
         # # of distinct pages that have ≥1 paragraph above floor
-        distinct_pages = len({
-            t["url"] for t in top if t["similarity"] >= paragraph_floor
-        })
+        distinct_pages = len(pages_above_floor)
 
         if best_sim < paragraph_floor:
             status = "gap"
