@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from site_audit import paragraph_links
 from site_audit.paragraph_links import build_addition_simulation, recommend, to_payload
 from site_audit.report import write_internal_linkbuilding_csv
 
@@ -54,6 +55,43 @@ def test_recommend_trims_candidates_before_anchor_embedding() -> None:
 
     assert len(recs) == 1
     assert embedder.encoded_count <= 120
+
+
+def test_recommend_streams_similarity_blocks_without_vstack(monkeypatch) -> None:
+    pages = [
+        SimpleNamespace(url=f"https://example.com/page-{idx}", title=f"Page {idx}")
+        for idx in range(1000)
+    ]
+    page_embeddings = np.tile(np.array([[0.0, 1.0, 0.0]], dtype=np.float32), (1000, 1))
+    page_embeddings[0] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    paragraph_records = [
+        (
+            0,
+            index,
+            f"Relevant anchor phrase number {index} about target content and internal linking.",
+            np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        )
+        for index in range(6000)
+    ]
+
+    def fail_vstack(*args, **kwargs):
+        raise AssertionError("paragraph recommendations must not materialize all similarity blocks")
+
+    monkeypatch.setattr(paragraph_links.np, "vstack", fail_vstack)
+
+    recs = recommend(
+        pages,
+        page_embeddings,
+        paragraph_records,
+        pages_with_outlinks=[],
+        embedder=None,
+        similarity_floor=0.1,
+        lift_floor=-1.0,
+        top_k_per_page=2,
+        top_k_total=5,
+    )
+
+    assert len(recs) <= 5
 
 
 def test_recommend_dedupes_same_anchor_in_same_paragraph() -> None:
