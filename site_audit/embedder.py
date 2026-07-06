@@ -27,6 +27,7 @@ from .cache import EmbeddingCache, content_hash
 LOG = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Alibaba-NLP/gte-multilingual-base"
+DEFAULT_EMBED_CACHE_SAVE_EVERY = 2048
 
 
 def _quiet_model_load():
@@ -38,6 +39,21 @@ def _quiet_model_load():
     stack.enter_context(redirect_stdout(StringIO()))
     stack.enter_context(redirect_stderr(StringIO()))
     return stack
+
+
+def _embed_cache_save_every(default: int = DEFAULT_EMBED_CACHE_SAVE_EVERY) -> int:
+    raw = os.environ.get("SITE_AUDIT_EMBED_CACHE_SAVE_EVERY")
+    if raw is None or raw == "":
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        LOG.warning(
+            "Ignoring invalid SITE_AUDIT_EMBED_CACHE_SAVE_EVERY=%r; using %d",
+            raw,
+            default,
+        )
+        return default
 
 
 @dataclass
@@ -125,13 +141,25 @@ class Embedder:
         )
 
         if misses_idx:
-            miss_texts = [inputs[i].text for i in misses_idx]
-            new_embs = self.encode(miss_texts, batch_size=batch_size, show_progress=True)
-            for k, i in enumerate(misses_idx):
-                emb = new_embs[k]
-                embeddings[i] = emb
-                cache.put(inputs[i].url, hashes[i], emb)
-            cache.save()
+            save_every = _embed_cache_save_every()
+            for offset in range(0, len(misses_idx), save_every):
+                chunk_idx = misses_idx[offset : offset + save_every]
+                miss_texts = [inputs[i].text for i in chunk_idx]
+                new_embs = self.encode(
+                    miss_texts,
+                    batch_size=batch_size,
+                    show_progress=True,
+                )
+                for k, i in enumerate(chunk_idx):
+                    emb = new_embs[k]
+                    embeddings[i] = emb
+                    cache.put(inputs[i].url, hashes[i], emb)
+                cache.save()
+                LOG.info(
+                    "Embedding cache persisted: %d / %d misses",
+                    min(offset + len(chunk_idx), len(misses_idx)),
+                    len(misses_idx),
+                )
 
         return np.stack(embeddings).astype(np.float32)
 
