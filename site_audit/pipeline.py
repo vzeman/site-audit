@@ -100,7 +100,7 @@ from .google_ads import fetch_snapshot as fetch_google_ads_snapshot
 from .header_analysis import analyse as analyse_headers
 from .header_analysis import headers_for_scatter
 from .heading_impact import build_heading_impact
-from .history import build_history_snapshot, save_report_snapshot
+from .history import build_history_snapshot, detect_recommendation_outcomes, list_snapshots, load_snapshot_payload, save_report_snapshot
 from .internal_link_patterns import build_internal_link_patterns
 from .linkbuilding import analyse as analyse_linkbuilding
 from .html_report import write_html_report
@@ -2731,7 +2731,21 @@ def run(config: PipelineConfig) -> dict:
         metadata_quality=metadata_quality_data,
         indexability=indexability_data,
         search_payload=ahrefs_data,
+        recommendations_payload=recommendations_data,
     )
+    recommendation_outcomes_data = {"available": False, "reason": "no previous snapshot", "rows": []}
+    previous_snapshots = list_snapshots(host, config.projects_root)
+    if previous_snapshots:
+        previous_snapshot_id = previous_snapshots[-1].get("snapshot_id") or ""
+        if previous_snapshot_id:
+            previous_snapshot = load_snapshot_payload(host, config.projects_root, previous_snapshot_id)
+            recommendation_outcomes_data = detect_recommendation_outcomes(previous_snapshot, history_snapshot_data)
+            outcome_summary = recommendation_outcomes_data.get("summary") or {}
+            LOG.info(
+                "  recommendation outcomes: %d previous actions · %d implemented",
+                outcome_summary.get("total", 0),
+                outcome_summary.get("implemented", 0),
+            )
 
     # 13) Reports
     begin_report_build(
@@ -2801,6 +2815,7 @@ def run(config: PipelineConfig) -> dict:
         best_pages=best_pages_data,
         performance_explainer=performance_explainer_data,
         history_snapshot=history_snapshot_data,
+        recommendation_outcomes=recommendation_outcomes_data,
         technical_seo=technical_seo_data,
     )
 
@@ -2868,6 +2883,7 @@ def run(config: PipelineConfig) -> dict:
             ahrefs=ahrefs_data,
             best_pages=best_pages_data,
             performance_explainer=performance_explainer_data,
+            recommendation_outcomes=recommendation_outcomes_data,
         )
         LOG.info("  HTML report: %s", html_path)
 

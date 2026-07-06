@@ -132,6 +132,7 @@ def test_compare_snapshots_reports_content_link_schema_metadata_and_metric_delta
     assert row["schema_added"] == ["FAQPage"]
     assert row["confidence"] in {"medium", "low-medium"}
     assert diff["summary"]["caveats"]
+    assert diff["recommendation_outcomes"]["available"] is False
 
 
 def test_compare_snapshots_reports_canonical_url_changes(tmp_path: Path) -> None:

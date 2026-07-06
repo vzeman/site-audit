@@ -29,14 +29,15 @@ def test_duplicate_drop_target_suppresses_improve_recommendation() -> None:
 
     ids = {item["id"] for item in report["items"]}
     suppressed = report["suppressed"]
+    dup_id = next(item["id"] for item in report["items"] if item["id"].startswith("dup-"))
 
-    assert "dup-0" in ids
+    assert dup_id in ids
     assert any(item["targets"] == ["https://example.com/canonical"] for item in report["items"])
     assert not any(item["targets"] == ["https://example.com/drop"] for item in report["items"])
     assert len(suppressed) == 1
     assert suppressed[0]["targets"] == ["https://example.com/drop"]
-    assert suppressed[0]["suppressed_by"] == "dup-0"
-    assert "dup-0" in suppressed[0]["suppressed_reason"]
+    assert suppressed[0]["suppressed_by"] == dup_id
+    assert dup_id in suppressed[0]["suppressed_reason"]
     assert report["summary"]["suppressed"] == 1
 
 
@@ -64,13 +65,13 @@ def test_cannibalization_runner_up_suppresses_improve_but_best_url_remains() -> 
     assert any(item["targets"] == ["https://example.com/best"] for item in report["items"])
     assert not any(item["targets"] == ["https://example.com/runner"] for item in report["items"])
     assert report["suppressed"][0]["targets"] == ["https://example.com/runner"]
-    assert report["suppressed"][0]["suppressed_by"] == "cann-0"
+    assert report["suppressed"][0]["suppressed_by"].startswith("cann-")
 
 
 def test_cards_group_url_recommendations_and_sum_modeled_gain() -> None:
     report = _finalized(
         Recommendation(
-            id="geo-0",
+            id="geo-page",
             category="geo",
             priority="medium",
             title="Answerability",
@@ -82,7 +83,7 @@ def test_cards_group_url_recommendations_and_sum_modeled_gain() -> None:
             estimated_clicks_gain=10.0,
         ),
         Recommendation(
-            id="title-0",
+            id="title-page",
             category="onpage",
             priority="high",
             title="Rewrite title",
@@ -93,7 +94,7 @@ def test_cards_group_url_recommendations_and_sum_modeled_gain() -> None:
             estimated_clicks_gain=5.0,
         ),
         Recommendation(
-            id="orphan-0",
+            id="orphan-page",
             category="linking",
             priority="low",
             title="Add links",
@@ -113,7 +114,7 @@ def test_cards_group_url_recommendations_and_sum_modeled_gain() -> None:
     assert card["top_priority"] == "high"
     assert card["top_priority_score"] == 70.0
     assert card["categories"] == ["geo", "linking", "onpage"]
-    assert card["recommendation_ids"] == ["geo-0", "title-0", "orphan-0"]
+    assert card["recommendation_ids"] == ["geo-page", "title-page", "orphan-page"]
     # Label reflects the heaviest member effort, not the summed score.
     assert card["effort_total"] == "medium"
 
@@ -121,7 +122,7 @@ def test_cards_group_url_recommendations_and_sum_modeled_gain() -> None:
 def test_multi_target_recommendation_lands_on_canonical_card() -> None:
     report = _finalized(
         Recommendation(
-            id="dup-0",
+            id="dup-pair",
             category="content_debt",
             priority="high",
             title="Merge duplicate",
@@ -136,7 +137,7 @@ def test_multi_target_recommendation_lands_on_canonical_card() -> None:
 
     assert card["url"] == "https://example.com/canonical"
     assert card["related_urls"] == ["https://example.com/drop"]
-    assert card["recommendation_ids"] == ["dup-0"]
+    assert card["recommendation_ids"] == ["dup-pair"]
 
 
 def test_coverage_gap_uses_new_content_pseudo_card() -> None:
@@ -157,7 +158,8 @@ def test_coverage_gap_uses_new_content_pseudo_card() -> None:
     assert card["url"] == ""
     assert card["query"] == "support automation tools"
     assert card["related_urls"] == ["https://example.com/neighbor"]
-    assert card["recommendation_ids"] == ["gap-0"]
+    assert len(card["recommendation_ids"]) == 1
+    assert card["recommendation_ids"][0].startswith("gap-")
 
 
 def test_recommendation_payload_is_deterministic_with_cards_and_suppression() -> None:

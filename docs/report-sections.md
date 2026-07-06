@@ -26,6 +26,13 @@ Actions that would conflict with a redirect or merge are suppressed and shown se
 
 Action: start here when you need execution priorities. Validate the suggested URL and issue type, assign the card to content, technical SEO, internal linking, or product/UX, then use the "All actions" list for the flat recommendation workflow.
 
+<a id="rec-outcomes-block"></a>
+## Past recommendations scoreboard
+
+Compares the previous audit's recommendation list with the current snapshot. It labels each previous recommendation as implemented, partially implemented, not implemented, page removed, or unknown based on tracked title, description, content, heading, link, redirect, and page-existence hashes.
+
+Action: use it as a follow-up checklist and a directional performance readout. Treat position, click, and traffic movement as correlation only; validate major conclusions against analytics windows and unrelated site changes.
+
 <a id="improvement-block"></a>
 ## GEO pages most in need of editing
 

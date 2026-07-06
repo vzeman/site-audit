@@ -1218,6 +1218,29 @@ def _history_compare_command(args: argparse.Namespace) -> int:
         out_html = out_dir / "index.html"
         write_history_html(template, payload, out_html)
         print(f"Wrote {out_html}")
+    outcomes = payload.get("recommendation_outcomes") or {}
+    if outcomes.get("available"):
+        summary = outcomes.get("summary") or {}
+        aggregates = outcomes.get("aggregates") or {}
+        by_status = aggregates.get("by_status") or {}
+        status_text = ", ".join(
+            f"{status} {row.get('count', 0)}"
+            for status, row in sorted(by_status.items())
+        )
+        print(
+            "Past recommendations scoreboard: "
+            f"{summary.get('total', 0)} issued"
+            + (f" ({status_text})" if status_text else "")
+        )
+        avg_implemented = aggregates.get("avg_position_delta_implemented")
+        avg_not_implemented = aggregates.get("avg_position_delta_not_implemented")
+        print(
+            "Position delta: "
+            f"implemented {'n/a' if avg_implemented is None else avg_implemented}, "
+            f"not implemented {'n/a' if avg_not_implemented is None else avg_not_implemented}"
+        )
+    else:
+        print("Past recommendations scoreboard: unavailable (previous snapshot has no recommendation data).")
     print(f"Wrote {out_dir / 'history.json'}")
     return 0
 
