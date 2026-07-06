@@ -533,6 +533,7 @@ class PipelineConfig:
     max_chars: int = 4000
     embed_body_chars: int = DEFAULT_EMBED_BODY_CHARS
     embed_max_seq_length: int = DEFAULT_EMBED_MAX_SEQ_LENGTH
+    embedding_batch_size: int = 32
     audit_preset: str = "standard"
     technical_only: bool = False
     allow_large_embeddings: bool = False
@@ -1380,6 +1381,7 @@ def run(config: PipelineConfig) -> dict:
             embed_inputs,
             embed_cache,
             use_cache=config.use_embedding_cache,
+            batch_size=config.embedding_batch_size,
         )
     LOG.info("  embeddings shape: %s", embeddings.shape)
 

@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
+import torch
 
 from site_audit.cache import EmbeddingCache, content_hash
-from site_audit.embedder import EmbedInput, Embedder
+from site_audit.embedder import EmbedInput, Embedder, _reset_position_ids
 
 
 class FakeEmbeddingCache:
@@ -100,6 +101,33 @@ def test_embedder_caps_model_max_sequence_length() -> None:
     embedder._ensure()
 
     assert embedder.fake_model.max_seq_length == 512
+
+
+def test_reset_position_ids_preserves_existing_buffer_rank() -> None:
+    class Embeddings(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_buffer(
+                "position_ids",
+                torch.zeros((1, 8), dtype=torch.long),
+                persistent=False,
+            )
+
+    class Config:
+        max_position_embeddings = 8
+
+    class Model:
+        config = Config()
+
+        def __init__(self) -> None:
+            self.embeddings = Embeddings()
+
+    model = Model()
+
+    _reset_position_ids(model)
+
+    assert model.embeddings.position_ids.shape == (1, 8)
+    assert model.embeddings.position_ids.tolist() == [list(range(8))]
 
 
 def test_embedding_cache_ignores_and_rejects_non_finite_vectors(tmp_path) -> None:

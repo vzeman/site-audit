@@ -57,6 +57,27 @@ def _embed_cache_save_every(default: int = DEFAULT_EMBED_CACHE_SAVE_EVERY) -> in
         return default
 
 
+def _reset_position_ids(auto_model) -> None:
+    embeddings = getattr(auto_model, "embeddings", None)
+    if embeddings is None or not hasattr(auto_model, "config"):
+        return
+    current = getattr(embeddings, "position_ids", None)
+    max_positions = getattr(auto_model.config, "max_position_embeddings", None)
+    if not max_positions:
+        return
+
+    import torch as _torch
+
+    replacement = _torch.arange(max_positions, dtype=_torch.long)
+    if getattr(current, "ndim", 1) == 2:
+        replacement = replacement.unsqueeze(0)
+    embeddings.register_buffer(
+        "position_ids",
+        replacement,
+        persistent=False,
+    )
+
+
 @dataclass
 class EmbedInput:
     url: str
@@ -102,13 +123,8 @@ class Embedder:
         # position_ids buffer (persistent=False) appears to contain garbage
         # memory after loading rather than the expected arange values.
         # Reinitializing it here works around the issue.
-        import torch as _torch
         _am = self._model[0].auto_model
-        _am.embeddings.register_buffer(
-            "position_ids",
-            _torch.arange(_am.config.max_position_embeddings, dtype=_torch.long),
-            persistent=False,
-        )
+        _reset_position_ids(_am)
 
     def _encode_current_model(
         self,
