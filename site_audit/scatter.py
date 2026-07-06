@@ -59,21 +59,21 @@ def _fallback_labels(n: int, k: int) -> np.ndarray:
     return (np.arange(n, dtype=int) % max(1, k)).astype(int)
 
 
-def _sklearn_labels(matrix: np.ndarray, k: int) -> np.ndarray:
+def _quantile_labels(coords: np.ndarray, k: int) -> np.ndarray:
+    n = len(coords)
+    if n == 0:
+        return np.zeros(0, dtype=int)
+    if k <= 1:
+        return np.zeros(n, dtype=int)
+    values = np.asarray(coords[:, 0], dtype=np.float32)
+    if not np.isfinite(values).all() or float(values.max() - values.min()) == 0.0:
+        return _fallback_labels(n, k)
     try:
-        from sklearn.cluster import MiniBatchKMeans
-
-        km = MiniBatchKMeans(
-            n_clusters=k,
-            random_state=42,
-            batch_size=min(4096, max(256, len(matrix))),
-            n_init=3,
-            max_iter=100,
-        )
-        return km.fit_predict(matrix).astype(int)
-    except Exception as exc:  # pragma: no cover - sklearn absent/native edge
-        LOG.warning("MiniBatchKMeans failed (%s); using deterministic fallback labels", exc)
-        return _fallback_labels(len(matrix), k)
+        cuts = np.quantile(values, np.linspace(0, 1, k + 1)[1:-1])
+        return np.searchsorted(cuts, values, side="right").astype(int)
+    except Exception as exc:  # pragma: no cover - numeric edge
+        LOG.warning("Quantile cluster labels failed (%s); using deterministic fallback labels", exc)
+        return _fallback_labels(n, k)
 
 
 def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray, np.ndarray]:
@@ -93,11 +93,12 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
     umap_max_points = _configured_umap_max_points()
     if umap_max_points and n > umap_max_points:
         LOG.info(
-            "Skipping FAISS/UMAP for %d points above SITE_AUDIT_UMAP_MAX_POINTS=%d; using MiniBatchKMeans/PCA",
+            "Skipping native scatter engines for %d points above SITE_AUDIT_UMAP_MAX_POINTS=%d; using PCA/quantile labels",
             n,
             umap_max_points,
         )
-        return _sklearn_labels(emb_f32, k), _pca_coords(emb_f32)
+        coords = _pca_coords(emb_f32)
+        return _quantile_labels(coords, k), coords
 
     import faiss  # type: ignore
 

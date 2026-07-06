@@ -9,7 +9,7 @@ def test_large_scatter_projection_skips_umap(monkeypatch) -> None:
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
-        if name in {"faiss", "umap"}:
+        if name in {"faiss", "umap"} or name.startswith("sklearn"):
             raise AssertionError(f"{name} should not be imported for large projections")
         return real_import(name, *args, **kwargs)
 
