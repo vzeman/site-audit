@@ -90,3 +90,38 @@ def test_answerability_recommendations_fallback_to_url_when_title_missing() -> N
 
     assert "on  page" not in item["title"]
     assert "https://example.com/weak" in item["title"]
+
+
+def test_ctr_anomaly_recommendations_land_in_payload() -> None:
+    recs = synthesize(
+        ctr_anomalies_payload={
+            "recommendations": [
+                {
+                    "title": 'Title underperforms position #2 for "support automation"',
+                    "action": (
+                        'Rewrite title/meta of https://example.com/support: CTR is 5.0% vs 15.0% expected '
+                        'at position 2 — ~100 missed clicks/30 days. Probable cause: unclear. '
+                        'Include "support automation" phrasing in the title (<=65 chars).'
+                    ),
+                    "url": "https://example.com/support",
+                    "query": "support automation",
+                    "position": 2,
+                    "actual_ctr": 0.05,
+                    "expected_ctr": 0.15,
+                    "missed_clicks": 100,
+                    "probable_cause": "unclear",
+                    "period": "30 days",
+                    "current_title": "Support automation guide",
+                }
+            ]
+        }
+    )
+
+    payload = to_payload(recs)
+    item = next(row for row in payload["items"] if row["id"].startswith("ctr-"))
+
+    assert item["category"] == "onpage"
+    assert item["type"] == "title_rewrite"
+    assert item["title"] == 'Title underperforms position #2 for "support automation"'
+    assert item["targets"] == ["https://example.com/support"]
+    assert item["evidence"]["estimated_clicks_gain"] == 100

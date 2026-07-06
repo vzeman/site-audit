@@ -70,6 +70,7 @@ from .contextual_links import build_contextual_link_impact
 from .conversion import analyze as analyze_conversion
 from .conversion import to_payload as conversion_payload
 from .conversion_balance import build_conversion_balance
+from .ctr_anomalies import build_ctr_anomalies
 from .paragraph_clustering import (
     cluster_and_label as cluster_paragraphs,
     project_paragraphs,
@@ -1982,6 +1983,14 @@ def run(config: PipelineConfig) -> dict:
             sd_summary.get("opportunities", 0),
             sd_summary.get("total_modeled_click_gain", 0.0),
         )
+    ctr_anomalies_data = build_ctr_anomalies(ahrefs_data, pages, metadata_quality_data)
+    ctr_summary = ctr_anomalies_data.get("summary", {}) or {}
+    if ctr_summary.get("status") == "ok" and ctr_summary.get("anomalies"):
+        LOG.info(
+            "  CTR anomalies: %d rows · %.1f missed clicks",
+            ctr_summary.get("anomalies", 0),
+            ctr_summary.get("total_missed_clicks", 0.0),
+        )
 
     competitive_data: dict = {}
     competitive_targets = []
@@ -2496,6 +2505,7 @@ def run(config: PipelineConfig) -> dict:
         paragraph_links=paragraph_recs_payload,
         wrong_home_payload=wrong_home_data,
         title_mismatch=title_mismatch_data,
+        ctr_anomalies_payload=ctr_anomalies_data,
         external_links_payload=external_payload_data,
     )
     recommendations_data = recommendations_payload(recommendations)
@@ -2623,6 +2633,7 @@ def run(config: PipelineConfig) -> dict:
         answer_blocks=answer_blocks_data,
         freshness_impact=freshness_impact_data,
         striking_distance=striking_distance_data,
+        ctr_anomalies=ctr_anomalies_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
         template_patterns=template_patterns_data,
@@ -2689,6 +2700,7 @@ def run(config: PipelineConfig) -> dict:
             answer_blocks=answer_blocks_data,
             freshness_impact=freshness_impact_data,
             striking_distance=striking_distance_data,
+            ctr_anomalies=ctr_anomalies_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
             template_patterns=template_patterns_data,
