@@ -26,10 +26,12 @@ high-PageRank pages — fixing the load-bearing pages compounds.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from typing import Iterable, Optional
 from urllib.parse import urlsplit, urlunsplit
+
+from .ctr_curve import estimate_clicks_gain, expected_ctr
 
 
 @dataclass
@@ -52,6 +54,8 @@ class Recommendation:
     type: str = ""
     cluster: str = ""
     traffic_opportunity: float = 0.0
+    estimated_clicks_gain: float | None = None
+    estimate_basis: str | None = None
 
 
 _PRI_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -97,11 +101,12 @@ _TYPE_BY_PREFIX = {
 SCORE_MODEL = {
     "model": "fix_priority_score_v1",
     "components": {
-        "impact": "0-100 estimate from traffic opportunity, existing recommendation score, PageRank, ranking/search gap, and issue severity.",
+        "impact": "0-100 blended estimate from issue severity and percentile-normalized modeled clicks gain, traffic, and PageRank.",
         "confidence": "0-100 estimate from recommendation class and evidence completeness.",
         "effort_score": "0-100 estimated implementation effort. Quick edits are lower, deep content/template work is higher.",
         "risk": "0-100 estimated downside risk. Redirects and consolidation are higher risk than links or metadata edits.",
         "priority_score": "0.45*impact + 0.25*confidence - 0.18*effort_score - 0.12*risk, clamped to 0-100.",
+        "traffic_opportunity": "Sum of modeled estimated_clicks_gain when available, falling back to the legacy traffic index for actions without a clicks model.",
     },
     "priority_thresholds": {"high": 60, "medium": 35, "low": 0},
 }
@@ -157,11 +162,38 @@ def _url_keys(url: object) -> set[str]:
     return {k for k in keys if k}
 
 
+def _merge_query_pages(left: list[dict] | None, right: list[dict] | None) -> list[dict]:
+    rows = list(left or []) + list(right or [])
+    rows.sort(key=lambda r: _safe_float(r.get("impressions")), reverse=True)
+    return rows[:3]
+
+
 def _store_context(out: dict[str, dict], url: object, context: dict) -> None:
     for key in _url_keys(url):
         current = out.get(key)
-        if current is None or _safe_float(context.get("traffic")) > _safe_float(current.get("traffic")):
-            out[key] = context
+        if current is None:
+            out[key] = dict(context)
+            continue
+        merged = dict(current)
+        incoming_traffic = _safe_float(context.get("traffic"))
+        current_traffic = _safe_float(current.get("traffic"))
+        prefer_incoming = incoming_traffic > current_traffic
+        for name, value in context.items():
+            if name == "query_pages":
+                merged[name] = _merge_query_pages(current.get(name), value)
+                continue
+            if value in (None, "", [], {}):
+                continue
+            if name in {"traffic", "keywords", "pagerank", "authority_gap", "top_keyword_volume"}:
+                merged[name] = max(_safe_float(current.get(name)), _safe_float(value))
+                continue
+            if name == "top_keyword_position":
+                if prefer_incoming or not _safe_float(current.get(name)):
+                    merged[name] = _safe_float(value)
+                continue
+            if prefer_incoming or not merged.get(name):
+                merged[name] = value
+        out[key] = merged
 
 
 def _target_context_lookup(linkgraph_payload: dict | None, search_payload: dict | None) -> dict[str, dict]:
@@ -175,6 +207,13 @@ def _target_context_lookup(linkgraph_payload: dict | None, search_payload: dict 
             "keywords": _safe_int(row.get("keywords")),
             "cluster": row.get("cluster_label") or row.get("cluster") or row.get("section") or "",
             "top_keyword": row.get("top_keyword") or "",
+            "top_keyword_position": _safe_float(row.get("top_keyword_position") or row.get("position")),
+            "top_keyword_volume": _safe_float(
+                row.get("top_keyword_volume")
+                or row.get("top_keyword_impressions")
+                or row.get("impressions")
+            ),
+            "top_keyword_source": str(row.get("provider") or row.get("source") or ""),
         })
     for row in (((linkgraph_payload or {}).get("traffic_weighted_pagerank") or {}).get("pages") or []):
         url = row.get("url")
@@ -186,6 +225,20 @@ def _target_context_lookup(linkgraph_payload: dict | None, search_payload: dict 
             "cluster": row.get("cluster") or row.get("section") or row.get("directory") or "",
             "pagerank": _safe_float(row.get("pagerank")),
             "authority_gap": _safe_float(row.get("authority_traffic_gap")),
+        })
+    for row in ((search_payload or {}).get("query_pages") or []):
+        url = row.get("matched_url") or row.get("url")
+        if not url:
+            continue
+        query = row.get("query") or row.get("keyword") or ""
+        if not query:
+            continue
+        _store_context(out, url, {
+            "query_pages": [{
+                "query": query,
+                "position": _safe_float(row.get("position")),
+                "impressions": _safe_float(row.get("impressions") or row.get("volume")),
+            }],
         })
     return out
 
@@ -207,16 +260,19 @@ def _rec_type(rec: Recommendation) -> str:
     return _TYPE_BY_PREFIX.get(prefix, rec.category)
 
 
-def _component_scores(rec: Recommendation, context: dict[str, dict]) -> dict:
+def _component_scores(rec: Recommendation, target_context: dict) -> dict:
     evidence = rec.evidence or {}
-    target_context = _lookup_context(context, rec.targets)
-    traffic = max(
+    traffic_terms = [
         _safe_float(target_context.get("traffic")),
         _safe_float(evidence.get("traffic")),
-        _safe_float(evidence.get("traffic_opportunity")),
-        _safe_float(evidence.get("estimated_clicks_gain")),
         _safe_float(evidence.get("target_traffic")),
-    )
+    ]
+    if rec.estimated_clicks_gain is None:
+        # A first-class gain is blended separately; counting the evidence copy
+        # here as well would double-weight the same clicks.
+        traffic_terms.append(_safe_float(evidence.get("traffic_opportunity")))
+        traffic_terms.append(_safe_float(evidence.get("estimated_clicks_gain")))
+    traffic = max(traffic_terms)
     pagerank = max(_safe_float(evidence.get("pagerank")), _safe_float(target_context.get("pagerank")))
     severity = max(
         _safe_float(rec.score),
@@ -229,7 +285,7 @@ def _component_scores(rec: Recommendation, context: dict[str, dict]) -> dict:
         _safe_float(evidence.get("generic_anchor_share")) * 80.0,
         _safe_float(evidence.get("click_depth")) * 6.0,
     )
-    impact = _clip(
+    legacy_impact = _clip(
         min(62.0, severity)
         + min(25.0, math.log1p(max(traffic, 0.0)) * 3.2)
         + min(18.0, pagerank * 2500.0)
@@ -246,16 +302,121 @@ def _component_scores(rec: Recommendation, context: dict[str, dict]) -> dict:
     if len([t for t in rec.targets if t]) > 1:
         risk += 6.0
     risk = _clip(risk)
-    priority_score = _clip(0.45 * impact + 0.25 * confidence - 0.18 * effort_score - 0.12 * risk)
     return {
-        "impact": round(impact, 1),
+        "severity_norm": _clip(severity),
+        "legacy_impact": round(legacy_impact, 1),
         "confidence": round(confidence, 1),
         "effort_score": round(effort_score, 1),
         "risk": round(risk, 1),
-        "priority_score": round(priority_score, 1),
         "traffic_opportunity": round(traffic, 1),
+        "traffic": traffic,
+        "pagerank": pagerank,
         "cluster": str(target_context.get("cluster") or evidence.get("query") or ""),
     }
+
+
+def _estimated_clicks_gain(context: dict, category: str) -> tuple[float | None, str | None]:
+    """Return modeled incremental clicks and the data source used."""
+    if category == "coverage_gap":
+        # Only the gap query's own volume counts here — the target context
+        # belongs to the nearest *existing* page, not to the missing one.
+        volume = _safe_float(context.get("volume"))
+        if volume > 0:
+            return volume * expected_ctr(5.0), "keyword_volume"
+        return None, None
+
+    query_rows = [
+        row for row in (context.get("query_pages") or [])
+        if _safe_float(row.get("position")) > 3.0 and _safe_float(row.get("impressions")) > 0.0
+    ]
+    if query_rows:
+        row = sorted(query_rows, key=lambda r: _safe_float(r.get("impressions")), reverse=True)[0]
+        position = _safe_float(row.get("position"))
+        gain = estimate_clicks_gain(
+            _safe_float(row.get("impressions")),
+            position,
+            max(3.0, position * 0.5),
+        )
+        return gain, "gsc_impressions"
+
+    position = _safe_float(context.get("top_keyword_position"))
+    volume = _safe_float(context.get("top_keyword_volume"))
+    if position > 3.0 and volume > 0.0:
+        gain = estimate_clicks_gain(volume, position, max(3.0, position * 0.5))
+        source = str(context.get("top_keyword_source") or "").lower()
+        return gain, ("gsc_impressions" if source == "gsc" else "keyword_volume")
+    return None, None
+
+
+def _estimate_context(rec: Recommendation, target_context: dict) -> dict:
+    evidence = rec.evidence or {}
+    if rec.id.startswith("gap-"):
+        return {
+            **target_context,
+            "volume": max(
+                _safe_float(evidence.get("volume")),
+                _safe_float(evidence.get("impressions")),
+                _safe_float(evidence.get("top_keyword_volume")),
+                _safe_float(evidence.get("search_volume")),
+            ),
+        }
+    return target_context
+
+
+def _apply_estimated_gain(rec: Recommendation, target_context: dict) -> None:
+    evidence_gain = _safe_float((rec.evidence or {}).get("estimated_clicks_gain"), default=0.0)
+    if evidence_gain > 0:
+        rec.estimated_clicks_gain = round(evidence_gain, 2)
+        rec.estimate_basis = (
+            rec.estimate_basis
+            or (rec.evidence or {}).get("estimate_basis")
+            or "gsc_impressions"
+        )
+        return
+    gain, basis = _estimated_clicks_gain(_estimate_context(rec, target_context), _rec_type(rec))
+    if gain is None or basis is None:
+        return
+    rec.estimated_clicks_gain = round(gain, 2)
+    rec.estimate_basis = basis
+
+
+def _append_top_query_instruction(rec: Recommendation, target_context: dict) -> None:
+    if rec.id.startswith(("gap-", "cann-")):
+        # These recs target a query, not an existing page — the neighbor
+        # page's top keyword would be misleading here.
+        return
+    keyword = str(target_context.get("top_keyword") or "").strip()
+    position = _safe_float(target_context.get("top_keyword_position"))
+    volume = _safe_float(target_context.get("top_keyword_volume"))
+    if not keyword or position <= 0.0 or volume <= 0.0:
+        return
+    if " Top query: " in rec.instruction:
+        return
+    source = str(target_context.get("top_keyword_source") or "").lower()
+    demand = (
+        f"{int(round(volume))} impressions/period"
+        if source == "gsc"
+        else f"{int(round(volume))}/mo"
+    )
+    rec.instruction = (
+        f'{rec.instruction} Top query: "{keyword}" '
+        f"(position {position:.0f}, {demand})."
+    )
+
+
+def _percentile_norm(values: dict[str, float]) -> dict[str, float]:
+    positives = [(rec_id, value) for rec_id, value in values.items() if value > 0.0]
+    if not positives:
+        return {}
+    ordered = sorted(positives, key=lambda item: (item[1], item[0]))
+    n = len(ordered)
+    return {rec_id: (rank / n) * 100.0 for rank, (rec_id, _value) in enumerate(ordered, start=1)}
+
+
+def _gain_label(gain: float | None) -> str:
+    if gain is None:
+        return ""
+    return f"≈ +{gain:.0f} clicks/period"
 
 
 def _priority_bucket(priority_score: float) -> str:
@@ -268,18 +429,53 @@ def _priority_bucket(priority_score: float) -> str:
 
 def _finalize(recs: list[Recommendation], *, linkgraph_payload: dict | None = None, search_payload: dict | None = None) -> list[Recommendation]:
     context = _target_context_lookup(linkgraph_payload, search_payload)
+    base_scores: dict[str, dict] = {}
+    gain_values: dict[str, float] = {}
+    traffic_values: dict[str, float] = {}
+    pagerank_values: dict[str, float] = {}
     for rec in recs:
-        scores = _component_scores(rec, context)
-        rec.impact = scores["impact"]
+        target_context = _lookup_context(context, rec.targets)
+        _apply_estimated_gain(rec, target_context)
+        _append_top_query_instruction(rec, target_context)
+        scores = _component_scores(rec, target_context)
+        base_scores[rec.id] = scores
+        gain_values[rec.id] = _safe_float(rec.estimated_clicks_gain)
+        traffic_values[rec.id] = _safe_float(scores.get("traffic"))
+        pagerank_values[rec.id] = _safe_float(scores.get("pagerank"))
+
+    has_search_payload = bool((search_payload or {}).get("top_pages") or (search_payload or {}).get("query_pages"))
+    has_business_data = has_search_payload or any(value > 0.0 for value in gain_values.values())
+    gain_norms = _percentile_norm(gain_values) if has_business_data else {}
+    traffic_norms = _percentile_norm(traffic_values) if has_business_data else {}
+    pagerank_norms = _percentile_norm(pagerank_values) if has_business_data else {}
+
+    for rec in recs:
+        scores = base_scores[rec.id]
+        if has_business_data:
+            business_norm = (
+                0.6 * gain_norms.get(rec.id, 0.0)
+                + 0.25 * traffic_norms.get(rec.id, 0.0)
+                + 0.15 * pagerank_norms.get(rec.id, 0.0)
+            )
+            rec.impact = round(_clip(0.5 * _safe_float(scores.get("severity_norm")) + 0.5 * business_norm), 1)
+        else:
+            # Without any business data the percentile blend is all zeros;
+            # fall back to the legacy severity+linkgraph impact so ordering
+            # and priority buckets match pre-model behaviour.
+            rec.impact = _safe_float(scores.get("legacy_impact"))
         rec.confidence = scores["confidence"]
         rec.effort_score = scores["effort_score"]
         rec.risk = scores["risk"]
-        rec.priority_score = scores["priority_score"]
+        rec.priority_score = round(_clip(0.45 * rec.impact + 0.25 * rec.confidence - 0.18 * rec.effort_score - 0.12 * rec.risk), 1)
         rec.priority = _priority_bucket(rec.priority_score)
         rec.owner = rec.owner or _CATEGORY_OWNER.get(rec.category, "SEO")
         rec.type = rec.type or _rec_type(rec)
         rec.cluster = rec.cluster or scores["cluster"]
-        rec.traffic_opportunity = scores["traffic_opportunity"]
+        rec.traffic_opportunity = (
+            round(float(rec.estimated_clicks_gain), 1)
+            if rec.estimated_clicks_gain is not None
+            else scores["traffic_opportunity"]
+        )
         rec.evidence = {
             **(rec.evidence or {}),
             "score_components": {
@@ -428,6 +624,7 @@ def _coverage(coverage_payload: list[dict]) -> list[Recommendation]:
                 "query": c.get("query", ""),
                 "source": c.get("source", ""),
                 "best_similarity": float(c.get("best_similarity", 0.0)),
+                "volume": _safe_float(c.get("volume") or c.get("impressions") or c.get("search_volume")),
             },
             effort="deep",
             score=(0.55 - float(c.get("best_similarity", 0.0))) * 100,
@@ -777,6 +974,12 @@ def _ctr_anomaly_recommendations(payload: dict | list | None) -> list[dict]:
 
 
 def to_payload(recs: Iterable[Recommendation]) -> dict:
+    """Convert recommendations to the report payload.
+
+    Per item, ``traffic_opportunity`` is the modeled ``estimated_clicks_gain``
+    when a CTR/position basis exists, else the legacy traffic index. The
+    summary total sums those per-item values.
+    """
     items = list(recs)
     by_category: dict[str, int] = {}
     by_priority: dict[str, int] = {"high": 0, "medium": 0, "low": 0}
@@ -821,6 +1024,9 @@ def to_payload(recs: Iterable[Recommendation]) -> dict:
                 "owner": r.owner,
                 "cluster": r.cluster,
                 "traffic_opportunity": r.traffic_opportunity,
+                "estimated_clicks_gain": r.estimated_clicks_gain,
+                "estimate_basis": r.estimate_basis,
+                "gain_label": _gain_label(r.estimated_clicks_gain),
                 "title": r.title,
                 "instruction": r.instruction,
                 "targets": r.targets,

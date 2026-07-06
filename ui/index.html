@@ -420,6 +420,7 @@
         <select id="rec-sort" class="border border-gray-300 rounded px-2 py-1 bg-white">
           <option value="priority_score">Sort by priority</option>
           <option value="impact">Sort by impact</option>
+          <option value="estimated_clicks_gain">Sort by modeled gain</option>
           <option value="effort_score">Sort by effort</option>
           <option value="confidence">Sort by confidence</option>
           <option value="risk">Sort by risk</option>
@@ -2866,10 +2867,12 @@
       if (ev.paragraph_excerpt) evidenceBits.push(`para: "${String(ev.paragraph_excerpt).slice(0, 140)}…"`);
       const evidenceLine = evidenceBits.length
         ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(evidenceBits.join(' · '))}</div>` : '';
+      const gainText = rec.gain_label || (rec.estimated_clicks_gain != null ? `≈ +${Number(rec.estimated_clicks_gain || 0).toFixed(0)} clicks/period` : '—');
       const scoreLine = `
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] mt-2">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-[11px] mt-2">
           <span class="bg-gray-50 rounded px-2 py-1">Priority <strong>${Number(rec.priority_score || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Impact <strong>${Number(rec.impact || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Modeled gain <strong>${escapeHtml(gainText)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Conf. <strong>${Number(rec.confidence || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Effort <strong>${Number(rec.effort_score || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Risk <strong>${Number(rec.risk || 0).toFixed(1)}</strong></span>
@@ -2964,7 +2967,7 @@
 
   function exportActionPlanCsv() {
     const rows = filteredActionItems();
-    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','title','instruction','targets'];
+    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','estimated_clicks_gain','estimate_basis','gain_label','title','instruction','targets'];
     const csv = [cols.join(',')].concat(rows.map(row => cols.map(col => {
       const value = col === 'targets' ? (row.targets || []).join(' | ') : row[col];
       return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
