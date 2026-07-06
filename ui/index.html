@@ -992,6 +992,54 @@
       </div>
     </div>
 
+    <!-- Technical SEO issues -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="technical-seo-block">
+      <div class="mb-3 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h3 class="text-lg font-semibold">Technical SEO issues</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            Consolidated issue model across crawl status, indexability, links, redirects, metadata, assets, sitemaps, localization, structured data, and performance.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <select id="technical-severity-filter" class="rounded border border-gray-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
+          <select id="technical-category-filter" class="rounded border border-gray-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
+          <input id="technical-issue-search" class="rounded border border-gray-300 px-3 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Search URL or issue">
+        </div>
+      </div>
+      <div id="technical-seo-summary" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm mb-5"></div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs mb-5">
+        <div>
+          <h4 class="font-semibold mb-2">Severity</h4>
+          <div id="technical-severity-bars" class="space-y-2"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Categories</h4>
+          <div id="technical-category-bars" class="space-y-2 max-h-72 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Top issue types</h4>
+          <div id="technical-issue-bars" class="space-y-2 max-h-72 overflow-y-auto"></div>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-3 gap-5 text-xs mb-5">
+        <div>
+          <h4 class="font-semibold mb-2">Issue catalog</h4>
+          <div id="technical-issue-catalog" class="max-h-80 overflow-y-auto"></div>
+        </div>
+        <div class="lg:col-span-2">
+          <h4 class="font-semibold mb-2">Affected URLs</h4>
+          <div id="technical-issue-status" class="text-gray-500 mb-2"></div>
+          <div id="technical-issue-rows" class="max-h-[560px] overflow-y-auto"></div>
+          <div class="flex items-center justify-between gap-3 mt-3 text-xs">
+            <button id="technical-prev-page" class="px-3 py-1.5 rounded border border-gray-300 bg-white">Previous</button>
+            <span id="technical-pager-label" class="text-gray-500"></span>
+            <button id="technical-next-page" class="px-3 py-1.5 rounded border border-gray-300 bg-white">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Structured data -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="structured-data-block">
       <div class="mb-3">
@@ -2085,6 +2133,7 @@
 <script type="application/json" id="data-conversion">__CONVERSION_JSON__</script>
 <script type="application/json" id="data-indexability">__INDEXABILITY_JSON__</script>
 <script type="application/json" id="data-performance">__PERFORMANCE_JSON__</script>
+<script type="application/json" id="data-technical-seo">__TECHNICAL_SEO_JSON__</script>
 <script type="application/json" id="data-ahrefs">__AHREFS_JSON__</script>
 <script type="application/json" id="data-best-pages">__BEST_PAGES_JSON__</script>
 <script type="application/json" id="data-performance-explainer">__PERFORMANCE_EXPLAINER_JSON__</script>
@@ -2107,7 +2156,7 @@
     {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block', 'heatmap-block']},
     {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'coverage-block']},
     {key: 'paragraphs', label: 'Paragraph analysis', ids: ['paragraph-impact-block', 'weak-paragraphs-block', 'semantic-ablation-block', 'keyword-attribution-block']},
-    {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
+    {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'technical-seo-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
     {key: 'authority', label: 'Authority and trust', ids: ['trust-signals-block', 'entities-block', 'entity-coverage-block', 'information-gain-block']},
     {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
     {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
@@ -2123,7 +2172,7 @@
     'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block',
     'ahrefs-block', 'best-pages-block', 'paragraph-impact-block', 'weak-paragraphs-block',
     'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
-    'indexability-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
+    'indexability-block', 'technical-seo-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
     'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
     'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
@@ -2351,11 +2400,12 @@
       const inlinedConversion = readInlined('data-conversion');
       const inlinedIndexability = readInlined('data-indexability');
       const inlinedPerformance = readInlined('data-performance');
+      const inlinedTechnicalSeo = readInlined('data-technical-seo');
       const inlinedAhrefs = readInlined('data-ahrefs');
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2406,11 +2456,12 @@
         conversion = inlinedConversion || {};
         indexability = inlinedIndexability || {};
         performance = inlinedPerformance || {};
+        technicalSeo = inlinedTechnicalSeo || {};
         ahrefs = inlinedAhrefs || {};
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2460,6 +2511,7 @@
           loadJSON('conversion.json').catch(() => ({})),
           loadJSON('indexability.json').catch(() => ({})),
           loadJSON('performance.json').catch(() => ({})),
+          loadJSON('technical_issues.json').catch(() => ({})),
           loadJSON('ahrefs.json').catch(() => ({})),
           loadJSON('best_pages.json').catch(() => ({})),
           loadJSON('performance_explainer.json').catch(() => ({})),
@@ -2522,6 +2574,7 @@
       state.conversion = conversion || {};
       state.indexability = indexability || {};
       state.performance = performance || {};
+      state.technicalSeo = technicalSeo || {};
       state.ahrefs = ahrefs || {};
       state.bestPages = bestPages || {};
       state.performanceExplainer = performanceExplainer || {};
@@ -2551,6 +2604,7 @@
       renderHeatmap();
       renderCoverage('all');
       renderIndexability();
+      renderTechnicalSeo();
       renderStructuredData();
       renderTrustSignals();
       renderConversionBalance();
@@ -5201,6 +5255,135 @@
           <div class="text-gray-500 mt-1">${escapeHtml(r.reason || 'skipped')}</div>
         </div>`).join('')
       : '<div class="text-gray-500">No non-indexability skips found.</div>';
+  }
+
+  function technicalIssueValue(row, names) {
+    for (const name of names) {
+      const value = row && row[name];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return '';
+  }
+
+  function renderTechnicalBars(targetId, counts, limit = 12) {
+    const entries = Object.entries(counts || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0)).slice(0, limit);
+    const max = Math.max(1, ...entries.map(([, value]) => Number(value || 0)));
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    el.innerHTML = entries.map(([label, value]) => {
+      const pct = Math.max(3, Math.round(Number(value || 0) / max * 100));
+      return `<div>
+        <div class="flex justify-between gap-3 mb-1">
+          <span class="truncate">${escapeHtml(String(label).replaceAll('_', ' '))}</span>
+          <span class="font-mono text-gray-600">${Number(value || 0).toLocaleString()}</span>
+        </div>
+        <div class="h-2 bg-gray-100 rounded"><div class="h-2 bg-blue-600 rounded" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">No issue counts available.</div>';
+  }
+
+  function renderTechnicalSeo() {
+    const block = document.getElementById('technical-seo-block');
+    const data = state.technicalSeo || {};
+    const summary = data.summary || {};
+    const issues = Array.isArray(data.issues) ? data.issues : [];
+    if (!summary.total_issues && !issues.length) {
+      block.style.display = 'none';
+      return;
+    }
+    document.getElementById('technical-seo-summary').innerHTML =
+      card('Pages analyzed', Number(summary.total_pages || summary.pages || 0).toLocaleString(), 'canonical URLs in the technical model') +
+      card('Total issues', Number(summary.total_issues || issues.length || 0).toLocaleString(), 'all detected technical SEO findings', summary.total_issues ? 'text-orange-600' : 'text-green-600') +
+      card('High priority', Number(summary.high_issues || summary.error_issues || 0).toLocaleString(), 'error-level findings', summary.high_issues ? 'text-red-600' : 'text-green-600') +
+      card('Pages with issues', Number(summary.pages_with_issues || 0).toLocaleString(), 'URLs with at least one finding') +
+      card('Issue types', Number(summary.catalog_issue_types || (data.issue_catalog || []).length || 0).toLocaleString(), 'technical audit checks active');
+
+    renderTechnicalBars('technical-severity-bars', data.severity_counts || {}, 8);
+    renderTechnicalBars('technical-category-bars', data.category_counts || {}, 16);
+    renderTechnicalBars('technical-issue-bars', data.issue_counts || {}, 20);
+
+    const catalog = data.issue_catalog || [];
+    document.getElementById('technical-issue-catalog').innerHTML = catalog.slice(0, 160).map(row => {
+      const severity = technicalIssueValue(row, ['severity', 'importance']);
+      const name = technicalIssueValue(row, ['name', 'issue_type', 'issue']);
+      return `<div class="border-b border-gray-100 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-medium">${escapeHtml(String(name).replaceAll('_', ' '))}</span>
+          <span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">${escapeHtml(severity || 'issue')}</span>
+        </div>
+        <div class="text-gray-500 mt-1">${escapeHtml(row.category || '')}${row.count ? ` · ${Number(row.count || 0).toLocaleString()} findings` : ''}</div>
+      </div>`;
+    }).join('') || '<div class="text-gray-500">Issue catalog not available.</div>';
+
+    const severityEl = document.getElementById('technical-severity-filter');
+    const categoryEl = document.getElementById('technical-category-filter');
+    const searchEl = document.getElementById('technical-issue-search');
+    const prevEl = document.getElementById('technical-prev-page');
+    const nextEl = document.getElementById('technical-next-page');
+    const rowsEl = document.getElementById('technical-issue-rows');
+    const statusEl = document.getElementById('technical-issue-status');
+    const pagerEl = document.getElementById('technical-pager-label');
+    const pageSize = 80;
+    state.technicalIssuePage = state.technicalIssuePage || 0;
+
+    const severities = [...new Set(issues.map(row => technicalIssueValue(row, ['severity', 'importance'])).filter(Boolean))].sort();
+    const categories = [...new Set(issues.map(row => row.category).filter(Boolean))].sort();
+    if (!severityEl.dataset.ready) {
+      severityEl.dataset.ready = '1';
+      severityEl.innerHTML = '<option value="">All severities</option>' + severities.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+      categoryEl.innerHTML = '<option value="">All categories</option>' + categories.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(String(v).replaceAll('_', ' '))}</option>`).join('');
+    }
+
+    const applyFilters = () => {
+      const q = (searchEl.value || '').trim().toLowerCase();
+      const severity = severityEl.value || '';
+      const category = categoryEl.value || '';
+      const filtered = issues.filter(row => {
+        if (severity && technicalIssueValue(row, ['severity', 'importance']) !== severity) return false;
+        if (category && row.category !== category) return false;
+        if (!q) return true;
+        return [
+          technicalIssueValue(row, ['url', 'page_url']),
+          technicalIssueValue(row, ['issue_type', 'name', 'issue']),
+          technicalIssueValue(row, ['message', 'details', 'description', 'recommendation']),
+          technicalIssueValue(row, ['category']),
+        ].some(value => String(value || '').toLowerCase().includes(q));
+      });
+      const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
+      state.technicalIssuePage = Math.min(state.technicalIssuePage || 0, maxPage);
+      const start = state.technicalIssuePage * pageSize;
+      const pageRows = filtered.slice(start, start + pageSize);
+      statusEl.textContent = issues.length
+        ? `${filtered.length.toLocaleString()} matching issues from ${issues.length.toLocaleString()} loaded rows.`
+        : 'Issue row file not loaded; summary counts are still available.';
+      rowsEl.innerHTML = pageRows.map(row => {
+        const severity = technicalIssueValue(row, ['severity', 'importance']);
+        const issueName = technicalIssueValue(row, ['issue_type', 'name', 'issue']);
+        const details = technicalIssueValue(row, ['message', 'details', 'description', 'recommendation']);
+        return `<div class="border-b border-gray-100 py-2">
+          <div class="flex items-start justify-between gap-3">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(technicalIssueValue(row, ['url', 'page_url']))}" target="_blank" rel="noopener">${escapeHtml(technicalIssueValue(row, ['url', 'page_url']))}</a>
+            <span class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(severity || 'issue')}</span>
+          </div>
+          <div class="font-medium mt-1">${escapeHtml(String(issueName).replaceAll('_', ' '))}</div>
+          <div class="text-gray-500 mt-1">${escapeHtml(row.category || '')}${details ? ` · ${escapeHtml(details)}` : ''}</div>
+        </div>`;
+      }).join('') || '<div class="text-gray-500">No matching issue rows.</div>';
+      const end = Math.min(start + pageRows.length, filtered.length);
+      pagerEl.textContent = filtered.length ? `${(start + 1).toLocaleString()}-${end.toLocaleString()} of ${filtered.length.toLocaleString()}` : 'No rows';
+      prevEl.disabled = state.technicalIssuePage <= 0;
+      nextEl.disabled = state.technicalIssuePage >= maxPage;
+    };
+    if (!searchEl.dataset.ready) {
+      searchEl.dataset.ready = '1';
+      [searchEl, severityEl, categoryEl].forEach(el => {
+        el.addEventListener('input', () => { state.technicalIssuePage = 0; applyFilters(); });
+        el.addEventListener('change', () => { state.technicalIssuePage = 0; applyFilters(); });
+      });
+      prevEl.addEventListener('click', () => { state.technicalIssuePage = Math.max(0, (state.technicalIssuePage || 0) - 1); applyFilters(); });
+      nextEl.addEventListener('click', () => { state.technicalIssuePage = (state.technicalIssuePage || 0) + 1; applyFilters(); });
+    }
+    applyFilters();
   }
 
   function renderStructuredData() {

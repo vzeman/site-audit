@@ -69,6 +69,7 @@ _PLACEHOLDERS = {
     "__CONVERSION_JSON__": "conversion",
     "__INDEXABILITY_JSON__": "indexability",
     "__PERFORMANCE_JSON__": "performance",
+    "__TECHNICAL_SEO_JSON__": "technical_seo",
     "__AHREFS_JSON__": "ahrefs",
     "__BEST_PAGES_JSON__": "best_pages",
     "__PERFORMANCE_EXPLAINER_JSON__": "performance_explainer",
@@ -294,6 +295,7 @@ def write_html_report(
     conversion: Optional[dict] = None,
     indexability: Optional[dict] = None,
     performance: Optional[dict] = None,
+    technical_seo: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
@@ -356,6 +358,7 @@ def write_html_report(
         "conversion": conversion or {},
         "indexability": indexability or {},
         "performance": performance or {},
+        "technical_seo": _technical_seo_payload(technical_seo or {}),
         "ahrefs": ahrefs or {},
         "best_pages": best_pages or {},
         "performance_explainer": performance_explainer or {},
@@ -367,3 +370,17 @@ def write_html_report(
 
     out_path.write_text(rendered, encoding="utf-8")
     return out_path
+
+
+def _technical_seo_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "summary": payload.get("summary") or {},
+        "issue_counts": payload.get("issue_counts") or {},
+        "category_counts": payload.get("category_counts") or {},
+        "severity_counts": payload.get("severity_counts") or {},
+        "issue_catalog": payload.get("issue_catalog") or [],
+        "issues": (payload.get("issues") or [])[:5000],
+        "interpretation": payload.get("interpretation") or {},
+    }

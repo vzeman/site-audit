@@ -9,6 +9,7 @@ from site_audit.report_lifecycle import (
     begin_report_build,
     complete_report_build,
 )
+from site_audit.report import _write_json
 
 
 def test_begin_report_build_moves_stale_index_and_clears_complete_marker(tmp_path) -> None:
@@ -53,3 +54,13 @@ def test_complete_report_build_writes_complete_marker_last(tmp_path) -> None:
     assert payload["status"] == "complete"
     assert payload["metadata"]["mode"] == "full"
     assert payload["required_files"] == ["index.html", "site_metrics.json"]
+
+
+def test_write_json_replaces_temp_file_atomically(tmp_path) -> None:
+    path = tmp_path / "payload.json"
+
+    _write_json(path, {"rows": [{"url": "https://example.com/a"}]})
+
+    assert path.is_file()
+    assert not (tmp_path / "payload.json.tmp").exists()
+    assert "example.com" in path.read_text(encoding="utf-8")

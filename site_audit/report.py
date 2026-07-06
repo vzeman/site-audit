@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import html
 import json
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -30,6 +31,8 @@ from urllib.parse import urlparse
 import numpy as np
 
 from .analyzer import AuditResult, recommend_action
+
+LOG = logging.getLogger(__name__)
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
@@ -74,12 +77,16 @@ def _write_csv_safe_iter(path: Path, rows: Iterable[dict]) -> None:
 
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    tmp_path.replace(path)
 
 
 def _write_json_object_with_array(path: Path, payload: dict, array_key: str, rows: Iterable[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         f.write("{\n")
         first = True
         for key, value in payload.items():
@@ -105,6 +112,12 @@ def _write_json_object_with_array(path: Path, payload: dict, array_key: str, row
         else:
             f.write("]\n")
         f.write("}\n")
+    tmp_path.replace(path)
+
+
+def _write_report_json(path: Path, payload, label: str) -> None:
+    LOG.info("  report export: %s", label)
+    _write_json(path, payload)
 
 
 def _html_escape(value) -> str:
@@ -1267,6 +1280,7 @@ def write_all(
     technical_seo: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    LOG.info("  report export: core metrics and CSVs")
     _copy_report_docs(output_dir)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
     write_section_report(output_dir / "section_report.json", result)
@@ -1275,6 +1289,7 @@ def write_all(
     duplicates = write_duplicates(output_dir / "duplicates.csv", result)
     write_pages(output_dir / "pages.json", result)
     write_scatterplot(output_dir / "scatterplot.json", result, coords, cluster_labels)
+    LOG.info("  report export: semantic and link payloads")
     if cluster_summaries:
         write_clusters(output_dir / "clusters.json", cluster_summaries)
     if coverage is not None:
@@ -1342,6 +1357,7 @@ def write_all(
         _write_json(output_dir / "header_scatter.json", header_scatter)
     if linkbuilding is not None:
         _write_json(output_dir / "linkbuilding.json", linkbuilding)
+    LOG.info("  report export: technical/content payloads")
     if structured_data is not None:
         _write_json(output_dir / "structured_data.json", structured_data)
     if trust_signals is not None:
@@ -1384,5 +1400,7 @@ def write_all(
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
     if technical_seo is not None:
+        LOG.info("  report export: technical SEO exports")
         write_technical_seo_exports(output_dir, technical_seo, domain=domain)
+    LOG.info("  report export: done")
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}
