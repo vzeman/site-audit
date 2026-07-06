@@ -138,6 +138,7 @@ def _run_command(args: argparse.Namespace) -> int:
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
         embed_body_chars=args.embed_body_chars,
+        embed_max_seq_length=args.embed_max_seq_length,
         audit_preset=preset,
         technical_only=technical_only,
         allow_large_embeddings=allow_large_embeddings,
@@ -1239,6 +1240,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Allow semantic embedding stages even when the crawl exceeds the large-site threshold")
     run_p.add_argument("--large-site-embedding-threshold", type=int, default=20000,
                        help="Page count above which standard runs stop after technical exports unless large embeddings are allowed")
+    run_p.add_argument("--embed-max-seq-length", type=int, default=512,
+                       help="Max transformer tokens per embedded text; 0 uses the model default (default: 512)")
     run_p.add_argument("--workers", type=int, default=8)
     run_p.add_argument("--link-parse-processes", type=int, default=0,
                        help="Processes for cached crawl link parsing; 0 auto, 1 disables the process pool")

@@ -28,6 +28,7 @@ LOG = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Alibaba-NLP/gte-multilingual-base"
 DEFAULT_EMBED_CACHE_SAVE_EVERY = 2048
+DEFAULT_EMBED_MAX_SEQ_LENGTH = 512
 
 
 def _quiet_model_load():
@@ -71,8 +72,14 @@ class Embedder:
     without paying the load cost twice.
     """
 
-    def __init__(self, model_name: str = DEFAULT_MODEL):
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL,
+        *,
+        max_seq_length: int | None = DEFAULT_EMBED_MAX_SEQ_LENGTH,
+    ):
         self.model_name = model_name
+        self.max_seq_length = max_seq_length if max_seq_length and max_seq_length > 0 else None
         self._model = None
         self._device: str | None = None
 
@@ -87,6 +94,10 @@ class Embedder:
                 self.model_name, trust_remote_code=True, device=target_device
             )
         self._device = target_device
+        if self.max_seq_length is not None:
+            current_max = getattr(self._model, "max_seq_length", None)
+            if current_max is None or current_max > self.max_seq_length:
+                self._model.max_seq_length = self.max_seq_length
         # On macOS (Apple Silicon), the gte-multilingual-base model's
         # position_ids buffer (persistent=False) appears to contain garbage
         # memory after loading rather than the expected arange values.
@@ -152,7 +163,8 @@ class Embedder:
         if not inputs:
             return np.zeros((0, 0), dtype=np.float32)
 
-        hashes = [content_hash(f"{p.text}|{self.model_name}") for p in inputs]
+        cache_fingerprint = f"{self.model_name}|seq={self.max_seq_length or 'model'}"
+        hashes = [content_hash(f"{p.text}|{cache_fingerprint}") for p in inputs]
         embeddings: List[np.ndarray | None] = [None] * len(inputs)
 
         misses_idx: list[int] = []

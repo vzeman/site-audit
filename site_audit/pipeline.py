@@ -77,7 +77,7 @@ from .paragraph_clustering import (
     to_summary_payload as paragraph_clusters_payload,
 )
 from .crawler import Crawler, CrawlConfig, DEFAULT_EXCLUDE_PATTERNS
-from .embedder import DEFAULT_MODEL, EmbedInput, Embedder
+from .embedder import DEFAULT_EMBED_MAX_SEQ_LENGTH, DEFAULT_MODEL, EmbedInput, Embedder
 from .entities import analyze as analyze_entities
 from .entities import to_payload as entities_payload
 from .entity_coverage import build_entity_coverage
@@ -186,6 +186,21 @@ def _configured_embed_body_chars(default: int) -> int:
     except ValueError:
         LOG.warning(
             "Ignoring invalid SITE_AUDIT_EMBED_BODY_CHARS=%r; using %d",
+            raw,
+            default,
+        )
+        return default
+
+
+def _configured_embed_max_seq_length(default: int) -> int:
+    raw = os.environ.get("SITE_AUDIT_EMBED_MAX_SEQ_LENGTH")
+    if raw is None or raw == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        LOG.warning(
+            "Ignoring invalid SITE_AUDIT_EMBED_MAX_SEQ_LENGTH=%r; using %d",
             raw,
             default,
         )
@@ -517,6 +532,7 @@ class PipelineConfig:
     skip_scatterplot: bool = False
     max_chars: int = 4000
     embed_body_chars: int = DEFAULT_EMBED_BODY_CHARS
+    embed_max_seq_length: int = DEFAULT_EMBED_MAX_SEQ_LENGTH
     audit_preset: str = "standard"
     technical_only: bool = False
     allow_large_embeddings: bool = False
@@ -724,11 +740,16 @@ def run(config: PipelineConfig) -> dict:
     cache_dir, report_dir = project_paths(config)
     stage_timings = StageTimings()
     embed_body_chars = _configured_embed_body_chars(config.embed_body_chars)
+    embed_max_seq_length = _configured_embed_max_seq_length(config.embed_max_seq_length)
 
     LOG.info("=== site-audit run for %s ===", host)
     LOG.info("  cache:  %s", cache_dir)
     LOG.info("  report: %s", report_dir)
     LOG.info("  embed body chars: %d", embed_body_chars)
+    LOG.info(
+        "  embed max sequence length: %s",
+        embed_max_seq_length if embed_max_seq_length > 0 else "model default",
+    )
 
     http_cache = HttpCache(cache_dir / "http.sqlite")
     http_cache.clean_tracking_duplicates(min_candidates=100)
@@ -1351,7 +1372,10 @@ def run(config: PipelineConfig) -> dict:
         embed_cache = EmbeddingCache(
             cache_dir / f"embeddings_{config.model.replace('/', '_').replace('-', '_')}.npz"
         )
-        embedder = Embedder(config.model)
+        embedder = Embedder(
+            config.model,
+            max_seq_length=embed_max_seq_length,
+        )
         embeddings = embedder.encode_pages(
             embed_inputs,
             embed_cache,

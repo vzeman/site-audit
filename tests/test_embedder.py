@@ -53,6 +53,25 @@ class CpuFallbackEmbedder(Embedder):
         return np.asarray([[np.nan, np.nan] for _ in texts], dtype=np.float32)
 
 
+class FakeModel:
+    def __init__(self, max_seq_length: int | None = 8192) -> None:
+        self.max_seq_length = max_seq_length
+
+
+class MaxSeqLengthEmbedder(Embedder):
+    def __init__(self, max_seq_length: int | None) -> None:
+        super().__init__("fake-model", max_seq_length=max_seq_length)
+        self.fake_model = FakeModel()
+
+    def _ensure(self, device: str | None = None) -> None:
+        self._model = self.fake_model
+        self._device = device
+        if self.max_seq_length is not None:
+            current_max = getattr(self._model, "max_seq_length", None)
+            if current_max is None or current_max > self.max_seq_length:
+                self._model.max_seq_length = self.max_seq_length
+
+
 def test_encode_pages_persists_embedding_cache_in_chunks(monkeypatch) -> None:
     monkeypatch.setenv("SITE_AUDIT_EMBED_CACHE_SAVE_EVERY", "2")
     cache = FakeEmbeddingCache()
@@ -73,6 +92,14 @@ def test_encode_retries_non_finite_embeddings_on_cpu() -> None:
 
     assert np.isfinite(embeddings).all()
     assert embeddings.tolist() == [[1.0, 0.0]]
+
+
+def test_embedder_caps_model_max_sequence_length() -> None:
+    embedder = MaxSeqLengthEmbedder(512)
+
+    embedder._ensure()
+
+    assert embedder.fake_model.max_seq_length == 512
 
 
 def test_embedding_cache_ignores_and_rejects_non_finite_vectors(tmp_path) -> None:
