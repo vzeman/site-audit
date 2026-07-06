@@ -36,6 +36,7 @@ import numpy as np
 from bs4 import BeautifulSoup
 
 from .adaptive_workers import AdaptiveWorkerController, StageProfile, configure_native_thread_limits
+from .ai_access import build_ai_access
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
 from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
@@ -810,6 +811,16 @@ def run(config: PipelineConfig) -> dict:
     with stage_timings.track("crawl", max_pages=config.max_pages, workers=crawl_worker_cap):
         fetched = crawler.discover_and_crawl()
     LOG.info("  fetched %d pages (cache: %s)", len(fetched), http_cache.stats())
+    robots_txt_info = getattr(crawler, "robots_txt_info", {}) or {}
+    robots_txt_status = int(robots_txt_info.get("status") or 0) if robots_txt_info else None
+    robots_txt_body = robots_txt_info.get("body") if robots_txt_status == 200 else None
+    ai_access_data = build_ai_access(
+        robots_txt_body,
+        getattr(crawler, "llms_txt_info", None),
+        getattr(crawler, "llms_full_txt_info", None),
+        getattr(crawler, "base_url", "") or f"https://{host}",
+        robots_status=robots_txt_status,
+    )
 
     # 2) Extract
     pages: list[PageInfo] = []
@@ -2506,6 +2517,7 @@ def run(config: PipelineConfig) -> dict:
         wrong_home_payload=wrong_home_data,
         title_mismatch=title_mismatch_data,
         ctr_anomalies_payload=ctr_anomalies_data,
+        ai_access_payload=ai_access_data,
         external_links_payload=external_payload_data,
     )
     recommendations_data = recommendations_payload(recommendations)
@@ -2634,6 +2646,7 @@ def run(config: PipelineConfig) -> dict:
         freshness_impact=freshness_impact_data,
         striking_distance=striking_distance_data,
         ctr_anomalies=ctr_anomalies_data,
+        ai_access=ai_access_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
         template_patterns=template_patterns_data,
@@ -2701,6 +2714,7 @@ def run(config: PipelineConfig) -> dict:
             freshness_impact=freshness_impact_data,
             striking_distance=striking_distance_data,
             ctr_anomalies=ctr_anomalies_data,
+            ai_access=ai_access_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
             template_patterns=template_patterns_data,
