@@ -8,10 +8,13 @@ distance. Both libraries are heavy, so we import them lazily.
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 
 LOG = logging.getLogger(__name__)
+
+DEFAULT_UMAP_MAX_POINTS = 20000
 
 
 def _stub_coords(n: int) -> np.ndarray:
@@ -19,6 +22,35 @@ def _stub_coords(n: int) -> np.ndarray:
     for i in range(n):
         coords[i, 0] = float(i)
     return coords
+
+
+def _configured_umap_max_points(default: int = DEFAULT_UMAP_MAX_POINTS) -> int:
+    raw = os.environ.get("SITE_AUDIT_UMAP_MAX_POINTS")
+    if raw is None or raw == "":
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        LOG.warning("Ignoring invalid SITE_AUDIT_UMAP_MAX_POINTS=%r; using %d", raw, default)
+        return default
+
+
+def _pca_coords(matrix: np.ndarray) -> np.ndarray:
+    arr = np.asarray(matrix, dtype=np.float32)
+    n = len(arr)
+    if n == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    arr = arr / np.where(norms == 0, 1.0, norms)
+    arr = arr - arr.mean(axis=0, keepdims=True)
+    try:
+        u, s, _ = np.linalg.svd(arr, full_matrices=False)
+        coords = (u[:, :2] * s[:2]).astype(np.float32)
+    except np.linalg.LinAlgError:
+        return _stub_coords(n)
+    if coords.shape[1] < 2:
+        coords = np.pad(coords, ((0, 0), (0, 2 - coords.shape[1])), mode="constant")
+    return coords.astype(np.float32)
 
 
 def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray, np.ndarray]:
@@ -48,6 +80,15 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
     _, labels = kmeans.index.search(emb_f32, 1)
     cluster_labels = labels.flatten().astype(int)
 
+    umap_max_points = _configured_umap_max_points()
+    if umap_max_points and n > umap_max_points:
+        LOG.info(
+            "Skipping UMAP for %d points above SITE_AUDIT_UMAP_MAX_POINTS=%d; using PCA coords",
+            n,
+            umap_max_points,
+        )
+        return cluster_labels, _pca_coords(emb_f32)
+
     import umap  # type: ignore
 
     n_neighbors = max(2, min(15, n - 1))
@@ -61,6 +102,6 @@ def project(embeddings: np.ndarray, num_clusters: int = 30) -> tuple[np.ndarray,
     try:
         coords = reducer.fit_transform(emb_f32)
     except Exception as exc:  # rare scipy/eigensolver corner cases on tiny corpora
-        LOG.warning("UMAP failed on %d-page site (%s); falling back to stub coords", n, exc)
-        coords = _stub_coords(n)
+        LOG.warning("UMAP failed on %d-page site (%s); falling back to PCA coords", n, exc)
+        coords = _pca_coords(emb_f32)
     return cluster_labels, coords.astype(np.float32)
