@@ -74,6 +74,7 @@ from .conversion import analyze as analyze_conversion
 from .conversion import to_payload as conversion_payload
 from .conversion_balance import build_conversion_balance
 from .ctr_anomalies import build_ctr_anomalies
+from .crux import build_crux_payload, crux_api_key, fetch_crux
 from .paragraph_clustering import (
     cluster_and_label as cluster_paragraphs,
     project_paragraphs,
@@ -651,6 +652,9 @@ class PipelineConfig:
     enable_information_gain: bool = True
     enable_content_quality: bool = True
     enable_paragraph_fanout: bool = True
+    enable_crux: bool = True
+    crux_max_urls: int = 100
+    crux_refresh: bool = False
     check_external_links: bool = False     # opt-in HEAD requests
     paragraph_link_top_k: int = 200
     paragraph_link_per_page: int = 8
@@ -822,6 +826,49 @@ def _search_payload_usable(payload: dict) -> bool:
         or metrics.get("org_traffic")
         or metrics.get("org_keywords")
     )
+
+
+def _select_crux_urls(
+    pages: list[PageInfo],
+    search_payload: dict | None,
+    link_payload: dict | None,
+    *,
+    home_url: str,
+    max_urls: int,
+) -> list[str]:
+    selected: list[str] = []
+    seen: set[str] = set()
+
+    def add(url: str) -> None:
+        if len(selected) >= max_urls:
+            return
+        normalized = _canonical_dedupe_key(url)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        selected.append(url)
+
+    add(home_url)
+    if _search_payload_usable(search_payload or {}):
+        rows = sorted(
+            list((search_payload or {}).get("top_pages") or []),
+            key=lambda row: _safe_int(row.get("traffic")),
+            reverse=True,
+        )
+        for row in rows:
+            add(str(row.get("matched_url") or row.get("url") or ""))
+    else:
+        authority_rows = sorted(
+            list((link_payload or {}).get("top_authority_pages") or []),
+            key=lambda row: float(row.get("pagerank") or 0.0),
+            reverse=True,
+        )
+        for row in authority_rows:
+            add(str(row.get("url") or ""))
+    if len(selected) < max_urls:
+        for page in pages:
+            add(page.url)
+    return selected
 
 
 def run(config: PipelineConfig) -> dict:
@@ -2055,6 +2102,43 @@ def run(config: PipelineConfig) -> dict:
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
 
+    crux_reason = "CRUX_API_KEY not configured" if config.enable_crux else "disabled by --no-crux"
+    crux_data: dict = build_crux_payload(
+        {"available": False, "reason": crux_reason},
+        pages,
+        ahrefs_data,
+    )
+    if config.enable_crux:
+        api_key = crux_api_key()
+        if api_key:
+            from .crawler import _starting_url
+
+            selected_urls = _select_crux_urls(
+                pages,
+                ahrefs_data,
+                link_payload,
+                home_url=_starting_url(config.domain),
+                max_urls=config.crux_max_urls,
+            )
+            crux_raw = fetch_crux(
+                selected_urls,
+                api_key,
+                cache_dir,
+                max_urls=config.crux_max_urls,
+                refresh=config.crux_refresh,
+            )
+            crux_data = build_crux_payload(crux_raw, pages, ahrefs_data)
+        crux_summary = crux_data.get("summary", {}) or {}
+        if crux_data.get("available"):
+            LOG.info(
+                "  CrUX field data: %d rows (%d URL / %d origin fallback)",
+                crux_summary.get("total_rows", 0),
+                crux_summary.get("url_rows", 0),
+                crux_summary.get("origin_rows", 0),
+            )
+        else:
+            LOG.info("  CrUX field data: %s", crux_data.get("reason", "unavailable"))
+
     # 11.g) RAG-style chunk retrievability. Runs after search enrichment so
     # demand gating sees volume/impressions/traffic from ahrefs_data. It
     # reuses the coverage query embeddings and paragraph embeddings computed
@@ -2636,6 +2720,7 @@ def run(config: PipelineConfig) -> dict:
         ai_citations_payload=ai_citations_data,
         chunk_retrievability_payload=chunk_retrievability_data,
         external_links_payload=external_payload_data,
+        crux_payload=crux_data,
     )
     recommendations_data = recommendations_payload(recommendations)
     LOG.info(
@@ -2779,6 +2864,7 @@ def run(config: PipelineConfig) -> dict:
         ctr_anomalies=ctr_anomalies_data,
         ai_access=ai_access_data,
         ai_citations=ai_citations_data,
+        crux=crux_data,
         chunk_retrievability=chunk_retrievability_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
@@ -2850,6 +2936,7 @@ def run(config: PipelineConfig) -> dict:
             ctr_anomalies=ctr_anomalies_data,
             ai_access=ai_access_data,
             ai_citations=ai_citations_data,
+            crux=crux_data,
             chunk_retrievability=chunk_retrievability_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,

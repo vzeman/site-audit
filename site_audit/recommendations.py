@@ -19,6 +19,7 @@ Categories
 * ``linking`` — top page-level + paragraph-level internal-link
   recommendations, orphans to surface, buried pages to lift.
 * ``onpage`` — title mismatches, CTR-anomaly title rewrites, generic anchors.
+* ``technical`` — field-data-backed technical SEO fixes such as poor Core Web Vitals.
 
 Priority is one of ``high`` / ``medium`` / ``low``. The pickers favour
 high-PageRank pages — fixing the load-bearing pages compounds.
@@ -34,13 +35,14 @@ from typing import Iterable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from .ai_access import format_blocked_agent_recommendation
+from .crux import CWV_REC_CAP, METRIC_LABELS, format_metric_value, threshold_label
 from .ctr_curve import estimate_clicks_gain, expected_ctr
 
 
 @dataclass
 class Recommendation:
     id: str
-    category: str        # content_debt | coverage | geo | linking | onpage
+    category: str        # content_debt | coverage | geo | linking | onpage | technical
     priority: str        # high | medium | low
     title: str
     instruction: str
@@ -72,6 +74,7 @@ _CATEGORY_CONFIDENCE = {
     "geo": 62.0,
     "linking": 70.0,
     "onpage": 66.0,
+    "technical": 78.0,
 }
 _CATEGORY_RISK = {
     "content_debt": 44.0,
@@ -79,6 +82,7 @@ _CATEGORY_RISK = {
     "geo": 22.0,
     "linking": 16.0,
     "onpage": 20.0,
+    "technical": 18.0,
 }
 _CATEGORY_OWNER = {
     "content_debt": "Content",
@@ -86,6 +90,7 @@ _CATEGORY_OWNER = {
     "geo": "Content",
     "linking": "SEO",
     "onpage": "SEO",
+    "technical": "Engineering",
 }
 _TYPE_BY_PREFIX = {
     "dup": "merge_duplicate",
@@ -103,6 +108,7 @@ _TYPE_BY_PREFIX = {
     "title": "title_rewrite",
     "ctr": "title_rewrite",
     "anchor": "anchor_rewrite",
+    "tech": "core_web_vitals",
 }
 
 SCORE_MODEL = {
@@ -1139,6 +1145,53 @@ def _chunk_retrievability_recommendations(payload: dict | None) -> list[Recommen
     return out
 
 
+def _cwv_recommendations(payload: dict | None) -> list[Recommendation]:
+    if not isinstance(payload, dict) or payload.get("available") is not True:
+        return []
+    out: list[Recommendation] = []
+    candidates = [
+        row for row in (payload.get("failing_urls") or [])
+        if row.get("form_factor") == "PHONE"
+        and row.get("level") == "url"
+        and _safe_float(row.get("traffic")) > 0
+    ]
+    candidates.sort(key=lambda row: (_safe_float(row.get("traffic")), row.get("url") or "", row.get("metric") or ""), reverse=True)
+    for row in candidates[:CWV_REC_CAP]:
+        url = str(row.get("url") or "")
+        metric = str(row.get("metric") or "")
+        if not url or not metric:
+            continue
+        metric_label = METRIC_LABELS.get(metric, metric.upper())
+        metric_slug = metric_label.lower()
+        value = row.get("value_label") or format_metric_value(metric, row.get("p75"))
+        threshold = row.get("threshold_label") or threshold_label(metric)
+        out.append(Recommendation(
+            id=f"tech-cwv-{metric_slug}-{_stable_slug(url, 'url')}",
+            category="technical",
+            priority="medium",
+            title=f"Poor mobile {metric_label} field data",
+            instruction=(
+                f"{url}: {metric_label} p75 is {value} on mobile "
+                f"(poor; threshold {threshold}). Run Lighthouse on this page to identify "
+                "the failing element — CrUX field data does not name it."
+            ),
+            targets=[url],
+            evidence={
+                "metric": metric,
+                "metric_label": metric_label,
+                "p75": row.get("p75"),
+                "value": value,
+                "threshold": threshold,
+                "traffic": _safe_float(row.get("traffic")),
+                "level": row.get("level"),
+                "form_factor": row.get("form_factor"),
+            },
+            effort="medium",
+            score=82.0 + min(12.0, math.log1p(max(_safe_float(row.get("traffic")), 0.0)) * 1.5),
+        ))
+    return out
+
+
 def _linking(
     linkgraph_payload: dict | None,
     paragraph_links: list[dict] | None,
@@ -1367,6 +1420,7 @@ def synthesize(
     ai_citations_payload: dict | None = None,
     chunk_retrievability_payload: dict | None = None,
     external_links_payload: dict | None = None,
+    crux_payload: dict | None = None,
     max_total: int = 100,
 ) -> list[Recommendation]:
     pr = _pr_lookup(linkgraph_payload)
@@ -1387,6 +1441,7 @@ def synthesize(
     )
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
+    recs += _cwv_recommendations(crux_payload)
 
     finalized = _finalize(recs, linkgraph_payload=linkgraph_payload, search_payload=search_payload)
     kept, suppressed = _resolve_conflicts(finalized)

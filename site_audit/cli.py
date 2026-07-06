@@ -166,6 +166,8 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_information_gain=not args.no_information_gain,
         enable_content_quality=not args.no_content_quality,
         enable_paragraph_fanout=not args.no_paragraph_fanout,
+        enable_crux=not args.no_crux,
+        crux_refresh=args.crux_refresh,
         check_external_links=args.check_external,
         competitive_pairs_file=Path(args.competitive) if args.competitive else None,
         queries_file=Path(args.queries_file) if args.queries_file else None,
@@ -1394,6 +1396,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-information-gain", action="store_true")
     run_p.add_argument("--no-content-quality", action="store_true")
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
+    run_p.add_argument("--no-crux", action="store_true", help="Skip Chrome UX Report Core Web Vitals field data")
+    run_p.add_argument("--crux-refresh", action="store_true",
+                       help="Re-fetch CrUX responses instead of reusing cached ones (28-day rolling window)")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
     run_p.add_argument("--search-provider", default="auto",
                        choices=["auto", "all", "combined", "gsc", "google_ads", "ahrefs", "dataforseo", "none"],
