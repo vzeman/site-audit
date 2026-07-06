@@ -1,6 +1,6 @@
 import sys
 
-from site_audit.cli import _domain_from_target_url, _run_serp_gap_menu, build_parser, main
+from site_audit.cli import _benchmark_command, _domain_from_target_url, _run_serp_gap_menu, build_parser, main
 
 
 def test_run_parser_accepts_crawl_filter_flags() -> None:
@@ -187,6 +187,46 @@ def test_run_parser_keeps_workers_alias_for_max_workers() -> None:
     args = build_parser().parse_args(["run", "example.com", "--workers", "7"])
 
     assert args.workers == 7
+
+
+def test_benchmark_parser_accepts_cached_report_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "example.com",
+            "--projects-root",
+            "projects",
+            "--include",
+            "*.json",
+            "--output",
+            "bench.json",
+        ]
+    )
+
+    assert args.command == "benchmark"
+    assert args.domain == "example.com"
+    assert args.include == ["*.json"]
+    assert args.output == "bench.json"
+
+
+def test_benchmark_command_writes_result(tmp_path) -> None:
+    report_dir = tmp_path / "report"
+    report_dir.mkdir()
+    (report_dir / "site_metrics.json").write_text("{}", encoding="utf-8")
+    out = tmp_path / "bench.json"
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "example.com",
+            "--report-dir",
+            str(report_dir),
+            "--output",
+            str(out),
+        ]
+    )
+
+    assert _benchmark_command(args) == 0
+    assert out.is_file()
 
 
 def test_cache_migrate_parser_accepts_options() -> None:

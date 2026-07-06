@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import numpy as np
 
 from .extractor import ExtractedPage
+from .progress import ProgressLogger
 
 LOG = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.I)
@@ -254,6 +255,8 @@ def build_anchor_relevance(
         chunks = _chunked(raw_rows, max(1, int(chunk_size)))
         LOG.info("  anchor relevance: scoring %d links in %d chunks with %d workers", len(raw_rows), len(chunks), workers)
         links = []
+        progress = ProgressLogger("anchor relevance", total=len(raw_rows))
+        processed = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for chunk_links in pool.map(
                 lambda chunk: _score_row_chunk(
@@ -267,6 +270,9 @@ def build_anchor_relevance(
                 chunks,
             ):
                 links.extend(chunk_links)
+                processed += len(chunk_links)
+                progress.update(processed)
+        progress.update(len(raw_rows), force=True)
     else:
         links = _score_row_chunk(
             raw_rows,

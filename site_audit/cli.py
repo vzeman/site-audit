@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .ai_agent import DEFAULT_OPENROUTER_MODEL, openrouter_model
 from . import compare as _compare
+from .benchmark import benchmark_callable, fingerprint_files, write_benchmark
 from .cache import HttpCache, domain_slug
 from .config_env import apply_env_defaults
 from .embedder import DEFAULT_MODEL
@@ -1220,6 +1221,33 @@ def _history_compare_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _benchmark_command(args: argparse.Namespace) -> int:
+    domain = args.domain
+    report_dir = Path(args.report_dir) if args.report_dir else Path(args.projects_root) / domain_slug(domain) / "report"
+    if not report_dir.is_dir():
+        print(f"Report directory does not exist: {report_dir}")
+        return 1
+    patterns = args.include or ["*.json", "*.csv", "index.html"]
+    files = []
+    for pattern in patterns:
+        files.extend(path for path in report_dir.glob(pattern) if path.is_file())
+    if not files:
+        print(f"No benchmarkable files found in {report_dir}")
+        return 1
+
+    result = benchmark_callable(
+        f"cached-report:{domain}",
+        lambda: {"files": len(files), "fingerprint": fingerprint_files(files)},
+    )
+    out_path = Path(args.output) if args.output else report_dir / "benchmark.json"
+    write_benchmark(out_path, result)
+    print(f"Wrote benchmark: {out_path}")
+    print(f"  files: {len(files)}")
+    print(f"  wall seconds: {result.wall_seconds:.3f}")
+    print(f"  max RSS MB: {result.max_rss_mb:.1f}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="site-audit", description="Crawl any website, embed its pages, surface duplicates, outliers, topic clusters, GEO scoring, and internal-link recommendations.")
     p.add_argument("--version", action="version", version=f"site-audit {__version__}")
@@ -1540,6 +1568,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8765)
     serve_p.set_defaults(func=_serve_command)
+
+    bench_p = sub.add_parser("benchmark", help="Benchmark cached report artifact reads without re-crawling")
+    bench_p.add_argument("domain", help="Domain/project slug to benchmark")
+    bench_p.add_argument("--projects-root", default="projects")
+    bench_p.add_argument("--report-dir", default=None, help="Override report directory")
+    bench_p.add_argument("--include", action="append", default=[],
+                         help="Glob of report files to include; repeat for multiple patterns")
+    bench_p.add_argument("--output", default=None, help="Benchmark JSON output path")
+    bench_p.set_defaults(func=_benchmark_command)
 
     settings_p = sub.add_parser("settings", help="Open a local UI for editing .env-backed defaults")
     settings_p.add_argument("--env-file", default=".env", help="Local env file to edit (default: .env)")
