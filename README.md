@@ -99,7 +99,7 @@ site-audit
 The `pip install -e .` command pulls the heavy ML deps
 (`sentence-transformers`, `faiss-cpu`, `umap-learn`, `scikit-learn`).
 The first audit run also downloads the default embedding model
-(`Alibaba-NLP/gte-multilingual-base`, ~ 600 MB) into
+(`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, ~ 470 MB) into
 `~/.cache/huggingface/` — subsequent runs use the cached weights.
 
 **Start the CLI app**
@@ -1196,7 +1196,7 @@ site-audit run <domain> [flags]
 | `--no-embedding-cache` | off | Bypass the embedding cache (force re-embed). |
 | `--clean` | off | Delete the project's cache directory before the run. Forces every page to be re-crawled, re-extracted and re-embedded under the current code. |
 | `--max-chars` | 4000 | Body characters fed to the embedder. Bigger ≠ always better. |
-| `--model` | `Alibaba-NLP/gte-multilingual-base` | Any sentence-transformer model on Hugging Face. |
+| `--model` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Any sentence-transformer model on Hugging Face. |
 | `--scatter-clusters` | 30 | k-means clusters for scatter coloring. |
 | `--no-scatterplot` | off | Skip UMAP projection (faster). |
 | `--duplicate-threshold` | 0.92 | Cosine above which pages are flagged as near-duplicates. |
@@ -1419,11 +1419,10 @@ is excluded from focus / clusters / GEO / recommendations. Per-bot
 directives (`googlebot`, `bingbot`, etc.) are honoured.
 
 **Embedding step crashes with `index out of bounds` or
-`AcceleratorError` on Apple Silicon.** The default model
-`Alibaba-NLP/gte-multilingual-base` ships custom modeling code that is
-incompatible with `transformers >= 5`. Pin it: `pip install
-"transformers>=4.40,<5.0"`. If MPS itself is the problem (rare), force
-CPU with `SITE_AUDIT_DEVICE=cpu site-audit run example.com`.
+`AcceleratorError` on Apple Silicon.** Force CPU with
+`SITE_AUDIT_DEVICE=cpu site-audit run example.com`. If using a custom
+model with remote code, check that its modeling code supports the installed
+`transformers` version.
 
 **Embedding step is slow on a big site.** Most cost is the per-page
 forward pass. The paragraph-link recommender now batch-encodes every

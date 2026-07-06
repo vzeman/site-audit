@@ -26,7 +26,7 @@ from .cache import EmbeddingCache, content_hash
 
 LOG = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "Alibaba-NLP/gte-multilingual-base"
+DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBED_CACHE_SAVE_EVERY = 2048
 DEFAULT_EMBED_MAX_SEQ_LENGTH = 512
 

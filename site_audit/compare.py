@@ -155,7 +155,7 @@ def _load_project(domain: str, projects_root: Path) -> Optional[_Project]:
 
     page_link_counts = (linkgraph.get("page_link_counts") or []) if isinstance(linkgraph, dict) else []
     link_flow = (linkgraph.get("link_flow") or {}) if isinstance(linkgraph, dict) else {}
-    model = metrics.get("model", "Alibaba-NLP/gte-multilingual-base")
+    model = metrics.get("model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
     embed_lookup = _load_embeddings(project_dir, model)
     embedded_pages: list[dict] = []
