@@ -91,6 +91,7 @@ from .external_links import analyze as analyze_external
 from .external_links import to_payload as external_payload
 from .extraction_cache import ExtractionCache
 from .extractor import ExtractedPage, extract
+from .fix_drafts import attach_fix_drafts, build_fix_drafts
 from .freshness import analyze as analyze_freshness
 from .freshness import to_payload as freshness_payload
 from .freshness_impact import build_freshness_impact
@@ -639,6 +640,7 @@ class PipelineConfig:
     enable_template_patterns: bool = True
     enable_trust_signals: bool = True
     enable_conversion_balance: bool = True
+    enable_fix_drafts: bool = True
     enable_linkgraph: bool = True
     enable_external_links: bool = True
     enable_paragraph_links: bool = True
@@ -2723,6 +2725,39 @@ def run(config: PipelineConfig) -> dict:
         crux_payload=crux_data,
     )
     recommendations_data = recommendations_payload(recommendations)
+    if config.enable_fix_drafts:
+        try:
+            fix_drafts_data = build_fix_drafts(
+                recommendations_data,
+                extracted_pages,
+                ahrefs_data,
+                None,
+            )
+            attach_fix_drafts(recommendations_data, fix_drafts_data)
+            fix_summary = fix_drafts_data.get("summary") or {}
+            LOG.info(
+                "  fix drafts: %d drafted (%d llm / %d fallback, %d repaired)",
+                fix_summary.get("drafted", 0),
+                fix_summary.get("llm", 0),
+                fix_summary.get("fallback", 0),
+                fix_summary.get("repaired", 0),
+            )
+        except Exception as exc:
+            recommendations_data["fix_drafts"] = {
+                "available": False,
+                "drafts": {},
+                "summary": {
+                    "requested": 0,
+                    "drafted": 0,
+                    "llm": 0,
+                    "fallback": 0,
+                    "repaired": 0,
+                    "failed": 0,
+                    "errors": [{"type": exc.__class__.__name__, "items": 0}],
+                },
+                "model_used": None,
+            }
+            LOG.warning("  fix drafts skipped after %s: %s", exc.__class__.__name__, exc)
     LOG.info(
         "  recommendations: %d actions (high %d / med %d / low %d)",
         recommendations_data["total"],

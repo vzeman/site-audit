@@ -3085,6 +3085,48 @@
     const filtered = filteredActionItems();
     drawActionPriorityMatrix(filtered);
 
+    const renderFixDraft = draft => {
+      if (!draft) return '';
+      const label = draft.generated_by === 'llm'
+        ? 'AI-generated suggestion — verify claims before publishing'
+        : 'auto-generated suggestion — verify claims before publishing';
+      const parts = [];
+      if (draft.proposed_title) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed title</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml(draft.proposed_title)}</code>
+          </div>`);
+      }
+      if (draft.proposed_meta) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed meta description</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml(draft.proposed_meta)}</code>
+          </div>`);
+      }
+      if ((draft.questions || []).length) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed FAQ H2s</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml((draft.questions || []).join('\n'))}</code>
+          </div>`);
+      }
+      if ((draft.outline || []).length) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed H2 outline</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml((draft.outline || []).join('\n'))}</code>
+          </div>`);
+      }
+      if (!parts.length) return '';
+      return `
+        <div class="mt-2 rounded border border-blue-100 bg-white p-2">
+          <div class="text-[11px] font-semibold text-blue-800 mb-1">Proposed: ${escapeHtml(label)}</div>
+          <div class="space-y-1.5">${parts.join('')}</div>
+        </div>`;
+    };
+
     const renderRec = rec => {
       const priClass = rec.priority === 'high' ? 'bg-red-100 text-red-800'
         : rec.priority === 'medium' ? 'bg-orange-100 text-orange-800'
@@ -3133,6 +3175,7 @@
             <span class="font-medium text-gray-900">${escapeHtml(rec.title)}</span>
           </div>
           <div class="text-sm text-gray-700 mt-1.5">${escapeHtml(rec.instruction)}</div>
+          ${renderFixDraft(rec.fix_draft)}
           ${targets ? `<div class="text-xs mt-1">${targets}</div>` : ''}
           ${evidenceLine}
           ${scoreLine}
@@ -3296,10 +3339,19 @@
 
   function exportActionPlanCsv() {
     const rows = filteredActionItems();
-    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','estimated_clicks_gain','estimate_basis','gain_label','title','instruction','targets'];
+    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','estimated_clicks_gain','estimate_basis','gain_label','title','instruction','targets','proposed_title','proposed_meta'];
     const csv = [cols.join(',')].concat(rows.map(row => cols.map(col => {
-      const value = col === 'targets' ? (row.targets || []).join(' | ') : row[col];
-      return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+      const value = col === 'targets'
+        ? (row.targets || []).join(' | ')
+        : col === 'proposed_title'
+          ? ((row.fix_draft || {}).proposed_title || '')
+          : col === 'proposed_meta'
+            ? ((row.fix_draft || {}).proposed_meta || '')
+            : row[col];
+      // Prefix a leading apostrophe so spreadsheet apps do not treat cell text as a formula.
+      const text = String(value == null ? '' : value);
+      const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
     }).join(','))).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
