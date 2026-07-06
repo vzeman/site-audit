@@ -22,6 +22,7 @@ import numpy as np
 import requests
 
 from .ahrefs import (
+    MAX_QUERY_PAGES_ROWS,
     AhrefsAnalysis,
     _aggregate_clusters,
     _aggregate_directories,
@@ -320,6 +321,9 @@ def build_analysis(
                 "pages_by_traffic": {},
                 "top_pages": [],
                 "organic_keywords": [],
+                "query_pages": [],
+                "ai_overview_citations": [],
+                "ai_overview_coverage": _ai_overview_coverage(),
                 "directories": [],
                 "clusters": [],
                 "semantic_map": {"points": [], "shown": 0},
@@ -330,8 +334,10 @@ def build_analysis(
 
     page_lookup = _page_lookup(pages)
     cluster_lookup = _cluster_lookup(cluster_summaries)
+    raw_keyword_items = _result_items(raw.get("ranked_keywords", {}))
+    ai_overview_citations = _ai_overview_citation_rows(raw_keyword_items)
     keyword_rows = _normalize_keywords(
-        _result_items(raw.get("ranked_keywords", {})),
+        raw_keyword_items,
         pages,
         page_lookup,
         cluster_labels,
@@ -398,6 +404,9 @@ def build_analysis(
         "pages_by_traffic": pages_by_traffic,
         "top_pages": top_pages,
         "organic_keywords": keyword_rows,
+        "query_pages": _query_pages_payload(keyword_rows),
+        "ai_overview_citations": ai_overview_citations,
+        "ai_overview_coverage": _ai_overview_coverage(),
         "directories": directories,
         "clusters": clusters,
         "position_buckets": _keyword_position_buckets(keyword_rows),
@@ -578,6 +587,9 @@ def _normalize_keywords(
         keyword_info = keyword_data.get("keyword_info") or {}
         serp = raw.get("ranked_serp_element") or {}
         serp_item = serp.get("serp_item") or {}
+        serp_type = serp_item.get("type") or ""
+        if serp_type == "ai_overview_reference":
+            continue
         keyword = keyword_data.get("keyword") or raw.get("keyword") or ""
         if not keyword:
             continue
@@ -607,9 +619,10 @@ def _normalize_keywords(
             "cpc_usd": round(cpc_usd, 2),
             "traffic_value_usd": round(_to_float(serp_item.get("estimated_paid_traffic_cost")), 2),
             "country": str(raw.get("location_code") or ""),
-            "serp_type": serp_item.get("type") or "",
-            "intents": intents,
             "serp_features": _serp_features(keyword_data, serp),
+            "has_ai_overview": _has_ai_overview(keyword_data, serp),
+            "serp_type": serp_type,
+            "intents": intents,
             "keyword_difficulty": _to_int((keyword_data.get("keyword_properties") or {}).get("keyword_difficulty")),
             "last_update": serp_item.get("last_updated_time") or raw.get("last_updated_time") or "",
             "title": serp_item.get("title", ""),
@@ -620,6 +633,71 @@ def _normalize_keywords(
         })
     rows.sort(key=lambda r: (int(r.get("traffic", 0)), int(r.get("volume", 0))), reverse=True)
     return rows
+
+
+def _ai_overview_citation_rows(raw_keywords: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[tuple[str, str, int]] = set()
+    for raw in raw_keywords:
+        keyword_data = raw.get("keyword_data") or {}
+        keyword_info = keyword_data.get("keyword_info") or {}
+        keyword = keyword_data.get("keyword") or raw.get("keyword") or ""
+        serp = raw.get("ranked_serp_element") or {}
+        serp_item = serp.get("serp_item") or {}
+        if (serp_item.get("type") or "") != "ai_overview_reference":
+            continue
+        url = serp_item.get("url") or serp_item.get("domain") or ""
+        if not keyword or not url:
+            continue
+        rank_absolute = _to_int(serp.get("rank_absolute") or serp_item.get("rank_absolute"))
+        key = (str(keyword), str(url), rank_absolute)
+        if key in seen:
+            continue
+        seen.add(key)
+        row: dict[str, Any] = {
+            "keyword": keyword,
+            "url": url,
+        }
+        search_volume = _to_int(keyword_info.get("search_volume"))
+        if search_volume:
+            row["search_volume"] = search_volume
+        keyword_difficulty = _to_int((keyword_data.get("keyword_properties") or {}).get("keyword_difficulty"))
+        if keyword_difficulty:
+            row["keyword_difficulty"] = keyword_difficulty
+        if rank_absolute:
+            row["rank_absolute"] = rank_absolute
+        serp_title = serp_item.get("title") or ""
+        if serp_title:
+            row["serp_title"] = serp_title
+        rows.append(row)
+    rows.sort(key=lambda r: (_to_int(r.get("search_volume")), str(r.get("keyword") or "")), reverse=True)
+    return rows
+
+
+def _query_pages_payload(keyword_rows: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for row in keyword_rows:
+        rows.append({
+            "query": row.get("keyword") or "",
+            "url": row.get("matched_url") or row.get("url") or "",
+            "clicks": row.get("traffic", 0),
+            "impressions": row.get("volume", 0),
+            "ctr": None,
+            "position": row.get("position", 0),
+            "source": "dataforseo",
+            "provider": "dataforseo",
+            "provider_label": "DataForSEO",
+            "matched_url": row.get("matched_url", ""),
+            "page_title": row.get("page_title", ""),
+            "cluster": row.get("cluster"),
+            "cluster_label": row.get("cluster_label", ""),
+            "intents": row.get("intents") or [],
+            "traffic": row.get("traffic", 0),
+            "volume": row.get("volume", 0),
+            "has_ai_overview": bool(row.get("has_ai_overview")),
+        })
+    rows.sort(key=lambda r: _to_int(r.get("impressions")), reverse=True)
+    return rows[:MAX_QUERY_PAGES_ROWS]
 
 
 def _top_keyword_by_url(rows: list[dict]) -> dict[str, dict]:
@@ -678,6 +756,21 @@ def _serp_features(keyword_data: dict, serp: dict) -> list[str]:
     if serp_item_type and serp_item_type not in features:
         features.append(serp_item_type)
     return features
+
+
+def _has_ai_overview(keyword_data: dict, serp: dict) -> bool:
+    features = {str(item).strip() for item in _serp_features(keyword_data, serp) if str(item).strip()}
+    return bool({"ai_overview_reference", "ai_overview"} & features)
+
+
+def _ai_overview_coverage() -> dict:
+    return {
+        "coverage": "own_domain_items_only",
+        "note": (
+            "DataForSEO ranked_keywords returns items for the audited domain. "
+            "AI Overview presence and citation gaps are limited to SERP item types returned on those own-domain rows."
+        ),
+    }
 
 
 def _page_position_buckets(metrics: dict) -> dict[str, int]:

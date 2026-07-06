@@ -26,6 +26,7 @@ high-PageRank pages — fixing the load-bearing pages compounds.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from dataclasses import dataclass, field
@@ -260,6 +261,8 @@ def _lookup_context(context: dict[str, dict], targets: Iterable[str]) -> dict:
 
 
 def _rec_type(rec: Recommendation) -> str:
+    if rec.id.startswith("geo-aio"):
+        return "ai_overview_citation"
     if rec.id.startswith("geo-access"):
         return "ai_crawler_access"
     prefix = rec.id.split("-", 1)[0]
@@ -871,9 +874,11 @@ def _geo(
     pr: dict[str, float],
     external_per_page: list[dict] | None,
     ai_access_payload: dict | None = None,
+    ai_citations_payload: dict | None = None,
 ) -> list[Recommendation]:
     out: list[Recommendation] = []
     out.extend(_ai_access_recommendations(ai_access_payload))
+    out.extend(_ai_citation_recommendations(ai_citations_payload))
 
     # Bias to high-PR pages — fixing the load-bearing ones moves the needle.
     if answerability_payload:
@@ -945,6 +950,76 @@ def _geo(
 def _agent_slug(agent: str, index: int) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", agent.lower()).strip("-")
     return slug or f"agent-{index}"
+
+
+def _stable_slug(value: object, fallback: str = "item") -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    if len(slug) > 80:
+        # Truncation can collide for long values differing only past the
+        # cut — pin uniqueness with a short digest of the full slug.
+        digest = hashlib.sha1(slug.encode("utf-8")).hexdigest()[:8]
+        slug = f"{slug[:80].strip('-')}-{digest}"
+    return slug or fallback
+
+
+def _ai_citation_recommendations(payload: dict | None) -> list[Recommendation]:
+    if not isinstance(payload, dict) or payload.get("available") is not True:
+        return []
+    out: list[Recommendation] = []
+    for row in (payload.get("at_risk") or [])[:15]:
+        url = str(row.get("url") or "")
+        keyword = str(row.get("top_keyword") or "")
+        volume = _safe_int(row.get("top_keyword_volume"))
+        if not url or not keyword:
+            continue
+        out.append(Recommendation(
+            id=f"geo-aio-{_stable_slug(url, 'url')}",
+            category="geo",
+            priority="medium",
+            title="Refresh page cited in Google AI Overviews",
+            instruction=(
+                f'{url} is cited in Google AI Overviews for "{keyword}" ({volume}/mo) '
+                "but its content is stale — refresh it to keep the citation."
+            ),
+            targets=[url],
+            evidence={
+                "keyword": keyword,
+                "search_volume": volume,
+                "bucket": row.get("bucket", ""),
+                "age_days": row.get("age_days"),
+                "query_count": _safe_int(row.get("query_count")),
+            },
+            effort="medium",
+            score=72.0 + min(18.0, math.log1p(max(volume, 0)) * 2.0),
+        ))
+
+    for row in (payload.get("opportunities") or [])[:20]:
+        keyword = str(row.get("keyword") or "")
+        url = str(row.get("url") or "")
+        position = _safe_float(row.get("position"))
+        if not keyword or not url or position <= 0:
+            continue
+        out.append(Recommendation(
+            id=f"geo-aio-opp-{_stable_slug(url, 'url')}-{_stable_slug(keyword, 'kw')}",
+            category="geo",
+            priority="medium",
+            title="Win missing Google AI Overview citation",
+            instruction=(
+                f'AI Overview exists for "{keyword}" but does not cite {url} '
+                f"(ranks #{position:.0f}). Strengthen the matching answer block: "
+                "direct answer under a question H2, cited evidence."
+            ),
+            targets=[url],
+            evidence={
+                "keyword": keyword,
+                "position": position,
+                "search_volume": _safe_int(row.get("search_volume")),
+                "traffic": _safe_int(row.get("traffic")),
+            },
+            effort="medium",
+            score=64.0 + min(16.0, math.log1p(max(_safe_int(row.get("search_volume")), 0)) * 1.8),
+        ))
+    return out
 
 
 def _ai_access_recommendations(payload: dict | None) -> list[Recommendation]:
@@ -1224,6 +1299,7 @@ def synthesize(
     title_mismatch: list[dict] | None = None,
     ctr_anomalies_payload: dict | list | None = None,
     ai_access_payload: dict | None = None,
+    ai_citations_payload: dict | None = None,
     external_links_payload: dict | None = None,
     max_total: int = 100,
 ) -> list[Recommendation]:
@@ -1235,7 +1311,7 @@ def synthesize(
     recs: list[Recommendation] = []
     recs += _content_debt(duplicates_rows or [], outliers_rows or [], wrong_home_payload or [], pr)
     recs += _coverage(coverage_payload or [])
-    recs += _geo(answerability_payload or [], pr, external_per_page, ai_access_payload)
+    recs += _geo(answerability_payload or [], pr, external_per_page, ai_access_payload, ai_citations_payload)
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
 

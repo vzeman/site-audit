@@ -37,6 +37,7 @@ from bs4 import BeautifulSoup
 
 from .adaptive_workers import AdaptiveWorkerController, StageProfile, configure_native_thread_limits
 from .ai_access import build_ai_access
+from .ai_citations import build_ai_citations
 from .analyzer import PageInfo, analyze, deduplicate_pages_by_url, section_for_url
 from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis
 from .ahrefs import fetch_snapshot as fetch_ahrefs_snapshot
@@ -1785,6 +1786,7 @@ def run(config: PipelineConfig) -> dict:
     # preferred first-party provider in auto mode; Ahrefs/DataForSEO remain
     # fallback proxy providers when GSC is unavailable.
     ahrefs_data: dict = {}
+    dataforseo_data: dict = {}
     provider_choice = (config.search_provider or "auto").lower()
     collect_all_search = provider_choice in {"all", "combined"}
     search_provider_payloads: list[dict] = []
@@ -1940,6 +1942,7 @@ def run(config: PipelineConfig) -> dict:
                 semantic_sample_cap=config.ahrefs_semantic_sample,
             )
             candidate = dataforseo_analysis.payload
+            dataforseo_data = candidate
             if _search_payload_usable(candidate):
                 search_provider_payloads.append(candidate)
             if _search_payload_usable(candidate) or not ahrefs_data:
@@ -1985,6 +1988,18 @@ def run(config: PipelineConfig) -> dict:
             )
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
+
+    ai_citations_data = build_ai_citations(dataforseo_data, ahrefs_data, pages, freshness_data)
+    aio_summary = ai_citations_data.get("summary", {}) or {}
+    if ai_citations_data.get("available"):
+        LOG.info(
+            "  AI Overview citations: %d cited pages · %d citing queries · %d opportunities",
+            aio_summary.get("cited_pages", 0),
+            aio_summary.get("citing_queries", 0),
+            len(ai_citations_data.get("opportunities") or []),
+        )
+    else:
+        LOG.info("  AI Overview citations: %s", ai_citations_data.get("reason", "unavailable"))
 
     striking_distance_data = build_striking_distance(ahrefs_data, pages)
     sd_summary = striking_distance_data.get("summary", {}) or {}
@@ -2518,6 +2533,7 @@ def run(config: PipelineConfig) -> dict:
         title_mismatch=title_mismatch_data,
         ctr_anomalies_payload=ctr_anomalies_data,
         ai_access_payload=ai_access_data,
+        ai_citations_payload=ai_citations_data,
         external_links_payload=external_payload_data,
     )
     recommendations_data = recommendations_payload(recommendations)
@@ -2647,6 +2663,7 @@ def run(config: PipelineConfig) -> dict:
         striking_distance=striking_distance_data,
         ctr_anomalies=ctr_anomalies_data,
         ai_access=ai_access_data,
+        ai_citations=ai_citations_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
         template_patterns=template_patterns_data,
@@ -2715,6 +2732,7 @@ def run(config: PipelineConfig) -> dict:
             striking_distance=striking_distance_data,
             ctr_anomalies=ctr_anomalies_data,
             ai_access=ai_access_data,
+            ai_citations=ai_citations_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
             template_patterns=template_patterns_data,
