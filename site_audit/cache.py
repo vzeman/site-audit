@@ -520,11 +520,17 @@ class EmbeddingCache:
     def get(self, url: str, hash_: str) -> Optional[np.ndarray]:
         entry = self._cache.get(url)
         if entry and entry[0] == hash_:
-            return entry[1]
+            emb = entry[1]
+            if np.isfinite(emb).all():
+                return emb
+            LOG.warning("Ignoring non-finite embedding cache entry for %s", url)
         return None
 
     def put(self, url: str, hash_: str, embedding: np.ndarray) -> None:
-        self._cache[url] = (hash_, embedding.astype(np.float32))
+        emb = embedding.astype(np.float32)
+        if not np.isfinite(emb).all():
+            raise ValueError(f"Refusing to cache non-finite embedding for {url}")
+        self._cache[url] = (hash_, emb)
 
     def save(self) -> None:
         if not self._cache:

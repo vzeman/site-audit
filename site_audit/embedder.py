@@ -74,17 +74,19 @@ class Embedder:
     def __init__(self, model_name: str = DEFAULT_MODEL):
         self.model_name = model_name
         self._model = None
+        self._device: str | None = None
 
-    def _ensure(self) -> None:
-        if self._model is not None:
+    def _ensure(self, device: str | None = None) -> None:
+        target_device = device if device is not None else (os.environ.get("SITE_AUDIT_DEVICE") or None)
+        if self._model is not None and self._device == target_device:
             return
         from sentence_transformers import SentenceTransformer  # lazy
 
-        device = os.environ.get("SITE_AUDIT_DEVICE") or None
         with _quiet_model_load():
             self._model = SentenceTransformer(
-                self.model_name, trust_remote_code=True, device=device
+                self.model_name, trust_remote_code=True, device=target_device
             )
+        self._device = target_device
         # On macOS (Apple Silicon), the gte-multilingual-base model's
         # position_ids buffer (persistent=False) appears to contain garbage
         # memory after loading rather than the expected arange values.
@@ -97,10 +99,13 @@ class Embedder:
             persistent=False,
         )
 
-    def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
-        if not texts:
-            return np.zeros((0, 0), dtype=np.float32)
-        self._ensure()
+    def _encode_current_model(
+        self,
+        texts: list[str],
+        *,
+        batch_size: int,
+        show_progress: bool,
+    ) -> np.ndarray:
         embs = self._model.encode(
             texts,
             batch_size=batch_size,
@@ -108,6 +113,33 @@ class Embedder:
             normalize_embeddings=True,
         )
         return np.asarray(embs, dtype=np.float32)
+
+    def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        self._ensure()
+        arr = self._encode_current_model(
+            texts,
+            batch_size=batch_size,
+            show_progress=show_progress,
+        )
+        if np.isfinite(arr).all():
+            return arr
+        if self._device != "cpu":
+            LOG.warning(
+                "Embedding model returned non-finite vectors on %s; retrying on CPU",
+                self._device or "auto",
+            )
+            self._model = None
+            self._ensure("cpu")
+            arr = self._encode_current_model(
+                texts,
+                batch_size=batch_size,
+                show_progress=show_progress,
+            )
+            if np.isfinite(arr).all():
+                return arr
+        raise RuntimeError("Embedding model returned non-finite vectors")
 
     def encode_pages(
         self,
