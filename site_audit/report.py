@@ -24,7 +24,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 from urllib.parse import urlparse
 
 import numpy as np
@@ -51,9 +51,60 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def _write_csv_safe_iter(path: Path, rows: Iterable[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows_list = rows if isinstance(rows, list) else list(rows)
+    if not rows_list:
+        path.write_text("")
+        return
+    fieldnames: list[str] = []
+    seen: set[str] = set()
+    for row in rows_list:
+        for key in row.keys():
+            if key in seen:
+                continue
+            seen.add(key)
+            fieldnames.append(key)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows_list:
+            writer.writerow(_csv_safe_row(row))
+
+
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _write_json_object_with_array(path: Path, payload: dict, array_key: str, rows: Iterable[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{\n")
+        first = True
+        for key, value in payload.items():
+            if key == array_key:
+                continue
+            if not first:
+                f.write(",\n")
+            f.write(f"  {json.dumps(str(key), ensure_ascii=False)}: ")
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            first = False
+        if not first:
+            f.write(",\n")
+        f.write(f"  {json.dumps(array_key, ensure_ascii=False)}: [")
+        wrote_row = False
+        for row in rows:
+            if wrote_row:
+                f.write(",")
+            f.write("\n    ")
+            json.dump(row, f, ensure_ascii=False)
+            wrote_row = True
+        if wrote_row:
+            f.write("\n  ]\n")
+        else:
+            f.write("]\n")
+        f.write("}\n")
 
 
 def _html_escape(value) -> str:
@@ -714,12 +765,11 @@ def write_internal_linkbuilding_csv(
 
 
 def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> None:
-    pages = list((technical_seo or {}).get("pages") or [])
-    issues = list((technical_seo or {}).get("issues") or [])
-    catalog = list((technical_seo or {}).get("issue_catalog") or [])
+    pages = (technical_seo or {}).get("pages") or []
+    issues = (technical_seo or {}).get("issues") or []
+    catalog = (technical_seo or {}).get("issue_catalog") or []
     page_payload = {
         "summary": (technical_seo or {}).get("summary", {}),
-        "pages": pages,
         "interpretation": (technical_seo or {}).get("interpretation", {}),
     }
     issue_payload = {
@@ -728,19 +778,18 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: O
         "category_counts": (technical_seo or {}).get("category_counts", {}),
         "severity_counts": (technical_seo or {}).get("severity_counts", {}),
         "issue_catalog": catalog,
-        "issues": issues,
         "interpretation": (technical_seo or {}).get("interpretation", {}),
     }
     catalog_payload = {
         "summary": (technical_seo or {}).get("summary", {}),
         "issue_catalog": catalog,
     }
-    _write_json(output_dir / "technical_pages.json", page_payload)
-    _write_json(output_dir / "technical_issues.json", issue_payload)
+    _write_json_object_with_array(output_dir / "technical_pages.json", page_payload, "pages", pages)
+    _write_json_object_with_array(output_dir / "technical_issues.json", issue_payload, "issues", issues)
     _write_json(output_dir / "technical_issue_catalog.json", catalog_payload)
-    _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
-    _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
-    _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
+    _write_csv_safe_iter(output_dir / "technical_pages.csv", pages)
+    _write_csv_safe_iter(output_dir / "technical_issues.csv", issues)
+    _write_csv_safe_iter(output_dir / "technical_issue_catalog.csv", catalog)
     write_technical_index_html(output_dir, technical_seo, domain=domain)
 
 
