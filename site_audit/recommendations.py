@@ -56,6 +56,9 @@ class Recommendation:
     traffic_opportunity: float = 0.0
     estimated_clicks_gain: float | None = None
     estimate_basis: str | None = None
+    suppressed: bool = False
+    suppressed_by: str | None = None
+    suppressed_reason: str = ""
 
 
 _PRI_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -419,6 +422,41 @@ def _gain_label(gain: float | None) -> str:
     return f"≈ +{gain:.0f} clicks/period"
 
 
+def _item_row(r: Recommendation) -> dict:
+    return {
+        "id": r.id,
+        "category": r.category,
+        "type": r.type,
+        "priority": r.priority,
+        "priority_score": r.priority_score,
+        "impact": r.impact,
+        "confidence": r.confidence,
+        "effort_score": r.effort_score,
+        "risk": r.risk,
+        "owner": r.owner,
+        "cluster": r.cluster,
+        "traffic_opportunity": r.traffic_opportunity,
+        "estimated_clicks_gain": r.estimated_clicks_gain,
+        "estimate_basis": r.estimate_basis,
+        "gain_label": _gain_label(r.estimated_clicks_gain),
+        "title": r.title,
+        "instruction": r.instruction,
+        "targets": r.targets,
+        "evidence": r.evidence,
+        "effort": r.effort,
+        "score": r.score,
+    }
+
+
+def _suppressed_row(r: Recommendation) -> dict:
+    return {
+        **_item_row(r),
+        "suppressed": r.suppressed,
+        "suppressed_by": r.suppressed_by,
+        "suppressed_reason": r.suppressed_reason,
+    }
+
+
 def _priority_bucket(priority_score: float) -> str:
     if priority_score >= 60.0:
         return "high"
@@ -488,6 +526,170 @@ def _finalize(recs: list[Recommendation], *, linkgraph_payload: dict | None = No
         }
     recs.sort(key=lambda r: (-r.priority_score, _PRI_RANK.get(r.priority, 9), -r.impact, r.effort_score, r.id))
     return recs
+
+
+def _removal_targets(rec: Recommendation) -> list[str]:
+    if rec.id.startswith("dup-") and len(rec.targets) > 1:
+        return [rec.targets[1]]
+    if rec.id.startswith("cann-") and len(rec.targets) > 1:
+        return [target for target in rec.targets[1:] if target]
+    return []
+
+
+def _primary_target_keys(rec: Recommendation) -> set[str]:
+    if not rec.targets:
+        return set()
+    return _url_keys(rec.targets[0])
+
+
+def _improves_page(rec: Recommendation) -> bool:
+    return bool(rec.targets) and not rec.id.startswith("gap-") and rec.type != "coverage_gap"
+
+
+def _resolve_conflicts(recommendations: Iterable[Recommendation]) -> tuple[list[Recommendation], list[Recommendation]]:
+    recs = list(recommendations)
+    for rec in recs:
+        rec.suppressed = False
+        rec.suppressed_by = None
+        rec.suppressed_reason = ""
+
+    removal_by_url: dict[str, Recommendation] = {}
+    removal_recs = sorted(
+        (rec for rec in recs if _removal_targets(rec)),
+        key=lambda r: (-_safe_float(r.priority_score), r.id),
+    )
+    for rec in removal_recs:
+        for target in _removal_targets(rec):
+            for key in _url_keys(target):
+                removal_by_url.setdefault(key, rec)
+
+    kept: list[Recommendation] = []
+    suppressed: list[Recommendation] = []
+    for rec in recs:
+        if _removal_targets(rec):
+            kept.append(rec)
+            continue
+        if not _improves_page(rec):
+            kept.append(rec)
+            continue
+        suppressor: Recommendation | None = None
+        reason = ""
+        for key in sorted(_primary_target_keys(rec)):
+            if key in removal_by_url:
+                suppressor = removal_by_url[key]
+                reason = f"page is slated for redirect/merge by {suppressor.id}"
+                break
+        if suppressor is None and rec.id.startswith(("link-", "plink-")):
+            # Link recs edit targets[0] but point at targets[1]; a link into
+            # a page slated for removal is wasted work too.
+            for destination in rec.targets[1:]:
+                for key in sorted(_url_keys(destination)):
+                    if key in removal_by_url:
+                        suppressor = removal_by_url[key]
+                        reason = f"link destination is slated for redirect/merge by {suppressor.id}"
+                        break
+                if suppressor is not None:
+                    break
+        if suppressor is None:
+            kept.append(rec)
+            continue
+        rec.suppressed = True
+        rec.suppressed_by = suppressor.id
+        rec.suppressed_reason = reason
+        suppressed.append(rec)
+    return kept, suppressed
+
+
+def _card_title(members: list[Recommendation], url: str, query: str) -> str:
+    for rec in members:
+        evidence = rec.evidence or {}
+        for key in (
+            "page_title",
+            "current_title",
+            "title",
+            "target_title",
+            "source_title",
+            "best_title",
+            "canonical_title",
+        ):
+            value = str(evidence.get(key) or "").strip()
+            if value:
+                return value
+    if query:
+        return query
+    return url
+
+
+def _card_group(rec: Recommendation) -> tuple[str, str, str, list[str]]:
+    evidence = rec.evidence or {}
+    if rec.id.startswith("gap-") or rec.type == "coverage_gap":
+        query = str(evidence.get("query") or rec.title or "").strip()
+        return f"new-content:{query}", "", query, [target for target in rec.targets if target]
+    url = rec.targets[0] if rec.targets else ""
+    key = next(iter(sorted(_url_keys(url))), url) if url else f"site-wide:{rec.id}"
+    return key, url, "", [target for target in rec.targets[1:] if target]
+
+
+_EFFORT_RANK = {"quick": 0, "medium": 1, "deep": 2}
+
+
+def _effort_total_label(members: list[Recommendation]) -> str:
+    # The card label is the heaviest member's effort — summing scores would
+    # make three quick edits read as "deep". The summed score is exposed
+    # separately as effort_total_score.
+    ranked = [rec.effort for rec in members if rec.effort in _EFFORT_RANK]
+    if not ranked:
+        return "medium"
+    return max(ranked, key=lambda label: _EFFORT_RANK[label])
+
+
+def to_cards(recommendations: Iterable[Recommendation]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for rec in recommendations:
+        key, url, query, related = _card_group(rec)
+        group = groups.get(key)
+        if group is None:
+            group = {
+                "url": url,
+                "query": query,
+                "members": [],
+                "related_urls": [],
+            }
+            groups[key] = group
+        for related_url in related:
+            if related_url and related_url != group["url"] and related_url not in group["related_urls"]:
+                group["related_urls"].append(related_url)
+        group["members"].append(rec)
+
+    cards: list[dict] = []
+    for group in groups.values():
+        members = group["members"]
+        gains = [float(rec.estimated_clicks_gain) for rec in members if rec.estimated_clicks_gain is not None]
+        total_gain = round(sum(gains), 2) if gains else None
+        top_priority_score = max(float(rec.priority_score or 0.0) for rec in members)
+        top_priority = sorted({rec.priority for rec in members}, key=lambda p: _PRI_RANK.get(p, 9))[0]
+        effort_score_total = round(sum(float(rec.effort_score or 0.0) for rec in members), 1)
+        cards.append({
+            "url": group["url"],
+            "query": group["query"],
+            "title": _card_title(members, group["url"], group["query"]),
+            "related_urls": sorted(group["related_urls"]),
+            "total_estimated_clicks_gain": total_gain,
+            "top_priority": top_priority,
+            "top_priority_score": top_priority_score,
+            "categories": sorted({rec.category for rec in members}),
+            "recommendation_ids": [rec.id for rec in members],
+            "recommendations": [_item_row(rec) for rec in members],
+            "effort_total": _effort_total_label(members),
+            "effort_total_score": effort_score_total,
+        })
+    cards.sort(key=lambda card: (
+        _PRI_RANK.get(card["top_priority"], 9),
+        -(card["total_estimated_clicks_gain"] if card["total_estimated_clicks_gain"] is not None else -1.0),
+        -float(card["top_priority_score"] or 0.0),
+        card["url"] or f"new-content:{card.get('query', '')}",
+    ))
+    return cards
 
 
 def _pr_lookup(linkgraph_payload: dict | None) -> dict[str, float]:
@@ -964,7 +1166,15 @@ def synthesize(
     recs += _linking(linkgraph_payload, paragraph_links, pr)
     recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
 
-    return _finalize(recs, linkgraph_payload=linkgraph_payload, search_payload=search_payload)[:max_total]
+    finalized = _finalize(recs, linkgraph_payload=linkgraph_payload, search_payload=search_payload)
+    kept, suppressed = _resolve_conflicts(finalized)
+    # Truncate AFTER resolving conflicts, and only report suppressions whose
+    # suppressor survived the cut — re-resolving on a truncated list would
+    # resurrect improve-recs for pages still slated for removal.
+    kept = kept[:max_total]
+    kept_ids = {rec.id for rec in kept}
+    suppressed = [rec for rec in suppressed if rec.suppressed_by in kept_ids]
+    return kept + suppressed
 
 
 def _ctr_anomaly_recommendations(payload: dict | list | None) -> list[dict]:
@@ -980,7 +1190,9 @@ def to_payload(recs: Iterable[Recommendation]) -> dict:
     when a CTR/position basis exists, else the legacy traffic index. The
     summary total sums those per-item values.
     """
-    items = list(recs)
+    recs_list = list(recs)
+    items = [r for r in recs_list if not r.suppressed]
+    suppressed = [r for r in recs_list if r.suppressed]
     by_category: dict[str, int] = {}
     by_priority: dict[str, int] = {"high": 0, "medium": 0, "low": 0}
     for r in items:
@@ -990,6 +1202,7 @@ def to_payload(recs: Iterable[Recommendation]) -> dict:
     types = sorted({r.type for r in items if r.type})
     clusters = sorted({r.cluster for r in items if r.cluster})
     avg = lambda attr: round(sum(float(getattr(r, attr, 0.0) or 0.0) for r in items) / max(len(items), 1), 1)
+    cards = to_cards(items)
     return {
         "total": len(items),
         "by_category": by_category,
@@ -1009,31 +1222,10 @@ def to_payload(recs: Iterable[Recommendation]) -> dict:
             "avg_risk": avg("risk"),
             "avg_priority_score": avg("priority_score"),
             "traffic_opportunity": round(sum(float(r.traffic_opportunity or 0.0) for r in items), 1),
+            "cards": len(cards),
+            "suppressed": len(suppressed),
         },
-        "items": [
-            {
-                "id": r.id,
-                "category": r.category,
-                "type": r.type,
-                "priority": r.priority,
-                "priority_score": r.priority_score,
-                "impact": r.impact,
-                "confidence": r.confidence,
-                "effort_score": r.effort_score,
-                "risk": r.risk,
-                "owner": r.owner,
-                "cluster": r.cluster,
-                "traffic_opportunity": r.traffic_opportunity,
-                "estimated_clicks_gain": r.estimated_clicks_gain,
-                "estimate_basis": r.estimate_basis,
-                "gain_label": _gain_label(r.estimated_clicks_gain),
-                "title": r.title,
-                "instruction": r.instruction,
-                "targets": r.targets,
-                "evidence": r.evidence,
-                "effort": r.effort,
-                "score": r.score,
-            }
-            for r in items
-        ],
+        "cards": cards,
+        "items": [_item_row(r) for r in items],
+        "suppressed": [_suppressed_row(r) for r in suppressed],
     }
