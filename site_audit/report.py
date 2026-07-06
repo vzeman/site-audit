@@ -1245,6 +1245,7 @@ def write_all(
     striking_distance: Optional[dict] = None,
     ctr_anomalies: Optional[dict] = None,
     ai_access: Optional[dict] = None,
+    ai_citations: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
     template_patterns: Optional[dict] = None,
@@ -1332,6 +1333,8 @@ def write_all(
         _write_json(output_dir / "ctr_anomalies.json", ctr_anomalies)
     if ai_access is not None:
         _write_json(output_dir / "ai_access.json", ai_access)
+    if ai_citations is not None:
+        _write_json(output_dir / "ai_citations.json", ai_citations)
     if cannibalization is not None:
         _write_json(output_dir / "cannibalization.json", cannibalization)
     if duplicate_fragments is not None:

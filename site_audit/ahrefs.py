@@ -211,10 +211,15 @@ def _url_keys(url: str) -> list[str]:
     keys = [norm]
     host = parsed.netloc
     path = parsed.path or "/"
-    if host.startswith("www."):
-        keys.append(urlunparse((parsed.scheme, host[4:], path, "", "", "")))
-    else:
-        keys.append(urlunparse((parsed.scheme, f"www.{host}", path, "", "", "")))
+    hosts = [host[4:] if host.startswith("www.") else f"www.{host}", host]
+    schemes = [parsed.scheme]
+    if parsed.scheme == "https":
+        schemes.append("http")
+    elif parsed.scheme == "http":
+        schemes.append("https")
+    for scheme in schemes:
+        for candidate_host in hosts:
+            keys.append(urlunparse((scheme, candidate_host, path, "", "", "")))
     keys.append(path.rstrip("/") or "/")
     return list(dict.fromkeys(keys))
 
@@ -533,10 +538,17 @@ def build_analysis(
 
 
 def _page_lookup(pages: list[PageInfo]) -> dict[str, int]:
+    # Register keys tier-by-tier so every page's exact/normalized key wins
+    # before any page's looser variants (www/protocol/path fallbacks). This
+    # keeps e.g. a crawled http:// page from shadowing the distinct https://
+    # page's exact URL.
+    keyed = [(i, _url_keys(page.url)) for i, page in enumerate(pages)]
     lookup: dict[str, int] = {}
-    for i, page in enumerate(pages):
-        for key in _url_keys(page.url):
-            lookup.setdefault(key, i)
+    max_keys = max((len(keys) for _, keys in keyed), default=0)
+    for tier in range(max_keys):
+        for i, keys in keyed:
+            if tier < len(keys):
+                lookup.setdefault(keys[tier], i)
     return lookup
 
 

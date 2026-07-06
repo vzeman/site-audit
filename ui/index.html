@@ -1463,6 +1463,68 @@
       </div>
     </div>
 
+    <!-- AI Overview citations -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ai-citations-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">AI Overview citations</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ai-citations-meta">
+          Google AI Overview citations found in DataForSEO Labs ranked keyword samples.
+        </p>
+      </div>
+      <div id="ai-citations-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div id="ai-citations-note" class="text-xs mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs mb-5">
+        <div>
+          <h4 class="font-semibold mb-2">Cited pages</h4>
+          <div class="overflow-x-auto max-h-96">
+            <table class="min-w-full text-xs">
+              <thead class="bg-gray-50 text-gray-600">
+                <tr>
+                  <th class="px-2 py-1.5 text-left">URL</th>
+                  <th class="px-2 py-1.5 text-left">Title</th>
+                  <th class="px-2 py-1.5 text-left">Queries</th>
+                  <th class="px-2 py-1.5 text-right">Volume</th>
+                </tr>
+              </thead>
+              <tbody id="ai-citations-cited-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Cited but stale</h4>
+          <div id="ai-citations-risk-wrap" class="overflow-x-auto max-h-96">
+            <table class="min-w-full text-xs">
+              <thead class="bg-gray-50 text-gray-600">
+                <tr>
+                  <th class="px-2 py-1.5 text-left">URL</th>
+                  <th class="px-2 py-1.5 text-left">Top query</th>
+                  <th class="px-2 py-1.5 text-left">Freshness</th>
+                </tr>
+              </thead>
+              <tbody id="ai-citations-risk-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="text-xs">
+        <h4 class="font-semibold mb-2">Opportunities</h4>
+        <div id="ai-citations-opportunity-note"></div>
+        <div id="ai-citations-opportunity-wrap" class="overflow-x-auto max-h-96">
+          <table class="min-w-full text-xs">
+            <thead class="bg-gray-50 text-gray-600">
+              <tr>
+                <th class="px-2 py-1.5 text-left">Keyword</th>
+                <th class="px-2 py-1.5 text-left">URL</th>
+                <th class="px-2 py-1.5 text-right">Rank</th>
+                <th class="px-2 py-1.5 text-right">Volume</th>
+              </tr>
+            </thead>
+            <tbody id="ai-citations-opportunity-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Answerability -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
       <div class="mb-3">
@@ -2186,6 +2248,7 @@
 <script type="application/json" id="data-striking-distance">__STRIKING_DISTANCE_JSON__</script>
 <script type="application/json" id="data-ctr-anomalies">__CTR_ANOMALIES_JSON__</script>
 <script type="application/json" id="data-ai-access">__AI_ACCESS_JSON__</script>
+<script type="application/json" id="data-ai-citations">__AI_CITATIONS_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
@@ -2254,7 +2317,7 @@
     {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
     {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
     {key: 'conversion', label: 'Conversion', ids: ['conversion-balance-block', 'conversion-block']},
-    {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'answerability-block', 'answer-blocks-block', 'fanout-block']},
+    {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'fanout-block']},
     {key: 'duplication', label: 'Cannibalization', ids: ['cannibalization-block', 'duplicate-fragments-block', 'wrong-home-block', 'para-clusters-block']},
     {key: 'links', label: 'Internal links', ids: ['linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block', 'hub-bottleneck-block', 'link-removal-block', 'linkbuilding-block', 'link-counts-block', 'para-density-block', 'para-links-block', 'cluster-auth-block', 'anchor-block', 'contextual-link-block', 'internal-link-patterns-block']},
     {key: 'competitive', label: 'SERP competitors', ids: ['competitive-block']},
@@ -2269,7 +2332,7 @@
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
     'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
     'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
-    'ai-access-block', 'answerability-block', 'answer-blocks-block', 'cannibalization-block', 'duplicate-fragments-block',
+    'ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'cannibalization-block', 'duplicate-fragments-block',
     'linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block',
     'hub-bottleneck-block', 'link-removal-block', 'link-addition-block', 'linkbuilding-block',
     'link-counts-block', 'para-density-block', 'para-links-block', 'wrong-home-block',
@@ -2456,6 +2519,7 @@
       const inlinedStrikingDistance = readInlined('data-striking-distance');
       const inlinedCtrAnomalies = readInlined('data-ctr-anomalies');
       const inlinedAiAccess = readInlined('data-ai-access');
+      const inlinedAiCitations = readInlined('data-ai-citations');
       const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
       const inlinedLinkgraph = readInlined('data-linkgraph');
@@ -2501,7 +2565,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2515,6 +2579,7 @@
         strikingDistance = inlinedStrikingDistance || {};
         ctrAnomalies = inlinedCtrAnomalies || {};
         aiAccess = inlinedAiAccess || {};
+        aiCitations = inlinedAiCitations || {};
         cannibalization = inlinedCannibalization || {};
         duplicateFragments = inlinedDuplicateFragments || {};
         linkgraph = inlinedLinkgraph || {};
@@ -2560,7 +2625,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2573,6 +2638,7 @@
           loadJSON('striking_distance.json').catch(() => ({})),
           loadJSON('ctr_anomalies.json').catch(() => ({})),
           loadJSON('ai_access.json').catch(() => ({})),
+          loadJSON('ai_citations.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('duplicate_fragments.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
@@ -2632,6 +2698,7 @@
       state.strikingDistance = strikingDistance || {};
       state.ctrAnomalies = ctrAnomalies || {};
       state.aiAccess = aiAccess || {};
+      state.aiCitations = aiCitations || {};
       state.cannibalization = cannibalization || {};
       state.duplicateFragments = duplicateFragments || {};
       state.linkgraph = linkgraph;
@@ -2705,6 +2772,7 @@
       renderStrikingDistance();
       renderCtrAnomalies();
       renderAiAccess();
+      renderAiCitations();
       renderParagraphImpact();
       renderWeakParagraphs();
       renderSemanticAblation();
@@ -4218,6 +4286,72 @@
           <td class="px-2 py-2 align-top">${row.explicitly_named ? 'Yes' : 'No'}</td>
         </tr>`;
     }).join('');
+  }
+
+  function renderAiCitations() {
+    const block = document.getElementById('ai-citations-block');
+    const data = state.aiCitations || {};
+    if (!block) return;
+    if (data.available !== true) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const cited = data.cited_pages || [];
+    const risk = data.at_risk || [];
+    const opportunities = data.opportunities || [];
+    document.getElementById('ai-citations-meta').textContent =
+      `${Number(summary.cited_pages || cited.length).toLocaleString()} cited pages from DataForSEO Labs samples. ${data.coverage_note || ''}`;
+    document.getElementById('ai-citations-summary').innerHTML =
+      card('cited pages', Number(summary.cited_pages || cited.length).toLocaleString(), 'protect and strengthen') +
+      card('citing queries', Number(summary.citing_queries || 0).toLocaleString(), 'unique keywords') +
+      card('citing volume', Number(summary.citing_query_volume || 0).toLocaleString(), 'monthly search volume') +
+      card('top pages cited', `${Math.round(Number(summary.top_traffic_pages_cited_share || 0) * 100)}%`, `${Number(summary.top_traffic_pages_cited || 0).toLocaleString()} of ${Number(summary.top_traffic_pages || 0).toLocaleString()}`);
+    document.getElementById('ai-citations-note').innerHTML = data.coverage_note ? `
+      <div class="border border-amber-200 bg-amber-50 text-amber-900 rounded p-3">${escapeHtml(data.coverage_note)}</div>` : '';
+
+    document.getElementById('ai-citations-cited-rows').innerHTML = cited.length ? cited.slice(0, 80).map(row => {
+      const queries = (row.queries || []).slice(0, 4).map(q => `
+        <div>
+          <span class="font-medium">${escapeHtml(q.keyword || '')}</span>
+          <span class="text-gray-500"> ${Number(q.search_volume || 0).toLocaleString()}/mo</span>
+        </div>`).join('');
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 58))}</a></td>
+          <td class="px-2 py-2 align-top">${escapeHtml(row.title || '')}<div class="text-gray-500">${escapeHtml(row.cluster || row.section || '')}</div></td>
+          <td class="px-2 py-2 align-top">${queries}</td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(row.total_volume || 0).toLocaleString()}</td>
+        </tr>`;
+    }).join('') : '<tr><td class="px-2 py-3 text-gray-500" colspan="4">No cited pages found.</td></tr>';
+
+    document.getElementById('ai-citations-risk-rows').innerHTML = risk.length ? risk.slice(0, 50).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 54))}</a></td>
+        <td class="px-2 py-2 align-top">${escapeHtml(row.top_keyword || '')}<div class="text-gray-500">${Number(row.top_keyword_volume || 0).toLocaleString()}/mo</div></td>
+        <td class="px-2 py-2 align-top"><span class="font-semibold text-amber-700">${escapeHtml(String(row.bucket || '').replaceAll('_', ' '))}</span><div class="text-gray-500">${row.age_days == null ? '' : Number(row.age_days).toLocaleString() + ' days'}</div></td>
+      </tr>`).join('') : '<tr><td class="px-2 py-3 text-gray-500" colspan="3">No cited pages are marked stale or very stale.</td></tr>';
+
+    const oppWrap = document.getElementById('ai-citations-opportunity-wrap');
+    const oppNote = document.getElementById('ai-citations-opportunity-note');
+    if (!opportunities.length) {
+      oppWrap.style.display = 'none';
+      oppNote.innerHTML = `
+        <div class="border border-gray-200 bg-gray-50 text-gray-700 rounded p-3">
+          No deterministic opportunity rows. ${escapeHtml(data.coverage_note || '')}
+        </div>`;
+      return;
+    }
+    oppWrap.style.display = '';
+    oppNote.innerHTML = '';
+    document.getElementById('ai-citations-opportunity-rows').innerHTML = opportunities.slice(0, 80).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top font-medium">${escapeHtml(row.keyword || '')}</td>
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 70))}</a><div class="text-gray-500">${escapeHtml(row.title || '')}</div></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(row.position || 0).toFixed(0)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(row.search_volume || 0).toLocaleString()}</td>
+      </tr>`).join('');
   }
 
   function aiAccessTextFileCard(label, file) {

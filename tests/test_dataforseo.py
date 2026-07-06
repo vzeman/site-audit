@@ -77,7 +77,7 @@ def test_dataforseo_analysis_matches_pages_and_aggregates_search_features() -> N
                         "keyword": "ai agent",
                         "keyword_info": {"search_volume": 1000, "cpc": 2.3},
                         "search_intent_info": {"main_intent": "informational"},
-                        "serp_info": {"serp_item_types": ["organic", "featured_snippet"]},
+                        "serp_info": {"serp_item_types": ["organic", "featured_snippet", "ai_overview_reference"]},
                     },
                     "ranked_serp_element": {
                         "rank_group": 2,
@@ -87,6 +87,21 @@ def test_dataforseo_analysis_matches_pages_and_aggregates_search_features() -> N
                             "url": "https://www.example.com/blog/a/",
                             "title": "AI Agent Guide",
                             "etv": 100,
+                        },
+                    },
+                },
+                {
+                    "keyword_data": {
+                        "keyword": "ai agent",
+                        "keyword_info": {"search_volume": 1000},
+                        "keyword_properties": {"keyword_difficulty": 42},
+                    },
+                    "ranked_serp_element": {
+                        "rank_absolute": 1,
+                        "serp_item": {
+                            "type": "ai_overview_reference",
+                            "url": "https://example.com/blog/a",
+                            "title": "AI Agent Guide",
                         },
                     },
                 }
@@ -109,5 +124,73 @@ def test_dataforseo_analysis_matches_pages_and_aggregates_search_features() -> N
     assert payload["top_pages"][0]["top_keyword"] == "ai agent"
     assert payload["top_pages"][0]["featured_snippet_traffic"] == 20
     assert payload["organic_keywords"][0]["serp_type"] == "organic"
+    assert payload["organic_keywords"][0]["has_ai_overview"] is True
     assert payload["serp_features"][0]["feature"] == "organic"
     assert payload["intents"][0]["intent"] == "informational"
+    assert payload["ai_overview_citations"] == [
+        {
+            "keyword": "ai agent",
+            "url": "https://example.com/blog/a",
+            "search_volume": 1000,
+            "keyword_difficulty": 42,
+            "rank_absolute": 1,
+            "serp_title": "AI Agent Guide",
+        }
+    ]
+    assert payload["summary"]["organic_keywords"] == 1
+    query_page = payload["query_pages"][0]
+    assert query_page["query"] == "ai agent"
+    assert query_page["ctr"] is None
+    assert query_page["source"] == "dataforseo"
+    assert query_page["provider"] == "dataforseo"
+    assert query_page["provider_label"] == "DataForSEO"
+    assert query_page["impressions"] == 1000
+    assert query_page["has_ai_overview"] is True
+
+
+def test_dataforseo_query_pages_feed_striking_distance() -> None:
+    from site_audit.striking_distance import build_striking_distance
+
+    pages = [
+        PageInfo(
+            url="https://example.com/blog/a/",
+            title="AI Agent Guide",
+            description="",
+            section="blog",
+            word_count=500,
+            language="en",
+        )
+    ]
+    snapshot = {
+        "meta": {"status": "ok", "cache_status": "hit", "provider": "dataforseo"},
+        "raw": {
+            "domain_rank_overview": _response([]),
+            "relevant_pages": _response([]),
+            "ranked_keywords": _response([
+                {
+                    "keyword_data": {
+                        "keyword": "ai agent workflows",
+                        "keyword_info": {"search_volume": 1000},
+                    },
+                    "ranked_serp_element": {
+                        "rank_group": 8,
+                        "rank_absolute": 8,
+                        "serp_item": {
+                            "type": "organic",
+                            "url": "https://example.com/blog/a/",
+                            "title": "AI Agent Guide",
+                            "etv": 30,
+                        },
+                    },
+                }
+            ]),
+        },
+    }
+
+    payload = build_analysis(snapshot, pages, np.eye(1, dtype=np.float32), embedder=None).payload
+    striking = build_striking_distance(payload, pages)
+
+    assert striking["available"] is True
+    assert striking["summary"]["status"] == "ok"
+    assert striking["rows"][0]["query"] == "ai agent workflows"
+    assert striking["rows"][0]["position"] == 8

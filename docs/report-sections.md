@@ -264,6 +264,15 @@ Shows whether major AI search, user-fetch, and training crawlers can access `/` 
 
 Action: unblock AI search and user-fetch agents when generative-search visibility matters. Treat training-bot blocks as a policy choice, not automatically an SEO defect.
 
+<a id="ai-citations-block"></a>
+## AI Overview citations
+
+Shows pages that DataForSEO Labs reports as cited by Google AI Overview reference items, the citing queries, monthly search volume, and cited pages that are stale or very stale.
+
+This is based on DataForSEO Labs ranked keyword sampling, not live SERP scraping. Coverage is limited to the audited domain's own returned SERP items, so opportunities are only shown when a returned ranking row explicitly exposes an AI Overview item type without an AI Overview citation for the same page and query.
+
+Action: protect cited pages by keeping them fresh and evidence-backed. For deterministic opportunities, strengthen the matching answer block with a direct answer under a question H2 and cited evidence.
+
 <a id="answerability-block"></a>
 ## GEO answer-ability score
 

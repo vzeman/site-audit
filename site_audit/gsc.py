@@ -22,6 +22,7 @@ import numpy as np
 import requests
 
 from .ahrefs import (
+    MAX_QUERY_PAGES_ROWS,
     AhrefsAnalysis,
     _aggregate_clusters,
     _aggregate_directories,
@@ -46,7 +47,6 @@ LOG = logging.getLogger(__name__)
 
 GSC_BASE_URL = "https://searchconsole.googleapis.com/webmasters/v3/sites"
 GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
-MAX_QUERY_PAGES_ROWS = 5000
 
 
 @dataclass
