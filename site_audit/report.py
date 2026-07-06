@@ -1242,6 +1242,7 @@ def write_all(
     keyword_attribution: Optional[dict] = None,
     answer_blocks: Optional[dict] = None,
     freshness_impact: Optional[dict] = None,
+    striking_distance: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
     template_patterns: Optional[dict] = None,
@@ -1323,6 +1324,8 @@ def write_all(
         _write_json(output_dir / "answer_blocks.json", answer_blocks)
     if freshness_impact is not None:
         _write_json(output_dir / "freshness_impact.json", freshness_impact)
+    if striking_distance is not None:
+        _write_json(output_dir / "striking_distance.json", striking_distance)
     if cannibalization is not None:
         _write_json(output_dir / "cannibalization.json", cannibalization)
     if duplicate_fragments is not None:
