@@ -22,6 +22,8 @@ Action: review the low-similarity tail. Keep pages that serve a strategic purpos
 
 Aggregates findings from multiple analyses into prioritized URL cards. Each card combines all active recommendations for the same primary page, sums any modeled click gains, and lists the underlying actions. Multi-URL merge/consolidation actions are filed under the canonical or best URL, with related URLs shown on the card. Coverage gaps for new pages appear as new-content cards keyed by query.
 
+For the top title, CTR, GEO answerability, and coverage-gap actions, the report can include generated fix text: proposed titles, meta descriptions, FAQ H2 questions, or new-page H2 outlines. LLM suggestions are labeled as AI-generated and deterministic fallbacks as auto-generated; both are starting points and must be checked for claim accuracy before publishing.
+
 Actions that would conflict with a redirect or merge are suppressed and shown separately with the recommendation that caused suppression — including internal-link suggestions pointing at a page slated for removal. The card effort label is the heaviest member action's effort (quick/medium/deep); the summed effort score is exposed separately.
 
 Action: start here when you need execution priorities. Validate the suggested URL and issue type, assign the card to content, technical SEO, internal linking, or product/UX, then use the "All actions" list for the flat recommendation workflow.

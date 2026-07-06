@@ -156,6 +156,7 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_template_patterns=not args.no_template_patterns,
         enable_trust_signals=not args.no_trust_signals,
         enable_conversion_balance=not args.no_conversion_balance,
+        enable_fix_drafts=not args.no_fix_drafts,
         enable_linkgraph=not args.no_linkgraph,
         enable_external_links=not args.no_external_links,
         enable_paragraph_links=not args.no_paragraph_links,
@@ -1385,6 +1386,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-template-patterns", action="store_true")
     run_p.add_argument("--no-trust-signals", action="store_true")
     run_p.add_argument("--no-conversion-balance", action="store_true")
+    run_p.add_argument("--no-fix-drafts", action="store_true",
+                       help="Skip generated before/after draft text for top action-plan recommendations")
     run_p.add_argument("--no-linkgraph", action="store_true")
     run_p.add_argument("--no-external-links", action="store_true")
     run_p.add_argument("--no-paragraph-links", action="store_true",
