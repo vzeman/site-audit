@@ -27,6 +27,7 @@ This module produces three outputs:
 from __future__ import annotations
 
 import logging
+import heapq
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -145,6 +146,8 @@ def wrong_home_paragraphs(
 ) -> list[WrongHomeParagraph]:
     if not paragraph_records or len(pages) < 2:
         return []
+    if top_n <= 0:
+        return []
 
     n_pages = len(pages)
     by_page: dict[int, list[int]] = {}
@@ -153,24 +156,44 @@ def wrong_home_paragraphs(
 
     # paragraph centroid per page (used for sim_to_host_centroid)
     page_para_centroid = np.zeros_like(page_embeddings)
+    counts = np.zeros(n_pages, dtype=np.int32)
     for pi, idxs in by_page.items():
-        embs = np.stack([paragraph_records[k][3] for k in idxs])
-        m = embs.mean(axis=0)
+        for idx in idxs:
+            page_para_centroid[pi] += paragraph_records[idx][3]
+        counts[pi] = len(idxs)
+    for pi in range(n_pages):
+        if counts[pi] <= 0:
+            continue
+        m = page_para_centroid[pi] / float(counts[pi])
         norm = np.linalg.norm(m)
         page_para_centroid[pi] = m / norm if norm > 0 else m
 
+    para_embs = np.stack([r[3] for r in paragraph_records]).astype(np.float32)
+    block_size = max(1, 5_000_000 // max(1, n_pages))
+    heap: list[tuple[float, int, int, float, float]] = []
+    for start in range(0, len(paragraph_records), block_size):
+        block = np.clip(para_embs[start : start + block_size] @ page_embeddings.T, -1.0, 1.0)
+        for offset, row in enumerate(block):
+            k = start + offset
+            pi, _, _, vec = paragraph_records[k]
+            row[int(pi)] = -1.0  # exclude host
+            target_i = int(np.argmax(row))
+            sim_to_target = float(row[target_i])
+            if sim_to_target < _WRONG_HOME_SIM_FLOOR:
+                continue
+            sim_to_host = float(np.clip(page_para_centroid[pi] @ vec, -1.0, 1.0))
+            lift = sim_to_target - sim_to_host
+            if lift < _WRONG_HOME_LIFT_FLOOR:
+                continue
+            item = (lift, k, target_i, sim_to_target, sim_to_host)
+            if len(heap) < top_n:
+                heapq.heappush(heap, item)
+            elif lift > heap[0][0]:
+                heapq.heapreplace(heap, item)
+
     out: list[WrongHomeParagraph] = []
-    for k, (pi, para_i, text, vec) in enumerate(paragraph_records):
-        sims_to_pages = np.clip(page_embeddings @ vec, -1.0, 1.0)
-        sims_to_pages[pi] = -1.0  # exclude host
-        target_i = int(np.argmax(sims_to_pages))
-        sim_to_target = float(sims_to_pages[target_i])
-        sim_to_host = float(np.clip(page_para_centroid[pi] @ vec, -1.0, 1.0))
-        lift = sim_to_target - sim_to_host
-        if sim_to_target < _WRONG_HOME_SIM_FLOOR:
-            continue
-        if lift < _WRONG_HOME_LIFT_FLOOR:
-            continue
+    for lift, k, target_i, sim_to_target, sim_to_host in sorted(heap, reverse=True):
+        pi, para_i, text, _ = paragraph_records[k]
         out.append(WrongHomeParagraph(
             source_url=pages[pi].url,
             paragraph_index=para_i,
@@ -181,9 +204,7 @@ def wrong_home_paragraphs(
             sim_to_host_centroid=round(sim_to_host, 4),
             lift=round(lift, 4),
         ))
-
-    out.sort(key=lambda r: r.lift, reverse=True)
-    return out[:top_n]
+    return out
 
 
 # --- per-page improvement score -----------------------------------------
