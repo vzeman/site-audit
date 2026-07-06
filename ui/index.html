@@ -845,6 +845,37 @@
       </p>
     </div>
 
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ctr-anomalies-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">CTR anomalies</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ctr-anomalies-meta">
+          GSC query+page rows ranking on page one where actual CTR is below the expected curve for that position.
+        </p>
+      </div>
+      <div id="ctr-anomalies-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 text-gray-600">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Query</th>
+              <th class="px-2 py-1.5 text-left">URL</th>
+              <th class="px-2 py-1.5 text-right">Pos</th>
+              <th class="px-2 py-1.5 text-right">Impr.</th>
+              <th class="px-2 py-1.5 text-right">Actual CTR</th>
+              <th class="px-2 py-1.5 text-right">Expected CTR</th>
+              <th class="px-2 py-1.5 text-right">Missed clicks</th>
+              <th class="px-2 py-1.5 text-left">Probable cause</th>
+              <th class="px-2 py-1.5 text-left">Current title</th>
+            </tr>
+          </thead>
+          <tbody id="ctr-anomalies-rows"></tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3">
+        Expected CTR is an industry-average curve; branded queries and SERP-feature-heavy queries naturally deviate.
+      </p>
+    </div>
+
     <!-- Paragraph impact -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="paragraph-impact-block">
       <div class="mb-4">
@@ -2123,6 +2154,7 @@
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-answer-blocks">__ANSWER_BLOCKS_JSON__</script>
 <script type="application/json" id="data-striking-distance">__STRIKING_DISTANCE_JSON__</script>
+<script type="application/json" id="data-ctr-anomalies">__CTR_ANOMALIES_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
@@ -2184,7 +2216,7 @@
     {key: 'titles', label: 'Titles and headings', ids: ['title-mismatch-block', 'headers-block', 'heading-impact-block']},
     {key: 'semantic-map', label: 'Semantic map', ids: ['scatter-block', 'section-outliers-block', 'link-addition-block']},
     {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block', 'heatmap-block']},
-    {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'striking-distance-block', 'coverage-block']},
+    {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'striking-distance-block', 'ctr-anomalies-block', 'coverage-block']},
     {key: 'paragraphs', label: 'Paragraph analysis', ids: ['paragraph-impact-block', 'weak-paragraphs-block', 'semantic-ablation-block', 'keyword-attribution-block']},
     {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'technical-seo-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
     {key: 'authority', label: 'Authority and trust', ids: ['trust-signals-block', 'entities-block', 'entity-coverage-block', 'information-gain-block']},
@@ -2200,7 +2232,7 @@
   const SECTION_DOC_BLOCKS = [
     'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
     'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block',
-    'ahrefs-block', 'best-pages-block', 'striking-distance-block', 'paragraph-impact-block', 'weak-paragraphs-block',
+    'ahrefs-block', 'best-pages-block', 'striking-distance-block', 'ctr-anomalies-block', 'paragraph-impact-block', 'weak-paragraphs-block',
     'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
     'indexability-block', 'technical-seo-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
@@ -2391,6 +2423,7 @@
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedAnswerBlocks = readInlined('data-answer-blocks');
       const inlinedStrikingDistance = readInlined('data-striking-distance');
+      const inlinedCtrAnomalies = readInlined('data-ctr-anomalies');
       const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
       const inlinedLinkgraph = readInlined('data-linkgraph');
@@ -2436,7 +2469,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2448,6 +2481,7 @@
         answerability = inlinedAnswerability || [];
         answerBlocks = inlinedAnswerBlocks || {};
         strikingDistance = inlinedStrikingDistance || {};
+        ctrAnomalies = inlinedCtrAnomalies || {};
         cannibalization = inlinedCannibalization || {};
         duplicateFragments = inlinedDuplicateFragments || {};
         linkgraph = inlinedLinkgraph || {};
@@ -2493,7 +2527,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2504,6 +2538,7 @@
           loadJSON('answerability.json').catch(() => []),
           loadJSON('answer_blocks.json').catch(() => ({})),
           loadJSON('striking_distance.json').catch(() => ({})),
+          loadJSON('ctr_anomalies.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('duplicate_fragments.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
@@ -2561,6 +2596,7 @@
       state.answerability = answerability;
       state.answerBlocks = answerBlocks || {};
       state.strikingDistance = strikingDistance || {};
+      state.ctrAnomalies = ctrAnomalies || {};
       state.cannibalization = cannibalization || {};
       state.duplicateFragments = duplicateFragments || {};
       state.linkgraph = linkgraph;
@@ -2632,6 +2668,7 @@
       renderAhrefs();
       renderBestPages();
       renderStrikingDistance();
+      renderCtrAnomalies();
       renderParagraphImpact();
       renderWeakParagraphs();
       renderSemanticAblation();
@@ -3973,6 +4010,40 @@
           <td class="px-2 py-2 align-top">${escapeHtml(r.page_title || '')}</td>
         </tr>`;
     }).join('');
+  }
+
+  function renderCtrAnomalies() {
+    const block = document.getElementById('ctr-anomalies-block');
+    const data = state.ctrAnomalies || {};
+    const rows = data.rows || [];
+    const summary = data.summary || {};
+    const model = data.model || {};
+    if (!block) return;
+    if (!data.available || !rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const period = model.period_days ? `${Number(model.period_days).toLocaleString()} days` : 'selected period';
+    document.getElementById('ctr-anomalies-meta').textContent =
+      `${Number(summary.anomalies || rows.length).toLocaleString()} CTR anomalies · positions <= ${Number(model.max_position || summary.max_position || 10).toFixed(0)} · ${period}.`;
+    document.getElementById('ctr-anomalies-summary').innerHTML =
+      card('missed clicks', Number(summary.total_missed_clicks || 0).toLocaleString(undefined, {maximumFractionDigits: 1}), 'expected-vs-actual CTR') +
+      card('anomalies', Number(summary.anomalies || rows.length).toLocaleString(), `CTR below ${Number(model.underperformance_ratio || 0.6).toLocaleString(undefined, {style: 'percent', maximumFractionDigits: 0})} of curve`) +
+      card('shown rows', Number(summary.shown || rows.length).toLocaleString(), `minimum ${Number(model.min_impressions || 100).toLocaleString()} impressions`) +
+      card('date window', summary.start_date ? `${escapeHtml(summary.start_date)} to ${escapeHtml(summary.end_date || '')}` : period, escapeHtml(model.curve || 'site-audit-v1'));
+    document.getElementById('ctr-anomalies-rows').innerHTML = rows.map(r => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top font-medium">${escapeHtml(r.query || '')}<div class="text-gray-500 font-normal">${escapeHtml(r.source || '')}</div></td>
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.url || '')}</a></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(r.position || 0).toFixed(1)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(r.impressions || 0).toLocaleString()}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${(Number(r.actual_ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${(Number(r.expected_ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="px-2 py-2 align-top text-right font-mono font-semibold">${Number(r.missed_clicks || 0).toLocaleString(undefined, {maximumFractionDigits: 1})}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml((r.probable_cause || '').replaceAll('_', ' '))}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(r.current_title || r.page_title || '')}</td>
+      </tr>`).join('');
   }
 
   function bestPageSignalList(rows, emptyText) {

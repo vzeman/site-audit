@@ -80,6 +80,13 @@ Lists query+page rankings in positions 4-20 with enough impressions to model the
 
 Action: prioritize pages with the largest modeled gain. Improve intent fit, title/heading alignment, answer depth, freshness, and internal links; treat modeled clicks as directional, not guaranteed.
 
+<a id="ctr-anomalies-block"></a>
+## CTR anomalies
+
+Lists GSC query+page rows ranking on page one where actual CTR falls below the expected CTR curve for that position.
+
+Action: rewrite titles and meta descriptions for the largest missed-click rows first. Treat the curve as directional because branded queries and SERP-feature-heavy queries naturally deviate.
+
 <a id="best-pages-block"></a>
 ## Best page reverse engineering
 

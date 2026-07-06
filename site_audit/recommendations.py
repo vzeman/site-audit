@@ -18,7 +18,7 @@ Categories
   citations) targeted at high-PR pages first.
 * ``linking`` — top page-level + paragraph-level internal-link
   recommendations, orphans to surface, buried pages to lift.
-* ``onpage`` — title mismatches, generic anchors.
+* ``onpage`` — title mismatches, CTR-anomaly title rewrites, generic anchors.
 
 Priority is one of ``high`` / ``medium`` / ``low``. The pickers favour
 high-PageRank pages — fixing the load-bearing pages compounds.
@@ -90,6 +90,7 @@ _TYPE_BY_PREFIX = {
     "orphan": "orphan_page",
     "deep": "click_depth",
     "title": "title_rewrite",
+    "ctr": "title_rewrite",
     "anchor": "anchor_rewrite",
 }
 
@@ -213,6 +214,7 @@ def _component_scores(rec: Recommendation, context: dict[str, dict]) -> dict:
         _safe_float(target_context.get("traffic")),
         _safe_float(evidence.get("traffic")),
         _safe_float(evidence.get("traffic_opportunity")),
+        _safe_float(evidence.get("estimated_clicks_gain")),
         _safe_float(evidence.get("target_traffic")),
     )
     pagerank = max(_safe_float(evidence.get("pagerank")), _safe_float(target_context.get("pagerank")))
@@ -648,9 +650,39 @@ def _linking(
 def _onpage(
     title_mismatch: list[dict] | None,
     anchor_analysis: list[dict] | None,
+    ctr_anomalies: list[dict] | None,
     pr: dict[str, float],
 ) -> list[Recommendation]:
     out: list[Recommendation] = []
+
+    if ctr_anomalies:
+        rows = sorted(ctr_anomalies, key=lambda r: _safe_float(r.get("missed_clicks")), reverse=True)
+        for i, r in enumerate(rows[:20]):
+            url = r.get("url", "")
+            missed = _safe_float(r.get("missed_clicks") or r.get("estimated_clicks_gain"))
+            if not url or missed <= 0:
+                continue
+            out.append(Recommendation(
+                id=f"ctr-{i}",
+                category="onpage",
+                priority="medium",
+                title=str(r.get("title") or ""),
+                instruction=str(r.get("action") or ""),
+                targets=[url],
+                evidence={
+                    "query": r.get("query", ""),
+                    "position": _safe_float(r.get("position")),
+                    "actual_ctr": _safe_float(r.get("actual_ctr")),
+                    "expected_ctr": _safe_float(r.get("expected_ctr")),
+                    "estimated_clicks_gain": round(missed, 2),
+                    "traffic_opportunity": round(missed, 2),
+                    "probable_cause": r.get("probable_cause", ""),
+                    "current_title": r.get("current_title", ""),
+                    "period": r.get("period", ""),
+                },
+                effort="quick",
+                score=min(100.0, missed),
+            ))
 
     if title_mismatch:
         tm_sorted = sorted(title_mismatch, key=lambda r: float(r.get("title_to_content", 1.0)))
@@ -719,21 +751,29 @@ def synthesize(
     paragraph_links: list[dict] | None = None,
     wrong_home_payload: list[dict] | None = None,
     title_mismatch: list[dict] | None = None,
+    ctr_anomalies_payload: dict | list | None = None,
     external_links_payload: dict | None = None,
     max_total: int = 100,
 ) -> list[Recommendation]:
     pr = _pr_lookup(linkgraph_payload)
     external_per_page = (external_links_payload or {}).get("per_page") or []
     anchor_analysis = (linkgraph_payload or {}).get("anchor_analysis") or []
+    ctr_anomalies = _ctr_anomaly_recommendations(ctr_anomalies_payload)
 
     recs: list[Recommendation] = []
     recs += _content_debt(duplicates_rows or [], outliers_rows or [], wrong_home_payload or [], pr)
     recs += _coverage(coverage_payload or [])
     recs += _geo(answerability_payload or [], pr, external_per_page)
     recs += _linking(linkgraph_payload, paragraph_links, pr)
-    recs += _onpage(title_mismatch, anchor_analysis, pr)
+    recs += _onpage(title_mismatch, anchor_analysis, ctr_anomalies, pr)
 
     return _finalize(recs, linkgraph_payload=linkgraph_payload, search_payload=search_payload)[:max_total]
+
+
+def _ctr_anomaly_recommendations(payload: dict | list | None) -> list[dict]:
+    if isinstance(payload, dict):
+        return list(payload.get("recommendations") or [])
+    return list(payload or [])
 
 
 def to_payload(recs: Iterable[Recommendation]) -> dict:
