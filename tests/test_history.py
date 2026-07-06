@@ -69,6 +69,20 @@ def test_history_snapshot_captures_page_paragraph_link_schema_and_metrics() -> N
     assert payload["summary"]["avg_position"] == 5
 
 
+def test_history_snapshot_skips_large_sites(monkeypatch) -> None:
+    monkeypatch.setenv("SITE_AUDIT_HISTORY_MAX_PAGES", "1")
+    pages = [
+        PageInfo(url="https://example.com/a", title="A", description="", section="root", word_count=10, language="en"),
+        PageInfo(url="https://example.com/b", title="B", description="", section="root", word_count=20, language="en"),
+    ]
+
+    payload = build_history_snapshot("example.com", pages)
+
+    assert payload["summary"]["status"] == "skipped_large_site"
+    assert payload["summary"]["pages"] == 2
+    assert payload["pages"] == []
+
+
 def test_compare_snapshots_reports_content_link_schema_metadata_and_metric_deltas(tmp_path: Path) -> None:
     before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, ["/b"])
     after_pages, after_extracted, after_search = _snapshot_page("Support automation updated", "Updated paragraph with proof.", 155, ["/b", "/c"])

@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -145,6 +146,26 @@ def build_history_snapshot(
     search_payload: dict | None = None,
     snapshot_id: str | None = None,
 ) -> dict:
+    raw_max_pages = os.getenv("SITE_AUDIT_HISTORY_MAX_PAGES", "20000")
+    try:
+        max_pages = max(0, int(raw_max_pages))
+    except ValueError:
+        max_pages = 20000
+    if max_pages and len(pages) > max_pages:
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        return {
+            "summary": {
+                "status": "skipped_large_site",
+                "model": "history_snapshot_v1",
+                "domain": domain,
+                "snapshot_id": snapshot_id or "",
+                "created_at": now,
+                "pages": len(pages),
+                "max_pages": max_pages,
+                "reason": "History snapshots include per-page headings, paragraphs, and links; skipped to keep large audits memory-safe.",
+            },
+            "pages": [],
+        }
     extracted_pages = extracted_pages or []
     outlinks_map = outlinks_map or {}
     structured = _row_lookup((structured_data or {}).get("per_page") or [], ("url",))
