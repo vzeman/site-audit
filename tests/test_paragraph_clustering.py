@@ -44,6 +44,7 @@ def test_paragraph_cluster_overlap_payload_uses_centroid_similarity() -> None:
 
 def test_large_paragraph_clustering_avoids_native_engines(monkeypatch) -> None:
     monkeypatch.setenv("SITE_AUDIT_PARAGRAPH_CLUSTER_NATIVE_MAX", "4")
+    monkeypatch.setenv("SITE_AUDIT_PARAGRAPH_CLUSTER_MAX_POINTS", "0")
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
@@ -71,3 +72,23 @@ def test_large_paragraph_clustering_avoids_native_engines(monkeypatch) -> None:
     assert len(chosen) == 8
     assert coords.shape == (8, 2)
     assert np.isfinite(coords).all()
+
+
+def test_very_large_paragraph_clustering_can_skip(monkeypatch) -> None:
+    monkeypatch.setenv("SITE_AUDIT_PARAGRAPH_CLUSTER_MAX_POINTS", "4")
+    pages = [SimpleNamespace(url=f"https://example.com/{idx}", title=f"Page {idx}") for idx in range(10)]
+    paragraph_records = [
+        (idx, 0, f"Paragraph text about topic {idx}", np.eye(10, 4, dtype=np.float32)[idx])
+        for idx in range(10)
+    ]
+
+    labels, summaries = cluster_and_label(
+        paragraph_records,
+        pages,
+        np.ones(4, dtype=np.float32) / 2.0,
+        num_clusters=4,
+    )
+
+    assert labels.shape == (10,)
+    assert labels.sum() == 0
+    assert summaries == []

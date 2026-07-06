@@ -40,6 +40,14 @@ def _native_max_points() -> int:
         return 50000
 
 
+def _cluster_max_points() -> int:
+    raw = os.getenv("SITE_AUDIT_PARAGRAPH_CLUSTER_MAX_POINTS", "300000")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 300000
+
+
 def _pca_scores(embs: np.ndarray, dims: int = 2) -> np.ndarray:
     if len(embs) == 0:
         return np.zeros((0, dims), dtype=np.float32)
@@ -105,6 +113,14 @@ def cluster_and_label(
 
     embs = np.stack([r[3] for r in paragraph_records]).astype(np.float32)
     n = len(embs)
+    max_points = _cluster_max_points()
+    if max_points and n > max_points:
+        LOG.info(
+            "  paragraph clusters: skipped for %d paragraphs above SITE_AUDIT_PARAGRAPH_CLUSTER_MAX_POINTS=%d",
+            n,
+            max_points,
+        )
+        return np.zeros(n, dtype=int), []
     k = max(2, min(num_clusters, max(2, n // 8)))
 
     if n > _native_max_points():
