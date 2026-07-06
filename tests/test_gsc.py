@@ -87,6 +87,7 @@ def test_gsc_build_analysis_normalizes_clicks_impressions_queries_and_pages() ->
     payload = analysis.payload
     top_page = payload["top_pages"][0]
     keyword = payload["organic_keywords"][0]
+    query_page = payload["query_pages"][0]
 
     assert payload["meta"]["provider"] == "gsc"
     assert payload["summary"]["provider_label"] == "Google Search Console"
@@ -103,6 +104,11 @@ def test_gsc_build_analysis_normalizes_clicks_impressions_queries_and_pages() ->
     assert keyword["traffic"] == 90
     assert keyword["volume"] == 900
     assert keyword["position"] == 2.5
+    assert query_page["query"] == "support automation"
+    assert query_page["url"] == page.url
+    assert query_page["source"] == "gsc"
+    assert query_page["impressions"] == 900
+    assert query_page["position"] == 2.5
     assert payload["daily"][1]["clicks"] == 80
     assert payload["countries"][0]["country"] == "usa"
     assert payload["devices"][0]["device"] == "DESKTOP"

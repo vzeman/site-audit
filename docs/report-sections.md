@@ -73,6 +73,13 @@ Shows GSC, Google Ads, Ahrefs, and DataForSEO search demand mapped onto audited 
 
 Action: use the source filters to compare first-party demand, paid spend, and third-party estimates. Prioritize terms that are commercially relevant and close to existing content vectors; treat far-away keyword clusters as candidates for new pages or major rewrites.
 
+<a id="striking-distance-block"></a>
+## Striking-distance opportunities
+
+Lists query+page rankings in positions 4-20 with enough impressions to model the click gain from moving to a top-3 position.
+
+Action: prioritize pages with the largest modeled gain. Improve intent fit, title/heading alignment, answer depth, freshness, and internal links; treat modeled clicks as directional, not guaranteed.
+
 <a id="best-pages-block"></a>
 ## Best page reverse engineering
 

@@ -143,6 +143,7 @@ from .resource_status import to_payload as resource_status_payload
 from .scatter import project
 from .semantic_ablation import build_semantic_ablation
 from .search_fusion import build_combined_search_analysis
+from .striking_distance import build_striking_distance
 from .structured_data import analyze as analyze_structured_data
 from .structured_data import to_payload as structured_data_payload
 from .sitemap_coverage import analyze as analyze_sitemap_coverage
@@ -1973,6 +1974,15 @@ def run(config: PipelineConfig) -> dict:
         elif search_meta:
             LOG.info("  %s search data: %s", provider_label, search_meta.get("status", "unavailable"))
 
+    striking_distance_data = build_striking_distance(ahrefs_data, pages)
+    sd_summary = striking_distance_data.get("summary", {}) or {}
+    if sd_summary.get("status") == "ok" and sd_summary.get("opportunities"):
+        LOG.info(
+            "  striking distance: %d opportunities · %.1f modeled clicks",
+            sd_summary.get("opportunities", 0),
+            sd_summary.get("total_modeled_click_gain", 0.0),
+        )
+
     competitive_data: dict = {}
     competitive_targets = []
     competitive_auto_meta: dict = {}
@@ -2612,6 +2622,7 @@ def run(config: PipelineConfig) -> dict:
         keyword_attribution=keyword_attribution_data,
         answer_blocks=answer_blocks_data,
         freshness_impact=freshness_impact_data,
+        striking_distance=striking_distance_data,
         cannibalization=cannibalization_data,
         duplicate_fragments=duplicate_fragments_data,
         template_patterns=template_patterns_data,
@@ -2677,6 +2688,7 @@ def run(config: PipelineConfig) -> dict:
             keyword_attribution=keyword_attribution_data,
             answer_blocks=answer_blocks_data,
             freshness_impact=freshness_impact_data,
+            striking_distance=striking_distance_data,
             cannibalization=cannibalization_data,
             duplicate_fragments=duplicate_fragments_data,
             template_patterns=template_patterns_data,

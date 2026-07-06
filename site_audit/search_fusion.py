@@ -6,7 +6,7 @@ from typing import Optional
 
 import numpy as np
 
-from .ahrefs import AhrefsAnalysis, _entity_alignment, _semantic_map
+from .ahrefs import AhrefsAnalysis, _entity_alignment, _normalize_url, _semantic_map
 from .analyzer import PageInfo
 
 
@@ -29,6 +29,7 @@ def build_combined_search_analysis(
 
     top_pages = _merge_top_pages(payloads)
     keywords = _merge_keywords(payloads)
+    query_pages = _merge_query_pages(payloads)
     clusters = _merge_clusters(payloads)
     semantic_points, semantic_rows, semantic_embeddings = _semantic_map(
         pages,
@@ -54,6 +55,7 @@ def build_combined_search_analysis(
         "summary": _combined_summary(payloads, top_pages, keywords, clusters),
         "top_pages": top_pages,
         "organic_keywords": keywords,
+        "query_pages": query_pages,
         "clusters": clusters,
         "semantic_map": {
             "points": semantic_points,
@@ -77,6 +79,7 @@ def _has_search_rows(payload: dict) -> bool:
     return bool(
         payload.get("top_pages")
         or payload.get("organic_keywords")
+        or payload.get("query_pages")
         or summary.get("top_pages")
         or summary.get("organic_keywords")
     )
@@ -92,6 +95,10 @@ def _tagged_payload(payload: dict) -> dict:
     out["summary"] = {**summary, "provider": provider, "provider_label": label}
     out["top_pages"] = [{**row, "provider": provider, "provider_label": label} for row in (payload.get("top_pages") or [])]
     out["organic_keywords"] = [{**row, "provider": provider, "provider_label": label} for row in (payload.get("organic_keywords") or [])]
+    out["query_pages"] = [
+        {**row, "source": row.get("source") or provider, "provider": provider, "provider_label": label}
+        for row in (payload.get("query_pages") or [])
+    ]
     return out
 
 
@@ -114,6 +121,33 @@ def _merge_keywords(payloads: list[dict]) -> list[dict]:
         rows.extend(dict(row) for row in (payload.get("organic_keywords") or []))
     rows.sort(key=lambda r: max(_num(r.get("traffic")), _num(r.get("paid_cost")), _num(r.get("volume")) / 100), reverse=True)
     return rows
+
+
+def _merge_query_pages(payloads: list[dict]) -> list[dict]:
+    by_key: dict[tuple[str, str], dict] = {}
+    for payload in payloads:
+        for row in payload.get("query_pages") or []:
+            query = str(row.get("query") or row.get("keyword") or "").strip().lower()
+            url = _normalize_url(str(row.get("matched_url") or row.get("url") or "").strip())
+            if not query or not url:
+                continue
+            key = (query, url)
+            current = by_key.get(key)
+            if current is None or _prefer_query_page(row, current):
+                by_key[key] = dict(row)
+    rows = list(by_key.values())
+    rows.sort(key=lambda r: _num(r.get("impressions")), reverse=True)
+    return rows
+
+
+def _prefer_query_page(candidate: dict, current: dict) -> bool:
+    candidate_source = str(candidate.get("source") or candidate.get("provider") or "").lower()
+    current_source = str(current.get("source") or current.get("provider") or "").lower()
+    if candidate_source == "gsc" and current_source != "gsc":
+        return True
+    if current_source == "gsc" and candidate_source != "gsc":
+        return False
+    return _num(candidate.get("impressions")) > _num(current.get("impressions"))
 
 
 def _merge_clusters(payloads: list[dict]) -> list[dict]:
@@ -159,9 +193,13 @@ def _merge_clusters(payloads: list[dict]) -> list[dict]:
 
 
 def _combined_summary(payloads: list[dict], top_pages: list[dict], keywords: list[dict], clusters: list[dict]) -> dict:
+    start_date = next((str((p.get("summary") or {}).get("start_date")) for p in payloads if (p.get("summary") or {}).get("start_date")), "")
+    end_date = next((str((p.get("summary") or {}).get("end_date")) for p in payloads if (p.get("summary") or {}).get("end_date")), "")
     return {
         "provider": "combined",
         "provider_label": "Combined search sources",
+        "start_date": start_date,
+        "end_date": end_date,
         "providers": len(payloads),
         "top_pages": len(top_pages),
         "organic_keywords": len(keywords),
@@ -197,6 +235,7 @@ def _compact_provider_payload(payload: dict) -> dict:
         "summary": payload.get("summary") or {},
         "top_pages": (payload.get("top_pages") or [])[:200],
         "organic_keywords": (payload.get("organic_keywords") or [])[:500],
+        "query_pages": (payload.get("query_pages") or [])[:500],
     }
 
 
