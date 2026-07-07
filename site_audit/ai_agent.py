@@ -22,6 +22,7 @@ import requests
 
 from .cache import content_hash
 from .config_env import load_dotenv
+from .gap_thresholds import COVERED, META_MAX_CHARS, TITLE_MAX_CHARS, similarity_band_prompt_text
 
 
 DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4-pro"
@@ -323,8 +324,8 @@ Rules: every paragraph index of the page appears exactly once in `paragraph_deci
 or editing should proceed, especially when evidence contains an intent mismatch or unlikely winnability band;
 `placement_after_paragraph` is -1 for the top of the page or a valid paragraph index;
 `rewrite` must be non-empty exactly when decision is `rewrite`; every new section needs a non-empty `draft`;
-`title.recommended` must be at most 65 characters and `meta_description.recommended` at most 165 characters
-(longer values are truncated in Google SERPs and will fail validation)."""
+`title.recommended` must be at most %d characters and `meta_description.recommended` at most %d characters
+(longer values are truncated in Google SERPs and will fail validation).""" % (TITLE_MAX_CHARS, META_MAX_CHARS)
 
 _DECISION_ENUM = {"keep", "rewrite", "move", "merge", "remove"}
 _OUTLINE_STATUS_ENUM = {"keep", "rename", "new", "remove"}
@@ -358,11 +359,11 @@ def validate_recommendation(payload: dict, paragraph_count: int) -> list[str]:
         elif not isinstance(payload.get(key), expected):
             errors.append(f"key {key} must be {expected.__name__}")
     recommended_title = str((payload.get("title") or {}).get("recommended") or "")
-    if len(recommended_title) > 65:
-        errors.append(f"title.recommended is {len(recommended_title)} characters; maximum is 65 (SERP truncation)")
+    if len(recommended_title) > TITLE_MAX_CHARS:
+        errors.append(f"title.recommended is {len(recommended_title)} characters; maximum is {TITLE_MAX_CHARS} (SERP truncation)")
     recommended_meta = str((payload.get("meta_description") or {}).get("recommended") or "")
-    if len(recommended_meta) > 165:
-        errors.append(f"meta_description.recommended is {len(recommended_meta)} characters; maximum is 165 (SERP truncation)")
+    if len(recommended_meta) > META_MAX_CHARS:
+        errors.append(f"meta_description.recommended is {len(recommended_meta)} characters; maximum is {META_MAX_CHARS} (SERP truncation)")
     decisions = payload.get("paragraph_decisions") or []
     if isinstance(decisions, list):
         seen: set[int] = set()
@@ -441,6 +442,7 @@ def _harnext_session_runner(
     max_turns: int,
     api_key: str | None = None,
 ) -> dict[str, Any]:
+    import harnext_sdk  # type: ignore
     from harnext_sdk import HarnextAgentOptions, query  # type: ignore
     from harnext_sdk.types import AssistantMessage, ResultMessage, TextBlock  # type: ignore
     import inspect
@@ -457,12 +459,18 @@ def _harnext_session_runner(
     }
     try:
         params = set(inspect.signature(HarnextAgentOptions).parameters)
-    except (TypeError, ValueError):
-        params = set()
-    for candidate in ("cwd", "workdir", "working_directory"):
-        if candidate in params:
-            kwargs[candidate] = str(workspace)
-            break
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Unsupported harnext_sdk: expected HarnextAgentOptions to expose cwd in harnext_sdk 1.15.x."
+        ) from exc
+    if "cwd" not in params:
+        version = getattr(harnext_sdk, "__version__", "unknown")
+        raise RuntimeError(
+            "Unsupported harnext_sdk version "
+            f"{version}: expected HarnextAgentOptions(cwd=...) as in harnext_sdk 1.15.x; "
+            f"available parameters: {', '.join(sorted(params))}"
+        )
+    kwargs["cwd"] = str(workspace)
     if "permission_mode" in params:
         kwargs["permission_mode"] = "acceptEdits"
     options = HarnextAgentOptions(**kwargs)
@@ -737,8 +745,8 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "In Paragraph Decisions, give a decision (keep, rewrite, move, merge, or remove) for every paragraph listed "
                 "in paragraph_review, referencing paragraphs as [P<index>]. For paragraphs not listed, only mention them if "
                 "they conflict with a new section. "
-                "How to read similarity scores: >= 0.78 covered, 0.62-0.78 partial, < 0.62 weak; paragraph_review is sorted "
-                "weakest-first so its values can still be high — never call a score above 0.78 'low'; cite the actual number "
+                f"How to read similarity scores: {similarity_band_prompt_text()}; paragraph_review is sorted "
+                f"weakest-first so its values can still be high — never call a score above {COVERED:g} 'low'; cite the actual number "
                 "and the correct band in reasons. "
                 "For missing competitor-covered topics, write the actual original draft copy that should be added. "
                 "In Final Article Draft, assemble the full recommended article from own_page order: reuse kept paragraphs by "
@@ -753,7 +761,8 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "alone are unlikely to reach page 1, recommend the supplied alternative keyword when present, and list "
                 "link acquisition as the prerequisite. "
                 "Ignore navigation, footer, cookie, newsletter, and language-switcher items if they appear in own_page "
-                "headings. Keep the recommended title at most 65 characters and the meta description at most 165 characters. "
+                f"headings. Keep the recommended title at most {TITLE_MAX_CHARS} characters and "
+                f"the meta description at most {META_MAX_CHARS} characters. "
                 "Respect structural_patterns advice (tables, question-form headings, statistics, schema). "
                 "Do not duplicate topics listed in covered_topics. "
                 "If impressions, clicks, traffic, or volume are absent, say demand metrics absent instead of guessing. "

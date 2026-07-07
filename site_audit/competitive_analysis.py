@@ -38,6 +38,14 @@ from .answerability import score_page
 from .crawler import Crawler, CrawlConfig
 from .extractor import extract
 from .dataforseo import dataforseo_credentials
+from .gap_thresholds import (
+    CLUSTER_SIMILARITY,
+    COVERED,
+    OFF_INTENT,
+    PARTIAL,
+    PREVALENCE_CRITICAL,
+    PREVALENCE_HIGH,
+)
 
 LOG = logging.getLogger(__name__)
 DATAFORSEO_SERP_BASE_URL = "https://api.dataforseo.com/v3/serp"
@@ -828,7 +836,7 @@ def _cluster_paragraphs(embeddings: np.ndarray, max_clusters: int = 12) -> np.nd
             labels[i] = next_label
             sims = embeddings @ emb
             for j in range(i + 1, len(embeddings)):
-                if labels[j] < 0 and sims[j] >= 0.78:
+                if labels[j] < 0 and sims[j] >= CLUSTER_SIMILARITY:
                     labels[j] = next_label
             next_label += 1
         return labels
@@ -858,7 +866,7 @@ def _cluster_paragraphs(embeddings: np.ndarray, max_clusters: int = 12) -> np.nd
             labels[i] = next_label
             sims = embeddings @ emb
             for j in range(i + 1, len(embeddings)):
-                if labels[j] < 0 and sims[j] >= 0.78:
+                if labels[j] < 0 and sims[j] >= CLUSTER_SIMILARITY:
                     labels[j] = next_label
             next_label += 1
         return labels
@@ -873,8 +881,8 @@ def build_serp_paragraph_gap(
     our_paragraphs: list[str],
     our_paragraph_embeddings: np.ndarray,
     competitor_pages: list[CompetitorPage],
-    missing_threshold: float = 0.62,
-    covered_threshold: float = 0.78,
+    missing_threshold: float = PARTIAL,
+    covered_threshold: float = COVERED,
 ) -> dict:
     usable = [p for p in competitor_pages if not p.error and len(p.paragraph_embeddings) > 0]
     if not usable:
@@ -939,9 +947,9 @@ def build_serp_paragraph_gap(
             coverage = "partial"
         else:
             coverage = "missing"
-        if coverage == "missing" and prevalence >= 0.8:
+        if coverage == "missing" and prevalence >= PREVALENCE_CRITICAL:
             priority = "critical"
-        elif coverage in {"missing", "partial"} and prevalence >= 0.6:
+        elif coverage in {"missing", "partial"} and prevalence >= PREVALENCE_HIGH:
             priority = "high"
         elif coverage == "missing":
             priority = "medium"
@@ -1002,7 +1010,7 @@ def build_serp_paragraph_gap(
                 "paragraph": text[:300],
                 "review_reason": "lowest similarity to SERP topic centroids",
             })
-            if best_topic_sim < 0.52:
+            if best_topic_sim < OFF_INTENT:
                 off_intent.append({
                     "paragraph_index": i,
                     "similarity_to_serp_topics": round(best_topic_sim, 4),

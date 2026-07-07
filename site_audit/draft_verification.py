@@ -15,9 +15,7 @@ from typing import Callable
 
 import numpy as np
 
-# Keep in sync with build_serp_paragraph_gap() in competitive_analysis.py.
-COVERED_THRESHOLD = 0.78
-PARTIAL_THRESHOLD = 0.62
+from .gap_thresholds import band
 
 
 @dataclass(frozen=True)
@@ -285,11 +283,8 @@ def assemble_recommended_blocks(own_paragraphs: list[str], recommendation: dict)
 
 
 def _classify(similarity: float) -> str:
-    if similarity >= COVERED_THRESHOLD:
-        return "covered"
-    if similarity >= PARTIAL_THRESHOLD:
-        return "partial"
-    return "missing"
+    score_band = band(similarity)
+    return "missing" if score_band == "weak" else score_band
 
 
 def verify_recommendation(
