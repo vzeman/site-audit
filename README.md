@@ -1220,6 +1220,11 @@ site-audit run <domain> [flags]
 | `--request-delay` | 0 | Seconds to sleep before each fetch. Slow down for rate-limited sites. |
 | `-v`, `--verbose` | off | DEBUG-level logging. |
 
+Embedding model note for Apple Silicon: `Alibaba-NLP/gte-multilingual-base`
+has been observed to develop in-process NaN corruption during very large
+audits with tens of thousands of pages. For large sites on that platform, use
+the default `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
+
 ```bash
 site-audit serve <domain> [--projects-root projects/] [--port 8765]
 ```

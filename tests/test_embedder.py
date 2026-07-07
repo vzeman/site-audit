@@ -60,7 +60,11 @@ class CpuFallbackEmbedder(Embedder):
     ) -> np.ndarray:
         if self._device == "cpu":
             return np.asarray([[1.0, 0.0] for _ in texts], dtype=np.float32)
-        return np.asarray([[np.nan, np.nan] for _ in texts], dtype=np.float32)
+        arr = np.ones((len(texts), 2), dtype=np.float32)
+        for idx, text in enumerate(texts):
+            if text == "bad":
+                arr[idx] = np.nan
+        return arr
 
 
 class FakeModel:
@@ -98,10 +102,10 @@ def test_encode_pages_persists_embedding_cache_in_chunks(monkeypatch) -> None:
 
 
 def test_encode_retries_non_finite_embeddings_on_cpu() -> None:
-    embeddings = CpuFallbackEmbedder().encode(["text"], batch_size=1)
+    embeddings = CpuFallbackEmbedder().encode(["ok", "bad"], batch_size=1)
 
     assert np.isfinite(embeddings).all()
-    assert embeddings.tolist() == [[1.0, 0.0]]
+    assert embeddings.tolist() == [[1.0, 1.0], [1.0, 0.0]]
 
 
 def test_embedder_caps_model_max_sequence_length() -> None:
@@ -212,6 +216,34 @@ def test_cpu_fallback_reencodes_only_still_bad_rows() -> None:
     assert emb.calls[2] == ("cpu", ["a", "c"])
 
 
+def test_whole_chunk_failure_zero_fills_without_cpu_fallback() -> None:
+    emb = ScriptedEmbedder([_nan_at([0, 1, 2]), _nan_at([0, 1, 2])])
+
+    result = emb.encode(["a", "b", "c"], zero_fill_bad=True)
+
+    assert np.isfinite(result).all()
+    assert not result.any()
+    assert [device for device, _ in emb.calls] == [None, None]
+
+
+def test_whole_chunk_failure_raises_without_cpu_fallback() -> None:
+    emb = ScriptedEmbedder([_nan_at([0, 1, 2]), _nan_at([0, 1, 2])])
+
+    with pytest.raises(RuntimeError, match="3/3 non-finite"):
+        emb.encode(["a", "b", "c"])
+
+    assert [device for device, _ in emb.calls] == [None, None]
+
+
+def test_chunk_size_one_failure_zero_fills_without_cpu_fallback() -> None:
+    emb = ScriptedEmbedder([_nan_at([0]), _nan_at([0])])
+
+    result = emb.encode(["a"], batch_size=1, zero_fill_bad=True)
+
+    assert result.tolist() == [[0.0, 0.0, 0.0]]
+    assert [device for device, _ in emb.calls] == [None, None]
+
+
 def test_raises_when_rows_stay_non_finite() -> None:
     emb = ScriptedEmbedder([_nan_at([1]), _nan_at([0]), _nan_at([0])])
 
@@ -230,7 +262,7 @@ def test_encode_reloads_model_before_each_retry() -> None:
 
     emb._ensure = tracking_ensure
 
-    result = emb.encode(["a"])
+    result = emb.encode(["a", "b"])
 
     assert np.isfinite(result).all()
     # initial load, accelerator reload, CPU reload
@@ -324,7 +356,7 @@ def test_encode_and_cache_skips_zero_rows_and_logs_identifiers(caplog) -> None:
 def test_encode_returns_to_accelerator_after_cpu_fallback() -> None:
     emb = ScriptedEmbedder([_nan_at([0]), _nan_at([0]), _finite, _finite])
 
-    first = emb.encode(["a"])
+    first = emb.encode(["a", "ok"])
     second = emb.encode(["b"])
 
     assert np.isfinite(first).all()
@@ -364,7 +396,7 @@ def test_reload_defeats_real_ensure_early_return(monkeypatch) -> None:
         def _clear_accelerator_cache(self) -> None:
             pass
 
-    result = RealEnsureEmbedder().encode(["a"])
+    result = RealEnsureEmbedder().encode(["a", "b"])
 
     assert np.isfinite(result).all()
     # initial load, accelerator reload, cpu reload — three constructions

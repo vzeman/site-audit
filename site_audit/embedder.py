@@ -165,6 +165,12 @@ class Embedder:
         segfaults once faiss has loaded libomp); (3) with ``zero_fill_bad``
         zero the surviving bad rows so a long audit degrades instead of
         dying — otherwise raise.
+
+        Step (2) is skipped and (3) applied directly if the *entire* chunk
+        is still non-finite after step (1), since whole-chunk failure
+        correlates with corrupted in-process model weights rather than a
+        transient error, and the CPU rung would otherwise burn hours
+        re-encoding rows that are never going to recover.
         """
         if not texts:
             return np.zeros((0, 0), dtype=np.float32)
@@ -188,6 +194,21 @@ class Embedder:
             bad = _non_finite_row_indices(arr)
             if bad.size == 0:
                 return arr
+            if bad.size == len(texts):
+                action = "zero-filling the chunk" if zero_fill_bad else "raising"
+                LOG.warning(
+                    "All %d/%d vectors in this chunk are non-finite after an "
+                    "accelerator reload; this usually means the model's "
+                    "in-process weights are corrupted (not a transient error); "
+                    "skipping the slow CPU-per-row rescue and %s",
+                    bad.size, len(texts), action,
+                )
+                if zero_fill_bad:
+                    arr[bad] = 0.0
+                    return arr
+                raise RuntimeError(
+                    f"Embedding model returned {bad.size}/{len(texts)} non-finite vectors"
+                )
             LOG.warning(
                 "%d vectors still non-finite after accelerator retry; "
                 "re-encoding those rows on CPU",
