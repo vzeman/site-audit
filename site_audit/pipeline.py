@@ -1834,10 +1834,23 @@ def run(config: PipelineConfig) -> dict:
 
             if misses_idx:
                 miss_texts = [triples[k][2] for k in misses_idx]
-                new_embs = embedder.encode(miss_texts, batch_size=64, show_progress=True)
+                # encode_and_cache zero-fills rows that stay non-finite on
+                # every device (instead of raising and killing the audit)
+                # and keeps those rows out of the paragraph cache so a
+                # later run retries them.
+                new_embs = embedder.encode_and_cache(
+                    miss_texts,
+                    [pages[triples[k][0]].url for k in misses_idx],
+                    [hashes[k] for k in misses_idx],
+                    paragraph_cache,
+                    batch_size=64,
+                    show_progress=True,
+                    identifiers=[
+                        f"{pages[triples[k][0]].url} (paragraph {triples[k][1]})"
+                        for k in misses_idx
+                    ],
+                )
                 for slot, k in enumerate(misses_idx):
-                    page_i, _, _ = triples[k]
-                    paragraph_cache.put(pages[page_i].url, hashes[k], new_embs[slot])
                     cached_embs[k] = new_embs[slot]
                 paragraph_cache.save()
 

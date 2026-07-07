@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import ExitStack, contextmanager, nullcontext, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from io import StringIO
 from typing import Iterable, List
@@ -46,32 +46,6 @@ def _non_finite_row_indices(arr: np.ndarray) -> np.ndarray:
     if arr.size == 0:
         return np.zeros(0, dtype=np.int64)
     return np.flatnonzero(~np.isfinite(arr).all(axis=1))
-
-
-@contextmanager
-def _cpu_thread_boost():
-    """Temporarily raise torch's intra-op threads for a CPU fallback encode.
-
-    ``site_audit.__init__`` pins ``OMP_NUM_THREADS=1`` so faiss and torch can
-    share libomp, which makes CPU encoding of this model ~100x slower than the
-    hardware allows. ``torch.set_num_threads`` overrides the pin for torch
-    only, and the previous value is restored afterwards.
-    """
-    try:
-        import torch
-
-        previous = torch.get_num_threads()
-        torch.set_num_threads(max(1, (os.cpu_count() or 2) // 2))
-    except Exception:
-        yield
-        return
-    try:
-        yield
-    finally:
-        try:
-            torch.set_num_threads(previous)
-        except Exception:
-            pass
 
 
 def _embed_cache_save_every(default: int = DEFAULT_EMBED_CACHE_SAVE_EVERY) -> int:
@@ -173,7 +147,25 @@ class Embedder:
         )
         return np.asarray(embs, dtype=np.float32)
 
-    def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
+    def encode(
+        self,
+        texts: list[str],
+        batch_size: int = 32,
+        show_progress: bool = False,
+        *,
+        zero_fill_bad: bool = False,
+    ) -> np.ndarray:
+        """Encode texts, recovering from non-finite accelerator output.
+
+        Recovery ladder: (1) reload the model on the accelerator with a
+        cleared allocator cache and re-encode only the bad rows — MPS can
+        corrupt model state and then NaN every batch until reloaded;
+        (2) reload on CPU and re-encode only the bad rows (single-threaded:
+        raising torch's thread count under the OMP_NUM_THREADS=1 pin
+        segfaults once faiss has loaded libomp); (3) with ``zero_fill_bad``
+        zero the surviving bad rows so a long audit degrades instead of
+        dying — otherwise raise.
+        """
         if not texts:
             return np.zeros((0, 0), dtype=np.float32)
         self._ensure()
@@ -186,34 +178,45 @@ class Embedder:
         if bad.size == 0:
             return arr
         if self._device != "cpu":
-            # MPS returns NaN rows under allocator pressure instead of
-            # raising; freeing its cache and re-encoding just the bad rows
-            # usually recovers without leaving the accelerator.
             LOG.warning(
                 "Embedding model returned %d/%d non-finite vectors on %s; "
-                "clearing accelerator cache and retrying those rows",
+                "reloading the model and retrying those rows",
                 bad.size, len(texts), self._device or "auto",
             )
-            self._clear_accelerator_cache()
+            self._reload(self._device)
             self._reencode_rows(arr, texts, bad, batch_size=batch_size)
             bad = _non_finite_row_indices(arr)
             if bad.size == 0:
                 return arr
-            # Only the still-bad rows go to CPU — re-encoding the whole
-            # chunk there takes hours under the OMP_NUM_THREADS=1 pin.
             LOG.warning(
                 "%d vectors still non-finite after accelerator retry; "
                 "re-encoding those rows on CPU",
                 bad.size,
             )
-            self._model = None
-            self._ensure("cpu")
-            with _cpu_thread_boost():
-                self._reencode_rows(arr, texts, bad, batch_size=batch_size)
+            self._reload("cpu")
+            self._reencode_rows(arr, texts, bad, batch_size=batch_size)
             bad = _non_finite_row_indices(arr)
             if bad.size == 0:
                 return arr
-        raise RuntimeError("Embedding model returned non-finite vectors")
+        if zero_fill_bad:
+            LOG.warning(
+                "%d/%d vectors stayed non-finite on every device; zero-filling "
+                "them so the run can continue (affected texts embed as "
+                "unrelated to everything)",
+                bad.size, len(texts),
+            )
+            arr[bad] = 0.0
+            return arr
+        raise RuntimeError(
+            f"Embedding model returned {bad.size}/{len(texts)} non-finite vectors"
+        )
+
+    def _reload(self, device: str | None) -> None:
+        """Discard the loaded model and load a fresh copy on ``device``."""
+        self._model = None
+        self._device = None
+        self._clear_accelerator_cache()
+        self._ensure(device)
 
     def _reencode_rows(
         self,
@@ -241,6 +244,51 @@ class Embedder:
                 torch.cuda.empty_cache()
         except Exception:  # best-effort; the CPU fallback still applies
             pass
+
+    def encode_and_cache(
+        self,
+        texts: list[str],
+        urls: list[str],
+        hashes: list[str],
+        cache,
+        *,
+        batch_size: int = 32,
+        show_progress: bool = False,
+        identifiers: list[str] | None = None,
+    ) -> np.ndarray:
+        """Encode ``texts`` tolerantly and cache the rows that embedded.
+
+        Rows the model could not embed on any device come back as zero
+        vectors (the ``zero_fill_bad`` sentinel from :meth:`encode`); those
+        are never written to ``cache`` so a later run retries them, and
+        their ``identifiers`` (default: ``urls``) are logged. ``cache``
+        needs ``put(url, hash, embedding)`` — both ``EmbeddingCache`` and
+        ``ParagraphEmbeddingCache`` qualify. Calling ``cache.save()``
+        stays the caller's job.
+        """
+        embs = self.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress=show_progress,
+            zero_fill_bad=True,
+        )
+        ids = identifiers if identifiers is not None else urls
+        skipped: list[str] = []
+        for k in range(len(texts)):
+            emb = embs[k]
+            if emb.size and not emb.any():
+                skipped.append(ids[k])
+                continue
+            cache.put(urls[k], hashes[k], emb)
+        if skipped:
+            LOG.warning(
+                "%d texts embedded as zero vectors (model returned "
+                "non-finite output for them on every device); left out of "
+                "the embedding cache so a later run retries: %s",
+                len(skipped),
+                ", ".join(skipped[:10]) + ("…" if len(skipped) > 10 else ""),
+            )
+        return embs
 
     def encode_pages(
         self,
@@ -279,15 +327,16 @@ class Embedder:
             for offset in range(0, len(misses_idx), save_every):
                 chunk_idx = misses_idx[offset : offset + save_every]
                 miss_texts = [inputs[i].text for i in chunk_idx]
-                new_embs = self.encode(
+                new_embs = self.encode_and_cache(
                     miss_texts,
+                    [inputs[i].url for i in chunk_idx],
+                    [hashes[i] for i in chunk_idx],
+                    cache,
                     batch_size=batch_size,
                     show_progress=True,
                 )
                 for k, i in enumerate(chunk_idx):
-                    emb = new_embs[k]
-                    embeddings[i] = emb
-                    cache.put(inputs[i].url, hashes[i], emb)
+                    embeddings[i] = new_embs[k]
                 cache.save()
                 LOG.info(
                     "Embedding cache persisted: %d / %d misses",
