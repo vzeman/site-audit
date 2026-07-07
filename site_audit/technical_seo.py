@@ -14,6 +14,8 @@ from urllib.parse import parse_qsl, urlparse
 
 from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CATALOG
 
+from .technical_issue_catalog import TECHNICAL_ISSUE_BY_KEY, TECHNICAL_ISSUE_CATALOG
+
 
 _SEVERITY_WEIGHT = {"high": 100.0, "medium": 55.0, "low": 25.0}
 _GOOGLEBOT_HTML_LIMIT_BYTES = 2 * 1024 * 1024

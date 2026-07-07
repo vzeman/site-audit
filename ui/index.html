@@ -1091,6 +1091,7 @@
           </p>
         </div>
         <div class="flex flex-wrap gap-2 text-xs">
+          <select id="technical-issue-type-filter" class="rounded border border-gray-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
           <select id="technical-severity-filter" class="rounded border border-gray-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
           <select id="technical-category-filter" class="rounded border border-gray-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"></select>
           <input id="technical-issue-search" class="rounded border border-gray-300 px-3 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Search URL or issue">
@@ -1107,7 +1108,7 @@
           <div id="technical-category-bars" class="space-y-2 max-h-72 overflow-y-auto"></div>
         </div>
         <div>
-          <h4 class="font-semibold mb-2">Top issue types</h4>
+          <h4 class="font-semibold mb-2">All found issue types</h4>
           <div id="technical-issue-bars" class="space-y-2 max-h-72 overflow-y-auto"></div>
         </div>
       </div>
@@ -2379,7 +2380,7 @@
 <script>
 (function() {
   const reportPathParts = window.location.pathname.split('/').filter(Boolean);
-  const servedReportDomain = reportPathParts[0] === 'reports' ? reportPathParts[1] : '';
+  const servedReportDomain = (reportPathParts[0] === 'reports' || reportPathParts[0] === 'reports-data') ? reportPathParts[1] : '';
   const basePath = servedReportDomain ? `/reports-data/${servedReportDomain}` : (window.location.protocol === 'file:' ? '.' : '/data');
   document.querySelectorAll('[data-report-csv]').forEach(link => {
     const filename = link.getAttribute('data-report-csv');
@@ -2771,7 +2772,7 @@
           loadJSON('conversion.json').catch(() => ({})),
           loadJSON('indexability.json').catch(() => ({})),
           loadJSON('performance.json').catch(() => ({})),
-          loadJSON('technical_issues.json').catch(() => ({})),
+          loadJSON('technical_overview.json').catch(() => loadJSON('technical_issues.json').catch(() => ({}))),
           loadJSON('ahrefs.json').catch(() => ({})),
           loadJSON('best_pages.json').catch(() => ({})),
           loadJSON('performance_explainer.json').catch(() => ({})),
@@ -5974,11 +5975,12 @@
   }
 
   function renderTechnicalBars(targetId, counts, limit = 12) {
-    const entries = Object.entries(counts || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0)).slice(0, limit);
-    const max = Math.max(1, ...entries.map(([, value]) => Number(value || 0)));
+    const entries = Object.entries(counts || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+    const visible = limit ? entries.slice(0, limit) : entries;
+    const max = Math.max(1, ...visible.map(([, value]) => Number(value || 0)));
     const el = document.getElementById(targetId);
     if (!el) return;
-    el.innerHTML = entries.map(([label, value]) => {
+    el.innerHTML = visible.map(([label, value]) => {
       const pct = Math.max(3, Math.round(Number(value || 0) / max * 100));
       return `<div>
         <div class="flex justify-between gap-3 mb-1">
@@ -6007,11 +6009,11 @@
       card('Issue types', Number(summary.catalog_issue_types || (data.issue_catalog || []).length || 0).toLocaleString(), 'technical audit checks active');
 
     renderTechnicalBars('technical-severity-bars', data.severity_counts || {}, 8);
-    renderTechnicalBars('technical-category-bars', data.category_counts || {}, 16);
-    renderTechnicalBars('technical-issue-bars', data.issue_counts || {}, 20);
+    renderTechnicalBars('technical-category-bars', data.category_counts || {}, 0);
+    renderTechnicalBars('technical-issue-bars', data.issue_counts || {}, 0);
 
     const catalog = data.issue_catalog || [];
-    document.getElementById('technical-issue-catalog').innerHTML = catalog.slice(0, 160).map(row => {
+    document.getElementById('technical-issue-catalog').innerHTML = catalog.map(row => {
       const severity = technicalIssueValue(row, ['severity', 'importance']);
       const name = technicalIssueValue(row, ['name', 'issue_type', 'issue']);
       return `<div class="border-b border-gray-100 py-2">
@@ -6023,6 +6025,7 @@
       </div>`;
     }).join('') || '<div class="text-gray-500">Issue catalog not available.</div>';
 
+    const issueTypeEl = document.getElementById('technical-issue-type-filter');
     const severityEl = document.getElementById('technical-severity-filter');
     const categoryEl = document.getElementById('technical-category-filter');
     const searchEl = document.getElementById('technical-issue-search');
@@ -6033,20 +6036,35 @@
     const pagerEl = document.getElementById('technical-pager-label');
     const pageSize = 80;
     state.technicalIssuePage = state.technicalIssuePage || 0;
+    let loadedIssues = issues;
+    const issueGroups = Array.isArray(data.issue_groups) ? data.issue_groups : [];
+    if (!issueTypeEl.dataset.ready) {
+      issueTypeEl.dataset.ready = '1';
+      issueTypeEl.innerHTML =
+        '<option value="">All issue rows</option>' +
+        issueGroups.map(group => {
+          const label = String(group.issue_name || group.issue_type || '').replaceAll('_', ' ');
+          const count = Number(group.count || 0).toLocaleString();
+          return `<option value="${escapeHtml(group.file || '')}">${escapeHtml(label)} (${count})</option>`;
+        }).join('');
+    }
 
-    const severities = [...new Set(issues.map(row => technicalIssueValue(row, ['severity', 'importance'])).filter(Boolean))].sort();
-    const categories = [...new Set(issues.map(row => row.category).filter(Boolean))].sort();
-    if (!severityEl.dataset.ready) {
-      severityEl.dataset.ready = '1';
+    const refillRowFilters = () => {
+      const severities = [...new Set(loadedIssues.map(row => technicalIssueValue(row, ['severity', 'importance'])).filter(Boolean))].sort();
+      const categories = [...new Set(loadedIssues.map(row => row.category).filter(Boolean))].sort();
+      const currentSeverity = severityEl.value || '';
+      const currentCategory = categoryEl.value || '';
       severityEl.innerHTML = '<option value="">All severities</option>' + severities.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
       categoryEl.innerHTML = '<option value="">All categories</option>' + categories.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(String(v).replaceAll('_', ' '))}</option>`).join('');
-    }
+      if (severities.includes(currentSeverity)) severityEl.value = currentSeverity;
+      if (categories.includes(currentCategory)) categoryEl.value = currentCategory;
+    };
 
     const applyFilters = () => {
       const q = (searchEl.value || '').trim().toLowerCase();
       const severity = severityEl.value || '';
       const category = categoryEl.value || '';
-      const filtered = issues.filter(row => {
+      const filtered = loadedIssues.filter(row => {
         if (severity && technicalIssueValue(row, ['severity', 'importance']) !== severity) return false;
         if (category && row.category !== category) return false;
         if (!q) return true;
@@ -6061,9 +6079,9 @@
       state.technicalIssuePage = Math.min(state.technicalIssuePage || 0, maxPage);
       const start = state.technicalIssuePage * pageSize;
       const pageRows = filtered.slice(start, start + pageSize);
-      statusEl.textContent = issues.length
-        ? `${filtered.length.toLocaleString()} matching issues from ${issues.length.toLocaleString()} loaded rows.`
-        : 'Issue row file not loaded; summary counts are still available.';
+      statusEl.textContent = loadedIssues.length
+        ? `${filtered.length.toLocaleString()} matching issues from ${loadedIssues.length.toLocaleString()} loaded rows.`
+        : 'Select an issue type to load affected URLs. Summary, category, and catalog data are already available.';
       rowsEl.innerHTML = pageRows.map(row => {
         const severity = technicalIssueValue(row, ['severity', 'importance']);
         const issueName = technicalIssueValue(row, ['issue_type', 'name', 'issue']);
@@ -6082,16 +6100,38 @@
       prevEl.disabled = state.technicalIssuePage <= 0;
       nextEl.disabled = state.technicalIssuePage >= maxPage;
     };
+    const loadIssueRows = async (path) => {
+      try {
+        statusEl.textContent = path ? `Loading ${path}...` : 'Loading all issue rows...';
+        const payload = path ? await loadJSON(path) : (issues.length ? {issues} : await loadJSON('technical_issues.json'));
+        loadedIssues = Array.isArray(payload.issues) ? payload.issues : [];
+        state.technicalIssuePage = 0;
+        refillRowFilters();
+        applyFilters();
+      } catch (err) {
+        loadedIssues = [];
+        rowsEl.innerHTML = '<div class="text-gray-500">Unable to load issue rows for this selection.</div>';
+        statusEl.textContent = 'Issue rows could not be loaded; summary counts and catalog are still available.';
+        pagerEl.textContent = 'No rows';
+      }
+    };
     if (!searchEl.dataset.ready) {
       searchEl.dataset.ready = '1';
       [searchEl, severityEl, categoryEl].forEach(el => {
         el.addEventListener('input', () => { state.technicalIssuePage = 0; applyFilters(); });
         el.addEventListener('change', () => { state.technicalIssuePage = 0; applyFilters(); });
       });
+      issueTypeEl.addEventListener('change', () => loadIssueRows(issueTypeEl.value || ''));
       prevEl.addEventListener('click', () => { state.technicalIssuePage = Math.max(0, (state.technicalIssuePage || 0) - 1); applyFilters(); });
       nextEl.addEventListener('click', () => { state.technicalIssuePage = (state.technicalIssuePage || 0) + 1; applyFilters(); });
     }
-    applyFilters();
+    if (issueGroups.length && !issues.length) {
+      issueTypeEl.value = issueGroups[0].file || '';
+      loadIssueRows(issueTypeEl.value);
+    } else {
+      refillRowFilters();
+      applyFilters();
+    }
   }
 
   function renderStructuredData() {

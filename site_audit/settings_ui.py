@@ -13,6 +13,14 @@ from urllib.parse import parse_qs, unquote
 
 from .config_env import collect_actions, env_names, read_env_file, update_env_file
 
+
+def _domain_report_index(projects_root: Path, domain: str, ui_dir: Path) -> Path:
+    report_index = projects_root / domain / "report" / "index.html"
+    if report_index.is_file():
+        return report_index
+    return ui_dir / "index.html"
+
+
 FIELD_DETAILS = {
     "SITE_AUDIT_RUN_DOMAIN": {
         "what": "The site to crawl and analyze.",
@@ -255,7 +263,8 @@ def serve_settings_ui(
                 self._send_html(_render_comparisons_page(projects_root))
                 return
             if path.startswith("/reports/") and path.rstrip("/").count("/") == 2:
-                self._serve_file(ui_dir / "index.html")
+                domain = path.strip("/").split("/", 1)[1]
+                self._serve_file(_domain_report_index(projects_root, domain, ui_dir))
                 return
             if path.startswith("/reports-data/"):
                 parts = path[len("/reports-data/"):].split("/", 1)

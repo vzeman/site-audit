@@ -592,3 +592,35 @@ site-audit serp-gap example.com \
   --refresh-serp \
   --refresh-competitors
 ```
+
+## Structural / GEO Gaps
+
+Each keyword card includes a Structural / GEO Gaps panel comparing page-structure signals against ranking competitors: FAQ/QA and Article/HowTo schema, question-form headings, statistics with units, external citations, comparison tables, and page depth. Signals seen on two or more competitors also become `structural` action points with concrete advice.
+
+## People Also Ask Coverage
+
+SERP features (People Also Ask questions, related searches, answer boxes) are captured from the SERP provider and each PAA question is scored against the page's paragraphs using the same embedding thresholds as topic coverage (covered >= 0.78, partial >= 0.62). Missing questions appear in the keyword card, in the TODO markdown, and as `answer_paa` action points.
+
+## AI Agent Workspace Mode (Harnext)
+
+With `--ai-agent-provider harnext` (default) and the Harnext CLI installed, the agent runs as a multi-turn coding agent over an on-disk evidence workspace written to `serp_gap/report/<run>/agent/<url-slug>/`:
+
+- `evidence.json` — the full computed evidence for the URL (topics, heatmap with per-competitor cells, benchmark, structural patterns, PAA coverage, content order, action points)
+- `our_page.md` — the page's complete content with paragraphs numbered `[P0]`, `[P1]`, ...
+- `competitors/NN-domain.md` — outline and paragraphs of each ranking competitor
+- `serp.json` — SERP rankings and features per keyword
+- `TASK.md` — the agent instructions including the `recommendation.json` contract
+
+The agent must write `recommendation.json` (validated: every paragraph gets exactly one keep/rewrite/move/merge/remove decision, new sections need drafts and valid placements) and `brief.md`. Invalid output triggers one automatic repair turn. Control the session length with `--ai-agent-max-turns` (default 20). With `--ai-agent-provider openrouter` the same JSON contract is requested inline in a single completion.
+
+## Coverage Verification
+
+After a valid recommendation, the recommended page (kept paragraphs + rewrites + new section drafts) is re-embedded locally and re-scored against the SERP topic centroids and PAA questions. The report shows before/after coverage (for example "missing 6 -> 0"); if critical or high-priority topics remain uncovered, one verification repair turn asks the agent to strengthen the recommendation.
+
+## New Action Types
+
+Besides `add_topic`, `strengthen_topic`, and `review_paragraph`, the action plan can include: `rewrite_title` (keyword missing from the title while most top competitor titles contain it, short titles, or empty H1), `expand_depth` (page is far below the top-5 competitor median depth), `structural` (structural/GEO pattern gaps), and `answer_paa` (missing People Also Ask answers). Near-duplicate topic actions across keywords of the same page are merged, keeping the highest-impact task (`merged_duplicates` records how many were folded in).
+
+## Recommended Section Order
+
+Each keyword card shows the section themes of ranking pages ordered by where competitors place them, marking themes the page already covers (`have`) and themes to add (`add`). Use it together with the AI recommendation outline to restructure the page.

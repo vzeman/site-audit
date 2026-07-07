@@ -414,6 +414,7 @@ def _serp_gap_command(args: argparse.Namespace) -> int:
         ai_agent_provider=args.ai_agent_provider,
         ai_agent_model=_resolved_ai_agent_model(args.ai_agent_model),
         ai_agent_refresh=args.ai_agent_refresh,
+        ai_agent_max_turns=getattr(args, "ai_agent_max_turns", 20),
     )
     payload = run_serp_gap(config)
     status = payload.get("status", "unknown")
@@ -1529,8 +1530,8 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--menu", action="store_true",
                         help="Open an interactive terminal menu that explains and fills common SERP gap options")
     serp_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
-    serp_p.add_argument("--url", action="append", default=[],
-                        help="Exact page URL to analyze even if it was not in pages.json; repeat for multiple URLs")
+    serp_p.add_argument("--url", "--urls", action="extend", nargs="+", default=[],
+                        help="Exact page URL(s) to analyze even if not in pages.json; repeat or pass multiple values")
     serp_p.add_argument("--url-include", "--include-url", action="append", default=[],
                         help="URL/path glob or regex to include; repeat for OR matching")
     serp_p.add_argument("--url-exclude", "--exclude-url", action="append", default=[],
@@ -1538,8 +1539,8 @@ def build_parser() -> argparse.ArgumentParser:
     serp_p.add_argument("--keyword-source", default="auto",
                         choices=["auto", "gsc", "ahrefs", "dataforseo", "google_ads", "h1", "file"],
                         help="Ranking keyword source (default: auto)")
-    serp_p.add_argument("--keyword", action="append", default=[],
-                        help="Suggested keyword to analyze for every selected page; repeat for multiple keywords")
+    serp_p.add_argument("--keyword", "--keywords", action="extend", nargs="+", default=[],
+                        help="Suggested keyword(s) to analyze for every selected page; repeat or pass multiple values")
     serp_p.add_argument("--keywords-file", default=None,
                         help="Optional TSV with url<TAB>keyword rows, or one keyword per line")
     serp_p.add_argument("--keywords-per-page", type=int, default=3)
@@ -1588,6 +1589,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"OpenRouter model for AI-agent tasks (default: {DEFAULT_OPENROUTER_MODEL})")
     serp_p.add_argument("--ai-agent-refresh", action="store_true",
                         help="Ignore cached AI-agent prompts/completions and call the provider again")
+    serp_p.add_argument("--ai-agent-max-turns", type=int, default=20,
+                        help="Maximum agent turns for the Harnext workspace session (default: 20)")
     serp_p.add_argument("--no-ai-agent-interactive-setup", dest="ai_agent_interactive_setup", action="store_false",
                         help="Do not prompt for OPENROUTER_API_KEY in interactive runs")
     serp_p.set_defaults(ai_agent_interactive_setup=True)

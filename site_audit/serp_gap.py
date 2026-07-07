@@ -8,6 +8,7 @@ independent report under ``projects/<domain>/serp_gap/report``.
 
 from __future__ import annotations
 
+import copy
 import csv
 import fnmatch
 import json
@@ -22,9 +23,15 @@ from urllib.parse import urlparse
 import numpy as np
 import requests
 
+from .agent_workspace import write_agent_workspace
 from .ai_agent import (
     DEFAULT_OPENROUTER_MODEL,
     MissingOpenRouterKey,
+    RECOMMENDATION_SCHEMA_DOC,
+    cached_workspace_completion,
+    parse_recommendation,
+    run_harnext_workspace_session,
+    validate_recommendation,
     build_agent_client,
     build_editor_brief_messages,
     build_keyword_messages,
@@ -38,15 +45,25 @@ from .ai_agent import (
 )
 from .analyzer import PageInfo, section_for_url
 from .cache import HttpCache, content_hash, domain_slug
+from .draft_verification import assemble_recommended_blocks, verify_recommendation
+from .answerability import score_page
 from .competitive_analysis import (
     CompetitiveTarget,
     CompetitorPage,
     _serp_items,
     build_serp_paragraph_gap,
+    structural_diff,
 )
 from .competitive_analysis import _fetch_dataforseo_serp as fetch_dataforseo_serp
 from .competitive_analysis import CompetitiveAutoConfig
-from .ahrefs import AhrefsConfig, build_analysis as build_ahrefs_analysis, fetch_snapshot as fetch_ahrefs_snapshot
+from .ahrefs import (
+    AHREFS_DOMAIN_RATING_ATTRIBUTION,
+    AHREFS_DOMAIN_RATING_LICENSE,
+    AhrefsConfig,
+    build_analysis as build_ahrefs_analysis,
+    fetch_domain_ratings_free,
+    fetch_snapshot as fetch_ahrefs_snapshot,
+)
 from .embedder import DEFAULT_MODEL, Embedder
 from .extractor import ExtractedPage, extract
 from .scatter import project
@@ -111,6 +128,7 @@ class SerpGapConfig:
     ai_agent_provider: str = "harnext"
     ai_agent_model: str = DEFAULT_OPENROUTER_MODEL
     ai_agent_refresh: bool = False
+    ai_agent_max_turns: int = 20
 
 
 def run(config: SerpGapConfig) -> dict:
@@ -219,6 +237,8 @@ def run(config: SerpGapConfig) -> dict:
     competitor_cache = HttpCache(cache_dir / "competitors.sqlite")
 
     page_results: list[dict] = []
+    page_competitor_content: dict[str, dict[str, dict]] = {}
+    own_exts: dict[str, ExtractedPage] = {}
     all_competitor_urls: set[str] = set()
     serp_url_rankings: dict[str, dict] = {}
     overview_rows: list[dict] = []
@@ -273,6 +293,12 @@ def run(config: SerpGapConfig) -> dict:
                 })
                 overview_texts.append(para)
 
+        own_paragraphs_for_page = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+        own_embeddings_for_page = (
+            embedder.encode(own_paragraphs_for_page, batch_size=64).astype(np.float32)
+            if own_paragraphs_for_page
+            else np.zeros((0, 0), dtype=np.float32)
+        )
         page_blocks: list[dict] = []
         page_keyword_keys = {row["keyword"].strip().lower() for row in page_keywords}
         keyword_index = 0
@@ -336,9 +362,20 @@ def run(config: SerpGapConfig) -> dict:
             for target in targets:
                 all_competitor_urls.add(target.competitor_url)
             competitor_pages = [
-                _competitor_page(target, competitor_cache, embedder, config)
+                _competitor_page(target, competitor_cache, embedder, config, own_ext=own_ext)
                 for target in targets
             ]
+            content_by_url = page_competitor_content.setdefault(page.url, {})
+            for cp in competitor_pages:
+                if cp.error or cp.target.competitor_url in content_by_url:
+                    continue
+                content_by_url[cp.target.competitor_url] = {
+                    "rank": cp.target.rank,
+                    "title": cp.title,
+                    "h1": cp.h1,
+                    "headings": cp.headers_rich,
+                    "paragraphs": cp.paragraphs,
+                }
             for competitor_page in competitor_pages:
                 competitor_url = competitor_page.target.competitor_url
                 if competitor_url in overview_urls_seen:
@@ -399,7 +436,19 @@ def run(config: SerpGapConfig) -> dict:
                         "text": para[:300],
                     })
                     overview_texts.append(para)
-            gap = _build_gap(page, kw, own_ext, competitor_pages, embedder, config)
+            gap = _build_gap(
+                page,
+                kw,
+                own_ext,
+                competitor_pages,
+                embedder,
+                config,
+                own_paragraphs=own_paragraphs_for_page,
+                own_embeddings=own_embeddings_for_page,
+            )
+            features = _serp_features(serp)
+            gap["serp_features"] = features
+            gap["paa_coverage"] = _paa_coverage(features, own_paragraphs_for_page, own_embeddings_for_page, embedder)
             gap["serp"] = {
                 "provider": provider,
                 "cache_status": serp_meta.get("cache_status", ""),
@@ -410,16 +459,45 @@ def run(config: SerpGapConfig) -> dict:
             }
             page_blocks.append(gap)
 
+        own_exts[page.url] = own_ext
         page_results.append({
             "url": page.url,
             "title": page.title,
             "h1": own_ext.h1,
             "keywords": page_keywords,
+            "own_content": {
+                "headings": [
+                    {"order": i, "level": _safe_int(h.get("level")), "text": str(h.get("text") or "").strip()}
+                    for i, h in enumerate(own_ext.headers_rich or [])
+                    if str(h.get("text") or "").strip()
+                ][:60],
+                "paragraphs": [
+                    {"index": i, "word_count": len(p.split()), "text": p[:500]}
+                    for i, p in enumerate(own_paragraphs_for_page)
+                ],
+                "word_count": own_ext.word_count,
+            },
             "analyses": page_blocks,
         })
 
     aggregate_action_points = _attach_action_points(page_results)
-    _attach_ai_editor_briefs(page_results, cache_dir, config, ai_agent)
+    _attach_ai_editor_briefs(
+        page_results,
+        cache_dir,
+        config,
+        ai_agent,
+        page_competitor_content=page_competitor_content,
+        own_exts=own_exts,
+        report_dir=report_dir,
+        embedder=embedder,
+    )
+    domain_rating_meta = _enrich_serp_domain_ratings(
+        serp_url_rankings,
+        page_results,
+        overview_rows,
+        cache_dir,
+        refresh=config.refresh_serp,
+    )
     payload = {
         "status": "ok",
         "domain": config.domain,
@@ -435,6 +513,7 @@ def run(config: SerpGapConfig) -> dict:
             "meta": ahrefs_payload.get("meta", {}) if ahrefs_payload else {},
             "summary": ahrefs_payload.get("summary", {}) if ahrefs_payload else {},
         },
+        "domain_ratings": domain_rating_meta,
         "serp_url_rankings": _serp_url_ranking_rows(serp_url_rankings),
         "overview_scatter": _overview_scatter(overview_rows, overview_texts, embedder),
         "action_points": aggregate_action_points,
@@ -708,10 +787,13 @@ def _ai_agent_state(config: SerpGapConfig) -> dict:
     if str(config.ai_agent_provider or "").lower() == "harnext":
         ok, detail = harnext_status()
         if not ok:
-            state["status"] = "missing_harnext"
-            state["notes"].append(detail)
-            return state
-        state["notes"].append(f"Harnext CLI: {detail}")
+            config.ai_agent_provider = "openrouter"
+            state["provider"] = "openrouter"
+            state["notes"].append(
+                f"Harnext unavailable, falling back to direct OpenRouter with the same recommendation contract. ({detail})"
+            )
+        else:
+            state["notes"].append(f"Harnext CLI: {detail}")
     state["status"] = "ready"
     return state
 
@@ -1266,6 +1348,118 @@ def _serp_result_rows(payload: dict) -> list[dict]:
     return rows
 
 
+def _serp_features(payload: dict) -> dict:
+    """Extract People Also Ask, related searches, and answer box from a SERP payload."""
+    features: dict = {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+    raw = payload.get("raw") or {}
+    provider = (payload.get("meta") or {}).get("provider") or ""
+    if provider == "serper" or "organic" in raw:
+        for item in (raw.get("peopleAlsoAsk") or [])[:10]:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()
+            if not question:
+                continue
+            features["people_also_ask"].append({
+                "question": question,
+                "snippet": str(item.get("snippet") or "").strip(),
+                "url": str(item.get("link") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+            })
+        for item in (raw.get("relatedSearches") or [])[:10]:
+            query = str((item.get("query") if isinstance(item, dict) else item) or "").strip()
+            if query:
+                features["related_searches"].append(query)
+        answer_box = raw.get("answerBox")
+        if isinstance(answer_box, dict):
+            answer = str(answer_box.get("answer") or answer_box.get("snippet") or "").strip()
+            if answer:
+                features["answer_box"] = {
+                    "title": str(answer_box.get("title") or "").strip(),
+                    "answer": answer,
+                    "url": str(answer_box.get("link") or "").strip(),
+                }
+        return features
+    for item in _serp_items(payload):
+        item_type = str(item.get("type") or "")
+        if item_type == "people_also_ask":
+            for element in (item.get("items") or [])[:10]:
+                if not isinstance(element, dict):
+                    continue
+                question = str(element.get("title") or "").strip()
+                if not question:
+                    continue
+                snippet = ""
+                url = ""
+                for expanded in element.get("expanded_element") or []:
+                    if isinstance(expanded, dict):
+                        snippet = str(expanded.get("description") or "").strip()
+                        url = str(expanded.get("url") or "").strip()
+                        break
+                if len(features["people_also_ask"]) < 10:
+                    features["people_also_ask"].append({
+                        "question": question,
+                        "snippet": snippet,
+                        "url": url,
+                        "title": "",
+                    })
+        elif item_type == "related_searches":
+            for element in item.get("items") or []:
+                query = str(element or "").strip() if not isinstance(element, dict) else str(element.get("title") or "").strip()
+                if query and len(features["related_searches"]) < 10:
+                    features["related_searches"].append(query)
+        elif item_type == "featured_snippet" and not features["answer_box"]:
+            answer = str(item.get("description") or "").strip()
+            if answer:
+                features["answer_box"] = {
+                    "title": str(item.get("title") or "").strip(),
+                    "answer": answer,
+                    "url": str(item.get("url") or "").strip(),
+                }
+    return features
+
+
+def _paa_coverage(
+    features: dict,
+    own_paragraphs: list[str],
+    own_embeddings: np.ndarray,
+    embedder: Embedder,
+) -> list[dict]:
+    """Score each People Also Ask question against our paragraphs."""
+    questions = [row.get("question") or "" for row in features.get("people_also_ask") or []]
+    questions = [q for q in questions if q.strip()]
+    if not questions:
+        return []
+    rows: list[dict] = []
+    if not own_paragraphs or not len(own_embeddings):
+        return [
+            {"question": q, "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}
+            for q in questions
+        ]
+    try:
+        question_embeddings = embedder.encode(questions, batch_size=32).astype(np.float32)
+    except Exception:
+        return []
+    for q, q_emb in zip(questions, question_embeddings):
+        sims = own_embeddings @ q_emb
+        best_i = int(np.argmax(sims))
+        best = float(np.clip(sims[best_i], -1.0, 1.0))
+        if best >= 0.78:
+            status = "covered"
+        elif best >= 0.62:
+            status = "partial"
+        else:
+            status = "missing"
+        rows.append({
+            "question": q,
+            "status": status,
+            "best_similarity": round(best, 4),
+            "best_paragraph_index": best_i,
+            "best_paragraph": str(own_paragraphs[best_i] or "")[:240],
+        })
+    return rows
+
+
 def _add_serp_url_rankings(
     rankings: dict[str, dict],
     domain: str,
@@ -1326,6 +1520,11 @@ def _serp_url_ranking_rows(rankings: dict[str, dict]) -> list[dict]:
             "url": item.get("url", ""),
             "domain": item.get("domain", ""),
             "is_selected_domain": bool(item.get("is_selected_domain")),
+            "domain_rating": item.get("domain_rating"),
+            "domain_rating_status": item.get("domain_rating_status", ""),
+            "domain_rating_source": item.get("domain_rating_source", ""),
+            "domain_rating_license": item.get("domain_rating_license", ""),
+            "domain_rating_attribution": item.get("domain_rating_attribution", ""),
             "top10_count": count,
             "best_rank": int(item.get("best_rank") or 0),
             "average_rank": round(float(item.get("rank_sum") or 0) / count, 2),
@@ -1342,6 +1541,71 @@ def _serp_url_ranking_rows(rankings: dict[str, dict]) -> list[dict]:
         row.get("domain", ""),
         row.get("url", ""),
     ))
+
+
+def _domain_rating_for_host(host: str, ratings: dict[str, dict]) -> dict:
+    key = str(host or "").lower().removeprefix("www.")
+    return ratings.get(key) or {}
+
+
+def _apply_domain_rating(row: dict, ratings: dict[str, dict]) -> None:
+    host = str(row.get("domain") or urlparse(str(row.get("url") or "")).netloc or "").lower()
+    rating = _domain_rating_for_host(host, ratings)
+    if not rating:
+        return
+    row["domain_rating"] = rating.get("domain_rating")
+    row["domain_rating_status"] = rating.get("status", "")
+    row["domain_rating_source"] = rating.get("source", "ahrefs_public_domain_rating_free")
+    row["domain_rating_license"] = rating.get("license") or AHREFS_DOMAIN_RATING_LICENSE
+    row["domain_rating_attribution"] = rating.get("attribution") or AHREFS_DOMAIN_RATING_ATTRIBUTION
+
+
+def _enrich_serp_domain_ratings(
+    serp_url_rankings: dict[str, dict],
+    page_results: list[dict],
+    overview_rows: list[dict],
+    cache_dir: Path,
+    *,
+    refresh: bool = False,
+) -> dict:
+    domains: set[str] = set()
+    for item in serp_url_rankings.values():
+        host = str(item.get("domain") or urlparse(str(item.get("url") or "")).netloc or "").lower().removeprefix("www.")
+        if host:
+            domains.add(host)
+    for page in page_results:
+        for analysis in page.get("analyses") or []:
+            for cp in analysis.get("competitor_pages") or []:
+                host = str(cp.get("domain") or urlparse(str(cp.get("url") or "")).netloc or "").lower().removeprefix("www.")
+                if host:
+                    domains.add(host)
+    for row in overview_rows:
+        host = str(row.get("domain") or urlparse(str(row.get("url") or "")).netloc or "").lower().removeprefix("www.")
+        if host:
+            domains.add(host)
+    ratings = fetch_domain_ratings_free(sorted(domains), cache_dir, refresh=refresh)
+    for item in serp_url_rankings.values():
+        _apply_domain_rating(item, ratings)
+    for page in page_results:
+        for analysis in page.get("analyses") or []:
+            for cp in analysis.get("competitor_pages") or []:
+                _apply_domain_rating(cp, ratings)
+    for row in overview_rows:
+        _apply_domain_rating(row, ratings)
+    ok = [row for row in ratings.values() if row.get("status") == "ok"]
+    errors = [
+        {"domain": domain, "status": row.get("status"), "error": row.get("error", "")}
+        for domain, row in ratings.items()
+        if row.get("status") != "ok"
+    ]
+    return {
+        "provider": "ahrefs_public_domain_rating_free",
+        "attribution": AHREFS_DOMAIN_RATING_ATTRIBUTION,
+        "license": AHREFS_DOMAIN_RATING_LICENSE,
+        "domains_requested": len(domains),
+        "domains_enriched": len(ok),
+        "errors": errors[:20],
+    }
 
 
 def _canonical_serp_url(url: str) -> str:
@@ -1417,6 +1681,7 @@ def _competitor_page(
     cache: HttpCache,
     embedder: Embedder,
     config: SerpGapConfig,
+    own_ext: ExtractedPage | None = None,
 ) -> CompetitorPage:
     ext = _fetch_and_extract(target.competitor_url, cache, refresh=config.refresh_competitors)
     if ext is None:
@@ -1430,6 +1695,16 @@ def _competitor_page(
             paragraph_count=0,
             error="competitor fetch/extract failed",
         )
+    structural_gaps: list[dict] = []
+    if own_ext is not None:
+        try:
+            structural_gaps = structural_diff(own_ext, ext)
+        except Exception:
+            structural_gaps = []
+    try:
+        answerability = float(score_page(ext).score)
+    except Exception:
+        answerability = 0.0
     paragraphs = (ext.paragraphs or [])[:config.max_paragraphs_per_page]
     embs = embedder.encode(paragraphs, batch_size=64).astype(np.float32) if paragraphs else np.zeros((0, 0), dtype=np.float32)
     return CompetitorPage(
@@ -1437,8 +1712,8 @@ def _competitor_page(
         title=ext.title or target.competitor_url,
         paragraphs=paragraphs,
         paragraph_embeddings=embs,
-        structural_gaps=[],
-        answerability=0.0,
+        structural_gaps=structural_gaps,
+        answerability=answerability,
         paragraph_count=len(paragraphs),
         h1=ext.h1,
         headers_rich=ext.headers_rich,
@@ -1469,9 +1744,13 @@ def _build_gap(
     competitor_pages: list[CompetitorPage],
     embedder: Embedder,
     config: SerpGapConfig,
+    own_paragraphs: list[str] | None = None,
+    own_embeddings: np.ndarray | None = None,
 ) -> dict:
-    own_paragraphs = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
-    own_embeddings = embedder.encode(own_paragraphs, batch_size=64).astype(np.float32) if own_paragraphs else np.zeros((0, 0), dtype=np.float32)
+    if own_paragraphs is None:
+        own_paragraphs = (own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+    if own_embeddings is None:
+        own_embeddings = embedder.encode(own_paragraphs, batch_size=64).astype(np.float32) if own_paragraphs else np.zeros((0, 0), dtype=np.float32)
     gap = build_serp_paragraph_gap(
         query=keyword["keyword"],
         cluster=keyword["keyword"],
@@ -1488,6 +1767,7 @@ def _build_gap(
     gap["topic_coverage_matrix"] = _topic_coverage_matrix(page.url, competitor_pages, gap.get("topics") or [])
     gap["paragraph_match_heatmap"] = _paragraph_match_heatmap(own_paragraphs, own_embeddings, competitor_pages)
     gap["content_order_path"] = _content_order_path(keyword["keyword"], own_ext, competitor_pages, embedder)
+    gap["recommended_outline"] = _recommended_outline(gap)
     gap["visual_summary"] = _visual_summary(gap["content_comparison"], gap["topic_coverage_matrix"])
     return gap
 
@@ -2230,6 +2510,15 @@ def _editorial_guidelines() -> dict:
             "The page covers missing and partial SERP topics with original detail from the selected domain.",
             "Low-alignment paragraphs are rewritten, moved, merged, or removed after manual review.",
         ],
+        "avoid": [
+            "Do not add broad introductory text that repeats the page title.",
+            "Do not stuff exact-match keywords into every paragraph.",
+            "Do not copy competitor wording or cite competitor claims as your own.",
+            "Do not publish vague claims without concrete support.",
+            "Do not delete useful facts without moving them to a better location.",
+            "Do not rewrite a paragraph for the target keyword if it actually belongs to another intent.",
+            "Do not replace specific information with generic brand language.",
+        ],
     }
 
 
@@ -2291,15 +2580,7 @@ def _topic_content_brief(
         paragraph_plan.append("Use the competitor example as a checklist for intent coverage, but write original text.")
     acceptance = [
         f"The section clearly covers '{label}' for the search intent behind '{keyword}'.",
-        "A reader can quote the first answer sentence without extra context.",
-        "No paragraph is generic marketing copy; each one adds a fact, example, condition, or decision point.",
         "The section naturally uses related terms: " + (", ".join(terms) if terms else label) + ".",
-    ]
-    avoid = [
-        "Do not add broad introductory text that repeats the page title.",
-        "Do not stuff exact-match keywords into every paragraph.",
-        "Do not copy competitor wording or cite competitor claims as your own.",
-        "Do not publish vague claims without concrete support.",
     ]
     prompt = (
         f"Edit {page.get('url', '')} for the keyword '{keyword}'. Task: {'add' if add_topic else 'strengthen'} "
@@ -2311,7 +2592,7 @@ def _topic_content_brief(
         "recommended_format": format_name,
         "placement": placement,
         "paragraph_plan": paragraph_plan,
-        "avoid": avoid,
+        "guidelines_ref": "editorial_guidelines",
         "acceptance_criteria": acceptance,
         "ai_agent_prompt": prompt,
         "source_evidence": {
@@ -2419,9 +2700,7 @@ def _paragraph_content_brief(page: dict, keyword: str, row: dict, profile: dict)
     if profile.get("filler_terms"):
         rules.append("Replace detected filler terms with concrete details: " + ", ".join(profile["filler_terms"]) + ".")
     acceptance = [
-        "The paragraph has one purpose and can be summarized in one sentence.",
         f"The paragraph supports the intent behind '{keyword}' or has been moved away from this page.",
-        "The paragraph includes a concrete fact, condition, example, step, comparison, or limitation.",
         "The paragraph no longer dilutes the target page with unrelated context.",
     ]
     prompt = (
@@ -2432,11 +2711,7 @@ def _paragraph_content_brief(page: dict, keyword: str, row: dict, profile: dict)
         "placement": f"Paragraph {paragraph_index} on the target page.",
         "paragraph_rules": rules,
         "acceptance_criteria": acceptance,
-        "avoid": [
-            "Do not delete useful facts without moving them to a better location.",
-            "Do not rewrite a paragraph for the target keyword if it actually belongs to another intent.",
-            "Do not replace specific information with generic brand language.",
-        ],
+        "guidelines_ref": "editorial_guidelines",
         "ai_agent_prompt": prompt,
         "quality_profile": profile,
     }
@@ -2483,6 +2758,226 @@ def _paragraph_action(page: dict, analysis: dict, row: dict, order: int) -> dict
     }
 
 
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    keyword_norm = re.sub(r"\s+", " ", str(keyword or "")).strip().lower()
+    text_norm = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not keyword_norm or not text_norm:
+        return False
+    if keyword_norm in text_norm:
+        return True
+    keyword_tokens = {t for t in re.split(r"\W+", keyword_norm) if len(t) > 2}
+    if not keyword_tokens:
+        return False
+    text_tokens = {t for t in re.split(r"\W+", text_norm) if t}
+    overlap = len(keyword_tokens & text_tokens) / len(keyword_tokens)
+    return overlap >= 0.6
+
+
+def _title_gap_action(page: dict, analysis: dict, order: int) -> dict | None:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    our_title = str(page.get("title") or "").strip()
+    our_h1 = str(page.get("h1") or "").strip()
+    competitors = [
+        row for row in analysis.get("competitor_pages") or []
+        if not row.get("error") and str(row.get("title") or "").strip()
+    ]
+    competitors.sort(key=lambda row: _safe_int(row.get("rank")) or 999)
+    top_titles = [{"rank": row.get("rank"), "title": row.get("title", "")} for row in competitors[:5]]
+    competitor_keyword_hits = sum(1 for row in top_titles if _keyword_in_text(keyword, row["title"]))
+    keyword_missing = (
+        bool(keyword)
+        and not _keyword_in_text(keyword, our_title)
+        and competitor_keyword_hits >= 3
+    )
+    title_too_short = bool(our_title) and len(our_title) < 30
+    h1_empty = not our_h1
+    if not (keyword_missing or title_too_short or h1_empty):
+        return None
+    demand = _keyword_demand(analysis)
+    problems = []
+    if keyword_missing:
+        problems.append(
+            f"Title '{our_title}' does not contain '{keyword}' while {competitor_keyword_hits}/{len(top_titles)} top competitor titles do"
+        )
+    if title_too_short:
+        problems.append(f"Title is only {len(our_title)} characters")
+    if h1_empty:
+        problems.append("H1 is empty")
+    instruction = (
+        f"{'; '.join(problems)}. Rewrite the title (<=60 chars) to lead with the primary keyword intent; "
+        "align the H1 with the title without duplicating it verbatim."
+    )
+    return {
+        "id": f"rewrite_title_{order}",
+        "order": order,
+        "type": "rewrite_title",
+        "priority": "high" if keyword_missing else "medium",
+        "action": "Rewrite title and H1",
+        "task_summary": f"Rewrite the title/H1 to match the intent behind '{keyword}'.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "title and H1",
+        "instruction": instruction,
+        "rationale": "Title and H1 are the strongest on-page relevance and CTR signals; top-ranking competitors align them with the query.",
+        "placement": "Page <title> tag and the main H1.",
+        "acceptance_criteria": [
+            f"The title contains the primary intent behind '{keyword}' within the first 60 characters.",
+            "The H1 matches the title intent without duplicating it word for word.",
+        ],
+        "ai_agent_prompt": (
+            f"Rewrite the title and H1 of {page.get('url', '')} for the keyword '{keyword}'. "
+            "Lead with the keyword intent, keep the title under 60 characters, keep the brand suffix if present."
+        ),
+        "impact_score": round(60 + demand["score"] * 10, 3),
+        "evidence": {
+            "our_title": our_title,
+            "our_h1": our_h1,
+            "keyword": keyword,
+            "competitor_titles": top_titles,
+            "keyword_impressions": demand["impressions"],
+            "keyword_volume": demand["volume"],
+        },
+    }
+
+
+def _depth_action(page: dict, analysis: dict, order: int) -> dict | None:
+    comparison = analysis.get("content_comparison") or {}
+    ours = comparison.get("ours") or {}
+    bench = comparison.get("benchmark") or {}
+    our_paragraphs = _safe_int(ours.get("paragraph_count"))
+    median_paragraphs = _safe_float(bench.get("median_competitor_paragraphs"))
+    if not (median_paragraphs >= 8 and our_paragraphs < 0.6 * median_paragraphs):
+        return None
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    median_headings = _safe_float(bench.get("median_competitor_headings"))
+    delta = max(0, int(round(median_paragraphs - our_paragraphs)))
+    instruction = (
+        f"Page has {our_paragraphs} paragraphs / {_safe_int(ours.get('heading_count'))} headings; "
+        f"top-5 competitor median is {median_paragraphs:g} paragraphs / {median_headings:g} headings. "
+        f"Add roughly {delta} paragraphs by implementing the missing-topic tasks rather than padding existing sections."
+    )
+    return {
+        "id": f"expand_depth_{order}",
+        "order": order,
+        "type": "expand_depth",
+        "priority": "medium",
+        "action": "Expand page depth",
+        "task_summary": "Bring page depth closer to the competitor median via missing-topic sections.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "page depth",
+        "instruction": instruction,
+        "rationale": "The page is much thinner than what currently ranks; depth should come from the detected missing topics, not filler.",
+        "placement": "New sections from the missing-topic tasks.",
+        "acceptance_criteria": [
+            "New content comes from missing/partial topic tasks, not generic padding.",
+            f"Paragraph count moves toward the competitor median ({median_paragraphs:g}).",
+        ],
+        "ai_agent_prompt": (
+            f"Expand {page.get('url', '')} toward the competitor median depth by implementing the missing-topic sections "
+            f"for '{keyword}'. Do not pad existing sections with filler."
+        ),
+        "impact_score": round(30 + demand["score"] * 8, 3),
+        "evidence": {"ours": ours, "benchmark": bench},
+    }
+
+
+def _structural_action(page: dict, analysis: dict, pattern: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    competitors = _safe_int(pattern.get("competitors"))
+    signal = str(pattern.get("signal") or "structure")
+    advice = str(pattern.get("advice") or "")
+    instruction = (
+        f"{advice} (ours: {pattern.get('ours')}, strongest competitor: {pattern.get('max_theirs')}, "
+        f"seen on {competitors} competitor page(s))."
+    )
+    return {
+        "id": f"structural_{order}",
+        "order": order,
+        "type": "structural",
+        "priority": "high" if competitors >= 4 else "medium",
+        "action": "Close a structural/GEO gap",
+        "task_summary": f"Close the structural gap: {signal}.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": signal,
+        "instruction": instruction,
+        "rationale": "Ranking competitors consistently use this page structure signal; AI answer engines and rich results favor it.",
+        "placement": "Page structure (markup, headings, or content blocks) as described.",
+        "acceptance_criteria": [f"The page matches or beats the competitor pattern for: {signal}."],
+        "ai_agent_prompt": f"On {page.get('url', '')}: {advice}",
+        "impact_score": round(20 + competitors * 8 + demand["score"] * 5, 3),
+        "evidence": dict(pattern),
+    }
+
+
+def _paa_action(page: dict, analysis: dict, row: dict, order: int, *, top_question: bool) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    demand = _keyword_demand(analysis)
+    question = str(row.get("question") or "").strip()
+    return {
+        "id": f"answer_paa_{order}",
+        "order": order,
+        "type": "answer_paa",
+        "priority": "high" if top_question else "medium",
+        "action": "Answer a People Also Ask question",
+        "task_summary": f"Answer the PAA question: {question}",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": question,
+        "instruction": (
+            f"Add a question-form H3 '{question}' with a 40-60 word direct answer first, detail after. "
+            "Candidate placement: FAQ block or the nearest related section."
+        ),
+        "rationale": "Google shows this question for the target keyword and the page has no close answer paragraph.",
+        "placement": "FAQ block or nearest related section.",
+        "acceptance_criteria": [
+            "The first sentence after the heading answers the question completely on its own.",
+            "The answer adds at least one concrete fact, condition, step, or example.",
+        ],
+        "ai_agent_prompt": (
+            f"On {page.get('url', '')}, add a question-form section answering '{question}' for the keyword '{keyword}'. "
+            "Direct answer first (40-60 words), supporting detail after."
+        ),
+        "impact_score": round(40 + demand["score"] * 10, 3),
+        "evidence": dict(row),
+    }
+
+
+def _recommended_outline(analysis: dict) -> list[dict]:
+    path = analysis.get("content_order_path") or {}
+    rows: list[dict] = []
+    for cluster in path.get("clusters") or []:
+        rows.append({
+            "label": cluster.get("label", ""),
+            "status": "have" if cluster.get("ours_mean_order") is not None else "add",
+            "competitor_pages": _safe_int(cluster.get("competitor_pages")),
+            "competitor_mean_order": cluster.get("competitor_mean_order"),
+            "sample_text": str(cluster.get("sample_text") or "")[:200],
+        })
+    have_labels = {row["label"] for row in rows}
+    for cluster in path.get("missing_clusters") or []:
+        if cluster.get("label") in have_labels:
+            continue
+        rows.append({
+            "label": cluster.get("label", ""),
+            "status": "add",
+            "competitor_pages": _safe_int(cluster.get("competitor_pages")),
+            "competitor_mean_order": cluster.get("competitor_mean_order"),
+            "sample_text": str(cluster.get("sample_text") or "")[:200],
+        })
+    rows.sort(key=lambda row: (
+        row.get("competitor_mean_order") is None,
+        _safe_float(row.get("competitor_mean_order")),
+        -_safe_int(row.get("competitor_pages")),
+    ))
+    for position, row in enumerate(rows, start=1):
+        row["position"] = position
+    return rows
+
+
 def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
     if analysis.get("status") != "ok":
         return []
@@ -2497,6 +2992,22 @@ def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
     review_rows = analysis.get("off_intent_paragraphs") or analysis.get("own_paragraphs_to_review") or []
     for row in review_rows[:6]:
         actions.append(_paragraph_action(page, analysis, row, order))
+        order += 1
+    structural_rows = [
+        pattern for pattern in analysis.get("structural_patterns") or []
+        if _safe_int(pattern.get("competitors")) >= 2
+    ]
+    for pattern in structural_rows[:4]:
+        actions.append(_structural_action(page, analysis, pattern, order))
+        order += 1
+    top_questions = {
+        str(row.get("question") or "").strip()
+        for row in ((analysis.get("serp_features") or {}).get("people_also_ask") or [])[:4]
+    }
+    missing_paa = [row for row in analysis.get("paa_coverage") or [] if row.get("status") == "missing"]
+    for row in missing_paa[:4]:
+        question = str(row.get("question") or "").strip()
+        actions.append(_paa_action(page, analysis, row, order, top_question=question in top_questions))
         order += 1
     actions.sort(key=_action_priority_score)
     for index, action in enumerate(actions, start=1):
@@ -2540,16 +3051,77 @@ def _page_content_brief(page: dict) -> dict:
     }
 
 
+def _action_dedupe_key(action: dict) -> tuple[str, str, str]:
+    topic = action.get("topic")
+    if topic is None or str(topic).strip() == "":
+        topic = action.get("paragraph_index")
+    normalized = re.sub(r"\W+", " ", str(topic if topic is not None else "")).strip().lower()
+    return (str(action.get("target_url") or ""), str(action.get("type") or ""), normalized)
+
+
+def _dedupe_actions(actions: list[dict]) -> list[dict]:
+    import difflib
+
+    by_key: dict[tuple[str, str], dict] = {}
+    dropped: dict[int, int] = {}
+    ordered: list[dict] = []
+    for action in sorted(actions, key=lambda a: -_safe_float(a.get("impact_score"))):
+        key = _action_dedupe_key(action)
+        if key in by_key:
+            dropped[id(by_key[key])] = dropped.get(id(by_key[key]), 0) + 1
+            continue
+        by_key[key] = action
+        ordered.append(action)
+    deduped: list[dict] = []
+    for action in ordered:
+        duplicate_of = None
+        if action.get("type") in {"add_topic", "strengthen_topic"}:
+            label = _action_dedupe_key(action)[2]
+            for kept in deduped:
+                if kept.get("type") not in {"add_topic", "strengthen_topic"}:
+                    continue
+                if str(kept.get("target_url") or "") != str(action.get("target_url") or ""):
+                    continue
+                kept_label = _action_dedupe_key(kept)[2]
+                if label and kept_label and difflib.SequenceMatcher(None, label, kept_label).ratio() >= 0.85:
+                    duplicate_of = kept
+                    break
+        if duplicate_of is not None:
+            dropped[id(duplicate_of)] = dropped.get(id(duplicate_of), 0) + 1
+            continue
+        deduped.append(action)
+    for action in deduped:
+        merged = dropped.get(id(action), 0)
+        if merged:
+            action["merged_duplicates"] = merged
+    return deduped
+
+
 def _attach_action_points(page_results: list[dict]) -> list[dict]:
     aggregate: list[dict] = []
     for page in page_results:
         page_actions: list[dict] = []
+        title_added = False
+        depth_added = False
         for analysis in page.get("analyses") or []:
             actions = _action_points_for_analysis(page, analysis)
             analysis["action_points"] = actions
             page_actions.extend(actions)
+            if analysis.get("status") == "ok":
+                if not title_added:
+                    title_action = _title_gap_action(page, analysis, len(page_actions) + 1)
+                    if title_action is not None:
+                        page_actions.append(title_action)
+                        title_added = True
+                if not depth_added:
+                    depth_action = _depth_action(page, analysis, len(page_actions) + 1)
+                    if depth_action is not None:
+                        page_actions.append(depth_action)
+                        depth_added = True
+        page_actions = _dedupe_actions(page_actions)
         page["action_points"] = sorted(page_actions, key=_action_priority_score)[:30]
         aggregate.extend(page["action_points"])
+    aggregate = _dedupe_actions(aggregate)
     aggregate.sort(key=_action_priority_score)
     out = aggregate[:80]
     for index, action in enumerate(out, start=1):
@@ -2564,6 +3136,10 @@ def _attach_ai_editor_briefs(
     cache_dir: Path,
     config: SerpGapConfig,
     state: dict,
+    page_competitor_content: dict[str, dict] | None = None,
+    own_exts: dict[str, ExtractedPage] | None = None,
+    report_dir: Path | None = None,
+    embedder: Embedder | None = None,
 ) -> None:
     if not config.ai_agent:
         return
@@ -2574,49 +3150,381 @@ def _attach_ai_editor_briefs(
                 "message": "; ".join(state.get("notes") or []) or "AI editor brief was not generated.",
             }
         return
-    try:
-        client = build_agent_client(config.ai_agent_provider)
-    except Exception as exc:
-        state["status"] = "error"
-        state.setdefault("errors", []).append(f"AI editor client init failed: {exc}")
-        for page in page_results:
-            page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
-        return
-    for page in page_results:
-        messages = build_editor_brief_messages(page)
+    own_exts = own_exts or {}
+    page_competitor_content = page_competitor_content or {}
+    use_workspace = (
+        config.ai_agent_provider == "harnext"
+        and report_dir is not None
+        and bool(own_exts)
+        and harnext_status()[0]
+    )
+    client = None
+    if not use_workspace:
         try:
-            completion = cached_completion(
-                cache_dir,
-                kind=f"editor-brief-{_url_report_slug(page.get('url', ''))}",
-                messages=messages,
-                client=client,
-                model=config.ai_agent_model,
-                refresh=config.ai_agent_refresh,
-                temperature=0.2,
-                timeout=180,
-            )
-            if completion.cache_status == "hit":
-                state["cache_hits"] += 1
-            if completion.fallback_from:
-                state.setdefault("notes", []).append(
-                    f"Editor brief for {page.get('url', '')} used {completion.provider} after {completion.fallback_from}."
+            client = build_agent_client(config.ai_agent_provider)
+        except Exception as exc:
+            state["status"] = "error"
+            state.setdefault("errors", []).append(f"AI editor client init failed: {exc}")
+            for page in page_results:
+                page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
+            return
+    for page in page_results:
+        url = page.get("url", "")
+        paragraph_count = len((page.get("own_content") or {}).get("paragraphs") or [])
+        own_ext = own_exts.get(url)
+        own_paragraphs = (
+            list(own_ext.paragraphs or [])[:config.max_paragraphs_per_page]
+            if own_ext is not None
+            else [str(row.get("text") or "") for row in (page.get("own_content") or {}).get("paragraphs") or []]
+        )
+        try:
+            if use_workspace and own_ext is not None:
+                _attach_workspace_brief(
+                    page,
+                    cache_dir,
+                    config,
+                    state,
+                    own_ext=own_ext,
+                    competitor_content=page_competitor_content.get(url, {}),
+                    report_dir=report_dir,
+                    paragraph_count=paragraph_count,
+                    own_paragraphs=own_paragraphs,
+                    embedder=embedder,
                 )
-            page["ai_editor_brief"] = {
-                "status": "ok",
-                "provider": completion.provider,
-                "model": completion.model,
-                "cache_status": completion.cache_status,
-                "fallback_from": completion.fallback_from,
-                "markdown": _clean_ai_markdown(completion.text),
-            }
-            state["editor_briefs"] += 1
+            else:
+                _attach_chat_brief(
+                    page,
+                    cache_dir,
+                    config,
+                    state,
+                    client=client,
+                    paragraph_count=paragraph_count,
+                    own_paragraphs=own_paragraphs,
+                    embedder=embedder,
+                )
         except MissingOpenRouterKey:
             state["status"] = "missing_openrouter_api_key"
             message = "Set OPENROUTER_API_KEY in .env to generate the AI editor brief."
             page["ai_editor_brief"] = {"status": "missing_openrouter_api_key", "message": message}
+            page["ai_recommendation"] = {"status": "missing_openrouter_api_key", "errors": [], "data": {}}
         except Exception as exc:
-            state.setdefault("errors", []).append(f"Editor brief failed for {page.get('url', '')}: {exc}")
+            state.setdefault("errors", []).append(f"Editor brief failed for {url}: {exc}")
             page["ai_editor_brief"] = {"status": "error", "message": str(exc)}
+            page["ai_recommendation"] = {"status": "error", "errors": [str(exc)], "data": {}}
+
+
+def _recommended_article_markdown(
+    page: dict,
+    recommendation: dict,
+    own_paragraphs: list[str],
+    verification: dict | None = None,
+) -> str:
+    """Assemble the full recommended article in final reading order, with the
+    evidence for why this version should outperform the current page."""
+    if not recommendation:
+        return ""
+    blocks = assemble_recommended_blocks(own_paragraphs, recommendation)
+    title = (recommendation.get("title") or {}).get("recommended") or page.get("title") or ""
+    h1 = (recommendation.get("h1") or {}).get("recommended") or page.get("h1") or title
+    meta = (recommendation.get("meta_description") or {}).get("recommended") or ""
+
+    heading_before: dict[int, dict] = {}
+    for row in recommendation.get("outline") or []:
+        if not isinstance(row, dict) or str(row.get("status") or "") == "remove":
+            continue
+        sources = [s for s in row.get("source_paragraphs") or [] if isinstance(s, int) and not isinstance(s, bool)]
+        if not sources:
+            continue
+        first = min(sources)
+        if first not in heading_before:
+            heading_before[first] = row
+
+    new_sections = recommendation.get("new_sections") or []
+    decisions = {
+        row.get("index"): row
+        for row in recommendation.get("paragraph_decisions") or []
+        if isinstance(row, dict)
+    }
+
+    lines: list[str] = [
+        f"# Recommended article: {page.get('url', '')}",
+        "",
+        f"- **Title:** {title}",
+        f"- **Meta description:** {meta}" if meta else "",
+        f"- **H1:** {h1}",
+        "",
+        "---",
+        "",
+    ]
+    for block in blocks:
+        ref = str(block.get("ref") or "")
+        source = str(block.get("source") or "")
+        if source == "new":
+            try:
+                section = new_sections[int(ref[1:])]
+            except (ValueError, IndexError, TypeError):
+                section = {}
+            heading = str(section.get("heading") or "").strip()
+            draft = str(section.get("draft") or "").strip()
+            covers = ", ".join(section.get("covers_paa") or [])
+            topic = str(section.get("topic") or "").strip()
+            why_bits = [bit for bit in (f"topic: {topic}" if topic else "", f"answers PAA: {covers}" if covers else "") if bit]
+            lines.append(f"## {heading}" if heading else "")
+            lines.append("")
+            if why_bits:
+                lines.append(f"*[new section — {'; '.join(why_bits)}]*")
+                lines.append("")
+            lines.append(draft)
+            lines.append("")
+            continue
+        index = _safe_int(ref[1:]) if ref.startswith("P") else None
+        if index is not None and index in heading_before:
+            row = heading_before[index]
+            level = min(max(_safe_int(row.get("level")) or 2, 2), 4)
+            lines.append(f"{'#' * level} {str(row.get('heading') or '').strip()}")
+            lines.append("")
+        annotation = "rewritten" if source == "rewrite" else ""
+        if annotation:
+            reason = str((decisions.get(index) or {}).get("reason") or "").strip()
+            lines.append(f"*[{annotation}{': ' + reason if reason else ''}]*")
+            lines.append("")
+        lines.append(str(block.get("text") or "").strip())
+        lines.append("")
+
+    removed = [
+        f"[P{row.get('index')}] {str(row.get('reason') or '').strip()}"
+        for row in recommendation.get("paragraph_decisions") or []
+        if isinstance(row, dict) and str(row.get("decision") or "") in {"remove", "move", "merge"}
+    ]
+    lines.extend(["---", "", "## Why this version should rank better", ""])
+    assessment = (recommendation.get("page_assessment") or {}).get("reason") or ""
+    if assessment:
+        lines.extend([f"- **Target page:** {assessment}", ""])
+    summary = (verification or {}).get("summary") or {}
+    if summary:
+        lines.append(
+            "- **Verified topic coverage (re-scored with the same embeddings used for the gap analysis):** "
+            f"missing {summary.get('missing_before', 0)} -> {summary.get('missing_after', 0)}, "
+            f"partial {summary.get('partial_before', 0)} -> {summary.get('partial_after', 0)}, "
+            f"People Also Ask missing {summary.get('paa_missing_before', 0)} -> {summary.get('paa_missing_after', 0)}."
+        )
+        unresolved = summary.get("unresolved_critical") or []
+        if unresolved:
+            lines.append(f"- **Still uncovered critical/high topics:** {'; '.join(str(x) for x in unresolved[:10])}")
+        lines.append("")
+    for section in new_sections:
+        heading = str(section.get("heading") or "").strip()
+        covers = ", ".join(section.get("covers_paa") or [])
+        if heading:
+            lines.append(f"- **New section '{heading}'**{f' answers: {covers}' if covers else ''}.")
+    schema_rows = recommendation.get("structured_data") or []
+    if schema_rows:
+        lines.append(
+            "- **Structured data to add:** "
+            + "; ".join(f"{row.get('type')} ({str(row.get('reason') or '')[:120]})" for row in schema_rows if isinstance(row, dict))
+        )
+    if removed:
+        lines.append("- **Removed/merged content:** " + " · ".join(removed[:8]))
+    title_reason = str((recommendation.get("title") or {}).get("reason") or "").strip()
+    if title_reason:
+        lines.append(f"- **Title change:** {title_reason}")
+    return "\n".join(line for line in lines if line is not None).strip() + "\n"
+
+
+def _verification_for(
+    page: dict,
+    recommendation: dict,
+    own_paragraphs: list[str],
+    embedder: Embedder | None,
+) -> dict:
+    if embedder is None or not recommendation:
+        return {}
+    try:
+        blocks = assemble_recommended_blocks(own_paragraphs, recommendation)
+        return verify_recommendation(
+            blocks,
+            page.get("analyses") or [],
+            embed_fn=lambda texts: embedder.encode(texts, batch_size=64).astype(np.float32),
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _attach_workspace_brief(
+    page: dict,
+    cache_dir: Path,
+    config: SerpGapConfig,
+    state: dict,
+    *,
+    own_ext: ExtractedPage,
+    competitor_content: dict,
+    report_dir: Path,
+    paragraph_count: int,
+    own_paragraphs: list[str] | None = None,
+    embedder: Embedder | None = None,
+) -> None:
+    url = page.get("url", "")
+    own_paragraphs = own_paragraphs or []
+    workspace = write_agent_workspace(
+        report_dir,
+        page,
+        own_ext,
+        competitor_content,
+        schema_doc=RECOMMENDATION_SCHEMA_DOC,
+    )
+    evidence_text = (workspace / "evidence.json").read_text(encoding="utf-8")
+    cache_key = content_hash(
+        json.dumps({"evidence": content_hash(evidence_text), "model": config.ai_agent_model}, sort_keys=True)
+    )
+
+    def _session(extra_prompt: str = "", max_turns: int | None = None):
+        return run_harnext_workspace_session(
+            workspace,
+            model=config.ai_agent_model,
+            max_turns=max_turns or config.ai_agent_max_turns,
+            extra_prompt=extra_prompt,
+        )
+
+    def _run() -> dict:
+        completion = _session()
+        recommendation = (completion.raw or {}).get("recommendation") or {}
+        errors = validate_recommendation(recommendation, paragraph_count)
+        repair_attempted = False
+        if errors:
+            repair_attempted = True
+            repair_prompt = (
+                "Your recommendation.json failed validation with these errors:\n- "
+                + "\n- ".join(errors[:20])
+                + "\nFix recommendation.json only so it satisfies the contract in TASK.md."
+            )
+            completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
+            recommendation = (completion.raw or {}).get("recommendation") or {}
+            errors = validate_recommendation(recommendation, paragraph_count)
+        verification = {}
+        verification_repair_attempted = False
+        if not errors:
+            verification = _verification_for(page, recommendation, own_paragraphs, embedder)
+            unresolved = (verification.get("summary") or {}).get("unresolved_critical") or []
+            if unresolved:
+                verification_repair_attempted = True
+                repair_prompt = (
+                    "Verification: these critical/high SERP topics are still not covered by your recommendation: "
+                    + "; ".join(str(label) for label in unresolved[:10])
+                    + ". Update recommendation.json (add or strengthen sections) to cover them. "
+                    "Modify recommendation.json and brief.md only."
+                )
+                completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
+                candidate = (completion.raw or {}).get("recommendation") or {}
+                candidate_errors = validate_recommendation(candidate, paragraph_count)
+                if not candidate_errors:
+                    recommendation = candidate
+                    verification = _verification_for(page, recommendation, own_paragraphs, embedder)
+                else:
+                    errors = candidate_errors
+        return {
+            "brief": completion.text,
+            "recommendation": recommendation,
+            "errors": errors,
+            "repair_attempted": repair_attempted,
+            "verification": verification,
+            "verification_repair_attempted": verification_repair_attempted,
+            "provider": completion.provider,
+            "model": completion.model,
+            "workspace": str(workspace),
+        }
+
+    payload = cached_workspace_completion(
+        cache_dir,
+        kind=f"editor-workspace-{_url_report_slug(url)}",
+        key=cache_key,
+        runner=_run,
+        refresh=config.ai_agent_refresh,
+    )
+    if payload.get("cache_status") == "hit":
+        state["cache_hits"] += 1
+    errors = payload.get("errors") or []
+    page["ai_editor_brief"] = {
+        "status": "ok",
+        "provider": payload.get("provider", "harnext"),
+        "model": payload.get("model", config.ai_agent_model),
+        "cache_status": payload.get("cache_status", "miss"),
+        "markdown": _clean_ai_markdown(str(payload.get("brief") or "")),
+    }
+    rec_data = payload.get("recommendation") or {}
+    page["ai_recommendation"] = {
+        "status": "ok" if not errors else "invalid_recommendation",
+        "errors": errors,
+        "data": rec_data,
+        "repair_attempted": bool(payload.get("repair_attempted")),
+        "verification": payload.get("verification") or {},
+        "verification_repair_attempted": bool(payload.get("verification_repair_attempted")),
+        "workspace": str(Path(payload.get("workspace") or workspace)),
+        "article_markdown": (
+            _recommended_article_markdown(page, rec_data, own_paragraphs, payload.get("verification") or {})
+            if not errors else ""
+        ),
+    }
+    state["editor_briefs"] += 1
+
+
+def _attach_chat_brief(
+    page: dict,
+    cache_dir: Path,
+    config: SerpGapConfig,
+    state: dict,
+    *,
+    client,
+    paragraph_count: int,
+    own_paragraphs: list[str] | None = None,
+    embedder: Embedder | None = None,
+) -> None:
+    messages = build_editor_brief_messages(page)
+    completion = cached_completion(
+        cache_dir,
+        kind=f"editor-brief-{_url_report_slug(page.get('url', ''))}",
+        messages=messages,
+        client=client,
+        model=config.ai_agent_model,
+        refresh=config.ai_agent_refresh,
+        temperature=0.2,
+        timeout=180,
+    )
+    if completion.cache_status == "hit":
+        state["cache_hits"] += 1
+    if completion.fallback_from:
+        state.setdefault("notes", []).append(
+            f"Editor brief for {page.get('url', '')} used {completion.provider} after {completion.fallback_from}."
+        )
+    recommendation = parse_recommendation(completion.text)
+    errors = validate_recommendation(recommendation, paragraph_count) if recommendation else ["no recommendation JSON found in completion"]
+    brief_markdown = completion.text
+    if recommendation:
+        brief_markdown = re.sub(r"```json\s*\{.*?\}\s*```", "", brief_markdown, flags=re.DOTALL | re.IGNORECASE).strip()
+    page["ai_editor_brief"] = {
+        "status": "ok",
+        "provider": completion.provider,
+        "model": completion.model,
+        "cache_status": completion.cache_status,
+        "fallback_from": completion.fallback_from,
+        "markdown": _clean_ai_markdown(brief_markdown),
+    }
+    verification = {}
+    if not errors:
+        verification = _verification_for(page, recommendation, own_paragraphs or [], embedder)
+    page["ai_recommendation"] = {
+        "status": "ok" if not errors else "invalid_recommendation",
+        "errors": errors,
+        "data": recommendation,
+        "repair_attempted": False,
+        "verification": verification,
+        "verification_repair_attempted": False,
+        "workspace": "",
+        "article_markdown": (
+            _recommended_article_markdown(page, recommendation, own_paragraphs or [], verification)
+            if not errors else ""
+        ),
+    }
+    state["editor_briefs"] += 1
 
 
 def _clean_ai_markdown(text: str) -> str:
@@ -2967,6 +3875,11 @@ def _write_outputs(payload: dict, report_dir: Path) -> None:
     _write_csv(report_dir / "serp_gap.csv", _csv_rows(payload))
     _write_csv(report_dir / "serp_gap_actions.csv", _action_csv_rows(payload))
     (report_dir / "serp_gap_todo.md").write_text(_todo_markdown(payload), encoding="utf-8")
+    for page in payload.get("pages") or []:
+        article = (page.get("ai_recommendation") or {}).get("article_markdown") or ""
+        if article.strip():
+            slug = _url_report_slug(str(page.get("url") or ""))
+            (report_dir / f"recommended-article-{slug}.md").write_text(article, encoding="utf-8")
     (report_dir / "index.html").write_text(_html(payload), encoding="utf-8")
 
 
@@ -3081,10 +3994,27 @@ def _paragraph_todo_rows(page: dict, limit: int = 10) -> list[dict]:
     return rows[:limit]
 
 
-def _append_ai_editor_brief_markdown(lines: list[str], seen: set[str], brief: dict) -> None:
+def _append_ai_editor_brief_markdown(lines: list[str], seen: set[str], brief: dict, recommendation: dict | None = None) -> None:
     if not brief:
         return
     _append_unique(lines, seen, "### AI Agent TODO")
+    verification_summary = ((recommendation or {}).get("verification") or {}).get("summary") or {}
+    if verification_summary:
+        _append_unique(
+            lines,
+            seen,
+            "- Coverage check: missing {mb} -> {ma}, partial {pb} -> {pa}, PAA missing {qb} -> {qa}".format(
+                mb=verification_summary.get("missing_before", 0),
+                ma=verification_summary.get("missing_after", 0),
+                pb=verification_summary.get("partial_before", 0),
+                pa=verification_summary.get("partial_after", 0),
+                qb=verification_summary.get("paa_missing_before", 0),
+                qa=verification_summary.get("paa_missing_after", 0),
+            ),
+        )
+        unresolved = verification_summary.get("unresolved_critical") or []
+        if unresolved:
+            _append_unique(lines, seen, f"- Still uncovered critical/high topics: {'; '.join(unresolved[:10])}")
     status = brief.get("status", "")
     if status == "ok" and brief.get("markdown"):
         meta = [
@@ -3154,7 +4084,7 @@ def _todo_markdown(payload: dict) -> str:
             _append_unique(lines, seen, f"- Target keywords: {', '.join(keywords[:12])}")
         _append_unique(lines, seen)
 
-        _append_ai_editor_brief_markdown(lines, seen, page.get("ai_editor_brief") or {})
+        _append_ai_editor_brief_markdown(lines, seen, page.get("ai_editor_brief") or {}, page.get("ai_recommendation") or {})
 
         if rules:
             _append_unique(lines, seen, "### Writing Rules")
@@ -3226,6 +4156,19 @@ def _todo_markdown(payload: dict) -> str:
                     _append_unique(lines, task_seen, f"- Example URL: {evidence.get('example_url')}")
                 _append_unique(lines, seen)
 
+        paa_lines: list[str] = []
+        for analysis in page.get("analyses") or []:
+            keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+            for row in analysis.get("paa_coverage") or []:
+                if row.get("status") in {"missing", "partial"}:
+                    suffix = f" (keyword: {keyword})" if keyword else ""
+                    paa_lines.append(f"- [{row.get('status')}] {row.get('question')}{suffix}")
+        if paa_lines:
+            _append_unique(lines, seen, "### People Also Ask")
+            for line in paa_lines:
+                _append_unique(lines, seen, line)
+            _append_unique(lines, seen)
+
         paragraph_rows = _paragraph_todo_rows(page)
         if paragraph_rows:
             _append_unique(lines, seen, "### Paragraph Review")
@@ -3258,9 +4201,22 @@ def _todo_markdown(payload: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _strip_centroids(node):
+    """Remove bulky embedding vectors from a payload copy used for HTML rendering."""
+    if isinstance(node, dict):
+        node.pop("centroid", None)
+        for value in node.values():
+            _strip_centroids(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_centroids(item)
+    return node
+
+
 def _html(payload: dict) -> str:
+    payload = _strip_centroids(copy.deepcopy(payload))
     data = json.dumps(payload, ensure_ascii=False)
-    template = """<!doctype html>
+    template = r"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -3268,6 +4224,14 @@ def _html(payload: dict) -> str:
 <style>
 :root{--ink:#17202a;--muted:#5d6d7e;--line:#d7dee8;--soft:#f5f7fa;--panel:#fff;--ours:#176a35;--comp:#2d5b9a;--kw:#8a4b00;--missing:#b42318;--partial:#9a6700;--covered:#176a35;--shadow:0 1px 3px rgba(22,34,51,.08)}
 *{box-sizing:border-box}body{margin:0;background:#f7f9fc;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.45}a{color:#1b5dbf;text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1440px;margin:0 auto;padding:24px}.topbar{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.title h1{font-size:28px;line-height:1.1;margin:0 0 8px}.title p{margin:0;color:var(--muted);max-width:820px}.summary{display:grid;grid-template-columns:repeat(8,minmax(112px,1fr));gap:10px;margin:18px 0}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow)}.metric b{display:block;font-size:22px;line-height:1.1}.metric span{color:var(--muted);font-size:12px}.page-section{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:18px 0 28px;box-shadow:var(--shadow);overflow:hidden}.page-head{padding:18px 20px;border-bottom:1px solid var(--line);background:#fff}.page-head h2{font-size:21px;margin:0 0 6px}.url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted);overflow-wrap:anywhere}.keyword-card{padding:20px;border-top:1px solid var(--line)}.keyword-card:first-of-type{border-top:0}.keyword-grid{display:grid;grid-template-columns:minmax(460px,1.2fr) minmax(420px,.8fr);gap:18px;align-items:start}.keyword-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.keyword-head h3{font-size:19px;margin:0}.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{border:1px solid var(--line);border-radius:999px;padding:3px 8px;background:#fff;font-size:12px;color:var(--muted)}.chip.missing{color:var(--missing);border-color:#f1b4ad;background:#fff7f6}.chip.partial{color:var(--partial);border-color:#e8cf85;background:#fff9e8}.chip.covered{color:var(--covered);border-color:#a8d5b6;background:#f1faf4}.panel{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}.panel h4{margin:0;padding:11px 12px;border-bottom:1px solid var(--line);font-size:14px;background:var(--soft)}.panel-body{padding:12px}.scatter-wrap{position:relative}.scatter{width:100%;height:390px;display:block;background:#fbfcfe}.scatter-point{cursor:pointer}.scatter-point:focus{outline:none;stroke:#111;stroke-width:2.4}.scatter-tooltip{display:none;position:absolute;left:12px;right:12px;bottom:12px;max-height:250px;overflow:auto;background:linear-gradient(180deg,#fff,#f8fbff);border:1px solid #b9c7d8;border-radius:10px;box-shadow:0 14px 34px rgba(22,34,51,.22);padding:0;z-index:2}.scatter-tooltip.open{display:block}.tip-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-bottom:1px solid #e3e9f2;background:#f4f7fb}.tip-title{font-weight:750;font-size:13px;color:#142033}.tip-sub{margin-top:2px;color:#637083;font-size:11px}.tip-close{border:0;background:#e7edf5;border-radius:6px;padding:2px 8px;cursor:pointer}.tip-body{padding:11px 12px}.tip-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.tip-badge{display:inline-flex;align-items:center;border:1px solid #d5deea;border-radius:999px;padding:3px 7px;background:#fff;font-size:11px;color:#405166}.tip-badge.ours{border-color:#9bd0ae;color:#176a35;background:#f1faf4}.tip-badge.competitor{border-color:#acc3e5;color:#2d5b9a;background:#f3f7ff}.tip-badge.keyword{border-color:#e7c889;color:#8a4b00;background:#fff9e8}.tip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:9px}.tip-field{border:1px solid #edf1f5;border-radius:7px;background:#fff;padding:6px 7px;min-width:0}.tip-field span{display:block;color:#768395;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.tip-field strong{display:block;color:#1b2838;font-size:12px;overflow-wrap:anywhere}.tip-text{border-left:3px solid #8fb2df;background:#f7faff;border-radius:6px;padding:8px 9px;color:#263445;font-size:12px;line-height:1.45}.tip-explain{color:#637083;font-size:12px;margin-bottom:9px}.scatter-controls{position:absolute;top:10px;right:10px;display:flex;gap:5px;z-index:3}.scatter-controls button{border:1px solid #c9d3df;background:#fff;color:#263445;border-radius:6px;padding:3px 8px;font-size:12px;line-height:1;box-shadow:0 1px 3px rgba(22,34,51,.12);cursor:pointer}.scatter-controls button:hover{background:#f1f5f9}.scatter.is-panning{cursor:grabbing}.scatter{cursor:grab}.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.tables{display:grid;grid-template-columns:1fr;gap:14px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 9px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fbfcfe}.topic-label{font-weight:600}.coverage-missing{color:var(--missing);font-weight:700}.coverage-partial{color:var(--partial);font-weight:700}.coverage-covered{color:var(--covered);font-weight:700}.cluster-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.cluster{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.cluster strong{display:block;margin-bottom:5px}.bar{height:7px;background:#e9eef5;border-radius:999px;overflow:hidden;margin:8px 0}.bar span{display:block;height:100%;background:#5f8cc9}.muted{color:var(--muted)}.empty{padding:18px;color:var(--muted)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}.competitors li,.review li{margin:0 0 8px}.competitors,.review{padding-left:18px;margin:0}.mini{font-size:12px;color:var(--muted)}@media(max-width:980px){.wrap{padding:14px}.summary{grid-template-columns:repeat(2,1fr)}.keyword-grid,.two-col{grid-template-columns:1fr}.scatter{height:320px}.topbar{display:block}}
+  .md-body{font-size:13px;line-height:1.55;color:var(--ink)}
+  .md-body h3,.md-body h4,.md-body h5,.md-body h6{margin:14px 0 6px;font-size:14px}
+  .md-body p{margin:6px 0}
+  .md-body ul,.md-body ol{margin:6px 0;padding-left:22px}
+  .md-body li{margin:3px 0}
+  .md-body code{background:#f0f3f8;border:1px solid #dde4ee;border-radius:4px;padding:1px 4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .md-body pre{background:#f7f9fc;border:1px solid #dde4ee;border-radius:6px;padding:10px;overflow:auto}
+  .md-body pre code{background:none;border:0;padding:0}
   :root {
     --audit-bg: #f5f7fb;
     --audit-panel: #ffffff;
@@ -4438,6 +5402,27 @@ const navEl = document.getElementById('report-nav');
 const colors = {keyword:'#8a4b00', ours:'#176a35', competitor:'#2d5b9a', title:'#7b3fb2', h1:'#b65f00', header:'#68788b', paragraph:'#2d5b9a'};
 const ownDomain = data.domain || 'selected domain';
 function esc(s){return String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function mdInline(s){let t=esc(s);t=t.replace(/`([^`]+)`/g,'<code>$1</code>');t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');t=t.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');return t;}
+function mdToHtml(md){
+  // All text is escaped via esc() BEFORE any tags are added, so embedded HTML/scripts render inert.
+  const lines=String(md||'').replace(/\r\n/g,'\n').split('\n');const out=[];let list=null;let code=false;let codeLines=[];
+  const closeList=()=>{if(list){out.push(list==='ul'?'</ul>':'</ol>');list=null;}};
+  for(const raw of lines){
+    if(code){if(/^```/.test(raw.trim())){out.push(`<pre><code>${esc(codeLines.join('\n'))}</code></pre>`);code=false;codeLines=[];}else{codeLines.push(raw);}continue;}
+    const line=raw.trimEnd();const trimmed=line.trim();
+    if(/^```/.test(trimmed)){closeList();code=true;codeLines=[];continue;}
+    const h=trimmed.match(/^(#{1,4})\s+(.*)$/);
+    if(h){closeList();const level=Math.min(h[1].length+2,6);out.push(`<h${level}>${mdInline(h[2])}</h${level}>`);continue;}
+    const ul=trimmed.match(/^[-*]\s+(.*)$/);const ol=trimmed.match(/^\d+[.)]\s+(.*)$/);
+    if(ul||ol){const kind=ul?'ul':'ol';if(list!==kind){closeList();out.push(kind==='ul'?'<ul>':'<ol>');list=kind;}out.push(`<li>${mdInline((ul||ol)[1])}</li>`);continue;}
+    closeList();
+    if(!trimmed){continue;}
+    out.push(`<p>${mdInline(trimmed)}</p>`);
+  }
+  if(code&&codeLines.length)out.push(`<pre><code>${esc(codeLines.join('\n'))}</code></pre>`);
+  closeList();
+  return `<div class="md-body">${out.join('')}</div>`;
+}
 function urlLink(url,label=url){return url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label||url)}</a>`:'';}
 function sectionNote(text){return `<div class="section-note">${esc(text)}</div>`;}
 function n(v){return Number(v||0).toLocaleString();}
@@ -4467,7 +5452,7 @@ function topicRows(topics, limit=12){if(!topics||!topics.length)return '<tr><td 
 function clusterImpactChart(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No topic impact data available.</div>';const maxImpact=Math.max(1,...clusters.map(c=>Number(c.impactScore||0)));return `<div class="topic-chart">${clusters.map(c=>{const width=Math.max(5,Math.round((Number(c.impactScore||0)/maxImpact)*100));const metrics=[Number(c.impactTraffic||0)>0&&`${n(c.impactTraffic)} traffic`,Number(c.impactImpressions||0)>0&&`${n(c.impactImpressions)} impr`,Number(c.impactVolume||0)>0&&`vol ${n(c.impactVolume)}`].filter(Boolean).join(' · ')||'No demand metric';const label=(c.keywords||[]).slice(0,3).join(', ')||`Cluster ${c.id}`;return `<div class="topic-chart-row"><div class="topic-chart-label" title="${esc(label)}">Cluster ${esc(c.id)} · ${esc(label)}</div><div class="topic-chart-track" title="${esc(metrics)}"><span class="topic-chart-bar coverage-missing" style="width:${width}%"></span></div><div class="mini">${esc(metrics)}</div></div>`;}).join('')}</div>`;}
 function clusterCards(points){const clusters=clusterSummary(points);if(!clusters.length)return '<div class="empty">No semantic clusters available.</div>';const maxImpact=Math.max(1,...clusters.map(c=>Number(c.impactScore||0)));return '<div class="cluster-list">'+clusters.map(c=>`<div class="cluster"><strong>Cluster ${esc(c.id)} · ${n(c.total)} points</strong><div class="mini">${esc(ownDomain)} ${n(c.ours)} · Competitor ${n(c.competitor)} · Headers ${n(c.headers)} · Keywords ${n(c.keyword)}${c.centroid?` · Centroid ${n(c.centroid)}`:''}</div><div class="mini">Impact ${Number(c.impactTraffic||0)>0?`${n(c.impactTraffic)} traffic`:Number(c.impactImpressions||0)>0?`${n(c.impactImpressions)} impressions`:Number(c.impactVolume||0)>0?`vol ${n(c.impactVolume)}`:'unavailable'}</div><div class="bar"><span style="width:${Math.min(100,Math.round((Number(c.impactScore||0)/maxImpact)*100))}%"></span></div><div class="mini">${esc(c.samples.join(' / '))}</div></div>`).join('')+'</div>';}
 const frequencyStopwords=new Set('a an and are as at be by can for from has have how if in into is it its more not of on or our page pages that the their this to top use user users with without your you we what when where which who why will all each any same over under also than then these those there here about after before because been being do does did done get got make made many much most some such own other them they his her she he was were would should could may might liveagent live agent'.split(' '));
-function frequencyTokens(text){return String(text||'').toLowerCase().replace(/&[a-z]+;/g,' ').replace(/[^a-z0-9]+/g,' ').split(/\\s+/).filter(token=>token.length>2&&!frequencyStopwords.has(token)&&!/^\\d+$/.test(token));}
+function frequencyTokens(text){return String(text||'').toLowerCase().replace(/&[a-z]+;/g,' ').replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(token=>token.length>2&&!frequencyStopwords.has(token)&&!/^\d+$/.test(token));}
 function addFrequency(map, term, amount){if(!term)return;map.set(term,(map.get(term)||0)+amount);}
 function frequencyRowsFromMap(map,limit=18){return [...map.entries()].map(([term,score])=>({term,score})).sort((a,b)=>b.score-a.score||a.term.localeCompare(b.term)).slice(0,limit);}
 function collectFrequency(points,types,weight=1){const map=new Map();for(const p of points||[]){if(!types.includes(p.entity_type))continue;const tokens=frequencyTokens(p.text);for(const token of tokens)addFrequency(map,token,weight);for(let i=0;i<tokens.length-1;i++){if(tokens[i]!==tokens[i+1])addFrequency(map,`${tokens[i]} ${tokens[i+1]}`,weight*1.35);}}return frequencyRowsFromMap(map);}
@@ -4491,29 +5476,33 @@ function actionList(rows,limit=12){if(!rows||!rows.length)return '<div class="em
 function pageBriefCard(brief,index){const actions=brief.next_actions||[];const keywords=(brief.primary_keywords||[]).map(k=>`<span class="chip">${esc(k)}</span>`).join('');return `<div class="brief-card"><h5>${index+1}. ${esc(brief.title||brief.target_url||'Page brief')}</h5><div class="mini">${urlLink(brief.target_url)}</div><div class="action-meta"><span class="chip missing">${n(brief.high_priority_actions||0)} high priority</span><span class="chip">${n(brief.total_actions||0)} tasks</span><span class="chip">score ${esc(brief.priority_score||0)}</span></div>${keywords?`<div class="action-meta">${keywords}</div>`:''}<div class="brief-label">Next tasks</div>${actions.length?`<ol>${actions.slice(0,5).map(a=>`<li><b>${esc(a.priority||'')}</b> ${esc(a.task_summary||a.type||'Task')} ${a.keyword?`<span class="mini">(${esc(a.keyword)})</span>`:''}</li>`).join('')}</ol>`:'<div class="mini">No page-level tasks generated.</div>'}${promptBox(brief.ai_agent_prompt)}</div>`;}
 function contentBriefsSection(){const rows=data.content_briefs||[];if(!rows.length)return '';return collapsiblePanel('Page Content Briefs',`${sectionNote('The shortest path from analysis to work: each page brief groups priority tasks, target keywords, paragraph rules, and an AI-agent prompt.')}<div class="brief-grid">${rows.map(pageBriefCard).join('')}</div>`,{meta:`${n(rows.length)} brief${rows.length===1?'':'s'}`});}
 function aiAgentStatusSection(){const agent=data.ai_agent||{};if(!agent.enabled)return '';const notes=(agent.notes||[]).concat(agent.errors||[]);const statusRows=[['Status',agent.status||''],['Provider',agent.provider||''],['Model',agent.model||''],['Detected language',agent.detected_language||''],['Language prompts',agent.language_prompts||0],['Keyword prompts',agent.keyword_prompts||0],['Keyword fallbacks',agent.keyword_fallbacks||0],['Editor briefs',agent.editor_briefs||0],['Cache hits',agent.cache_hits||0]];return collapsiblePanel('AI Agent Status',`${sectionNote('Harnext/OpenRouter agent layer for language detection, keyword inference, paragraph-level editor briefs, and final article drafts. Missing prerequisites are reported here; metrics are never fabricated.')}<table><tbody>${statusRows.map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>${notes.length?`<div class="brief-label">Notes</div>${listHtml(notes)}`:''}`,{meta:agent.status||'',open:agent.status&&agent.status!=='ready'&&agent.status!=='disabled'});}
-function aiEditorBriefSection(page){const brief=page.ai_editor_brief||{};if(!brief.status)return '';if(brief.status==='ok'){const meta=[brief.provider,brief.cache_status].filter(Boolean).join(' · ');return collapsiblePanel('AI Agent TODO',`${sectionNote('Generated markdown instructions for an AI coding/content agent. It should be treated as the implementation brief; deterministic task cards remain below as supporting evidence.')}<div class="prompt-box">${esc(brief.markdown||'')}</div>`,{meta,open:false});}return collapsiblePanel('AI Agent TODO',`<div class="empty">${esc(brief.message||'AI editor brief was not generated.')}</div>`,{meta:brief.status||'not generated',open:false});}
+function aiEditorBriefSection(page){const brief=page.ai_editor_brief||{};if(!brief.status)return '';if(brief.status==='ok'){const meta=[brief.provider,brief.cache_status].filter(Boolean).join(' · ');return collapsiblePanel('AI Agent TODO',`${sectionNote('Generated markdown instructions for an AI coding/content agent. It should be treated as the implementation brief; deterministic task cards remain below as supporting evidence.')}${mdToHtml(brief.markdown||'')}`,{meta,open:false});}return collapsiblePanel('AI Agent TODO',`<div class="empty">${esc(brief.message||'AI editor brief was not generated.')}</div>`,{meta:brief.status||'not generated',open:false});}
 function paragraphRulesSection(){const rules=(data.editorial_guidelines||{}).paragraph_rules||[];if(!rules.length)return '';return collapsiblePanel('AI Paragraph Rules',listHtml(rules),{meta:`${n(rules.length)} rule${rules.length===1?'':'s'}`});}
 function aggregateActionsSection(){const rows=data.action_points||[];return collapsiblePanel('Content Action Plan For AI Agents',`${sectionNote('Prioritized instructions for editors or an AI agent. Each card includes what to change, where to place it, how paragraphs should be structured, and when the task is done.')} ${actionList(rows,18)}`,{meta:`${n(rows.length)} task${rows.length===1?'':'s'}`});}
-function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
+function domainRatingValue(row){const raw=row?.domain_rating;if(raw===null||raw===undefined||raw==='')return null;const v=Number(raw);return Number.isFinite(v)&&v>=0?v:null;}
+function domainRatingChip(row){const v=domainRatingValue(row);return v===null?'':`<span class="chip" title="Domain Rating by Ahrefs">DR ${v.toFixed(1)}</span>`;}
+function domainRatingText(row){const v=domainRatingValue(row);return v===null?'':` · DR ${v.toFixed(1)} by Ahrefs`;}
+function domainRatingAttribution(){const meta=data.domain_ratings||{};if(!meta.domains_enriched)return '';const license=meta.license||'http://ahrefs.com/legal/domain-rating-license';return `<div class="mini" style="margin-top:10px">Domain Rating by <a href="https://ahrefs.com/" target="_blank" rel="noopener noreferrer">Ahrefs</a>. <a href="${esc(license)}" target="_blank" rel="noopener noreferrer">License</a>. ${n(meta.domains_enriched)} domain${Number(meta.domains_enriched)===1?'':'s'} enriched.</div>`;}
+function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${domainRatingText(c)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No high-distance ${esc(ownDomain)} paragraphs were flagged for this keyword. This means the analyzed paragraphs stayed close enough to either the target keyword vector or the SERP topic space.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
 function sharedKeywordNames(a,b){const aKeywords=new Set((a.keywords||[]).map(k=>String(k.keyword||'')));return (b.keywords||[]).map(k=>String(k.keyword||'')).filter(k=>aKeywords.has(k));}
 function rankForKeyword(row,keyword){const match=(row.keywords||[]).find(k=>String(k.keyword||'')===String(keyword||''));return Number(match?.rank||0);}
 function serpTrafficScore(a,b,keywords){if(!keywords.length)return 0;const total=keywords.reduce((sum,keyword)=>{const ar=rankForKeyword(a,keyword),br=rankForKeyword(b,keyword);return sum+Math.max(0,11-ar)+Math.max(0,11-br);},0);return total/(keywords.length*20);}
 function trafficColor(score){const t=Math.max(0,Math.min(1,Number(score)||0));const low=[88,123,181],mid=[151,121,77],high=[194,91,30];const mix=(a,b,x)=>Math.round(a+(b-a)*x);const left=t<.5?low:mid;const right=t<.5?mid:high;const x=t<.5?t*2:(t-.5)*2;return `rgb(${mix(left[0],right[0],x)} ${mix(left[1],right[1],x)} ${mix(left[2],right[2],x)})`;}
-function serpUrlGraph(rows){if(!rows||rows.length<2)return '<div class="empty">Not enough URLs for a co-ranking graph.</div>';const nodes=rows.slice(0,18).map(row=>({...row,domain:row.domain||urlDomain(row.url||'')||row.url})).sort((a,b)=>String(a.domain).localeCompare(String(b.domain))||Number(b.top10_count||0)-Number(a.top10_count||0));const edges=[];for(let i=0;i<nodes.length;i++){for(let j=i+1;j<nodes.length;j++){const shared=sharedKeywordNames(nodes[i],nodes[j]);if(shared.length){const traffic=serpTrafficScore(nodes[i],nodes[j],shared);edges.push({a:i,b:j,weight:shared.length,traffic,keywords:shared});}}}if(!edges.length)return '<div class="empty">No URLs share selected keywords.</div>';const w=920,h=560,cx=w/2,cy=h/2,leafR=205,domainR=118,bundleR=34;const maxCount=Math.max(1,...nodes.map(row=>Number(row.top10_count||0)));const domains=[...new Set(nodes.map(n=>n.domain))];const domainAngles=new Map(domains.map((domain,i)=>[domain,-Math.PI/2+(i/domains.length)*Math.PI*2]));const groups=new Map;nodes.forEach(node=>{const group=groups.get(node.domain)||[];group.push(node);groups.set(node.domain,group);});const positions=nodes.map((node,index)=>{const group=groups.get(node.domain)||[node];const groupIndex=group.indexOf(node);const base=domainAngles.get(node.domain)||0;const spread=Math.min(0.46,0.09*Math.max(group.length-1,0));const angle=base+(group.length<=1?0:-spread/2+(groupIndex/(group.length-1))*spread);return{index,angle,x:cx+Math.cos(angle)*leafR,y:cy+Math.sin(angle)*leafR,dx:cx+Math.cos(base)*domainR,dy:cy+Math.sin(base)*domainR,bx:cx+Math.cos(base)*bundleR,by:cy+Math.sin(base)*bundleR};});const edgeSvg=edges.map(edge=>{const a=positions[edge.a],b=positions[edge.b];const d=`M${a.x.toFixed(1)},${a.y.toFixed(1)} C${a.dx.toFixed(1)},${a.dy.toFixed(1)} ${a.bx.toFixed(1)},${a.by.toFixed(1)} ${cx},${cy} S${b.dx.toFixed(1)},${b.dy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;const title=`${nodes[edge.a].url} ↔ ${nodes[edge.b].url}: ${edge.weight} shared keyword${edge.weight===1?'':'s'} (${edge.keywords.join(', ')}); traffic proxy ${(edge.traffic*100).toFixed(0)}% from SERP positions`;return `<path class="graph-edge" d="${d}" stroke="${trafficColor(edge.traffic)}" stroke-width="${(0.9+edge.weight*1.5).toFixed(1)}"><title>${esc(title)}</title></path>`;}).join('');const domainMarks=domains.map(domain=>{const angle=domainAngles.get(domain)||0;const x=cx+Math.cos(angle)*domainR,y=cy+Math.sin(angle)*domainR;return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${domainColor(domain)}" opacity=".76"><title>${esc(domain)}</title></circle>`;}).join('');const nodeSvg=nodes.map((node,i)=>{const p=positions[i];const count=Number(node.top10_count||0);const size=7+Math.sqrt(count/maxCount)*10;const title=`${node.url}\\n${count} top-10 appearance${count===1?'':'s'}\\nBest rank #${node.best_rank||''}\\nKeywords: ${(node.keywords||[]).map(k=>`${k.keyword} #${k.rank}`).join(', ')}`;const labelX=p.x+(p.x>=cx?size+5:-size-5);const anchor=p.x>=cx?'start':'end';return `<a href="${esc(node.url||'#')}" target="_blank" rel="noopener noreferrer"><circle class="graph-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${size.toFixed(1)}" fill="${domainColor(node.domain)}"><title>${esc(title)}</title></circle></a><text class="graph-label" x="${labelX.toFixed(1)}" y="${(p.y-2).toFixed(1)}" text-anchor="${anchor}">${esc(node.domain).slice(0,26)}</text><text class="graph-meta" x="${labelX.toFixed(1)}" y="${(p.y+11).toFixed(1)}" text-anchor="${anchor}">${n(count)} top-10 · best #${esc(node.best_rank||'')}</text>`;}).join('');const defs='<defs><linearGradient id="trafficGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="'+trafficColor(0.08)+'"></stop><stop offset="50%" stop-color="'+trafficColor(0.5)+'"></stop><stop offset="100%" stop-color="'+trafficColor(1)+'"></stop></linearGradient></defs>';const legend=`<g class="traffic-legend" transform="translate(26 ${h-34})"><text x="0" y="-8">Connection color: SERP-position traffic proxy</text><rect x="0" y="0" width="150" height="8" rx="4" fill="url(#trafficGradient)"></rect><text x="0" y="23">lower</text><text x="150" y="23" text-anchor="end">higher</text></g>`;return `<svg class="serp-url-graph" viewBox="0 0 ${w} ${h}" role="img" aria-label="Hierarchical edge bundling chart for URL co-ranking. Nodes are ranking URLs grouped by domain. Curved connections join URLs that rank for the same selected keywords; thicker lines mean more shared keywords and warmer colors mean stronger SERP-position traffic proxy."><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"></rect>${defs}${edgeSvg}${domainMarks}${nodeSvg}${legend}</svg><div class="mini">Bundled co-ranking graph: nodes are URLs grouped by domain; curved connections mean URLs rank for the same selected keyword; line width shows shared keyword count; warmer color means stronger SERP-position traffic proxy.</div>`;}
-function serpRankingChart(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 URL chart available.</div>';const maxCount=Math.max(1,...rows.map(row=>Number(row.top10_count||0)));return `<div class="serp-ranking-chart" aria-label="Top-10 URL relevance chart">${rows.slice(0,12).map(row=>{const count=Number(row.top10_count||0);const width=Math.max(6,Math.round((count/maxCount)*100));const title=`${row.url} · ${count} top-10 appearances · best #${row.best_rank||''} · avg #${row.average_rank||''}`;return `<div class="serp-ranking-chart-row"><div class="serp-ranking-chart-label" title="${esc(row.url||'')}">${urlLink(row.url,row.domain||row.url)}</div><div class="serp-ranking-chart-track" title="${esc(title)}"><span class="serp-ranking-chart-bar" style="width:${width}%"></span></div><div class="serp-ranking-chart-meta">${n(count)} top-10 · best #${esc(row.best_rank||'')}</div></div>`;}).join('')}</div>`;}
+function serpUrlGraph(rows){if(!rows||rows.length<2)return '<div class="empty">Not enough URLs for a co-ranking graph.</div>';const nodes=rows.slice(0,18).map(row=>({...row,domain:row.domain||urlDomain(row.url||'')||row.url})).sort((a,b)=>String(a.domain).localeCompare(String(b.domain))||Number(b.top10_count||0)-Number(a.top10_count||0));const edges=[];for(let i=0;i<nodes.length;i++){for(let j=i+1;j<nodes.length;j++){const shared=sharedKeywordNames(nodes[i],nodes[j]);if(shared.length){const traffic=serpTrafficScore(nodes[i],nodes[j],shared);edges.push({a:i,b:j,weight:shared.length,traffic,keywords:shared});}}}if(!edges.length)return '<div class="empty">No URLs share selected keywords.</div>';const w=920,h=560,cx=w/2,cy=h/2,leafR=205,domainR=118,bundleR=34;const maxCount=Math.max(1,...nodes.map(row=>Number(row.top10_count||0)));const domains=[...new Set(nodes.map(n=>n.domain))];const domainAngles=new Map(domains.map((domain,i)=>[domain,-Math.PI/2+(i/domains.length)*Math.PI*2]));const groups=new Map;nodes.forEach(node=>{const group=groups.get(node.domain)||[];group.push(node);groups.set(node.domain,group);});const positions=nodes.map((node,index)=>{const group=groups.get(node.domain)||[node];const groupIndex=group.indexOf(node);const base=domainAngles.get(node.domain)||0;const spread=Math.min(0.46,0.09*Math.max(group.length-1,0));const angle=base+(group.length<=1?0:-spread/2+(groupIndex/(group.length-1))*spread);return{index,angle,x:cx+Math.cos(angle)*leafR,y:cy+Math.sin(angle)*leafR,dx:cx+Math.cos(base)*domainR,dy:cy+Math.sin(base)*domainR,bx:cx+Math.cos(base)*bundleR,by:cy+Math.sin(base)*bundleR};});const edgeSvg=edges.map(edge=>{const a=positions[edge.a],b=positions[edge.b];const d=`M${a.x.toFixed(1)},${a.y.toFixed(1)} C${a.dx.toFixed(1)},${a.dy.toFixed(1)} ${a.bx.toFixed(1)},${a.by.toFixed(1)} ${cx},${cy} S${b.dx.toFixed(1)},${b.dy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;const title=`${nodes[edge.a].url} ↔ ${nodes[edge.b].url}: ${edge.weight} shared keyword${edge.weight===1?'':'s'} (${edge.keywords.join(', ')}); traffic proxy ${(edge.traffic*100).toFixed(0)}% from SERP positions`;return `<path class="graph-edge" d="${d}" stroke="${trafficColor(edge.traffic)}" stroke-width="${(0.9+edge.weight*1.5).toFixed(1)}"><title>${esc(title)}</title></path>`;}).join('');const domainMarks=domains.map(domain=>{const angle=domainAngles.get(domain)||0;const x=cx+Math.cos(angle)*domainR,y=cy+Math.sin(angle)*domainR;return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${domainColor(domain)}" opacity=".76"><title>${esc(domain)}</title></circle>`;}).join('');const nodeSvg=nodes.map((node,i)=>{const p=positions[i];const count=Number(node.top10_count||0);const size=7+Math.sqrt(count/maxCount)*10;const title=`${node.url}\\n${count} top-10 appearance${count===1?'':'s'}\\nBest rank #${node.best_rank||''}\\nKeywords: ${(node.keywords||[]).map(k=>`${k.keyword} #${k.rank}`).join(', ')}`;const labelX=p.x+(p.x>=cx?size+5:-size-5);const anchor=p.x>=cx?'start':'end';return `<a href="${esc(node.url||'#')}" target="_blank" rel="noopener noreferrer"><circle class="graph-node" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${size.toFixed(1)}" fill="${domainColor(node.domain)}"><title>${esc(title)}</title></circle></a><text class="graph-label" x="${labelX.toFixed(1)}" y="${(p.y-2).toFixed(1)}" text-anchor="${anchor}">${esc(node.domain).slice(0,26)}</text><text class="graph-meta" x="${labelX.toFixed(1)}" y="${(p.y+11).toFixed(1)}" text-anchor="${anchor}">${n(count)} top-10 · best #${esc(node.best_rank||'')}${domainRatingText(node)}</text>`;}).join('');const defs='<defs><linearGradient id="trafficGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="'+trafficColor(0.08)+'"></stop><stop offset="50%" stop-color="'+trafficColor(0.5)+'"></stop><stop offset="100%" stop-color="'+trafficColor(1)+'"></stop></linearGradient></defs>';const legend=`<g class="traffic-legend" transform="translate(26 ${h-34})"><text x="0" y="-8">Connection color: SERP-position traffic proxy</text><rect x="0" y="0" width="150" height="8" rx="4" fill="url(#trafficGradient)"></rect><text x="0" y="23">lower</text><text x="150" y="23" text-anchor="end">higher</text></g>`;return `<svg class="serp-url-graph" viewBox="0 0 ${w} ${h}" role="img" aria-label="Hierarchical edge bundling chart for URL co-ranking. Nodes are ranking URLs grouped by domain. Curved connections join URLs that rank for the same selected keywords; thicker lines mean more shared keywords and warmer colors mean stronger SERP-position traffic proxy."><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"></rect>${defs}${edgeSvg}${domainMarks}${nodeSvg}${legend}</svg><div class="mini">Bundled co-ranking graph: nodes are URLs grouped by domain; curved connections mean URLs rank for the same selected keyword; line width shows shared keyword count; warmer color means stronger SERP-position traffic proxy.</div>`;}
+function serpRankingChart(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 URL chart available.</div>';const maxCount=Math.max(1,...rows.map(row=>Number(row.top10_count||0)));return `<div class="serp-ranking-chart" aria-label="Top-10 URL relevance chart">${rows.slice(0,12).map(row=>{const count=Number(row.top10_count||0);const width=Math.max(6,Math.round((count/maxCount)*100));const title=`${row.url} · ${count} top-10 appearances · best #${row.best_rank||''} · avg #${row.average_rank||''}${domainRatingText(row)}`;return `<div class="serp-ranking-chart-row"><div class="serp-ranking-chart-label" title="${esc(row.url||'')}">${urlLink(row.url,row.domain||row.url)}</div><div class="serp-ranking-chart-track" title="${esc(title)}"><span class="serp-ranking-chart-bar" style="width:${width}%"></span></div><div class="serp-ranking-chart-meta">${n(count)} top-10 · best #${esc(row.best_rank||'')}${domainRatingText(row)}</div></div>`;}).join('')}</div>`;}
 function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const keywords=(row.keywords||[]).map(k=>`<span class="serp-ranking-chip"><strong>#${esc(k.rank)}</strong> ${esc(k.keyword)}</span>`).join('');return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span></div><div class="serp-ranking-keywords">${keywords}</div></div>`;}).join('')}</div>`;}
 function hasDemandMetrics(row){return Number(row?.impressions||0)>0||Number(row?.clicks||0)>0||Number(row?.traffic||0)>0||Number(row?.volume||0)>0;}
 function keywordMetrics(k){const parts=[`#${esc(k.rank)}`];if(hasDemandMetrics(k)){if(Number(k.impressions||0)>0)parts.push(`${n(k.impressions)} impr`);if(Number(k.clicks||0)>0)parts.push(`${n(k.clicks)} clicks`);if(Number(k.traffic||0)>0)parts.push(`${n(k.traffic)} traffic`);if(Number(k.volume||0)>0)parts.push(`vol ${n(k.volume)}`);}else{parts.push('no demand metrics');}if(Number(k.source_position||0))parts.push(`source pos ${Number(k.source_position).toFixed(1)}`);if(k.source)parts.push(esc(k.source));return parts.join(' · ');}
 function graphKeywordRows(keywords){return (keywords||[]).map(k=>`<div class="metric-line"><b>${esc(k.keyword)}</b> · ${keywordMetrics(k)}</div>`).join('');}
 function demandMetricLine(row){if(hasDemandMetrics(row)){const parts=[];if(Number(row.impressions||0)>0)parts.push(`Impressions: ${n(row.impressions)}`);if(Number(row.clicks||0)>0)parts.push(`Clicks: ${n(row.clicks)}`);if(Number(row.traffic||0)>0)parts.push(`Traffic: ${n(row.traffic)}`);if(Number(row.volume||0)>0)parts.push(`Volume: ${n(row.volume)}`);return `<div class="metric-line">${parts.join(' · ')}</div>`;}return '<div class="metric-line">Demand metrics unavailable: this run used manual keywords and SERP suggestions without GSC/Ahrefs click, impression, traffic, or volume data.</div>';}
 function aggregateDemandRows(rows){return (rows||[]).reduce((out,row)=>({impressions:Number(out.impressions||0)+Number(row.impressions||0),clicks:Number(out.clicks||0)+Number(row.clicks||0),traffic:Number(out.traffic||0)+Number(row.traffic||0),volume:Number(out.volume||0)+Number(row.volume||0)}),{});}
-function graphTooltipHtml(detail){if(detail.kind==='connection'){return `<h5>Shared keyword connection</h5><div>${urlLink(detail.url_a,detail.domain_a)} ↔ ${urlLink(detail.url_b,detail.domain_b)}</div><div class="metric-line">SERP-position proxy: ${Math.round(Number(detail.traffic_proxy||0)*100)}% · Shared keywords: ${n(detail.shared_count||0)}</div>${demandMetricLine(aggregateDemandRows(detail.keywords))}${graphKeywordRows(detail.keywords)}`;}return `<h5>${esc(detail.domain||'URL')}</h5><div>${urlLink(detail.url)}</div><div class="metric-line">Top-10 keywords: ${n(detail.top10_count||0)} · Best SERP position: #${esc(detail.best_rank||'')} · Avg SERP position: #${esc(detail.average_rank||'')}</div>${demandMetricLine(detail)}${graphKeywordRows(detail.keywords)}`;}
-function serpUrlGraph(rows){if(!rows||rows.length<2)return '<div class="empty">Not enough URLs for a co-ranking graph.</div>';const nodes=rows.slice(0,18).map(row=>({...row,domain:row.domain||urlDomain(row.url||'')||row.url})).sort((a,b)=>String(a.domain).localeCompare(String(b.domain))||Number(b.top10_count||0)-Number(a.top10_count||0));const edges=[];for(let i=0;i<nodes.length;i++){for(let j=i+1;j<nodes.length;j++){const shared=sharedKeywordNames(nodes[i],nodes[j]);if(shared.length){const traffic=serpTrafficScore(nodes[i],nodes[j],shared);const keywords=shared.map(keyword=>{const a=(nodes[i].keywords||[]).find(k=>String(k.keyword||'')===keyword)||{};const b=(nodes[j].keywords||[]).find(k=>String(k.keyword||'')===keyword)||{};return{keyword,rank:`${a.rank||''} / ${b.rank||''}`,impressions:Math.max(Number(a.impressions||0),Number(b.impressions||0)),clicks:Math.max(Number(a.clicks||0),Number(b.clicks||0)),traffic:Math.max(Number(a.traffic||0),Number(b.traffic||0)),source_position:Number(a.source_position||b.source_position||0),volume:Math.max(Number(a.volume||0),Number(b.volume||0))};});edges.push({a:i,b:j,weight:shared.length,traffic,keywords});}}}if(!edges.length)return '<div class="empty">No URLs share selected keywords.</div>';const w=920,h=560,cx=w/2,cy=h/2,leafR=205,domainR=118,bundleR=34;const maxCount=Math.max(1,...nodes.map(row=>Number(row.top10_count||0)));const domains=[...new Set(nodes.map(n=>n.domain))];const domainAngles=new Map(domains.map((domain,i)=>[domain,-Math.PI/2+(i/domains.length)*Math.PI*2]));const groups=new Map;nodes.forEach(node=>{const group=groups.get(node.domain)||[];group.push(node);groups.set(node.domain,group);});const positions=nodes.map((node,index)=>{const group=groups.get(node.domain)||[node];const groupIndex=group.indexOf(node);const base=domainAngles.get(node.domain)||0;const spread=Math.min(0.46,0.09*Math.max(group.length-1,0));const angle=base+(group.length<=1?0:-spread/2+(groupIndex/(group.length-1))*spread);return{index,angle,x:cx+Math.cos(angle)*leafR,y:cy+Math.sin(angle)*leafR,dx:cx+Math.cos(base)*domainR,dy:cy+Math.sin(base)*domainR,bx:cx+Math.cos(base)*bundleR,by:cy+Math.sin(base)*bundleR};});const edgeSvg=edges.map(edge=>{const a=positions[edge.a],b=positions[edge.b];const d=`M${a.x.toFixed(1)},${a.y.toFixed(1)} C${a.dx.toFixed(1)},${a.dy.toFixed(1)} ${a.bx.toFixed(1)},${a.by.toFixed(1)} ${cx},${cy} S${b.dx.toFixed(1)},${b.dy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;const detail={kind:'connection',url_a:nodes[edge.a].url,url_b:nodes[edge.b].url,domain_a:nodes[edge.a].domain,domain_b:nodes[edge.b].domain,shared_count:edge.weight,traffic_proxy:edge.traffic,keywords:edge.keywords};return `<path class="graph-edge" tabindex="0" data-graph-edge data-nodes=",${edge.a},${edge.b}," data-graph-detail="${esc(JSON.stringify(detail))}" d="${d}" stroke="${trafficColor(edge.traffic)}" stroke-width="${(0.9+edge.weight*1.5).toFixed(1)}"></path>`;}).join('');const domainMarks=domains.map(domain=>{const angle=domainAngles.get(domain)||0;const x=cx+Math.cos(angle)*domainR,y=cy+Math.sin(angle)*domainR;return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${domainColor(domain)}" opacity=".76"><title>${esc(domain)}</title></circle>`;}).join('');const nodeSvg=nodes.map((node,i)=>{const p=positions[i];const count=Number(node.top10_count||0);const size=7+Math.sqrt(count/maxCount)*10;const labelX=p.x+(p.x>=cx?size+5:-size-5);const anchor=p.x>=cx?'start':'end';const detail={kind:'url',url:node.url,domain:node.domain,top10_count:node.top10_count,best_rank:node.best_rank,average_rank:node.average_rank,impressions:node.impressions,clicks:node.clicks,traffic:node.traffic,keywords:node.keywords||[]};return `<a href="${esc(node.url||'#')}" target="_blank" rel="noopener noreferrer"><circle class="graph-node" tabindex="0" data-graph-node data-node-index="${i}" data-graph-detail="${esc(JSON.stringify(detail))}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${size.toFixed(1)}" fill="${domainColor(node.domain)}"></circle></a><text class="graph-label" x="${labelX.toFixed(1)}" y="${(p.y-2).toFixed(1)}" text-anchor="${anchor}">${esc(node.domain).slice(0,26)}</text><text class="graph-meta" x="${labelX.toFixed(1)}" y="${(p.y+11).toFixed(1)}" text-anchor="${anchor}">${n(count)} top-10 · best #${esc(node.best_rank||'')}</text>`;}).join('');const defs='<defs><linearGradient id="trafficGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="'+trafficColor(0.08)+'"></stop><stop offset="50%" stop-color="'+trafficColor(0.5)+'"></stop><stop offset="100%" stop-color="'+trafficColor(1)+'"></stop></linearGradient></defs>';const legend=`<g class="traffic-legend" transform="translate(26 ${h-34})"><text x="0" y="-8">Connection color: SERP-position traffic proxy</text><rect x="0" y="0" width="150" height="8" rx="4" fill="url(#trafficGradient)"></rect><text x="0" y="23">lower</text><text x="150" y="23" text-anchor="end">higher</text></g>`;return `<div class="serp-url-graph-wrap"><svg class="serp-url-graph" viewBox="0 0 ${w} ${h}" role="img" aria-label="Hierarchical edge bundling chart for URL co-ranking. Nodes are ranking URLs grouped by domain. Curved connections join URLs that rank for the same selected keywords; thicker lines mean more shared keywords and warmer colors mean stronger SERP-position traffic proxy."><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"></rect>${defs}${edgeSvg}${domainMarks}${nodeSvg}${legend}</svg><div class="graph-tooltip" role="tooltip"></div></div><div class="mini">Bundled co-ranking graph: nodes are URLs grouped by domain; curved connections mean URLs rank for the same selected keyword; line width shows shared keyword count; warmer color means stronger SERP-position traffic proxy.</div>`;}
+function graphTooltipHtml(detail){if(detail.kind==='connection'){return `<h5>Shared keyword connection</h5><div>${urlLink(detail.url_a,detail.domain_a)} ↔ ${urlLink(detail.url_b,detail.domain_b)}</div><div class="metric-line">SERP-position proxy: ${Math.round(Number(detail.traffic_proxy||0)*100)}% · Shared keywords: ${n(detail.shared_count||0)}</div>${demandMetricLine(aggregateDemandRows(detail.keywords))}${graphKeywordRows(detail.keywords)}`;}return `<h5>${esc(detail.domain||'URL')}</h5><div>${urlLink(detail.url)}</div><div class="metric-line">Top-10 keywords: ${n(detail.top10_count||0)} · Best SERP position: #${esc(detail.best_rank||'')} · Avg SERP position: #${esc(detail.average_rank||'')}${domainRatingText(detail)}</div>${demandMetricLine(detail)}${graphKeywordRows(detail.keywords)}`;}
+function serpUrlGraph(rows){if(!rows||rows.length<2)return '<div class="empty">Not enough URLs for a co-ranking graph.</div>';const nodes=rows.slice(0,18).map(row=>({...row,domain:row.domain||urlDomain(row.url||'')||row.url})).sort((a,b)=>String(a.domain).localeCompare(String(b.domain))||Number(b.top10_count||0)-Number(a.top10_count||0));const edges=[];for(let i=0;i<nodes.length;i++){for(let j=i+1;j<nodes.length;j++){const shared=sharedKeywordNames(nodes[i],nodes[j]);if(shared.length){const traffic=serpTrafficScore(nodes[i],nodes[j],shared);const keywords=shared.map(keyword=>{const a=(nodes[i].keywords||[]).find(k=>String(k.keyword||'')===keyword)||{};const b=(nodes[j].keywords||[]).find(k=>String(k.keyword||'')===keyword)||{};return{keyword,rank:`${a.rank||''} / ${b.rank||''}`,impressions:Math.max(Number(a.impressions||0),Number(b.impressions||0)),clicks:Math.max(Number(a.clicks||0),Number(b.clicks||0)),traffic:Math.max(Number(a.traffic||0),Number(b.traffic||0)),source_position:Number(a.source_position||b.source_position||0),volume:Math.max(Number(a.volume||0),Number(b.volume||0))};});edges.push({a:i,b:j,weight:shared.length,traffic,keywords});}}}if(!edges.length)return '<div class="empty">No URLs share selected keywords.</div>';const w=920,h=560,cx=w/2,cy=h/2,leafR=205,domainR=118,bundleR=34;const maxCount=Math.max(1,...nodes.map(row=>Number(row.top10_count||0)));const domains=[...new Set(nodes.map(n=>n.domain))];const domainAngles=new Map(domains.map((domain,i)=>[domain,-Math.PI/2+(i/domains.length)*Math.PI*2]));const groups=new Map;nodes.forEach(node=>{const group=groups.get(node.domain)||[];group.push(node);groups.set(node.domain,group);});const positions=nodes.map((node,index)=>{const group=groups.get(node.domain)||[node];const groupIndex=group.indexOf(node);const base=domainAngles.get(node.domain)||0;const spread=Math.min(0.46,0.09*Math.max(group.length-1,0));const angle=base+(group.length<=1?0:-spread/2+(groupIndex/(group.length-1))*spread);return{index,angle,x:cx+Math.cos(angle)*leafR,y:cy+Math.sin(angle)*leafR,dx:cx+Math.cos(base)*domainR,dy:cy+Math.sin(base)*domainR,bx:cx+Math.cos(base)*bundleR,by:cy+Math.sin(base)*bundleR};});const edgeSvg=edges.map(edge=>{const a=positions[edge.a],b=positions[edge.b];const d=`M${a.x.toFixed(1)},${a.y.toFixed(1)} C${a.dx.toFixed(1)},${a.dy.toFixed(1)} ${a.bx.toFixed(1)},${a.by.toFixed(1)} ${cx},${cy} S${b.dx.toFixed(1)},${b.dy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;const detail={kind:'connection',url_a:nodes[edge.a].url,url_b:nodes[edge.b].url,domain_a:nodes[edge.a].domain,domain_b:nodes[edge.b].domain,shared_count:edge.weight,traffic_proxy:edge.traffic,keywords:edge.keywords};return `<path class="graph-edge" tabindex="0" data-graph-edge data-nodes=",${edge.a},${edge.b}," data-graph-detail="${esc(JSON.stringify(detail))}" d="${d}" stroke="${trafficColor(edge.traffic)}" stroke-width="${(0.9+edge.weight*1.5).toFixed(1)}"></path>`;}).join('');const domainMarks=domains.map(domain=>{const angle=domainAngles.get(domain)||0;const x=cx+Math.cos(angle)*domainR,y=cy+Math.sin(angle)*domainR;return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${domainColor(domain)}" opacity=".76"><title>${esc(domain)}</title></circle>`;}).join('');const nodeSvg=nodes.map((node,i)=>{const p=positions[i];const count=Number(node.top10_count||0);const size=7+Math.sqrt(count/maxCount)*10;const labelX=p.x+(p.x>=cx?size+5:-size-5);const anchor=p.x>=cx?'start':'end';const detail={kind:'url',url:node.url,domain:node.domain,top10_count:node.top10_count,best_rank:node.best_rank,average_rank:node.average_rank,domain_rating:node.domain_rating,impressions:node.impressions,clicks:node.clicks,traffic:node.traffic,keywords:node.keywords||[]};return `<a href="${esc(node.url||'#')}" target="_blank" rel="noopener noreferrer"><circle class="graph-node" tabindex="0" data-graph-node data-node-index="${i}" data-graph-detail="${esc(JSON.stringify(detail))}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${size.toFixed(1)}" fill="${domainColor(node.domain)}"></circle></a><text class="graph-label" x="${labelX.toFixed(1)}" y="${(p.y-2).toFixed(1)}" text-anchor="${anchor}">${esc(node.domain).slice(0,26)}</text><text class="graph-meta" x="${labelX.toFixed(1)}" y="${(p.y+11).toFixed(1)}" text-anchor="${anchor}">${n(count)} top-10 · best #${esc(node.best_rank||'')}</text>`;}).join('');const defs='<defs><linearGradient id="trafficGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="'+trafficColor(0.08)+'"></stop><stop offset="50%" stop-color="'+trafficColor(0.5)+'"></stop><stop offset="100%" stop-color="'+trafficColor(1)+'"></stop></linearGradient></defs>';const legend=`<g class="traffic-legend" transform="translate(26 ${h-34})"><text x="0" y="-8">Connection color: SERP-position traffic proxy</text><rect x="0" y="0" width="150" height="8" rx="4" fill="url(#trafficGradient)"></rect><text x="0" y="23">lower</text><text x="150" y="23" text-anchor="end">higher</text></g>`;return `<div class="serp-url-graph-wrap"><svg class="serp-url-graph" viewBox="0 0 ${w} ${h}" role="img" aria-label="Hierarchical edge bundling chart for URL co-ranking. Nodes are ranking URLs grouped by domain. Curved connections join URLs that rank for the same selected keywords; thicker lines mean more shared keywords and warmer colors mean stronger SERP-position traffic proxy."><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"></rect>${defs}${edgeSvg}${domainMarks}${nodeSvg}${legend}</svg><div class="graph-tooltip" role="tooltip"></div></div><div class="mini">Bundled co-ranking graph: nodes are URLs grouped by domain; curved connections mean URLs rank for the same selected keyword; line width shows shared keyword count; warmer color means stronger SERP-position traffic proxy.</div>`;}
 function urlKeywordTable(keywords){if(!keywords||!keywords.length)return '<div class="empty">No keyword rows for this URL.</div>';return `<table class="url-keyword-table"><thead><tr><th class="metric-number">Rank</th><th>Keyword</th><th class="metric-number">Impr</th><th class="metric-number">Clicks</th><th class="metric-number">Traffic</th><th class="metric-number">Volume</th><th class="metric-number">Source pos</th><th>Source</th></tr></thead><tbody>${keywords.map(k=>`<tr><td class="metric-number">#${esc(k.rank||'')}</td><td><strong>${esc(k.keyword||'')}</strong></td><td class="metric-number">${metricCell(k.impressions)}</td><td class="metric-number">${metricCell(k.clicks)}</td><td class="metric-number">${metricCell(k.traffic,2)}</td><td class="metric-number">${metricCell(k.volume)}</td><td class="metric-number">${metricCell(k.source_position,1)}</td><td>${esc(k.source||'')}</td></tr>`).join('')}</tbody></table>`;}
-function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const demandChips=hasDemandMetrics(row)?`${Number(row.impressions||0)>0?`<span class="chip">${n(row.impressions)} impr</span>`:''}${Number(row.clicks||0)>0?`<span class="chip">${n(row.clicks)} clicks</span>`:''}${Number(row.traffic||0)>0?`<span class="chip">${n(row.traffic)} traffic</span>`:''}${Number(row.volume||0)>0?`<span class="chip">vol ${n(row.volume)}</span>`:''}`:'<span class="chip">Demand metrics unavailable</span>';return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span>${demandChips}</div>${urlKeywordTable(row.keywords||[])}</div>`;}).join('')}</div>`;}
+function serpRankingList(rows){if(!rows||!rows.length)return '<div class="empty">No top-10 SERP URLs available.</div>';return `<div class="serp-ranking-list">${rows.map((row,index)=>{const demandChips=hasDemandMetrics(row)?`${Number(row.impressions||0)>0?`<span class="chip">${n(row.impressions)} impr</span>`:''}${Number(row.clicks||0)>0?`<span class="chip">${n(row.clicks)} clicks</span>`:''}${Number(row.traffic||0)>0?`<span class="chip">${n(row.traffic)} traffic</span>`:''}${Number(row.volume||0)>0?`<span class="chip">vol ${n(row.volume)}</span>`:''}`:'<span class="chip">Demand metrics unavailable</span>';return `<div class="serp-ranking-row"><div><div class="serp-ranking-url">${index+1}. ${urlLink(row.url)}</div><div class="serp-ranking-domain">${esc(row.domain||'')}${row.is_selected_domain?' · selected domain':''}</div></div><div class="serp-ranking-stats"><span class="chip covered">${n(row.top10_count)} top-10</span><span class="chip">Best #${esc(row.best_rank||'')}</span><span class="chip">Avg #${esc(row.average_rank||'')}</span>${domainRatingChip(row)}${demandChips}</div>${urlKeywordTable(row.keywords||[])}</div>`;}).join('')}</div>`;}
 function urlDemandRows(rows){return (rows||[]).map(row=>({...row,demand_score:Number(row.impressions||0)+Number(row.clicks||0)*50+Number(row.traffic||0)*20+Number(row.volume||0)})).sort((a,b)=>Number(b.demand_score||0)-Number(a.demand_score||0)||Number(b.top10_count||0)-Number(a.top10_count||0)||Number(a.best_rank||999)-Number(b.best_rank||999));}
-function urlDemandMetricsSection(rows){const demandRows=urlDemandRows(rows);if(!demandRows.length)return '';const hasAny=demandRows.some(hasDemandMetrics);const maxDemand=Math.max(1,...demandRows.map(row=>Number(row.demand_score||0)));return `<h5 style="margin:14px 0 6px">URL Demand Metrics</h5><div class="url-demand-table-wrap"><table class="url-demand-table"><thead><tr><th>URL</th><th class="metric-number">Top-10</th><th class="metric-number">Best</th><th class="metric-number">Avg</th><th class="metric-number">Impr</th><th class="metric-number">Clicks</th><th class="metric-number">Traffic</th><th class="metric-number">Volume</th><th>Demand weight</th></tr></thead><tbody>${demandRows.slice(0,18).map(row=>{const width=Math.max(4,Math.round(Number(row.demand_score||0)/maxDemand*100));return `<tr><td>${urlLink(row.url,row.domain||row.url)}${row.is_selected_domain?' <span class="chip covered">selected domain</span>':''}</td><td class="metric-number">${metricCell(row.top10_count)}</td><td class="metric-number">${row.best_rank?`#${esc(row.best_rank)}`:''}</td><td class="metric-number">${row.average_rank?`#${esc(row.average_rank)}`:''}</td><td class="metric-number">${metricCell(row.impressions)}</td><td class="metric-number">${metricCell(row.clicks)}</td><td class="metric-number">${metricCell(row.traffic,2)}</td><td class="metric-number">${metricCell(row.volume)}</td><td class="url-demand-bar" title="${esc(row.demand_score||0)} demand proxy"><span style="width:${hasAny?width:4}%"></span></td></tr>`;}).join('')}</tbody></table></div>${hasAny?'':'<div class="section-note" style="margin-top:10px">Demand metrics unavailable for these URLs because the selected keywords did not have matched GSC/Ahrefs/DataForSEO click, impression, traffic, or volume data in this run.</div>'}`;}
+function urlDemandMetricsSection(rows){const demandRows=urlDemandRows(rows);if(!demandRows.length)return '';const hasAny=demandRows.some(hasDemandMetrics);const maxDemand=Math.max(1,...demandRows.map(row=>Number(row.demand_score||0)));return `<h5 style="margin:14px 0 6px">URL Demand Metrics</h5><div class="url-demand-table-wrap"><table class="url-demand-table"><thead><tr><th>URL</th><th class="metric-number">Top-10</th><th class="metric-number">Best</th><th class="metric-number">Avg</th><th class="metric-number">DR</th><th class="metric-number">Impr</th><th class="metric-number">Clicks</th><th class="metric-number">Traffic</th><th class="metric-number">Volume</th><th>Demand weight</th></tr></thead><tbody>${demandRows.slice(0,18).map(row=>{const width=Math.max(4,Math.round(Number(row.demand_score||0)/maxDemand*100));return `<tr><td>${urlLink(row.url,row.domain||row.url)}${row.is_selected_domain?' <span class="chip covered">selected domain</span>':''}</td><td class="metric-number">${metricCell(row.top10_count)}</td><td class="metric-number">${row.best_rank?`#${esc(row.best_rank)}`:''}</td><td class="metric-number">${row.average_rank?`#${esc(row.average_rank)}`:''}</td><td class="metric-number">${domainRatingValue(row)===null?'':domainRatingValue(row).toFixed(1)}</td><td class="metric-number">${metricCell(row.impressions)}</td><td class="metric-number">${metricCell(row.clicks)}</td><td class="metric-number">${metricCell(row.traffic,2)}</td><td class="metric-number">${metricCell(row.volume)}</td><td class="url-demand-bar" title="${esc(row.demand_score||0)} demand proxy"><span style="width:${hasAny?width:4}%"></span></td></tr>`;}).join('')}</tbody></table></div>${hasAny?'':'<div class="section-note" style="margin-top:10px">Demand metrics unavailable for these URLs because the selected keywords did not have matched GSC/Ahrefs/DataForSEO click, impression, traffic, or volume data in this run.</div>'}`;}
 function serpRankSort(a,b){return (Number(a.rank||9999)-Number(b.rank||9999))||(a.source==='ours'?1:0)-(b.source==='ours'?1:0)||String(a.domain||a.url||'').localeCompare(String(b.domain||b.url||''));}
 function keywordParagraphRidgeline(ridges){const keywords=ridges?.keywords||[];const rows=(ridges?.rows||[]).slice().sort(serpRankSort).slice(0,16);if(!keywords.length||!rows.length)return '<div class="empty">No keyword-to-paragraph relationship data available.</div>';const w=960,rowH=58,padL=190,padR=26,padT=72,padB=34,h=padT+padB+rows.length*rowH;const x=i=>padL+(keywords.length<=1?0.5:i/(keywords.length-1))*(w-padL-padR);const cellFor=(row,i)=>(row.cells||[]).find(cell=>Number(cell.keyword_order)===i)||{};const axis=keywords.map((kw,i)=>{const xx=x(i);const metric=[Number(kw.impressions||0)>0&&`${n(kw.impressions)} impr`,Number(kw.volume||0)>0&&`vol ${n(kw.volume)}`].filter(Boolean).join(' · ');return `<line class="keyword-ridge-baseline" x1="${xx.toFixed(1)}" x2="${xx.toFixed(1)}" y1="${padT-8}" y2="${h-padB}"></line><text class="keyword-ridge-axis" x="${xx.toFixed(1)}" y="24" text-anchor="middle">${esc(kw.keyword||'').slice(0,20)}</text>${metric?`<text class="keyword-ridge-axis" x="${xx.toFixed(1)}" y="39" text-anchor="middle">${esc(metric)}</text>`:''}`;}).join('');const lanes=rows.map((row,rowIndex)=>{const base=padT+rowIndex*rowH+rowH*0.72;const amp=rowH*0.58;const label=row.source==='ours'?ownDomain:(row.domain||urlDomain(row.url||'')||row.url);const meta=row.source==='ours'?(row.rank?`SERP #${row.rank} · target`:'target · no top-10 rank'):`SERP #${row.rank||'?'} · ${n(row.paragraph_count||0)} paragraphs`;const top=keywords.map((kw,i)=>{const cell=cellFor(row,i);const score=Math.max(0,Math.min(1,Number(cell.top3_similarity||cell.max_similarity||0)));return{x:x(i),y:base-score*amp,score,cell,kw};});const area=top.length===1?`M${(top[0].x-16).toFixed(1)},${base.toFixed(1)} L${top[0].x.toFixed(1)},${top[0].y.toFixed(1)} L${(top[0].x+16).toFixed(1)},${base.toFixed(1)} Z`:`M${top[0].x.toFixed(1)},${base.toFixed(1)} ${top.map(p=>`L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} L${top[top.length-1].x.toFixed(1)},${base.toFixed(1)} Z`;const dots=top.map(point=>{const c=point.cell||{};const title=[label,point.kw.keyword,`top paragraphs similarity ${point.score.toFixed(2)}`,Number(c.strong_paragraphs||0)&&`${n(c.strong_paragraphs)} strong paragraph(s)`,c.best_paragraph].filter(Boolean).join('\\n');return `<circle class="keyword-ridge-point" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${Math.max(3.5,Math.min(8,3.5+point.score*5))}" fill="${point.score>=0.72?'#176a35':point.score>=0.58?'#b65f00':'#68788b'}"><title>${esc(title)}</title></circle>`;}).join('');return `<text class="keyword-ridge-label" x="12" y="${(base-14).toFixed(1)}">${esc(label).slice(0,28)}</text><text class="keyword-ridge-meta" x="12" y="${base.toFixed(1)}">${esc(meta)}</text><line class="keyword-ridge-baseline" x1="${padL}" x2="${w-padR}" y1="${base.toFixed(1)}" y2="${base.toFixed(1)}"></line><path class="keyword-ridge-area ${row.source==='ours'?'ours':''}" d="${area}"><title>${esc(label)} keyword-to-paragraph relation ridge</title></path>${dots}`;}).join('');return `<div class="keyword-ridge-wrap"><svg class="keyword-ridge-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Ridgeline-style keyword-to-paragraph relation chart. URLs are on the Y axis ordered by SERP rank; keywords are on the X axis; ridge height shows how strongly paragraphs on each URL match each keyword."><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"></rect>${axis}${lanes}</svg></div><div class="mini">Rows are URLs ordered by SERP top-10 position. Ridge height and dot size show how strongly that URL's paragraphs match each selected keyword; hover points for the best matching paragraph.</div>`;}
 function keywordParagraphRidgelineSection(points){const ridges=data.overview_scatter?.keyword_url_ridges||{};return `<div class="panel" style="margin-top:14px"><h4>Keyword-to-Paragraph Coverage by URL</h4><div class="panel-body">${sectionNote('Ridgeline-style view of selected keyword intent against paragraphs on each URL. Use it to see which ranking pages have paragraph-level support for each keyword and where the target page is thin or off-order.')} ${keywordParagraphRidgeline(ridges)}</div></div>`;}
@@ -4561,16 +5550,41 @@ function semanticScatterSection(a){const points=a.scatter?.points||[];return `<d
 function visualComparisonSection(a){const hasComparison=a.content_comparison||a.topic_coverage_matrix||a.paragraph_match_heatmap||a.content_order_path;if(!hasComparison)return '';return `<div class="panel content-comparison" style="margin-top:14px"><h4>Why These Edits Matter</h4><div class="panel-body">${sectionNote('Top ranking page differences show why the recommended edits matter: compare topic coverage, paragraph depth, heading structure, content order, and which SERP pages cover each missing or partial topic.')} ${visualReasonList(a)}<div class="visual-grid"><div class="visual-card"><h5>SERP rank vs content coverage</h5>${contentComparisonRows(a)}</div><div class="visual-card"><h5>Top ranking page differences</h5>${contentDeltaBoxes(a)}</div></div><div class="visual-card coverage-heatmap-card" style="margin-top:14px"><h5>Topic coverage heatmap</h5>${topicCoverageHeatmap(a)}</div><div class="visual-card paragraph-match-card" style="margin-top:14px"><h5>Paragraph match heatmap</h5>${paragraphMatchHeatmap(a)}</div><div class="visual-card content-path-card" style="margin-top:14px"><h5>Content order semantic path</h5>${contentOrderPathSection(a)}</div></div></div>`;}
 function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
-function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
-function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Semantic Clusters</h4><div class="panel-body">${sectionNote('Clusters show where competitors cover nearby themes more deeply than the selected domain.')} ${clusterCards(a.scatter?.points||[])}</div></div><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
-function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
+function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}${domainRatingAttribution()}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
+function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const outlineRows=a.recommended_outline||[];const outlinePanel=outlineRows.length?collapsiblePanel('Recommended Section Order',`${sectionNote('Section themes ordered by where ranking competitors place them. "add" rows are themes the page does not cover yet.')}<ol style="margin:0;padding-left:20px">${outlineRows.map(r=>`<li style="margin-bottom:6px" title="${esc(r.sample_text||'')}"><span class="chip ${r.status==='have'?'covered':'missing'}">${esc(r.status)}</span> ${esc(r.label||'')} <span class="mini">— seen on ${n(r.competitor_pages||0)} competitor page(s)</span></li>`).join('')}</ol>`,{meta:`${n(outlineRows.filter(r=>r.status==='add').length)} to add`}):'';const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}${outlinePanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
+function decisionChipClass(decision){if(decision==='keep')return 'covered';if(decision==='rewrite')return 'partial';return 'missing';}
+function recommendationSection(page){const rec=page.ai_recommendation||{};if(!rec.status)return '';if(rec.status!=='ok'&&rec.status!=='invalid_recommendation'){return '';}
+const d=rec.data||{};const parts=[];
+if(rec.status==='invalid_recommendation'&&(rec.errors||[]).length){parts.push(`<div class="mini" style="color:var(--missing);margin-bottom:8px">Recommendation failed validation: ${rec.errors.slice(0,6).map(e=>esc(e)).join('; ')}</div>`);}
+const verif=rec.verification||{};const vs=verif.summary||{};
+if((verif.topics||[]).length){const unresolved=vs.unresolved_critical||[];parts.push(`<div style="margin-bottom:10px"><div class="chips" style="margin-bottom:6px"><span class="chip ${vs.missing_after>0?'missing':'covered'}">Missing ${n(vs.missing_before)} → ${n(vs.missing_after)}</span><span class="chip ${vs.partial_after>0?'partial':'covered'}">Partial ${n(vs.partial_before)} → ${n(vs.partial_after)}</span><span class="chip ${vs.paa_missing_after>0?'missing':'covered'}">PAA missing ${n(vs.paa_missing_before)} → ${n(vs.paa_missing_after)}</span></div>${unresolved.length?`<div class="mini" style="color:var(--missing)">Still uncovered critical/high topics: ${unresolved.map(t=>esc(t)).join('; ')}</div>`:''}<details><summary class="mini">Coverage check details</summary><table><thead><tr><th>Keyword</th><th>Topic</th><th>Priority</th><th>Before → After</th><th>Best similarity</th></tr></thead><tbody>${verif.topics.map(r=>`<tr><td>${esc(r.keyword||'')}</td><td>${esc(r.label||'')}</td><td>${esc(r.priority||'')}</td><td><span class="chip ${esc(r.before)}">${esc(r.before)}</span> → <span class="chip ${esc(r.after)}">${esc(r.after)}</span></td><td>${esc(String(r.best_similarity??''))}</td></tr>`).join('')}</tbody></table></details></div>`);}
+const titleRec=d.title||{};const h1Rec=d.h1||{};const metaRec=d.meta_description||{};const assessment=d.page_assessment||{};
+const headParts=[];
+if(assessment.reason)headParts.push(`<div class="mini" style="margin-bottom:6px">Target page check: <b>${assessment.is_right_target_page===false?'wrong target page':'right target page'}</b> — ${esc(assessment.reason||'')}</div>`);
+if(titleRec.recommended&&titleRec.recommended!==titleRec.current)headParts.push(`<div class="mini"><b>Title:</b> ${esc(titleRec.recommended)}${titleRec.reason?` <span class="muted">(${esc(titleRec.reason)})</span>`:''}</div>`);
+if(h1Rec.recommended)headParts.push(`<div class="mini"><b>H1:</b> ${esc(h1Rec.recommended)}</div>`);
+if(metaRec.recommended)headParts.push(`<div class="mini"><b>Meta description:</b> ${esc(metaRec.recommended)}</div>`);
+if(headParts.length)parts.push(`<div style="margin-bottom:10px">${headParts.join('')}</div>`);
+const outline=d.outline||[];
+if(outline.length){parts.push(`<h4 style="margin:10px 0 6px">Recommended outline</h4><table><thead><tr><th>Level</th><th>Heading</th><th>Status</th><th>Maps to topic</th></tr></thead><tbody>${outline.map(r=>`<tr><td>H${esc(String(r.level||2))}</td><td>${esc(r.heading||'')}</td><td><span class="chip ${r.status==='keep'?'covered':(r.status==='remove'?'missing':'partial')}">${esc(r.status||'')}</span></td><td>${esc(r.maps_to_topic||'')}</td></tr>`).join('')}</tbody></table>`);}
+const decisions=d.paragraph_decisions||[];
+if(decisions.length){parts.push(`<h4 style="margin:14px 0 6px">Paragraph decisions</h4><table><thead><tr><th>Paragraph</th><th>Decision</th><th>Reason</th></tr></thead><tbody>${decisions.map(r=>`<tr><td>[P${esc(String(r.index))}]</td><td><span class="chip ${decisionChipClass(r.decision)}">${esc(r.decision||'')}</span></td><td>${esc(r.reason||'')}${r.rewrite?`<details style="margin-top:4px"><summary class="mini">Replacement text</summary>${mdToHtml(r.rewrite)}</details>`:''}</td></tr>`).join('')}</tbody></table>`);}
+const sections=d.new_sections||[];
+if(sections.length){parts.push(`<h4 style="margin:14px 0 6px">New sections</h4><table><thead><tr><th>Heading</th><th>Placement</th><th>Format</th><th>Covers PAA</th><th>Draft</th></tr></thead><tbody>${sections.map(r=>`<tr><td>${esc(r.heading||'')}</td><td>${r.placement_after_paragraph===-1?'top':'after [P'+esc(String(r.placement_after_paragraph))+']'}</td><td>${esc(r.format||'')}</td><td>${n((r.covers_paa||[]).length)}</td><td>${r.draft?`<details><summary class="mini">Show draft</summary>${mdToHtml(r.draft)}</details>`:''}</td></tr>`).join('')}</tbody></table>`);}
+const schema=d.structured_data||[];const links=d.internal_links||[];
+if(schema.length)parts.push(`<div class="mini" style="margin-top:10px"><b>Structured data:</b> ${schema.map(r=>`${esc(r.type||'')} — ${esc(r.reason||'')}`).join(' · ')}</div>`);
+if(links.length)parts.push(`<div class="mini" style="margin-top:6px"><b>Internal links:</b> ${links.map(r=>`"${esc(r.anchor||'')}" (${esc(r.from_hint||'')})`).join(' · ')}</div>`);
+if(rec.article_markdown){parts.push(`<details style="margin-top:14px" open><summary><b>Final Recommended Article</b> <span class="mini">(full page in final reading order: kept paragraphs, rewrites, new sections — plus why it should rank better; also saved as recommended-article-*.md next to this report)</span></summary>${mdToHtml(rec.article_markdown)}</details>`);}
+if(!parts.length)return '';
+return collapsiblePanel('AI Page Recommendation',`${sectionNote('Structured, validated recommendation produced by the AI agent from the full computed evidence.')}${parts.join('')}`,{meta:rec.status==='ok'?'validated':'validation errors',open:true});}
+function pageSection(page, index){const aiBrief=aiEditorBriefSection(page);const aiRec=recommendationSection(page);return `<section class="page-section" id="page-${index}"><div class="page-head"><h2>${index+1}. ${esc(page.title || page.url)}</h2><div class="url">${urlLink(page.url)}</div>${page.h1?`<div class="mini">H1: ${esc(page.h1)}</div>`:''}</div>${aiRec?`<div class="keyword-card">${aiRec}</div>`:''}${aiBrief?`<div class="keyword-card">${aiBrief}</div>`:''}${(page.analyses||[]).map((analysis, keywordIndex)=>keywordCard(analysis, index, keywordIndex)).join('') || '<div class="empty">No keyword analyses for this page.</div>'}</section>`;}
 function buildNav(){if(!navEl)return;navEl.innerHTML=`<button type="button" class="report-nav-button" data-target="overview-section"><span class="report-nav-label">Task board</span></button>`+(data.pages||[]).map((page,pageIndex)=>`<button type="button" class="report-nav-button" data-target="page-${pageIndex}"><span class="report-nav-label">${esc(page.title||page.url||`Page ${pageIndex+1}`)}</span></button>${(page.analyses||[]).map((analysis,keywordIndex)=>`<button type="button" class="report-nav-button nav-keyword" data-target="${keywordId(pageIndex,keywordIndex)}"><span class="report-nav-label">${esc(analysis.query||analysis.keyword?.keyword||`Keyword ${keywordIndex+1}`)}</span></button>`).join('')}`).join('');const buttons=[...navEl.querySelectorAll('.report-nav-button')];const sections=buttons.map(button=>document.getElementById(button.dataset.target||'')).filter(Boolean);buttons.forEach(button=>button.addEventListener('click',()=>{const target=document.getElementById(button.dataset.target||'');if(target)target.scrollIntoView({block:'start',behavior:'smooth'});}));function update(){let active=0;for(let i=0;i<sections.length;i++){if(sections[i].getBoundingClientRect().top<160)active=i;}buttons.forEach((button,i)=>{const selected=i===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-current',selected?'page':'false');});}document.addEventListener('scroll',update,{passive:true});update();}
 
 function bindSerpUrlGraphInteractions(){document.querySelectorAll('.serp-url-graph-wrap').forEach(wrap=>{const tooltip=wrap.querySelector('.graph-tooltip');const clear=()=>{wrap.classList.remove('has-active');wrap.querySelectorAll('.is-active').forEach(el=>el.classList.remove('is-active'));tooltip?.classList.remove('open');};function show(el,event){let detail={};try{detail=JSON.parse(el.getAttribute('data-graph-detail')||'{}');}catch(_){}wrap.classList.add('has-active');wrap.querySelectorAll('.is-active').forEach(active=>active.classList.remove('is-active'));el.classList.add('is-active');if(el.matches('[data-graph-node]')){const index=el.getAttribute('data-node-index');wrap.querySelectorAll(`[data-graph-edge][data-nodes*=",${index},"]`).forEach(edge=>edge.classList.add('is-active'));}else if(el.matches('[data-graph-edge]')){(el.getAttribute('data-nodes')||'').split(',').filter(Boolean).forEach(index=>wrap.querySelector(`[data-graph-node][data-node-index="${index}"]`)?.classList.add('is-active'));}if(tooltip){tooltip.innerHTML=graphTooltipHtml(detail);tooltip.classList.add('open');position(event);}}function position(event){if(!tooltip||!event)return;const rect=wrap.getBoundingClientRect();const x=Math.min(Math.max(10,event.clientX-rect.left+14),Math.max(10,rect.width-380));const y=Math.min(Math.max(10,event.clientY-rect.top+14),Math.max(10,rect.height-190));tooltip.style.left=`${x}px`;tooltip.style.top=`${y}px`;}wrap.querySelectorAll('[data-graph-node],[data-graph-edge]').forEach(el=>{el.addEventListener('mouseenter',event=>show(el,event));el.addEventListener('mousemove',position);el.addEventListener('focus',event=>show(el,event));el.addEventListener('mouseleave',clear);el.addEventListener('blur',clear);});});}
 
 function bindContentPathInteractions(){document.querySelectorAll('.content-path-wrap').forEach(wrap=>{const items=[...wrap.querySelectorAll('[data-path-cluster]')];if(!items.length)return;function clear(){wrap.classList.remove('has-active');items.forEach(el=>el.classList.remove('is-active'));}function activate(cluster){if(!cluster)return;wrap.classList.add('has-active');items.forEach(el=>el.classList.toggle('is-active',el.getAttribute('data-path-cluster')===cluster));}items.forEach(el=>{const cluster=()=>el.getAttribute('data-path-cluster')||'';el.addEventListener('mouseenter',()=>activate(cluster()));el.addEventListener('focus',()=>activate(cluster()));el.addEventListener('click',event=>{event.stopPropagation();activate(cluster());});});wrap.addEventListener('click',event=>{if(!event.target.closest?.('[data-path-cluster]'))clear();});wrap.addEventListener('mousemove',event=>{if(!event.target.closest?.('[data-path-cluster]'))clear();});wrap.addEventListener('mouseleave',clear);wrap.addEventListener('focusout',()=>setTimeout(()=>{if(!wrap.contains(document.activeElement))clear();},0));});}
 
-function bindScatterInteractions(){document.querySelectorAll('.scatter-wrap').forEach(wrap=>{const svg=wrap.querySelector('svg.scatter');const tooltip=wrap.querySelector('.scatter-tooltip');if(!svg||!tooltip)return;const base=(svg.getAttribute('data-base-viewbox')||'0 0 820 390').split(/\\s+/).map(Number);let vb={x:base[0],y:base[1],w:base[2],h:base[3]};const setVb=()=>svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);function zoomAt(factor,cx=base[2]/2,cy=base[3]/2){const nx=cx-(cx-vb.x)*factor;const ny=cy-(cy-vb.y)*factor;vb={x:nx,y:ny,w:vb.w*factor,h:vb.h*factor};setVb();}function pointFromEvent(event){const rect=svg.getBoundingClientRect();return{x:vb.x+(event.clientX-rect.left)/Math.max(rect.width,1)*vb.w,y:vb.y+(event.clientY-rect.top)/Math.max(rect.height,1)*vb.h};}function show(point){let detail=null;try{detail=JSON.parse(point.getAttribute('data-detail')||'{}');}catch(_){detail={type:'point',explanation:point.getAttribute('data-tooltip')||point.getAttribute('aria-label')||''};}tooltip.innerHTML=pointDetailHtml(detail);tooltip.classList.add('open');tooltip.querySelector('.tip-close')?.addEventListener('click',event=>{event.stopPropagation();tooltip.classList.remove('open');});}wrap.querySelectorAll('.scatter-point').forEach(point=>{point.addEventListener('click',event=>{event.stopPropagation();show(point);});point.addEventListener('focus',()=>show(point));});svg.addEventListener('wheel',event=>{event.preventDefault();const p=pointFromEvent(event);zoomAt(event.deltaY<0?0.82:1.22,p.x,p.y);},{passive:false});let drag=null;svg.addEventListener('mousedown',event=>{if(event.target.classList?.contains('scatter-point'))return;drag={x:event.clientX,y:event.clientY,vx:vb.x,vy:vb.y};svg.classList.add('is-panning');});window.addEventListener('mousemove',event=>{if(!drag)return;const rect=svg.getBoundingClientRect();vb.x=drag.vx-(event.clientX-drag.x)/Math.max(rect.width,1)*vb.w;vb.y=drag.vy-(event.clientY-drag.y)/Math.max(rect.height,1)*vb.h;setVb();});window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('is-panning');});svg.addEventListener('dblclick',()=>{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();});wrap.querySelectorAll('[data-zoom]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const action=button.getAttribute('data-zoom');if(action==='in')zoomAt(0.78);else if(action==='out')zoomAt(1.28);else{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();}}));});document.addEventListener('click',event=>{const target=event.target;if(target?.closest?.('.scatter-tooltip')||target?.closest?.('.scatter-point'))return;document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});}
+function bindScatterInteractions(){document.querySelectorAll('.scatter-wrap').forEach(wrap=>{const svg=wrap.querySelector('svg.scatter');const tooltip=wrap.querySelector('.scatter-tooltip');if(!svg||!tooltip)return;let base=(svg.getAttribute('data-base-viewbox')||svg.getAttribute('viewBox')||'0 0 820 390').trim().split(/\s+/).map(Number);if(base.length!==4||base.some(v=>!Number.isFinite(v))||base[2]<=0||base[3]<=0)base=[0,0,820,390];let vb={x:base[0],y:base[1],w:base[2],h:base[3]};const setVb=()=>{if([vb.x,vb.y,vb.w,vb.h].every(Number.isFinite)&&vb.w>0&&vb.h>0)svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);};function zoomAt(factor,cx=base[2]/2,cy=base[3]/2){const nx=cx-(cx-vb.x)*factor;const ny=cy-(cy-vb.y)*factor;const next={x:nx,y:ny,w:vb.w*factor,h:vb.h*factor};if([next.x,next.y,next.w,next.h].every(Number.isFinite)&&next.w>0&&next.h>0){vb=next;setVb();}}function pointFromEvent(event){const rect=svg.getBoundingClientRect();return{x:vb.x+(event.clientX-rect.left)/Math.max(rect.width,1)*vb.w,y:vb.y+(event.clientY-rect.top)/Math.max(rect.height,1)*vb.h};}function show(point){let detail=null;try{detail=JSON.parse(point.getAttribute('data-detail')||'{}');}catch(_){detail={type:'point',explanation:point.getAttribute('data-tooltip')||point.getAttribute('aria-label')||''};}tooltip.innerHTML=pointDetailHtml(detail);tooltip.classList.add('open');tooltip.querySelector('.tip-close')?.addEventListener('click',event=>{event.stopPropagation();tooltip.classList.remove('open');});}wrap.querySelectorAll('.scatter-point').forEach(point=>{point.addEventListener('click',event=>{event.stopPropagation();show(point);});point.addEventListener('focus',()=>show(point));});svg.addEventListener('wheel',event=>{event.preventDefault();const p=pointFromEvent(event);zoomAt(event.deltaY<0?0.82:1.22,p.x,p.y);},{passive:false});let drag=null;svg.addEventListener('mousedown',event=>{if(event.target.classList?.contains('scatter-point'))return;drag={x:event.clientX,y:event.clientY,vx:vb.x,vy:vb.y};svg.classList.add('is-panning');});window.addEventListener('mousemove',event=>{if(!drag)return;const rect=svg.getBoundingClientRect();const nextX=drag.vx-(event.clientX-drag.x)/Math.max(rect.width,1)*vb.w;const nextY=drag.vy-(event.clientY-drag.y)/Math.max(rect.height,1)*vb.h;if(Number.isFinite(nextX)&&Number.isFinite(nextY)){vb.x=nextX;vb.y=nextY;setVb();}});window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('is-panning');});svg.addEventListener('dblclick',()=>{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();});wrap.querySelectorAll('[data-zoom]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const action=button.getAttribute('data-zoom');if(action==='in')zoomAt(0.78);else if(action==='out')zoomAt(1.28);else{vb={x:base[0],y:base[1],w:base[2],h:base[3]};setVb();}}));});document.addEventListener('click',event=>{const target=event.target;if(target?.closest?.('.scatter-tooltip')||target?.closest?.('.scatter-point'))return;document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.scatter-tooltip.open').forEach(t=>t.classList.remove('open'));});}
 function bindScatterFilters(){document.querySelectorAll('.panel-body').forEach(panel=>{const entityFilters=[...panel.querySelectorAll('[data-entity-filter]')];const domainFilters=[...panel.querySelectorAll('[data-domain-filter]')];const filters=[...entityFilters,...domainFilters];const points=[...panel.querySelectorAll('.scatter-point')];const tooltip=panel.querySelector('.scatter-tooltip');if(!filters.length||!points.length)return;function apply(){const visibleEntities=new Set(entityFilters.filter(input=>input.checked).map(input=>input.dataset.entityFilter));const visibleDomains=new Set(domainFilters.filter(input=>input.checked).map(input=>input.dataset.domainFilter));points.forEach(point=>{const entityVisible=visibleEntities.has(point.dataset.entity||'paragraph');const domain=point.dataset.domain||'';const domainVisible=!domain||visibleDomains.has(domain);const show=entityVisible&&domainVisible;point.style.display=show?'':'none';if(!show&&document.activeElement===point)point.blur();});tooltip?.classList.remove('open');}filters.forEach(input=>input.addEventListener('change',apply));apply();});}
 overviewEl.innerHTML = overviewSection();
 app.innerHTML = (data.pages||[]).map(pageSection).join('') || '<div class="empty">No analyzed pages in this report.</div>';

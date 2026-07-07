@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 
 from .analyzer import AuditResult, recommend_action
-from .report import _slim_linkgraph_payload
+from .report import _build_technical_issue_group_manifest, _slim_linkgraph_payload
 
 _PLACEHOLDERS = {
     "__SCATTERPLOT_JSON__": "scatter",
@@ -396,12 +396,14 @@ def write_html_report(
 def _technical_seo_payload(payload: dict) -> dict:
     if not isinstance(payload, dict):
         return {}
+    issues = payload.get("issues") or []
     return {
         "summary": payload.get("summary") or {},
         "issue_counts": payload.get("issue_counts") or {},
         "category_counts": payload.get("category_counts") or {},
         "severity_counts": payload.get("severity_counts") or {},
         "issue_catalog": payload.get("issue_catalog") or [],
-        "issues": (payload.get("issues") or [])[:5000],
+        "issue_groups": payload.get("issue_groups") or _build_technical_issue_group_manifest(issues),
+        "issues": issues[:5000],
         "interpretation": payload.get("interpretation") or {},
     }

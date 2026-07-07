@@ -84,6 +84,13 @@ _TRACKING_SQL_WHERE = (
     "OR url GLOB '*[?&]fbclid=*'"
 )
 
+_TRACKING_PARAM_RE = re.compile(r"(?:^|[?&])(?:utm_[^=&]+|source|fbclid)=", re.IGNORECASE)
+_TRACKING_SQL_WHERE = (
+    "url GLOB '*[?&]utm_*' "
+    "OR url GLOB '*[?&]source=*' "
+    "OR url GLOB '*[?&]fbclid=*'"
+)
+
 
 @dataclass
 class CachedResponse:
@@ -430,6 +437,100 @@ class HttpCache:
                 conn.executemany("DELETE FROM responses WHERE url = ?", [(url,) for url in delete_urls])
         for url in delete_urls:
             self._delete_body(url)
+
+        if delete_urls:
+            LOG.info(
+                "  cache cleanup: removed %d tracking URL variants from %d candidates",
+                len(delete_urls),
+                candidate_count,
+            )
+        return {"candidates": candidate_count, "deleted": len(delete_urls)}
+
+
+def _has_tracking_param(url: str) -> bool:
+    parsed = urlparse(url)
+    return bool(_TRACKING_PARAM_RE.search("?" + (parsed.query or "")))
+
+
+def _usable_canonical(base_url: str, canonical_url: Optional[str]) -> str:
+    if not canonical_url:
+        return ""
+    return _absolute_url(base_url, canonical_url)
+
+
+def _extract_html_canonical(base_url: str, body: bytes | str | None) -> str:
+    if not body:
+        return ""
+    if isinstance(body, bytes):
+        html = body.decode("utf-8", errors="replace")
+    else:
+        html = body
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return ""
+    tag = soup.find(
+        "link",
+        rel=lambda value: value and "canonical" in [
+            str(v).lower() for v in (value if isinstance(value, list) else [value])
+        ],
+    )
+    if not tag:
+        return ""
+    return _absolute_url(base_url, tag.get("href", ""))
+
+
+def _absolute_url(base_url: str, maybe_url: str) -> str:
+    maybe_url = (maybe_url or "").strip()
+    if not maybe_url:
+        return ""
+    return urljoin(base_url, maybe_url)
+
+
+def _normalize_for_cache_dedupe(url: str) -> str:
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "https").lower()
+    netloc = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    return urlunparse((scheme, netloc, path, "", parsed.query, ""))
+
+    def clean_tracking_duplicates(self, *, min_candidates: int = 100) -> dict:
+        """Delete cached tracking-param URL variants that point at another canonical.
+
+        The crawl cache is keyed by request URL, so large sites can accumulate many
+        copies of the same page at URLs like ``?utm_*`` or ``?source=...``. We only
+        delete rows whose request URL contains a known tracking parameter and whose
+        stored redirect target or HTML canonical points somewhere else.
+        """
+        with self._connect() as conn:
+            candidate_count = conn.execute(
+                f"SELECT COUNT(*) FROM responses WHERE {_TRACKING_SQL_WHERE}"
+            ).fetchone()[0]
+            if candidate_count < min_candidates:
+                return {"candidates": candidate_count, "deleted": 0}
+
+            delete_urls: list[str] = []
+            rows = conn.execute(
+                "SELECT url, canonical_url, body, content_type FROM responses "
+                f"WHERE {_TRACKING_SQL_WHERE}"
+            )
+            for url, stored_canonical, body, content_type in rows:
+                if not _has_tracking_param(url):
+                    continue
+                canonical = _usable_canonical(url, stored_canonical)
+                if not canonical and "html" in (content_type or "").lower():
+                    canonical = _extract_html_canonical(url, body)
+                if (
+                    canonical
+                    and _normalize_for_cache_dedupe(canonical)
+                    != _normalize_for_cache_dedupe(url)
+                ):
+                    delete_urls.append(url)
+
+            if delete_urls:
+                conn.executemany("DELETE FROM responses WHERE url = ?", [(url,) for url in delete_urls])
 
         if delete_urls:
             LOG.info(

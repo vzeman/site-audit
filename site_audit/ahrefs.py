@@ -17,7 +17,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 from urllib.parse import unquote, urlparse, urlunparse
 
 import numpy as np
@@ -28,6 +28,9 @@ from .analyzer import PageInfo, section_for_url
 LOG = logging.getLogger(__name__)
 
 AHREFS_BASE_URL = "https://api.ahrefs.com/v3/site-explorer"
+AHREFS_PUBLIC_BASE_URL = "https://api.ahrefs.com/v3/public"
+AHREFS_DOMAIN_RATING_LICENSE = "http://ahrefs.com/legal/domain-rating-license"
+AHREFS_DOMAIN_RATING_ATTRIBUTION = "Domain Rating by Ahrefs"
 
 TOP_PAGES_SELECT = ",".join(
     [
@@ -114,6 +117,105 @@ def load_dotenv(path: Path | None = None) -> None:
 def ahrefs_api_key() -> str:
     load_dotenv()
     return os.environ.get("AHREFS_API_KEY") or os.environ.get("AHREFS_TOKEN") or ""
+
+
+def _domain_rating_target(value: str) -> str:
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = (parsed.netloc or parsed.path or value).split("/")[0].strip().lower()
+    return host.removeprefix("www.")
+
+
+def fetch_domain_rating_free(
+    target: str,
+    cache_dir: Path,
+    *,
+    refresh: bool = False,
+    requester: Callable[..., Any] = requests.get,
+    timeout: int = 30,
+) -> dict:
+    """Fetch Ahrefs' free Domain Rating for a URL/domain.
+
+    This endpoint is public and does not require an API key. Results are cached
+    independently from paid Ahrefs snapshots so SERP reports can show authority
+    context without spending API credits.
+    """
+    normalized = _domain_rating_target(target)
+    if not normalized:
+        return {
+            "target": target,
+            "domain": "",
+            "domain_rating": None,
+            "status": "invalid_target",
+            "error": "empty target",
+            "source": "ahrefs_public_domain_rating_free",
+            "license": AHREFS_DOMAIN_RATING_LICENSE,
+            "attribution": AHREFS_DOMAIN_RATING_ATTRIBUTION,
+        }
+    root = Path(cache_dir) / "ahrefs_domain_rating_free"
+    cache_path = root / f"{_slug(normalized)}.json"
+    if cache_path.is_file() and not refresh:
+        cached = _load_json(cache_path)
+        if isinstance(cached, dict):
+            cached["cache_status"] = "hit"
+            return cached
+    payload = {
+        "target": target,
+        "domain": normalized,
+        "domain_rating": None,
+        "status": "error",
+        "source": "ahrefs_public_domain_rating_free",
+        "license": AHREFS_DOMAIN_RATING_LICENSE,
+        "attribution": AHREFS_DOMAIN_RATING_ATTRIBUTION,
+    }
+    try:
+        response = requester(
+            f"{AHREFS_PUBLIC_BASE_URL}/domain-rating-free",
+            params={"target": normalized, "output": "json"},
+            headers={"Accept": "application/json", "User-Agent": "site-audit/0.1"},
+            timeout=timeout,
+        )
+        status_code = int(getattr(response, "status_code", 200) or 200)
+        if status_code >= 400:
+            text = str(getattr(response, "text", ""))[:300]
+            payload.update({"status": f"http_{status_code}", "error": text})
+        else:
+            data = response.json()
+            row = data.get("domain_rating") if isinstance(data, dict) else {}
+            payload.update({
+                "domain_rating": _to_float((row or {}).get("domain_rating")),
+                "status": "ok",
+                "license": (row or {}).get("license") or AHREFS_DOMAIN_RATING_LICENSE,
+            })
+    except Exception as exc:
+        payload.update({"status": "error", "error": str(exc)[:300]})
+    payload["cache_status"] = "miss"
+    payload["fetched_at"] = date.today().isoformat()
+    if payload.get("status") == "ok":
+        _write_json(cache_path, payload)
+    return payload
+
+
+def fetch_domain_ratings_free(
+    targets: Iterable[str],
+    cache_dir: Path,
+    *,
+    refresh: bool = False,
+    requester: Callable[..., Any] = requests.get,
+    timeout: int = 30,
+) -> dict[str, dict]:
+    ratings: dict[str, dict] = {}
+    for target in targets:
+        normalized = _domain_rating_target(str(target or ""))
+        if not normalized or normalized in ratings:
+            continue
+        ratings[normalized] = fetch_domain_rating_free(
+            normalized,
+            cache_dir,
+            refresh=refresh,
+            requester=requester,
+            timeout=timeout,
+        )
+    return ratings
 
 
 def _find_dotenv(start: Path | None = None) -> Path | None:

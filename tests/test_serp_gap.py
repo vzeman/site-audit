@@ -24,6 +24,7 @@ from site_audit.serp_gap import (
     _editorial_guidelines,
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
+    _enrich_serp_domain_ratings,
     _keyword_metrics_lookup,
     _overview_scatter,
     _paragraph_match_heatmap,
@@ -202,13 +203,16 @@ def test_serp_gap_ai_agent_state_reports_missing_openrouter_key(monkeypatch) -> 
     assert "OPENROUTER_API_KEY" in state["notes"][0]
 
 
-def test_serp_gap_ai_agent_state_reports_missing_harnext(monkeypatch) -> None:
+def test_serp_gap_ai_agent_state_falls_back_to_openrouter_without_harnext(monkeypatch) -> None:
     monkeypatch.setattr("site_audit.serp_gap.openrouter_api_key", lambda: "sk-test")
     monkeypatch.setattr("site_audit.serp_gap.harnext_status", lambda: (False, "Install Harnext CLI"))
 
-    state = _ai_agent_state(SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True))
+    config = SerpGapConfig(domain="example.com", dry_run=False, ai_agent=True)
+    state = _ai_agent_state(config)
 
-    assert state["status"] == "missing_harnext"
+    assert state["status"] == "ready"
+    assert state["provider"] == "openrouter"
+    assert config.ai_agent_provider == "openrouter"
     assert "Install Harnext CLI" in state["notes"][0]
 
 
@@ -1022,6 +1026,46 @@ def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     assert rows[-1]["is_selected_domain"] is True
 
 
+def test_serp_gap_enriches_serp_domains_with_ahrefs_domain_rating(tmp_path: Path, monkeypatch) -> None:
+    def fake_fetch(targets, cache_dir, *, refresh=False):
+        assert cache_dir == tmp_path
+        assert refresh is True
+        return {
+            "competitor-one.com": {
+                "domain_rating": 71.2,
+                "status": "ok",
+                "source": "ahrefs_public_domain_rating_free",
+                "license": "http://license.example",
+                "attribution": "Domain Rating by Ahrefs",
+            },
+            "example.com": {
+                "domain_rating": 42.0,
+                "status": "ok",
+                "source": "ahrefs_public_domain_rating_free",
+                "license": "http://license.example",
+                "attribution": "Domain Rating by Ahrefs",
+            },
+        }
+
+    monkeypatch.setattr("site_audit.serp_gap.fetch_domain_ratings_free", fake_fetch)
+    rankings = {
+        "https://competitor-one.com/a": {"url": "https://competitor-one.com/a", "domain": "competitor-one.com"},
+    }
+    page_results = [{
+        "analyses": [{
+            "competitor_pages": [{"url": "https://competitor-one.com/a", "domain": "competitor-one.com"}],
+        }],
+    }]
+    overview_rows = [{"url": "https://www.example.com/", "domain": "www.example.com"}]
+
+    meta = _enrich_serp_domain_ratings(rankings, page_results, overview_rows, tmp_path, refresh=True)
+
+    assert meta["domains_enriched"] == 2
+    assert rankings["https://competitor-one.com/a"]["domain_rating"] == 71.2
+    assert page_results[0]["analyses"][0]["competitor_pages"][0]["domain_rating"] == 71.2
+    assert overview_rows[0]["domain_rating"] == 42.0
+
+
 def test_serp_gap_reuses_known_competitors_for_overlapping_keywords() -> None:
     config = SerpGapConfig(domain="example.com", results_per_keyword=3, max_competitor_pages=2)
     known = {"https://competitor-one.com/", "https://competitor-two.com/"}
@@ -1131,7 +1175,10 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "Vector-space chart for keywords" in html
     assert "Vector space for keyword, target page, competitor titles, headings, and paragraphs" in html
     assert "Edit these after reviewing the charts" in html
-    assert "competitors cover nearby themes more deeply" in html
+    # The per-keyword cluster panel was removed (one cluster view lives in the overview);
+    # the overview aggregate cluster section must remain.
+    assert "competitors cover nearby themes more deeply" not in html
+    assert "Aggregate Semantic Clusters" in html
     assert "Review candidates for intent drift, thinness, or filler" in html
     assert "Charts first, then tasks" in html
     assert "review_paragraphs" in html
@@ -1224,3 +1271,432 @@ def test_serp_gap_html_includes_scatter_and_cluster_sections(tmp_path: Path) -> 
     assert "--audit-accent" in html
     assert "buildNav" in html
     assert 'target="_blank" rel="noopener noreferrer"' in html
+
+
+def _norm_rows(rows):
+    import numpy as np
+    arr = np.asarray(rows, dtype=np.float32)
+    denom = np.linalg.norm(arr, axis=1, keepdims=True)
+    denom[denom == 0] = 1.0
+    return arr / denom
+
+
+def test_serp_features_parses_serper_payload() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "serper", "status": "ok"},
+        "raw": {
+            "peopleAlsoAsk": [
+                {"question": "How much does X cost?", "snippet": "s", "title": "t", "link": "https://a"},
+            ],
+            "relatedSearches": [{"query": "x pricing"}],
+            "answerBox": {"title": "t", "answer": "a", "link": "https://b"},
+        },
+    }
+    features = _serp_features(payload)
+    assert features["people_also_ask"] == [
+        {"question": "How much does X cost?", "snippet": "s", "url": "https://a", "title": "t"}
+    ]
+    assert features["related_searches"] == ["x pricing"]
+    assert features["answer_box"] == {"title": "t", "answer": "a", "url": "https://b"}
+
+
+def test_serp_features_handles_missing_blocks() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    features = _serp_features({"meta": {"provider": "serper"}, "raw": {}})
+    assert features == {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+
+
+def test_serp_features_parses_dataforseo_payload() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "dataforseo", "status": "ok"},
+        "raw": {
+            "tasks": [{"result": [{"items": [
+                {"type": "people_also_ask", "items": [
+                    {"title": "What is X?", "expanded_element": [{"description": "d", "url": "https://c"}]},
+                ]},
+                {"type": "related_searches", "items": ["x alternatives"]},
+                {"type": "featured_snippet", "title": "ft", "description": "fd", "url": "https://d"},
+            ]}]}],
+        },
+    }
+    features = _serp_features(payload)
+    assert features["people_also_ask"][0]["question"] == "What is X?"
+    assert features["people_also_ask"][0]["snippet"] == "d"
+    assert features["related_searches"] == ["x alternatives"]
+    assert features["answer_box"]["answer"] == "fd"
+
+
+def test_paa_coverage_classifies_thresholds() -> None:
+    import numpy as np
+    from site_audit.serp_gap import _paa_coverage
+
+    class StubEmbedder:
+        def encode(self, texts, batch_size=32, show_progress=False):
+            vectors = []
+            for text in texts:
+                if "covered" in text.lower():
+                    vectors.append([1.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0])
+            return _norm_rows(vectors)
+
+    own_paragraphs = ["This paragraph is about the covered topic in detail."]
+    own_embeddings = _norm_rows([[1.0, 0.0]])
+    features = {
+        "people_also_ask": [
+            {"question": "Is the covered topic explained?"},
+            {"question": "Something entirely different?"},
+        ]
+    }
+    rows = _paa_coverage(features, own_paragraphs, own_embeddings, StubEmbedder())
+    assert rows[0]["status"] == "covered"
+    assert rows[0]["best_paragraph_index"] == 0
+    assert rows[1]["status"] == "missing"
+    assert 0.0 <= rows[1]["best_similarity"] <= 1.0
+
+
+def test_paa_coverage_without_own_paragraphs_marks_missing() -> None:
+    import numpy as np
+    from site_audit.serp_gap import _paa_coverage
+
+    rows = _paa_coverage(
+        {"people_also_ask": [{"question": "Anything?"}]},
+        [],
+        np.zeros((0, 0), dtype=np.float32),
+        embedder=None,
+    )
+    assert rows == [{"question": "Anything?", "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}]
+
+
+def test_editor_payload_sorts_paragraph_review_by_weakness() -> None:
+    from site_audit.ai_agent import _editor_prompt_payload
+
+    page = {
+        "url": "https://ours.example/page",
+        "title": "T",
+        "h1": "H",
+        "own_content": {"headings": [], "paragraphs": [], "word_count": 10},
+        "analyses": [{
+            "keyword": {"keyword": "kw"},
+            "paragraph_match_heatmap": {"rows": [
+                {"paragraph_index": 0, "max_similarity": 0.9, "status": "strong", "paragraph": "a",
+                 "cells": [{"url": "https://c1", "similarity": 0.9, "rank": 1, "paragraph": "cp1"}]},
+                {"paragraph_index": 1, "max_similarity": 0.2, "status": "weak", "paragraph": "b",
+                 "cells": [{"url": "https://c2", "similarity": 0.2, "rank": 2, "paragraph": "cp2"},
+                           {"url": "https://c3", "similarity": 0.1, "rank": 3, "paragraph": "cp3"}]},
+                {"paragraph_index": 2, "max_similarity": 0.5, "status": "weak", "paragraph": "c",
+                 "cells": []},
+            ]},
+        }],
+    }
+    payload = _editor_prompt_payload(page)
+    review = payload["analyses"][0]["paragraph_review"]
+    assert [row["paragraph_index"] for row in review] == [1, 2, 0]
+    assert review[0]["best_competitor"]["url"] == "https://c2"
+    assert review[1]["best_competitor"] == {}
+
+
+def test_editor_payload_includes_new_evidence_keys() -> None:
+    from site_audit.ai_agent import _editor_prompt_payload
+
+    page = {
+        "url": "https://ours.example/page",
+        "own_content": {"headings": [{"order": 0, "level": 2, "text": "H2"}], "paragraphs": [{"index": 0, "word_count": 3, "text": "x y z"}], "word_count": 3},
+        "analyses": [{
+            "keyword": {"keyword": "kw"},
+            "content_comparison": {"benchmark": {"median_competitor_paragraphs": 20}, "ours": {"paragraph_count": 5, "word_count": 100, "heading_count": 2, "h2_h3_count": 2, "coverage_ratio": 0.4}},
+            "structural_patterns": [{"signal": "s", "competitors": 3, "advice": "a"}],
+            "paa_coverage": [{"question": "Q?", "status": "missing", "best_similarity": 0.1}],
+            "serp_features": {"related_searches": ["alt"]},
+            "covered_topics": [{"label": "done topic"}],
+            "content_order_path": {"summary": {"order_score": 1.0}, "missing_clusters": [{"label": "m", "competitor_pages": 2, "sample_text": "s"}], "deviations": []},
+        }],
+    }
+    payload = _editor_prompt_payload(page)
+    assert payload["own_page"]["paragraphs"][0]["text"] == "x y z"
+    analysis = payload["analyses"][0]
+    assert analysis["benchmark"]["median_competitor_paragraphs"] == 20
+    assert analysis["our_profile"]["paragraph_count"] == 5
+    assert analysis["structural_patterns"][0]["signal"] == "s"
+    assert analysis["serp_features"]["people_also_ask"][0]["question"] == "Q?"
+    assert analysis["serp_features"]["related_searches"] == ["alt"]
+    assert analysis["covered_topics"] == ["done topic"]
+    assert analysis["content_order"]["missing_clusters"][0]["label"] == "m"
+
+
+def test_shrink_editor_payload_respects_budget() -> None:
+    from site_audit.ai_agent import _shrink_editor_payload
+    import json as _json
+
+    payload = {
+        "own_page": {"paragraphs": [{"index": i, "text": "word " * 200} for i in range(60)]},
+        "analyses": [{
+            "paragraph_review": [{"paragraph_index": i, "paragraph": "x" * 400, "best_competitor": {"paragraph": "y" * 320}} for i in range(25)],
+            "topics": [{"example_paragraph": "z" * 320} for _ in range(12)],
+            "content_order": {"missing_clusters": [{"sample_text": "s" * 200} for _ in range(8)]},
+        }],
+    }
+    out = _shrink_editor_payload(payload, max_chars=20_000)
+    assert len(_json.dumps(out, ensure_ascii=False)) <= 20_000
+    assert len(out["analyses"][0]["paragraph_review"]) <= 15
+
+
+def _analysis_base(keyword="widget tool"):
+    return {
+        "status": "ok",
+        "keyword": {"keyword": keyword, "impressions": 100},
+        "competitor_pages": [],
+        "missing_topics": [],
+        "weak_topics": [],
+        "off_intent_paragraphs": [],
+        "own_paragraphs_to_review": [],
+    }
+
+
+def test_title_gap_action_triggers_on_missing_keyword() -> None:
+    from site_audit.serp_gap import _title_gap_action
+
+    page = {"url": "https://ours.example/p", "title": "Our Generic Landing Page Headline", "h1": "Hello"}
+    analysis = _analysis_base()
+    analysis["competitor_pages"] = [
+        {"rank": i, "title": f"Best widget tool option {i}", "error": ""} for i in range(1, 6)
+    ]
+    action = _title_gap_action(page, analysis, 1)
+    assert action is not None
+    assert action["type"] == "rewrite_title"
+    assert action["priority"] == "high"
+    assert len(action["evidence"]["competitor_titles"]) == 5
+
+    page_with_keyword = {"url": "https://ours.example/p", "title": "The Widget Tool for Everyone Everywhere", "h1": "Hello"}
+    assert _title_gap_action(page_with_keyword, analysis, 1) is None
+
+
+def test_depth_action_uses_benchmark() -> None:
+    from site_audit.serp_gap import _depth_action
+
+    page = {"url": "https://ours.example/p"}
+    analysis = _analysis_base()
+    analysis["content_comparison"] = {
+        "ours": {"paragraph_count": 5, "heading_count": 2},
+        "benchmark": {"median_competitor_paragraphs": 20, "median_competitor_headings": 9},
+    }
+    action = _depth_action(page, analysis, 1)
+    assert action is not None
+    assert action["type"] == "expand_depth"
+    assert "15" in action["instruction"]
+
+    analysis["content_comparison"]["ours"]["paragraph_count"] = 18
+    assert _depth_action(page, analysis, 1) is None
+
+
+def test_structural_and_paa_actions_emitted() -> None:
+    from site_audit.serp_gap import _action_points_for_analysis
+
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    analysis = _analysis_base()
+    analysis["structural_patterns"] = [
+        {"signal": "Comparison / data tables", "competitors": 4, "advice": "Add a table.", "ours": 0, "max_theirs": 3},
+        {"signal": "only one competitor", "competitors": 1, "advice": "x", "ours": 0, "max_theirs": 1},
+    ]
+    analysis["serp_features"] = {"people_also_ask": [{"question": "What is a widget tool?"}]}
+    analysis["paa_coverage"] = [
+        {"question": "What is a widget tool?", "status": "missing", "best_similarity": 0.2},
+        {"question": "Covered question?", "status": "covered", "best_similarity": 0.9},
+    ]
+    actions = _action_points_for_analysis(page, analysis)
+    types = {a["type"] for a in actions}
+    assert "structural" in types
+    assert "answer_paa" in types
+    structural = next(a for a in actions if a["type"] == "structural")
+    assert structural["priority"] == "high"
+    assert all(a["topic"] != "only one competitor" for a in actions if a["type"] == "structural")
+    paa = next(a for a in actions if a["type"] == "answer_paa")
+    assert paa["priority"] == "high"
+
+
+def test_action_dedupe_across_keywords() -> None:
+    from site_audit.serp_gap import _attach_action_points
+
+    def topic(label):
+        return {
+            "label": label, "coverage": "missing", "priority": "high",
+            "competitor_prevalence": 0.9, "best_competitor_rank": 1,
+            "competitor_coverage": 4, "competitor_urls": [], "examples": [],
+        }
+
+    page = {
+        "url": "https://ours.example/p", "title": "T", "h1": "H",
+        "analyses": [
+            {**_analysis_base("kw one"), "missing_topics": [topic("pricing, free plan")]},
+            {**_analysis_base("kw two"), "missing_topics": [topic("pricing free plan")]},
+        ],
+    }
+    out = _attach_action_points([page])
+    add_topic_actions = [a for a in out if a["type"] == "add_topic"]
+    assert len(add_topic_actions) == 1
+    assert add_topic_actions[0].get("merged_duplicates") == 1
+
+
+def test_recommended_outline_orders_have_and_add() -> None:
+    from site_audit.serp_gap import _recommended_outline
+
+    analysis = {
+        "content_order_path": {
+            "clusters": [
+                {"label": "intro", "ours_mean_order": 0.05, "competitor_mean_order": 0.1, "competitor_pages": 5, "sample_text": "s"},
+                {"label": "setup", "ours_mean_order": None, "competitor_mean_order": 0.5, "competitor_pages": 4, "sample_text": "s"},
+            ],
+            "missing_clusters": [
+                {"label": "pricing", "competitor_mean_order": 0.3, "competitor_pages": 3, "sample_text": "s"},
+            ],
+        },
+    }
+    rows = _recommended_outline(analysis)
+    assert [r["label"] for r in rows] == ["intro", "pricing", "setup"]
+    assert [r["status"] for r in rows] == ["have", "add", "add"]
+    assert [r["position"] for r in rows] == [1, 2, 3]
+
+
+def test_html_renders_with_minimal_payload() -> None:
+    from site_audit.serp_gap import _html
+
+    payload = {
+        "status": "ok",
+        "domain": "ours.example",
+        "summary": {},
+        "selected_pages": [],
+        "selected_keywords": [],
+        "skipped_pages": [],
+        "skipped_keywords": [],
+        "domain_ratings": {
+            "provider": "ahrefs_public_domain_rating_free",
+            "attribution": "Domain Rating by Ahrefs",
+            "license": "http://ahrefs.com/legal/domain-rating-license",
+            "domains_enriched": 1,
+        },
+        "serp_url_rankings": [
+            {
+                "url": "https://comp.example/a",
+                "domain": "comp.example",
+                "domain_rating": 71.2,
+                "top10_count": 1,
+                "best_rank": 1,
+                "average_rank": 1.0,
+                "keywords": [{"keyword": "kw", "rank": 1}],
+            },
+            {
+                "url": "https://other.example/a",
+                "domain": "other.example",
+                "domain_rating": 42.0,
+                "top10_count": 1,
+                "best_rank": 2,
+                "average_rank": 2.0,
+                "keywords": [{"keyword": "kw", "rank": 2}],
+            },
+        ],
+        "editorial_guidelines": {"paragraph_rules": ["One idea per paragraph."], "avoid": ["No filler."]},
+        "pages": [{
+            "url": "https://ours.example/p",
+            "title": "T",
+            "h1": "H",
+            "own_content": {"headings": [], "paragraphs": [{"index": 0, "word_count": 3, "text": "a b c"}], "word_count": 3},
+            "ai_editor_brief": {"status": "ok", "provider": "harnext", "cache_status": "miss", "markdown": "# Brief\n\n- do this <script>alert(1)</script>"},
+            "ai_recommendation": {
+                "status": "ok",
+                "errors": [],
+                "data": {
+                    "page_assessment": {"is_right_target_page": True, "reason": "ok"},
+                    "title": {"current": "T", "recommended": "T2", "reason": "kw"},
+                    "meta_description": {"recommended": "m"},
+                    "h1": {"recommended": "H"},
+                    "outline": [{"level": 2, "heading": "X", "status": "new", "maps_to_topic": "x"}],
+                    "paragraph_decisions": [{"index": 0, "decision": "keep", "reason": "fine"}],
+                    "new_sections": [{"heading": "S", "placement_after_paragraph": -1, "format": "faq", "draft": "d", "covers_paa": ["q"]}],
+                    "structured_data": [],
+                    "internal_links": [],
+                },
+                "verification": {
+                    "topics": [{"keyword": "kw", "label": "x", "priority": "high", "before": "missing", "after": "covered", "best_similarity": 0.9}],
+                    "paa": [],
+                    "summary": {"missing_before": 1, "missing_after": 0, "partial_before": 0, "partial_after": 0, "paa_missing_before": 0, "paa_missing_after": 0, "unresolved_critical": []},
+                },
+            },
+            "analyses": [{
+                "status": "ok",
+                "query": "kw",
+                "keyword": {"keyword": "kw"},
+                "summary": {"missing": 1, "partial": 0, "covered": 0},
+                "topics": [{"label": "x", "coverage": "missing", "priority": "high", "centroid": [1.0, 0.0]}],
+                "structural_patterns": [{"signal": "Comparison / data tables", "competitors": 3, "advice": "Add a table.", "ours": 0, "max_theirs": 2}],
+                "paa_coverage": [{"question": "Q?", "status": "missing", "best_similarity": 0.1, "best_paragraph": ""}],
+                "serp_features": {"related_searches": ["alt"], "people_also_ask": [], "answer_box": {}},
+                "recommended_outline": [{"position": 1, "label": "x", "status": "add", "competitor_pages": 3, "sample_text": "s"}],
+                "competitor_pages": [],
+                "action_points": [],
+            }],
+        }],
+    }
+    html = _html(payload)
+    assert "mdToHtml" in html
+    assert "Structural / GEO Gaps" in html
+    assert "People Also Ask Coverage" in html
+    assert "Recommended Section Order" in html
+    assert "AI Page Recommendation" in html
+    assert "Domain Rating by" in html
+    assert '"domain_rating": 71.2' in html
+    assert "DR ${v.toFixed(1)}" in html
+    assert "replace(/\\r\\n/g,'\\n').split('\\n')" in html
+    assert "trimmed.match(/^(#{1,4})\\s+(.*)$/)" in html
+    assert ".split(/\\s+/).map(Number)" in html
+    assert ".split(/\\\\s+/).map(Number)" not in html
+    assert "trimmed.match(/^(#{1,4})\n" not in html
+    # centroids must be stripped from the HTML payload
+    assert '"centroid"' not in html
+
+
+def test_recommended_article_markdown_assembles_full_page() -> None:
+    from site_audit.serp_gap import _recommended_article_markdown
+
+    page = {"url": "https://ours.example/p", "title": "Old", "h1": "Old H1"}
+    paragraphs = ["Intro text.", "Weak text.", "Setup step one."]
+    rec = {
+        "title": {"recommended": "New Title", "reason": "keyword alignment"},
+        "meta_description": {"recommended": "New meta."},
+        "h1": {"recommended": "New H1"},
+        "page_assessment": {"is_right_target_page": True, "reason": "right page"},
+        "outline": [
+            {"level": 2, "heading": "Setup", "status": "keep", "source_paragraphs": [2]},
+        ],
+        "paragraph_decisions": [
+            {"index": 0, "decision": "keep", "reason": "good"},
+            {"index": 1, "decision": "rewrite", "reason": "filler", "rewrite": "Strong rewritten text."},
+            {"index": 2, "decision": "keep", "reason": "essential setup"},
+        ],
+        "new_sections": [
+            {"heading": "Pricing", "placement_after_paragraph": 0, "topic": "pricing",
+             "format": "paragraphs", "draft": "Original pricing copy.", "covers_paa": ["How much does it cost?"]},
+        ],
+        "structured_data": [{"type": "FAQPage", "reason": "competitors carry it"}],
+        "internal_links": [],
+    }
+    verification = {"summary": {"missing_before": 2, "missing_after": 0, "partial_before": 1, "partial_after": 0,
+                                "paa_missing_before": 1, "paa_missing_after": 0, "unresolved_critical": []}}
+    md = _recommended_article_markdown(page, rec, paragraphs, verification)
+
+    assert "**Title:** New Title" in md
+    assert "**H1:** New H1" in md
+    # reading order: intro, new pricing section, rewritten paragraph, heading + setup step
+    assert md.index("Intro text.") < md.index("## Pricing") < md.index("Strong rewritten text.") < md.index("## Setup") < md.index("Setup step one.")
+    assert "Original pricing copy." in md
+    assert "answers PAA: How much does it cost?" in md
+    assert "Why this version should rank better" in md
+    assert "missing 2 -> 0" in md
+    assert "FAQPage" in md
+    assert "**Title change:** keyword alignment" in md
+    # removed paragraphs do not appear
+    assert "Weak text." not in md

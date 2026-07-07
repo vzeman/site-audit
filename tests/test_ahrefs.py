@@ -10,6 +10,7 @@ from site_audit.ahrefs import (
     _page_lookup,
     _url_keys,
     build_analysis,
+    fetch_domain_rating_free,
 )
 from site_audit.analyzer import PageInfo
 
@@ -73,6 +74,32 @@ def test_ahrefs_client_reuses_latest_cached_snapshot_without_api_key(tmp_path: P
     assert second["meta"]["status"] == "ok"
     assert second["meta"]["cache_status"] == "hit"
     assert len(calls) == 4
+
+
+def test_fetch_domain_rating_free_uses_public_endpoint_and_cache(tmp_path: Path) -> None:
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"domain_rating": {"domain_rating": 72.4, "license": "http://license.example"}}
+
+    def requester(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    first = fetch_domain_rating_free("https://www.example.com/path", tmp_path, requester=requester)
+    second = fetch_domain_rating_free("example.com", tmp_path, requester=requester)
+
+    assert first["domain"] == "example.com"
+    assert first["domain_rating"] == 72.4
+    assert first["status"] == "ok"
+    assert first["cache_status"] == "miss"
+    assert second["cache_status"] == "hit"
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/domain-rating-free")
+    assert calls[0][1]["params"]["target"] == "example.com"
 
 
 def test_ahrefs_analysis_aggregates_pages_keywords_directories_and_clusters() -> None:

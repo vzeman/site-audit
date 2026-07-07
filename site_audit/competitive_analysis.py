@@ -681,6 +681,11 @@ def _structural_diff(ours_ext, theirs_ext) -> list[dict]:
     return diffs
 
 
+def structural_diff(ours_ext, theirs_ext) -> list[dict]:
+    """Public wrapper used by serp_gap to compute per-competitor structural gaps."""
+    return _structural_diff(ours_ext, theirs_ext)
+
+
 def _missing_topics(
     theirs_para_embs: np.ndarray,
     theirs_paragraphs: list[str],
@@ -960,6 +965,7 @@ def build_serp_paragraph_gap(
             })
         topics.append({
             "label": _topic_label(texts, labels, cid),
+            "centroid": [round(float(x), 5) for x in centroid.tolist()],
             "coverage": coverage,
             "priority": priority,
             "competitor_paragraphs": len(idxs),
@@ -1006,6 +1012,14 @@ def build_serp_paragraph_gap(
         off_intent.sort(key=lambda r: r["similarity_to_serp_topics"])
         review_candidates.sort(key=lambda r: r["similarity_to_serp_topics"])
 
+    def _gap_num(value) -> float:
+        if isinstance(value, bool):
+            return 1.0 if value else 0.0
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
     structural_counts: dict[str, dict] = {}
     for page in usable:
         for gap in page.structural_gaps:
@@ -1020,7 +1034,8 @@ def build_serp_paragraph_gap(
                 "max_theirs": gap.get("theirs"),
             })
             row["competitors"] += 1
-            row["max_theirs"] = gap.get("theirs")
+            if _gap_num(gap.get("theirs")) > _gap_num(row.get("max_theirs")):
+                row["max_theirs"] = gap.get("theirs")
 
     return {
         "query": query,

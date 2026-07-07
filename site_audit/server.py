@@ -17,6 +17,13 @@ from urllib.parse import parse_qs, unquote
 LOG = logging.getLogger(__name__)
 
 
+def _domain_report_index(projects_root: Path, domain: str, ui_dir: Path) -> Path:
+    report_index = projects_root / domain / "report" / "index.html"
+    if report_index.is_file():
+        return report_index
+    return ui_dir / "index.html"
+
+
 def _build_handler(ui_dir: Path, data_dir: Path, projects_root: Path):
     scans: dict[str, dict] = {}
     scans_lock = threading.Lock()
@@ -46,7 +53,8 @@ def _build_handler(ui_dir: Path, data_dir: Path, projects_root: Path):
                 self._send_json({"scans": _scan_rows()})
                 return
             if path.startswith("/reports/") and path.rstrip("/").count("/") == 2:
-                self._serve_file(ui_dir / "index.html")
+                domain = path.strip("/").split("/", 1)[1]
+                self._serve_file(_domain_report_index(projects_root, domain, ui_dir))
                 return
             if path.startswith("/comparisons/") and path.rstrip("/").count("/") == 2:
                 name = path.strip("/").split("/", 1)[1]

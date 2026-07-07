@@ -157,9 +157,9 @@ Action: fix accidental noindex/canonical/robots issues before content work. Cont
 <a id="technical-seo-block"></a>
 ## Technical SEO issues
 
-Shows the consolidated technical issue model across crawl status, indexability, links, redirects, metadata, assets, sitemaps, localization, structured data, and performance.
+Consolidates technical findings across crawl status, indexability, links, redirects, metadata, assets, sitemaps, localization, structured data, and performance.
 
-Action: prioritize error-level findings first, then filter by category to work through each affected URL group.
+Action: use severity, category, and issue-type filters to drill into affected URLs. Start with error-level template issues and high-count issue types that affect canonical pages.
 
 <a id="structured-data-block"></a>
 ## Structured data health
