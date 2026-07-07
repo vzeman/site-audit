@@ -118,13 +118,24 @@ def test_write_technical_seo_exports_writes_json_and_csv(tmp_path) -> None:
     write_technical_seo_exports(tmp_path, payload)
 
     assert (tmp_path / "technical_pages.json").is_file()
+    assert (tmp_path / "technical_overview.json").is_file()
     assert (tmp_path / "technical_issues.json").is_file()
     assert (tmp_path / "technical_issue_catalog.json").is_file()
+    assert (tmp_path / "technical_issue_groups" / "index.json").is_file()
     assert (tmp_path / "technical_pages.csv").is_file()
     assert (tmp_path / "technical_issues.csv").is_file()
     assert (tmp_path / "technical_issue_catalog.csv").is_file()
+    assert (tmp_path / "index.html").is_file()
     csv_text = (tmp_path / "technical_pages.csv").read_text(encoding="utf-8")
     assert "technical_severity_score" in csv_text
     assert "missing_title" in csv_text
     issue_json = (tmp_path / "technical_issues.json").read_text(encoding="utf-8")
     assert "issue_catalog" in issue_json
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "example.com technical SEO audit" in html
+    assert "technical_issues.csv" in html
+    assert "Issue catalog" in html
+    assert "issue-type-filter" in html
+    assert "technical_issue_groups/" in html
+    group_index = (tmp_path / "technical_issue_groups" / "index.json").read_text(encoding="utf-8")
+    assert "missing_title" in group_index

@@ -1901,6 +1901,7 @@ def run(config: PipelineConfig) -> dict:
             conversion=conversion_data,
             indexability=indexability_data,
             performance=performance_data,
+            technical_seo=technical_seo_data,
             ahrefs=ahrefs_data,
             best_pages=best_pages_data,
             performance_explainer=performance_explainer_data,

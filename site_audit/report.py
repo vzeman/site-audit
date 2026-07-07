@@ -19,6 +19,7 @@ viewer template can render against either source unchanged:
 from __future__ import annotations
 
 import csv
+import html
 import json
 import re
 import shutil
@@ -45,6 +46,682 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _html_escape(value) -> str:
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _format_number(value) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return _html_escape(value)
+
+
+def _technical_report_domain(domain: Optional[str], technical_seo: dict) -> str:
+    if domain:
+        return str(domain)
+    for page in (technical_seo or {}).get("pages") or []:
+        parsed = urlparse(str(page.get("url") or ""))
+        if parsed.netloc:
+            return parsed.netloc
+    return "Technical SEO audit"
+
+
+def _technical_report_rows(title: str, rows: list[tuple[str, object]]) -> str:
+    rendered = "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+        if value not in (None, "")
+    )
+    if not rendered:
+        return ""
+    return f"""
+      <section>
+        <h2>{_html_escape(title)}</h2>
+        <table>{rendered}</table>
+      </section>
+    """
+
+
+def _technical_report_count_rows(counts: dict, limit: int = 25) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "<p>No issues recorded.</p>"
+    rows = sorted(counts.items(), key=lambda item: item[1] or 0, reverse=True)[:limit]
+    return "<table>" + "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+    ) + "</table>"
+
+
+def _first_present(mapping: dict, keys: list[str]):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _inline_json(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _slugify_issue_type(value: object, fallback: str = "issue") -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    return slug or fallback
+
+
+def _issue_field(issue: dict, keys: list[str]) -> str:
+    for key in keys:
+        value = issue.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _build_technical_issue_group_manifest(issues: list[dict]) -> list[dict]:
+    grouped: dict[str, dict] = {}
+    used_files: set[str] = set()
+    for issue in issues:
+        issue_type = _issue_field(issue, ["issue_type", "name", "issue"]) or "issue"
+        row = grouped.get(issue_type)
+        if row is None:
+            filename_base = _slugify_issue_type(issue_type)
+            filename = f"{filename_base}.json"
+            suffix = 2
+            while filename in used_files:
+                filename = f"{filename_base}-{suffix}.json"
+                suffix += 1
+            used_files.add(filename)
+            row = {
+                "issue_type": issue_type,
+                "issue_name": _issue_field(issue, ["issue_name", "name", "issue"]) or issue_type.replace("_", " "),
+                "category": _issue_field(issue, ["category"]),
+                "severity": _issue_field(issue, ["severity", "importance"]),
+                "importance": _issue_field(issue, ["importance", "severity"]),
+                "count": 0,
+                "file": f"technical_issue_groups/{filename}",
+            }
+            grouped[issue_type] = row
+        row["count"] += 1
+    return sorted(grouped.values(), key=lambda row: (-(row.get("count") or 0), str(row.get("issue_type") or "")))
+
+
+def write_technical_issue_group_exports(output_dir: Path, issues: list[dict]) -> list[dict]:
+    manifest = _build_technical_issue_group_manifest(issues)
+    groups_dir = output_dir / "technical_issue_groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    by_type: dict[str, list[dict]] = {}
+    for issue in issues:
+        issue_type = _issue_field(issue, ["issue_type", "name", "issue"]) or "issue"
+        by_type.setdefault(issue_type, []).append(issue)
+    for row in manifest:
+        _write_json(output_dir / row["file"], {"summary": row, "issues": by_type.get(row["issue_type"], [])})
+    _write_json(groups_dir / "index.json", {"groups": manifest, "total_issues": len(issues)})
+    return manifest
+
+
+def _technical_report_links(output_dir: Path) -> str:
+    files = [
+        ("Run summary", "run_summary.json"),
+        ("Technical pages JSON", "technical_pages.json"),
+        ("Technical pages CSV", "technical_pages.csv"),
+        ("Technical overview JSON", "technical_overview.json"),
+        ("Technical issues JSON", "technical_issues.json"),
+        ("Technical issues CSV", "technical_issues.csv"),
+        ("Technical issue groups", "technical_issue_groups/index.json"),
+        ("Issue catalog JSON", "technical_issue_catalog.json"),
+        ("Issue catalog CSV", "technical_issue_catalog.csv"),
+        ("Indexability JSON", "indexability.json"),
+        ("Sitemap coverage JSON", "sitemap_coverage.json"),
+        ("Canonical consistency JSON", "canonical_consistency.json"),
+        ("Performance JSON", "performance.json"),
+    ]
+    links = []
+    for label, filename in files:
+        if (output_dir / filename).is_file():
+            links.append(f'<a href="{_html_escape(filename)}">{_html_escape(label)}</a>')
+    if not links:
+        return ""
+    return "<div class=\"links\">" + "\n".join(links) + "</div>"
+
+
+def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    domain_name = _technical_report_domain(domain, technical_seo)
+    summary = (technical_seo or {}).get("summary") or {}
+    issue_counts = (technical_seo or {}).get("issue_counts") or {}
+    category_counts = (technical_seo or {}).get("category_counts") or {}
+    severity_counts = (technical_seo or {}).get("severity_counts") or {}
+    interpretation = (technical_seo or {}).get("interpretation") or {}
+    issues = list((technical_seo or {}).get("issues") or [])
+    issue_groups = (technical_seo or {}).get("issue_groups") or _build_technical_issue_group_manifest(issues)
+    summary_rows = [
+        ("Pages analyzed", _first_present(summary, ["total_pages", "pages"])),
+        ("Pages fetched", summary.get("fetched_pages")),
+        ("Pages skipped", summary.get("skipped_pages")),
+        ("Noindex pages dropped", summary.get("noindex_dropped")),
+        ("Canonical duplicates dropped", summary.get("canonical_duplicates_dropped")),
+        ("Pages with issues", summary.get("pages_with_issues")),
+        ("Technical issues", _first_present(summary, ["total_issues", "technical_issues"])),
+        ("High priority issues", _first_present(summary, ["high_issues", "high_technical_issues"])),
+        ("Catalog issue types", summary.get("catalog_issue_types")),
+    ]
+    bootstrap = {
+        "domain": domain_name,
+        "summaryRows": [(label, value) for label, value in summary_rows if value not in (None, "")],
+        "summary": summary,
+        "severityCounts": severity_counts,
+        "categoryCounts": category_counts,
+        "issueCounts": issue_counts,
+        "issueCatalog": (technical_seo or {}).get("issue_catalog") or [],
+        "issueGroups": issue_groups,
+    }
+    html_text = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_html_escape(domain_name)} technical SEO audit</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #5f6b7a;
+      --border: #d8e0ea;
+      --accent: #0b6bcb;
+      --danger: #b42318;
+      --warn: #b54708;
+      --info: #175cd3;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    header {{
+      margin-bottom: 24px;
+    }}
+    .header-row {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+    }}
+    h2 {{
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 650;
+    }}
+    p {{
+      margin: 0 0 16px;
+      color: var(--muted);
+    }}
+    .cards {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 22px 0;
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    .card span {{
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .card strong {{
+      display: block;
+      margin-top: 6px;
+      font-size: 26px;
+      line-height: 1.1;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }}
+    .wide {{
+      grid-column: 1 / -1;
+    }}
+    section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    th, td {{
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }}
+    tr:last-child th, tr:last-child td {{
+      border-bottom: 0;
+    }}
+    th {{
+      width: 70%;
+      color: var(--muted);
+      font-weight: 500;
+      padding-right: 16px;
+    }}
+    td {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) 86px;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }}
+    .bar-row:last-child {{
+      border-bottom: 0;
+    }}
+    .bar-label {{
+      overflow-wrap: anywhere;
+    }}
+    .bar-track {{
+      height: 10px;
+      background: #edf1f7;
+      border-radius: 999px;
+      overflow: hidden;
+    }}
+    .bar-fill {{
+      height: 100%;
+      min-width: 2px;
+      background: var(--accent);
+    }}
+    .bar-fill.high {{ background: var(--danger); }}
+    .bar-fill.medium {{ background: var(--warn); }}
+    .bar-fill.low {{ background: var(--info); }}
+    .bar-value {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .toolbar {{
+      display: grid;
+      grid-template-columns: 1fr 210px 160px 160px;
+      gap: 10px;
+      margin: 12px 0 16px;
+    }}
+    input, select, button {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      min-height: 38px;
+      padding: 7px 10px;
+    }}
+    button {{
+      cursor: pointer;
+    }}
+    .issue-table-wrap {{
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }}
+    .issue-table th, .issue-table td {{
+      min-width: 130px;
+      padding: 10px 12px;
+      text-align: left;
+    }}
+    .issue-table th:first-child, .issue-table td:first-child {{
+      min-width: 260px;
+    }}
+    .issue-table th:last-child, .issue-table td:last-child {{
+      min-width: 360px;
+    }}
+    .catalog-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 10px;
+      max-height: 520px;
+      overflow: auto;
+    }}
+    .catalog-item {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfdff;
+    }}
+    .catalog-title {{
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+      font-weight: 650;
+    }}
+    .catalog-meta {{
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .pill {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      background: #eef2f6;
+      color: var(--muted);
+      text-transform: capitalize;
+    }}
+    .pill.high {{ background: #fee4e2; color: var(--danger); }}
+    .pill.medium {{ background: #fef0c7; color: var(--warn); }}
+    .pill.low {{ background: #d1e9ff; color: var(--info); }}
+    .pager {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+    }}
+    .links {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }}
+    a {{
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid #b8d6f3;
+      background: #eef6ff;
+      border-radius: 6px;
+      padding: 7px 10px;
+    }}
+    a:hover {{
+      text-decoration: underline;
+    }}
+    @media (max-width: 720px) {{
+      .toolbar {{
+        grid-template-columns: 1fr;
+      }}
+      .bar-row {{
+        grid-template-columns: 1fr 86px;
+      }}
+      .bar-track {{
+        grid-column: 1 / -1;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="header-row">
+        <div>
+          <h1>{_html_escape(domain_name)} technical SEO audit</h1>
+          <p>Interactive technical SEO dashboard generated from the audit exports.</p>
+        </div>
+      </div>
+    </header>
+    <div id="cards" class="cards"></div>
+    <div class="grid">
+      <section>
+        <h2>Issue severity</h2>
+        <div id="severity-bars"></div>
+      </section>
+      <section>
+        <h2>Issue categories</h2>
+        <div id="category-bars"></div>
+      </section>
+      <section class="wide">
+        <h2>All issue types</h2>
+        <div id="issue-bars"></div>
+      </section>
+      <section class="wide">
+        <h2>Issue catalog</h2>
+        <p id="catalog-status"></p>
+        <div id="issue-catalog" class="catalog-grid"></div>
+      </section>
+      <section class="wide">
+        <h2>Affected URLs</h2>
+        <p id="issue-status">Select an issue type to inspect affected URLs.</p>
+        <div class="toolbar">
+          <input id="issue-search" type="search" placeholder="Filter by URL, issue type, category, severity, or message">
+          <select id="issue-type-filter"><option value="">All issue types</option></select>
+          <select id="severity-filter"><option value="">All severities</option></select>
+          <select id="category-filter"><option value="">All categories</option></select>
+        </div>
+        <div class="issue-table-wrap">
+          <table class="issue-table">
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Issue</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="issue-rows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="pager-label"></span>
+          <div>
+            <button id="prev-page" type="button">Previous</button>
+            <button id="next-page" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+      <section class="wide">
+        <h2>Exports</h2>
+        <p>{_html_escape(interpretation.get("exports") or "Open the JSON or CSV files for raw row-level audit data.")}</p>
+        {_technical_report_links(output_dir)}
+      </section>
+    </div>
+  </main>
+  <script id="technical-bootstrap" type="application/json">{_inline_json(bootstrap)}</script>
+  <script>
+    const bootstrap = JSON.parse(document.getElementById('technical-bootstrap').textContent);
+    const fmt = new Intl.NumberFormat();
+    const pageSize = 250;
+    let allIssues = [];
+    let filteredIssues = [];
+    let page = 0;
+    let selectedIssueFile = '';
+
+    function escapeHtml(value) {{
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({{
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }}[ch]));
+    }}
+
+    function normalize(value) {{
+      return String(value ?? '').toLowerCase();
+    }}
+
+    function renderCards() {{
+      const cards = [
+        ['Pages analyzed', bootstrap.summary.total_pages ?? bootstrap.summary.pages],
+        ['Pages with issues', bootstrap.summary.pages_with_issues],
+        ['Technical issues', bootstrap.summary.total_issues ?? bootstrap.summary.technical_issues],
+        ['High priority issues', bootstrap.summary.high_issues ?? bootstrap.summary.high_technical_issues],
+        ['Catalog issue types', bootstrap.summary.catalog_issue_types],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+      document.getElementById('cards').innerHTML = cards.map(([label, value]) =>
+        `<div class="card"><span>${{escapeHtml(label)}}</span><strong>${{fmt.format(Number(value) || 0)}}</strong></div>`
+      ).join('');
+    }}
+
+    function renderBars(id, counts, limit = 12) {{
+      const entries = Object.entries(counts || {{}})
+        .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+        .slice(0, limit || Number.MAX_SAFE_INTEGER);
+      const max = Math.max(...entries.map(([, value]) => Number(value) || 0), 1);
+      document.getElementById(id).innerHTML = entries.map(([label, value]) => {{
+        const cls = ['high', 'medium', 'low'].includes(label) ? label : '';
+        const pct = Math.max(1, Math.round(((Number(value) || 0) / max) * 100));
+        return `<div class="bar-row">
+          <div class="bar-label">${{escapeHtml(label.replaceAll('_', ' '))}}</div>
+          <div class="bar-track"><div class="bar-fill ${{cls}}" style="width:${{pct}}%"></div></div>
+          <div class="bar-value">${{fmt.format(Number(value) || 0)}}</div>
+        </div>`;
+      }}).join('') || '<p>No issues recorded.</p>';
+    }}
+
+    function issueField(issue, names) {{
+      for (const name of names) {{
+        const value = issue?.[name];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }}
+      return '';
+    }}
+
+    function fillFilters() {{
+      const groups = bootstrap.issueGroups || [];
+      document.getElementById('issue-type-filter').innerHTML =
+        '<option value="">All issue types</option>' +
+        groups.map(group => `<option value="${{escapeHtml(group.file || '')}}">${{escapeHtml((group.issue_name || group.issue_type || '').replaceAll('_', ' '))}} (${{fmt.format(Number(group.count) || 0)}})</option>`).join('');
+      const severities = [...new Set(allIssues.map(row => issueField(row, ['severity', 'importance'])).filter(Boolean))].sort();
+      const categories = [...new Set(allIssues.map(row => issueField(row, ['category'])).filter(Boolean))].sort();
+      document.getElementById('severity-filter').innerHTML = '<option value="">All severities</option>' + severities.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+      document.getElementById('category-filter').innerHTML = '<option value="">All categories</option>' + categories.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+    }}
+
+    function renderCatalog() {{
+      const catalog = bootstrap.issueCatalog || [];
+      document.getElementById('catalog-status').textContent =
+        `${{fmt.format(catalog.length)}} technical audit checks configured.`;
+      document.getElementById('issue-catalog').innerHTML = catalog.map(row => {{
+        const name = issueField(row, ['name', 'issue_name', 'issue_type', 'issue']).replaceAll('_', ' ');
+        const severity = issueField(row, ['importance', 'severity']);
+        const category = issueField(row, ['category']);
+        const count = Number(row.count || (bootstrap.issueCounts || {{}})[row.issue_type] || 0);
+        return `<div class="catalog-item">
+          <div class="catalog-title">
+            <span>${{escapeHtml(name)}}</span>
+            <span class="pill ${{escapeHtml(normalize(severity))}}">${{escapeHtml(severity || 'issue')}}</span>
+          </div>
+          <div class="catalog-meta">${{escapeHtml(category || 'uncategorized')}}${{count ? ` · ${{fmt.format(count)}} findings` : ''}}</div>
+        </div>`;
+      }}).join('') || '<p>No issue catalog available.</p>';
+    }}
+
+    function applyFilters() {{
+      const q = normalize(document.getElementById('issue-search').value);
+      const severity = document.getElementById('severity-filter').value;
+      const category = document.getElementById('category-filter').value;
+      filteredIssues = allIssues.filter(issue => {{
+        if (severity && issueField(issue, ['severity', 'importance']) !== severity) return false;
+        if (category && issueField(issue, ['category']) !== category) return false;
+        if (!q) return true;
+        return [
+          issueField(issue, ['url', 'page_url']),
+          issueField(issue, ['severity', 'importance']),
+          issueField(issue, ['category']),
+          issueField(issue, ['issue_type', 'name', 'issue']),
+          issueField(issue, ['message', 'details', 'description', 'recommendation']),
+        ].some(value => normalize(value).includes(q));
+      }});
+      page = 0;
+      renderIssuePage();
+    }}
+
+    function renderIssuePage() {{
+      const start = page * pageSize;
+      const rows = filteredIssues.slice(start, start + pageSize);
+      document.getElementById('issue-rows').innerHTML = rows.map(issue => {{
+        const severity = issueField(issue, ['severity', 'importance']);
+        const issueName = issueField(issue, ['issue_type', 'name', 'issue']).replaceAll('_', ' ');
+        const details = issueField(issue, ['message', 'details', 'description', 'recommendation']);
+        return `<tr>
+          <td>${{escapeHtml(issueField(issue, ['url', 'page_url']))}}</td>
+          <td><span class="pill ${{escapeHtml(normalize(severity))}}">${{escapeHtml(severity)}}</span></td>
+          <td>${{escapeHtml(issueField(issue, ['category']))}}</td>
+          <td>${{escapeHtml(issueName)}}</td>
+          <td>${{escapeHtml(details)}}</td>
+        </tr>`;
+      }}).join('');
+      const end = Math.min(start + rows.length, filteredIssues.length);
+      document.getElementById('pager-label').textContent = filteredIssues.length
+        ? `${{fmt.format(start + 1)}}-${{fmt.format(end)}} of ${{fmt.format(filteredIssues.length)}} issues`
+        : 'No matching issues';
+      document.getElementById('prev-page').disabled = page === 0;
+      document.getElementById('next-page').disabled = end >= filteredIssues.length;
+    }}
+
+    async function loadIssues(path = '') {{
+      try {{
+        const target = path || 'technical_issues.json';
+        selectedIssueFile = path;
+        document.getElementById('issue-status').textContent = `Loading ${{target}}...`;
+        const response = await fetch(target);
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        const payload = await response.json();
+        allIssues = Array.isArray(payload.issues) ? payload.issues : [];
+        filteredIssues = allIssues;
+        document.getElementById('issue-status').textContent = `${{fmt.format(allIssues.length)}} issues loaded from ${{target}}.`;
+        fillFilters();
+        if (selectedIssueFile) document.getElementById('issue-type-filter').value = selectedIssueFile;
+        renderIssuePage();
+      }} catch (err) {{
+        document.getElementById('issue-status').innerHTML =
+          `Unable to load issue rows in this browser context. Use <a href="technical_issues.csv">technical_issues.csv</a> or serve the report with <code>site-audit serve</code>.`;
+      }}
+    }}
+
+    document.getElementById('issue-search').addEventListener('input', applyFilters);
+    document.getElementById('issue-type-filter').addEventListener('change', event => loadIssues(event.target.value));
+    document.getElementById('severity-filter').addEventListener('change', applyFilters);
+    document.getElementById('category-filter').addEventListener('change', applyFilters);
+    document.getElementById('prev-page').addEventListener('click', () => {{ page = Math.max(0, page - 1); renderIssuePage(); }});
+    document.getElementById('next-page').addEventListener('click', () => {{ page += 1; renderIssuePage(); }});
+
+    renderCards();
+    renderBars('severity-bars', bootstrap.severityCounts, 6);
+    renderBars('category-bars', bootstrap.categoryCounts, 0);
+    renderBars('issue-bars', bootstrap.issueCounts, 0);
+    renderCatalog();
+    fillFilters();
+    if ((bootstrap.issueGroups || []).length) {{
+      loadIssues(bootstrap.issueGroups[0].file || '');
+    }} else {{
+      loadIssues();
+    }}
+  </script>
+</body>
+</html>
+"""
+    out_path = output_dir / "index.html"
+    out_path.write_text(html_text, encoding="utf-8")
+    return out_path
 
 
 def _slim_linkgraph_payload(payload: dict) -> dict:
@@ -153,7 +830,7 @@ def write_internal_linkbuilding_csv(
     return rows
 
 
-def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
+def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> None:
     pages = list((technical_seo or {}).get("pages") or [])
     issues = list((technical_seo or {}).get("issues") or [])
     catalog = list((technical_seo or {}).get("issue_catalog") or [])
@@ -175,12 +852,24 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict) -> None:
         "summary": (technical_seo or {}).get("summary", {}),
         "issue_catalog": catalog,
     }
+    overview_payload = {
+        "summary": (technical_seo or {}).get("summary", {}),
+        "issue_counts": (technical_seo or {}).get("issue_counts", {}),
+        "category_counts": (technical_seo or {}).get("category_counts", {}),
+        "severity_counts": (technical_seo or {}).get("severity_counts", {}),
+        "issue_catalog": catalog,
+        "interpretation": (technical_seo or {}).get("interpretation", {}),
+    }
     _write_json(output_dir / "technical_pages.json", page_payload)
     _write_json(output_dir / "technical_issues.json", issue_payload)
     _write_json(output_dir / "technical_issue_catalog.json", catalog_payload)
+    issue_groups = write_technical_issue_group_exports(output_dir, issues)
+    overview_payload["issue_groups"] = issue_groups
+    _write_json(output_dir / "technical_overview.json", overview_payload)
     _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
     _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
     _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
+    write_technical_index_html(output_dir, {**(technical_seo or {}), "issue_groups": issue_groups}, domain=domain)
 
 
 def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:
@@ -699,5 +1388,5 @@ def write_all(
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
     if technical_seo is not None:
-        write_technical_seo_exports(output_dir, technical_seo)
+        write_technical_seo_exports(output_dir, technical_seo, domain=domain)
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

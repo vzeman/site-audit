@@ -129,6 +129,13 @@ Summarizes crawlability, noindex, canonical, robots, and skipped-page signals.
 
 Action: fix accidental noindex/canonical/robots issues before content work. Content improvements do not matter if the page cannot be indexed.
 
+<a id="technical-seo-block"></a>
+## Technical SEO issues
+
+Consolidates technical findings across crawl status, indexability, links, redirects, metadata, assets, sitemaps, localization, structured data, and performance.
+
+Action: use severity, category, and issue-type filters to drill into affected URLs. Start with error-level template issues and high-count issue types that affect canonical pages.
+
 <a id="structured-data-block"></a>
 ## Structured data health
 

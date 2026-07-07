@@ -80,6 +80,19 @@ class Embedder:
             _torch.arange(_am.config.max_position_embeddings, dtype=_torch.long),
             persistent=False,
         )
+        # Cap the input sequence length. gte-multilingual-base allows up to
+        # 8192 tokens, but a long page (× a 32-item batch) makes the attention
+        # tensor large enough to exhaust the Apple-Silicon MPS allocator, which
+        # then silently returns NaN embeddings instead of erroring. A page-level
+        # topical embedding only needs the leading content, so we bound the
+        # sequence length (override with SITE_AUDIT_MAX_SEQ_LENGTH). This keeps
+        # MPS fast and NaN-free without measurably hurting embedding quality.
+        try:
+            max_seq = int(os.environ.get("SITE_AUDIT_MAX_SEQ_LENGTH", "1024"))
+        except ValueError:
+            max_seq = 1024
+        if max_seq > 0 and (self._model.max_seq_length or 0) > max_seq:
+            self._model.max_seq_length = max_seq
 
     def encode(self, texts: list[str], batch_size: int = 32, show_progress: bool = False) -> np.ndarray:
         if not texts:
@@ -91,7 +104,20 @@ class Embedder:
             show_progress_bar=show_progress,
             normalize_embeddings=True,
         )
-        return np.asarray(embs, dtype=np.float32)
+        embs = np.asarray(embs, dtype=np.float32)
+        # Guard against silent corruption: the MPS backend can return NaN
+        # embeddings under memory pressure rather than raising. Caching those
+        # poisons every downstream metric, so fail loudly instead.
+        if embs.size and not np.isfinite(embs).all():
+            n_bad = int((~np.isfinite(embs)).any(axis=1).sum())
+            raise RuntimeError(
+                f"Embedding model produced {n_bad}/{len(embs)} non-finite vectors "
+                f"(device={getattr(self._model, 'device', '?')}, "
+                f"max_seq_length={self._model.max_seq_length}). This usually means "
+                "the accelerator ran out of memory; lower SITE_AUDIT_MAX_SEQ_LENGTH "
+                "or set SITE_AUDIT_DEVICE=cpu."
+            )
+        return embs
 
     def encode_pages(
         self,

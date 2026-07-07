@@ -24,6 +24,7 @@ from site_audit.serp_gap import (
     _editorial_guidelines,
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
+    _enrich_serp_domain_ratings,
     _keyword_metrics_lookup,
     _overview_scatter,
     _paragraph_match_heatmap,
@@ -1025,6 +1026,46 @@ def test_serp_gap_url_rankings_count_top_10_repeated_urls() -> None:
     assert rows[-1]["is_selected_domain"] is True
 
 
+def test_serp_gap_enriches_serp_domains_with_ahrefs_domain_rating(tmp_path: Path, monkeypatch) -> None:
+    def fake_fetch(targets, cache_dir, *, refresh=False):
+        assert cache_dir == tmp_path
+        assert refresh is True
+        return {
+            "competitor-one.com": {
+                "domain_rating": 71.2,
+                "status": "ok",
+                "source": "ahrefs_public_domain_rating_free",
+                "license": "http://license.example",
+                "attribution": "Domain Rating by Ahrefs",
+            },
+            "example.com": {
+                "domain_rating": 42.0,
+                "status": "ok",
+                "source": "ahrefs_public_domain_rating_free",
+                "license": "http://license.example",
+                "attribution": "Domain Rating by Ahrefs",
+            },
+        }
+
+    monkeypatch.setattr("site_audit.serp_gap.fetch_domain_ratings_free", fake_fetch)
+    rankings = {
+        "https://competitor-one.com/a": {"url": "https://competitor-one.com/a", "domain": "competitor-one.com"},
+    }
+    page_results = [{
+        "analyses": [{
+            "competitor_pages": [{"url": "https://competitor-one.com/a", "domain": "competitor-one.com"}],
+        }],
+    }]
+    overview_rows = [{"url": "https://www.example.com/", "domain": "www.example.com"}]
+
+    meta = _enrich_serp_domain_ratings(rankings, page_results, overview_rows, tmp_path, refresh=True)
+
+    assert meta["domains_enriched"] == 2
+    assert rankings["https://competitor-one.com/a"]["domain_rating"] == 71.2
+    assert page_results[0]["analyses"][0]["competitor_pages"][0]["domain_rating"] == 71.2
+    assert overview_rows[0]["domain_rating"] == 42.0
+
+
 def test_serp_gap_reuses_known_competitors_for_overlapping_keywords() -> None:
     config = SerpGapConfig(domain="example.com", results_per_keyword=3, max_competitor_pages=2)
     known = {"https://competitor-one.com/", "https://competitor-two.com/"}
@@ -1532,6 +1573,32 @@ def test_html_renders_with_minimal_payload() -> None:
         "selected_keywords": [],
         "skipped_pages": [],
         "skipped_keywords": [],
+        "domain_ratings": {
+            "provider": "ahrefs_public_domain_rating_free",
+            "attribution": "Domain Rating by Ahrefs",
+            "license": "http://ahrefs.com/legal/domain-rating-license",
+            "domains_enriched": 1,
+        },
+        "serp_url_rankings": [
+            {
+                "url": "https://comp.example/a",
+                "domain": "comp.example",
+                "domain_rating": 71.2,
+                "top10_count": 1,
+                "best_rank": 1,
+                "average_rank": 1.0,
+                "keywords": [{"keyword": "kw", "rank": 1}],
+            },
+            {
+                "url": "https://other.example/a",
+                "domain": "other.example",
+                "domain_rating": 42.0,
+                "top10_count": 1,
+                "best_rank": 2,
+                "average_rank": 2.0,
+                "keywords": [{"keyword": "kw", "rank": 2}],
+            },
+        ],
         "editorial_guidelines": {"paragraph_rules": ["One idea per paragraph."], "avoid": ["No filler."]},
         "pages": [{
             "url": "https://ours.example/p",
@@ -1580,6 +1647,9 @@ def test_html_renders_with_minimal_payload() -> None:
     assert "People Also Ask Coverage" in html
     assert "Recommended Section Order" in html
     assert "AI Page Recommendation" in html
+    assert "Domain Rating by" in html
+    assert '"domain_rating": 71.2' in html
+    assert "DR ${v.toFixed(1)}" in html
     assert "replace(/\\r\\n/g,'\\n').split('\\n')" in html
     assert "trimmed.match(/^(#{1,4})\\s+(.*)$/)" in html
     assert ".split(/\\s+/).map(Number)" in html

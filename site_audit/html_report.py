@@ -10,13 +10,14 @@ or attach it to email.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 from .analyzer import AuditResult, recommend_action
-from .report import _slim_linkgraph_payload
+from .report import _build_technical_issue_group_manifest, _slim_linkgraph_payload
 
 _PLACEHOLDERS = {
     "__SCATTERPLOT_JSON__": "scatter",
@@ -68,10 +69,20 @@ _PLACEHOLDERS = {
     "__CONVERSION_JSON__": "conversion",
     "__INDEXABILITY_JSON__": "indexability",
     "__PERFORMANCE_JSON__": "performance",
+    "__TECHNICAL_SEO_JSON__": "technical_seo",
     "__AHREFS_JSON__": "ahrefs",
     "__BEST_PAGES_JSON__": "best_pages",
     "__PERFORMANCE_EXPLAINER_JSON__": "performance_explainer",
 }
+
+
+def _external_json_mode(result: AuditResult) -> bool:
+    raw = os.getenv("SITE_AUDIT_HTML_EXTERNAL_JSON_MAX_PAGES", "20000")
+    try:
+        max_pages = max(0, int(raw))
+    except ValueError:
+        max_pages = 20000
+    return len(result.pages) > max_pages
 
 
 def _scatterplot_payload(result: AuditResult, coords: Optional[np.ndarray], cluster_labels: Optional[np.ndarray]) -> Optional[dict]:
@@ -284,11 +295,18 @@ def write_html_report(
     conversion: Optional[dict] = None,
     indexability: Optional[dict] = None,
     performance: Optional[dict] = None,
+    technical_seo: Optional[dict] = None,
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
+    out_path = Path(output_dir) / "index.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if _external_json_mode(result):
+        out_path.write_text(template, encoding="utf-8")
+        return out_path
 
     payloads = {
         "scatter": _scatterplot_payload(result, coords, cluster_labels) or {},
@@ -340,6 +358,7 @@ def write_html_report(
         "conversion": conversion or {},
         "indexability": indexability or {},
         "performance": performance or {},
+        "technical_seo": _technical_seo_payload(technical_seo or {}),
         "ahrefs": ahrefs or {},
         "best_pages": best_pages or {},
         "performance_explainer": performance_explainer or {},
@@ -349,7 +368,21 @@ def write_html_report(
     for placeholder, key in _PLACEHOLDERS.items():
         rendered = rendered.replace(placeholder, _safe_json(payloads[key]))
 
-    out_path = Path(output_dir) / "index.html"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(rendered, encoding="utf-8")
     return out_path
+
+
+def _technical_seo_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    issues = payload.get("issues") or []
+    return {
+        "summary": payload.get("summary") or {},
+        "issue_counts": payload.get("issue_counts") or {},
+        "category_counts": payload.get("category_counts") or {},
+        "severity_counts": payload.get("severity_counts") or {},
+        "issue_catalog": payload.get("issue_catalog") or [],
+        "issue_groups": payload.get("issue_groups") or _build_technical_issue_group_manifest(issues),
+        "issues": issues[:5000],
+        "interpretation": payload.get("interpretation") or {},
+    }
