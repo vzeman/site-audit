@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import ExitStack, nullcontext, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from io import StringIO
 from typing import Iterable, List
@@ -40,6 +40,38 @@ def _quiet_model_load():
     stack.enter_context(redirect_stdout(StringIO()))
     stack.enter_context(redirect_stderr(StringIO()))
     return stack
+
+
+def _non_finite_row_indices(arr: np.ndarray) -> np.ndarray:
+    if arr.size == 0:
+        return np.zeros(0, dtype=np.int64)
+    return np.flatnonzero(~np.isfinite(arr).all(axis=1))
+
+
+@contextmanager
+def _cpu_thread_boost():
+    """Temporarily raise torch's intra-op threads for a CPU fallback encode.
+
+    ``site_audit.__init__`` pins ``OMP_NUM_THREADS=1`` so faiss and torch can
+    share libomp, which makes CPU encoding of this model ~100x slower than the
+    hardware allows. ``torch.set_num_threads`` overrides the pin for torch
+    only, and the previous value is restored afterwards.
+    """
+    try:
+        import torch
+
+        previous = torch.get_num_threads()
+        torch.set_num_threads(max(1, (os.cpu_count() or 2) // 2))
+    except Exception:
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            torch.set_num_threads(previous)
+        except Exception:
+            pass
 
 
 def _embed_cache_save_every(default: int = DEFAULT_EMBED_CACHE_SAVE_EVERY) -> int:
@@ -150,23 +182,65 @@ class Embedder:
             batch_size=batch_size,
             show_progress=show_progress,
         )
-        if np.isfinite(arr).all():
+        bad = _non_finite_row_indices(arr)
+        if bad.size == 0:
             return arr
         if self._device != "cpu":
+            # MPS returns NaN rows under allocator pressure instead of
+            # raising; freeing its cache and re-encoding just the bad rows
+            # usually recovers without leaving the accelerator.
             LOG.warning(
-                "Embedding model returned non-finite vectors on %s; retrying on CPU",
-                self._device or "auto",
+                "Embedding model returned %d/%d non-finite vectors on %s; "
+                "clearing accelerator cache and retrying those rows",
+                bad.size, len(texts), self._device or "auto",
+            )
+            self._clear_accelerator_cache()
+            self._reencode_rows(arr, texts, bad, batch_size=batch_size)
+            bad = _non_finite_row_indices(arr)
+            if bad.size == 0:
+                return arr
+            # Only the still-bad rows go to CPU — re-encoding the whole
+            # chunk there takes hours under the OMP_NUM_THREADS=1 pin.
+            LOG.warning(
+                "%d vectors still non-finite after accelerator retry; "
+                "re-encoding those rows on CPU",
+                bad.size,
             )
             self._model = None
             self._ensure("cpu")
-            arr = self._encode_current_model(
-                texts,
-                batch_size=batch_size,
-                show_progress=show_progress,
-            )
-            if np.isfinite(arr).all():
+            with _cpu_thread_boost():
+                self._reencode_rows(arr, texts, bad, batch_size=batch_size)
+            bad = _non_finite_row_indices(arr)
+            if bad.size == 0:
                 return arr
         raise RuntimeError("Embedding model returned non-finite vectors")
+
+    def _reencode_rows(
+        self,
+        arr: np.ndarray,
+        texts: list[str],
+        indices: np.ndarray,
+        *,
+        batch_size: int,
+    ) -> None:
+        retry = self._encode_current_model(
+            [texts[i] for i in indices],
+            batch_size=batch_size,
+            show_progress=False,
+        )
+        for k, i in enumerate(indices):
+            arr[i] = retry[k]
+
+    def _clear_accelerator_cache(self) -> None:
+        try:
+            import torch
+
+            if getattr(torch, "mps", None) is not None and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            elif torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:  # best-effort; the CPU fallback still applies
+            pass
 
     def encode_pages(
         self,

@@ -3,7 +3,13 @@ import pytest
 import torch
 
 from site_audit.cache import EmbeddingCache, content_hash
-from site_audit.embedder import EmbedInput, Embedder, _reset_position_ids
+from site_audit.embedder import (
+    EmbedInput,
+    Embedder,
+    _cpu_thread_boost,
+    _non_finite_row_indices,
+    _reset_position_ids,
+)
 
 
 class FakeEmbeddingCache:
@@ -128,6 +134,99 @@ def test_reset_position_ids_preserves_existing_buffer_rank() -> None:
 
     assert model.embeddings.position_ids.shape == (1, 8)
     assert model.embeddings.position_ids.tolist() == [list(range(8))]
+
+
+class ScriptedEmbedder(Embedder):
+    """Embedder whose model calls follow a scripted sequence of outputs."""
+
+    def __init__(self, script) -> None:
+        super().__init__("stub-model")
+        self._script = list(script)
+        self.calls: list[tuple[str | None, list[str]]] = []
+
+    def _ensure(self, device: str | None = None) -> None:
+        self._device = device
+        self._model = object()
+
+    def _clear_accelerator_cache(self) -> None:
+        pass
+
+    def _encode_current_model(self, texts, *, batch_size, show_progress):
+        self.calls.append((self._device, list(texts)))
+        return np.asarray(self._script.pop(0)(texts), dtype=np.float32)
+
+
+def _finite(texts):
+    return np.ones((len(texts), 3), dtype=np.float32)
+
+
+def _nan_at(bad_positions):
+    def fn(texts):
+        arr = np.ones((len(texts), 3), dtype=np.float32)
+        for pos in bad_positions:
+            arr[pos] = np.nan
+        return arr
+
+    return fn
+
+
+def test_non_finite_row_indices() -> None:
+    arr = np.ones((3, 2), dtype=np.float32)
+    arr[1, 0] = np.inf
+    assert _non_finite_row_indices(arr).tolist() == [1]
+    assert _non_finite_row_indices(np.zeros((0, 0), dtype=np.float32)).tolist() == []
+
+
+def test_encode_finite_passthrough_makes_one_call() -> None:
+    emb = ScriptedEmbedder([_finite])
+
+    result = emb.encode(["a", "b", "c"])
+
+    assert result.shape == (3, 3)
+    assert len(emb.calls) == 1
+
+
+def test_accelerator_retry_reencodes_only_bad_rows() -> None:
+    emb = ScriptedEmbedder([_nan_at([1]), _finite])
+
+    result = emb.encode(["a", "b", "c"])
+
+    assert np.isfinite(result).all()
+    assert len(emb.calls) == 2
+    # The retry stays on the accelerator (no device switch) and receives
+    # only the non-finite row's text.
+    assert emb.calls[1] == (None, ["b"])
+
+
+def test_cpu_fallback_reencodes_only_still_bad_rows() -> None:
+    emb = ScriptedEmbedder([_nan_at([0, 2]), _nan_at([0, 1]), _finite])
+
+    result = emb.encode(["a", "b", "c"])
+
+    assert np.isfinite(result).all()
+    assert len(emb.calls) == 3
+    assert emb.calls[1] == (None, ["a", "c"])
+    assert emb.calls[2] == ("cpu", ["a", "c"])
+
+
+def test_raises_when_rows_stay_non_finite() -> None:
+    emb = ScriptedEmbedder([_nan_at([1]), _nan_at([0]), _nan_at([0])])
+
+    with pytest.raises(RuntimeError, match="non-finite"):
+        emb.encode(["a", "b"])
+
+
+def test_cpu_thread_boost_sets_and_restores(monkeypatch) -> None:
+    seen: list[int] = []
+    monkeypatch.setattr(torch, "get_num_threads", lambda: 1)
+    monkeypatch.setattr(torch, "set_num_threads", lambda n: seen.append(n))
+
+    with _cpu_thread_boost():
+        pass
+
+    assert len(seen) == 2
+    assert seen[0] >= 1
+    assert seen[1] == 1
 
 
 def test_embedding_cache_ignores_and_rejects_non_finite_vectors(tmp_path) -> None:
