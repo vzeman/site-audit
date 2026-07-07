@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 import numpy as np
 import requests
 
-from .agent_workspace import write_agent_workspace
+from .agent_workspace import agent_evidence_payload, write_agent_workspace
 from .ai_agent import (
     DEFAULT_OPENROUTER_MODEL,
     MissingOpenRouterKey,
@@ -45,7 +45,7 @@ from .ai_agent import (
 )
 from .analyzer import PageInfo, section_for_url
 from .cache import HttpCache, content_hash, domain_slug
-from .draft_verification import assemble_recommended_blocks, verify_recommendation
+from .draft_verification import assemble_recommended_blocks, verify_numeric_claims, verify_recommendation
 from .answerability import score_page
 from .competitive_analysis import (
     CompetitiveTarget,
@@ -485,7 +485,7 @@ def run(config: SerpGapConfig) -> dict:
                 own_paragraphs=own_paragraphs_for_page,
                 own_embeddings=own_embeddings_for_page,
             )
-            features = _serp_features(serp)
+            features = _serp_features(serp, config.domain)
             gap["serp_features"] = features
             gap["paa_coverage"] = _paa_coverage(features, own_paragraphs_for_page, own_embeddings_for_page, embedder)
             serp_rows = _serp_result_rows(serp)
@@ -1443,11 +1443,93 @@ def _serp_result_rows(payload: dict) -> list[dict]:
     return rows
 
 
-def _serp_features(payload: dict) -> dict:
-    """Extract People Also Ask, related searches, and answer box from a SERP payload."""
-    features: dict = {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+def _word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", str(text or "")))
+
+
+def _snippet_format(answer: str, source: dict | None = None) -> str:
+    source = source or {}
+    if source.get("table") or source.get("table_items") or source.get("tableRows"):
+        return "table"
+    if source.get("list") or source.get("items") or source.get("list_items"):
+        return "list"
+    lines = [line.strip() for line in str(answer or "").splitlines() if line.strip()]
+    if len(lines) >= 2 and all(re.match(r"^(?:[-*•]|\d+[.)])\s+", line) for line in lines[:3]):
+        return "list"
+    return "paragraph"
+
+
+def _answer_box_payload(title: str, answer: str, url: str, source: dict | None = None) -> dict:
+    return {
+        "title": str(title or "").strip(),
+        "answer": str(answer or "").strip(),
+        "url": str(url or "").strip(),
+        "format": _snippet_format(answer, source),
+        "word_count": _word_count(answer),
+    }
+
+
+def _domain_from_value(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "://" in raw:
+        return urlparse(raw).netloc.lower().removeprefix("www.")
+    if "." in raw and "/" not in raw:
+        return raw.lower().removeprefix("www.")
+    return ""
+
+
+def _collect_ai_overview_domains(node) -> list[str]:
+    domains: list[str] = []
+
+    def add_domain(value: str) -> None:
+        domain = _domain_from_value(value)
+        if domain and domain not in domains:
+            domains.append(domain)
+
+    def walk(value) -> None:
+        if len(domains) >= 10:
+            return
+        if isinstance(value, dict):
+            for key in ("url", "link", "source_url", "domain"):
+                add_domain(str(value.get(key) or ""))
+            for nested in value.values():
+                walk(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                walk(nested)
+        elif isinstance(value, str):
+            for url in re.findall(r"https?://[^\s)>\"]+", value):
+                add_domain(url)
+
+    walk(node)
+    return domains[:10]
+
+
+def _ai_overview_payload(node, own_domain: str | None = None) -> dict | None:
+    if isinstance(node, list) and node:
+        node = {"items": node}
+    if not isinstance(node, dict):
+        return None
+    domains = _collect_ai_overview_domains(node)
+    own = _domain_from_value(own_domain or "")
+    cites_us: bool | None = None
+    if domains and own:
+        cites_us = any(domain == own or domain.endswith("." + own) for domain in domains)
+    return {
+        "present": True,
+        "cites_us": cites_us,
+        "cited_domains": domains[:10],
+    }
+
+
+def _serp_features(payload: dict, own_domain: str | None = None) -> dict:
+    """Extract People Also Ask, related searches, answer box, and AI Overview from SERP payloads."""
+    features: dict = {"people_also_ask": [], "related_searches": [], "answer_box": {}, "ai_overview": None}
     raw = payload.get("raw") or {}
     provider = (payload.get("meta") or {}).get("provider") or ""
+    own_domain = own_domain or (payload.get("meta") or {}).get("domain") or (payload.get("meta") or {}).get("own_domain")
     if provider == "serper" or "organic" in raw:
         for item in (raw.get("peopleAlsoAsk") or [])[:10]:
             if not isinstance(item, dict):
@@ -1469,11 +1551,17 @@ def _serp_features(payload: dict) -> dict:
         if isinstance(answer_box, dict):
             answer = str(answer_box.get("answer") or answer_box.get("snippet") or "").strip()
             if answer:
-                features["answer_box"] = {
-                    "title": str(answer_box.get("title") or "").strip(),
-                    "answer": answer,
-                    "url": str(answer_box.get("link") or "").strip(),
-                }
+                features["answer_box"] = _answer_box_payload(
+                    str(answer_box.get("title") or ""),
+                    answer,
+                    str(answer_box.get("link") or ""),
+                    answer_box,
+                )
+        for key in ("aiOverview", "ai_overview", "ai_overview_item"):
+            overview = _ai_overview_payload(raw.get(key), own_domain)
+            if overview is not None:
+                features["ai_overview"] = overview
+                break
         return features
     for item in _serp_items(payload):
         item_type = str(item.get("type") or "")
@@ -1506,11 +1594,9 @@ def _serp_features(payload: dict) -> dict:
         elif item_type == "featured_snippet" and not features["answer_box"]:
             answer = str(item.get("description") or "").strip()
             if answer:
-                features["answer_box"] = {
-                    "title": str(item.get("title") or "").strip(),
-                    "answer": answer,
-                    "url": str(item.get("url") or "").strip(),
-                }
+                features["answer_box"] = _answer_box_payload(str(item.get("title") or ""), answer, str(item.get("url") or ""), item)
+        elif item_type == "ai_overview" and features["ai_overview"] is None:
+            features["ai_overview"] = _ai_overview_payload(item, own_domain)
     return features
 
 
@@ -2030,11 +2116,15 @@ def _attach_winnability(page_results: list[dict], keyword_rows: list[dict], own_
 def _recommendation_header(analysis: dict) -> str:
     win = analysis.get("winnability") or {}
     band = win.get("band")
+    notes: list[str] = []
     if band == "unlikely":
-        return "Content changes alone are unlikely to reach page 1; build authority or target an easier variant first."
-    if band == "hard":
-        return "Hard SERP: proceed with content improvements, but expect link acquisition or authority gains to matter."
-    return ""
+        notes.append("Content changes alone are unlikely to reach page 1; build authority or target an easier variant first.")
+    elif band == "hard":
+        notes.append("Hard SERP: proceed with content improvements, but expect link acquisition or authority gains to matter.")
+    overview = (analysis.get("serp_features") or {}).get("ai_overview")
+    if isinstance(overview, dict) and overview.get("present") and overview.get("cited_domains") and overview.get("cites_us") is False:
+        notes.append("AI Overview is present but does not cite this domain; prioritize direct answers, sourceable facts, and snippet/PAA blocks.")
+    return " ".join(notes)
 
 
 def _enrich_serp_domain_ratings(
@@ -3522,6 +3612,77 @@ def _winnability_prerequisite_action(page: dict, analysis: dict, order: int) -> 
     }
 
 
+def _featured_snippet_action(page: dict, analysis: dict, order: int) -> dict | None:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    answer_box = (analysis.get("serp_features") or {}).get("answer_box") or {}
+    holder_url = str(answer_box.get("url") or "").strip()
+    answer = str(answer_box.get("answer") or "").strip()
+    if not holder_url or not answer:
+        return None
+    own_host = urlparse(str(page.get("url") or "")).netloc
+    if own_host and _is_own_url(holder_url, own_host):
+        return None
+    demand = _keyword_demand(analysis)
+    snippet_format = str(answer_box.get("format") or _snippet_format(answer) or "paragraph")
+    word_count = _safe_int(answer_box.get("word_count")) or _word_count(answer)
+    if snippet_format == "list":
+        format_instruction = "Match the current list structure with concise, parallel list items immediately under the H2."
+    elif snippet_format == "table":
+        format_instruction = "Match the current table structure with a compact comparison table immediately under the H2."
+    else:
+        format_instruction = "Place a 40-55-word direct-answer paragraph immediately under the H2."
+    instruction = (
+        f"Win the featured snippet for '{keyword}'. Current holder: {holder_url}. "
+        f"Current snippet is a {snippet_format} with {word_count} words: \"{answer[:240]}\". "
+        f"Add an H2 phrased as the query ('{keyword}') and {format_instruction}"
+    )
+    acceptance = [
+        f"The page contains an H2 phrased as the query: '{keyword}'.",
+        f"The block immediately after that H2 uses the same snippet format ({snippet_format}).",
+        "Paragraph snippets are 40-55 words; list/table snippets are concise and scannable.",
+        "The answer is original, directly answers the query, and uses only sourceable facts.",
+    ]
+    return {
+        "id": f"win_featured_snippet_{order}",
+        "order": order,
+        "type": "win_featured_snippet",
+        "priority": "high",
+        "action": "Win the featured snippet",
+        "task_summary": f"Create a snippet-ready answer block for '{keyword}'.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "featured snippet",
+        "instruction": instruction,
+        "rationale": "A competitor owns the answer box for this target keyword; matching the answer format gives the page a concrete snippet target.",
+        "placement": f"Immediately under an H2 phrased as '{keyword}'.",
+        "acceptance_criteria": acceptance,
+        "content_brief": {
+            "recommended_heading": keyword,
+            "recommended_format": snippet_format,
+            "placement": f"Immediately under an H2 phrased as '{keyword}'.",
+            "paragraph_plan": [format_instruction, "Use the current holder only as intent/format evidence; write original copy."],
+            "acceptance_criteria": acceptance,
+            "ai_agent_prompt": (
+                f"Add a featured-snippet candidate to {page.get('url', '')} for '{keyword}'. "
+                f"Current holder {holder_url} uses {snippet_format} format and {word_count} words. {format_instruction}"
+            ),
+        },
+        "ai_agent_prompt": (
+            f"Add a featured-snippet candidate to {page.get('url', '')} for '{keyword}'. "
+            f"Current holder {holder_url} uses {snippet_format} format and {word_count} words. {format_instruction}"
+        ),
+        "impact_score": round((65 + demand["score"] * 12) * _analysis_winnability_factor(analysis), 3),
+        "evidence": {
+            "holder_url": holder_url,
+            "snippet_text": answer,
+            "snippet_format": snippet_format,
+            "snippet_word_count": word_count,
+            "keyword_impressions": demand["impressions"],
+            "keyword_volume": demand["volume"],
+        },
+    }
+
+
 def _recommended_outline(analysis: dict) -> list[dict]:
     path = analysis.get("content_order_path") or {}
     rows: list[dict] = []
@@ -3565,6 +3726,10 @@ def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
         order += 1
     if (analysis.get("winnability") or {}).get("band") == "unlikely":
         leading_actions.append(_winnability_prerequisite_action(page, analysis, order))
+        order += 1
+    snippet_action = _featured_snippet_action(page, analysis, order)
+    if snippet_action:
+        actions.append(snippet_action)
         order += 1
     for topic in (analysis.get("missing_topics") or [])[:8]:
         actions.append(_topic_action("add_topic", page, analysis, topic, order))
@@ -3895,6 +4060,10 @@ def _recommended_article_markdown(
         unresolved = summary.get("unresolved_critical") or []
         if unresolved:
             lines.append(f"- **Still uncovered critical/high topics:** {'; '.join(str(x) for x in unresolved[:10])}")
+    unverified = _unverified_number_labels(verification or {})
+    if unverified:
+        lines.append(f"- **Unverified numeric claims:** {'; '.join(unverified[:10])}")
+    if summary or unverified:
         lines.append("")
     for section in new_sections:
         heading = str(section.get("heading") or "").strip()
@@ -3915,21 +4084,118 @@ def _recommended_article_markdown(
     return "\n".join(line for line in lines if line is not None).strip() + "\n"
 
 
+def _recommendation_numeric_text(blocks: list[dict], recommendation: dict) -> str:
+    parts: list[str] = []
+    for key in ("title", "h1", "meta_description"):
+        row = recommendation.get(key) or {}
+        if isinstance(row, dict):
+            value = str(row.get("recommended") or "").strip()
+            if value:
+                parts.append(value)
+    for block in blocks:
+        text = str(block.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _numeric_evidence_texts(page: dict, own_paragraphs: list[str] | None = None) -> list[str]:
+    """Every text the agent may legitimately source numbers from.
+
+    Mirrors what the agent actually sees: the full own-page paragraphs (own_content
+    stores truncated copies) plus the same evidence payload written to the agent
+    workspace / chat prompt, so numbers from untouched kept content or any evidence
+    field never get flagged as invented.
+    """
+    texts: list[str] = [str(paragraph or "") for paragraph in own_paragraphs or []]
+    texts.append(json.dumps(agent_evidence_payload(page), ensure_ascii=False, sort_keys=True))
+    for row in (page.get("own_content") or {}).get("paragraphs") or []:
+        if isinstance(row, dict):
+            texts.append(str(row.get("text") or ""))
+    texts.extend(str(item or "") for item in page.get("keywords") or [])
+    for analysis in page.get("analyses") or []:
+        texts.append(json.dumps(analysis.get("keyword") or {}, ensure_ascii=False, sort_keys=True))
+        features = analysis.get("serp_features") or {}
+        texts.append(json.dumps(features, ensure_ascii=False, sort_keys=True))
+        for topic in analysis.get("topics") or []:
+            for example in topic.get("examples") or []:
+                texts.append(str(example.get("paragraph") or ""))
+                texts.append(str(example.get("url") or ""))
+        for row in ((analysis.get("paragraph_match_heatmap") or {}).get("rows") or []):
+            for cell in row.get("cells") or []:
+                texts.append(str(cell.get("paragraph") or ""))
+        for row in analysis.get("structural_patterns") or []:
+            texts.append(json.dumps(row, ensure_ascii=False, sort_keys=True))
+        for row in analysis.get("competitor_pages") or []:
+            texts.append(json.dumps(row, ensure_ascii=False, sort_keys=True))
+    return [text for text in texts if str(text or "").strip()]
+
+
+def _unverified_number_labels(verification: dict) -> list[str]:
+    labels: list[str] = []
+    for claim in verification.get("unverified_numbers") or []:
+        text = str(claim.get("text") or claim.get("number") or "").strip()
+        context = str(claim.get("context") or "").strip()
+        if not text:
+            continue
+        labels.append(f"{text} ({context[:140]})" if context else text)
+    return labels
+
+
+def _verification_repair_prompt(verification: dict, mode: str = "workspace") -> str:
+    if mode == "chat":
+        coverage_fix = "Add or strengthen sections in your recommendation to cover them."
+        closing = " Output the corrected brief and the full recommendation JSON block again."
+    else:
+        coverage_fix = "Update recommendation.json (add or strengthen sections) to cover them."
+        closing = " Modify recommendation.json and brief.md only."
+    instructions: list[str] = []
+    unresolved = (verification.get("summary") or {}).get("unresolved_critical") or []
+    if unresolved:
+        instructions.append(
+            "Verification: these critical/high SERP topics are still not covered by your recommendation: "
+            + "; ".join(str(label) for label in unresolved[:10])
+            + ". "
+            + coverage_fix
+        )
+    unverified = _unverified_number_labels(verification)
+    if unverified:
+        instructions.append(
+            "Replace or source these numbers: "
+            + "; ".join(unverified[:12])
+            + ". Use only numbers present in the Evidence JSON or mark the claim [NEEDS DATA]."
+        )
+    if not instructions:
+        return ""
+    return " ".join(instructions) + closing
+
+
 def _verification_for(
     page: dict,
     recommendation: dict,
     own_paragraphs: list[str],
     embedder: Embedder | None,
 ) -> dict:
-    if embedder is None or not recommendation:
+    if not recommendation:
         return {}
     try:
         blocks = assemble_recommended_blocks(own_paragraphs, recommendation)
-        return verify_recommendation(
-            blocks,
-            page.get("analyses") or [],
-            embed_fn=lambda texts: embedder.encode(texts, batch_size=64).astype(np.float32),
+        verification = (
+            verify_recommendation(
+                blocks,
+                page.get("analyses") or [],
+                embed_fn=lambda texts: embedder.encode(texts, batch_size=64).astype(np.float32),
+            )
+            if embedder is not None
+            else {"topics": [], "paa": [], "summary": {}}
         )
+        numeric = verify_numeric_claims(
+            _recommendation_numeric_text(blocks, recommendation),
+            _numeric_evidence_texts(page, own_paragraphs),
+        )
+        verification["numeric_claims"] = numeric
+        verification["unverified_numbers"] = numeric.get("unverified") or []
+        return verification
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -3988,23 +4254,17 @@ def _attach_workspace_brief(
         verification_repair_attempted = False
         if not errors:
             verification = _verification_for(page, recommendation, own_paragraphs, embedder)
-            unresolved = (verification.get("summary") or {}).get("unresolved_critical") or []
-            if unresolved:
+            repair_prompt = _verification_repair_prompt(verification)
+            if repair_prompt:
                 verification_repair_attempted = True
-                repair_prompt = (
-                    "Verification: these critical/high SERP topics are still not covered by your recommendation: "
-                    + "; ".join(str(label) for label in unresolved[:10])
-                    + ". Update recommendation.json (add or strengthen sections) to cover them. "
-                    "Modify recommendation.json and brief.md only."
-                )
-                completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
-                candidate = (completion.raw or {}).get("recommendation") or {}
-                candidate_errors = validate_recommendation(candidate, paragraph_count)
-                if not candidate_errors:
+                repair_completion = _session(repair_prompt, max_turns=max(6, config.ai_agent_max_turns // 2))
+                candidate = (repair_completion.raw or {}).get("recommendation") or {}
+                if not validate_recommendation(candidate, paragraph_count):
+                    completion = repair_completion
                     recommendation = candidate
                     verification = _verification_for(page, recommendation, own_paragraphs, embedder)
-                else:
-                    errors = candidate_errors
+                # An invalid repair candidate is discarded: keep the original valid
+                # recommendation and its verification instead of failing the page.
         return {
             "brief": completion.text,
             "recommendation": recommendation,
@@ -4084,6 +4344,42 @@ def _attach_chat_brief(
     brief_markdown = completion.text
     if recommendation:
         brief_markdown = re.sub(r"```json\s*\{.*?\}\s*```", "", brief_markdown, flags=re.DOTALL | re.IGNORECASE).strip()
+    verification = {}
+    verification_repair_attempted = False
+    if not errors:
+        verification = _verification_for(page, recommendation, own_paragraphs or [], embedder)
+        repair_prompt = _verification_repair_prompt(verification, mode="chat")
+        if repair_prompt:
+            verification_repair_attempted = True
+            repair_messages = messages + [
+                {"role": "assistant", "content": completion.text},
+                {"role": "user", "content": repair_prompt},
+            ]
+            repair_completion = cached_completion(
+                cache_dir,
+                kind=f"editor-brief-repair-{_url_report_slug(page.get('url', ''))}",
+                messages=repair_messages,
+                client=client,
+                model=config.ai_agent_model,
+                refresh=config.ai_agent_refresh,
+                temperature=0.2,
+                timeout=180,
+            )
+            if repair_completion.cache_status == "hit":
+                state["cache_hits"] += 1
+            candidate = parse_recommendation(repair_completion.text)
+            if candidate and not validate_recommendation(candidate, paragraph_count):
+                completion = repair_completion
+                recommendation = candidate
+                brief_markdown = re.sub(
+                    r"```json\s*\{.*?\}\s*```",
+                    "",
+                    repair_completion.text,
+                    flags=re.DOTALL | re.IGNORECASE,
+                ).strip()
+                verification = _verification_for(page, recommendation, own_paragraphs or [], embedder)
+            # An invalid repair candidate is discarded: keep the original valid
+            # recommendation and its verification instead of failing the page.
     page["ai_editor_brief"] = {
         "status": "ok",
         "provider": completion.provider,
@@ -4092,16 +4388,13 @@ def _attach_chat_brief(
         "fallback_from": completion.fallback_from,
         "markdown": _clean_ai_markdown(brief_markdown),
     }
-    verification = {}
-    if not errors:
-        verification = _verification_for(page, recommendation, own_paragraphs or [], embedder)
     page["ai_recommendation"] = {
         "status": "ok" if not errors else "invalid_recommendation",
         "errors": errors,
         "data": recommendation,
         "repair_attempted": False,
         "verification": verification,
-        "verification_repair_attempted": False,
+        "verification_repair_attempted": verification_repair_attempted,
         "workspace": "",
         "article_markdown": (
             _recommended_article_markdown(page, recommendation, own_paragraphs or [], verification)
@@ -4599,6 +4892,9 @@ def _append_ai_editor_brief_markdown(lines: list[str], seen: set[str], brief: di
         unresolved = verification_summary.get("unresolved_critical") or []
         if unresolved:
             _append_unique(lines, seen, f"- Still uncovered critical/high topics: {'; '.join(unresolved[:10])}")
+    unverified = _unverified_number_labels((recommendation or {}).get("verification") or {})
+    if unverified:
+        _append_unique(lines, seen, f"- Unverified numeric claims: {'; '.join(unverified[:10])}")
     status = brief.get("status", "")
     if status == "ok" and brief.get("markdown"):
         meta = [
@@ -6133,9 +6429,10 @@ function topicCoverageHeatmap(a){const matrix=a.topic_coverage_matrix||{};const 
 function paragraphMatchHeatmap(a){const heat=a.paragraph_match_heatmap||{};const columns=heat.columns||[];const rows=heat.rows||[];if(!columns.length||!rows.length)return '<div class="empty">No paragraph match heatmap available.</div>';const header=`<div class="heatmap-head"><div>${esc(ownDomain)} paragraph</div>${columns.map(col=>`<div title="${esc(col.url||'')}">${esc(col.domain||'Page').slice(0,22)}${col.rank?`<br>#${esc(col.rank)}`:''}</div>`).join('')}</div>`;const body=rows.map(row=>`<div class="paragraph-row"><div class="paragraph-topic"><strong>P${n(Number(row.paragraph_index||0)+1)} · ${esc(row.status||'')} · impact ${Number(row.max_rank_impact||0).toFixed(2)}</strong><span title="${esc(row.paragraph||'')}">${esc(row.paragraph||'')}</span></div>${(row.cells||[]).map((cell,index)=>{const col=columns[index]||{};const status=cell.status||'no_match';const sim=Number(cell.similarity||0);const impact=Number(cell.rank_impact||0);const label=sim?sim.toFixed(2):'-';const title=[`P${Number(row.paragraph_index||0)+1}`,col.domain||col.url||'',`SERP rank ${cell.rank||col.rank||''}`,`similarity ${label}`,`rank impact proxy ${impact.toFixed(3)}`,cell.paragraph||''].filter(Boolean).join(' · ');return `<div class="heatmap-cell ${esc(status)}" title="${esc(title)}">${esc(label)}<br><span class="mini">impact ${impact.toFixed(2)}</span></div>`;}).join('')}</div>`).join('');return `<div class="paragraph-heatmap-wrap"><div class="paragraph-heatmap" style="--paragraph-cols:${columns.length}">${header}${body}</div></div><div class="heatmap-legend"><span><i style="background:#eefbf4;border:1px solid #a5dabb"></i>strong paragraph match</span><span><i style="background:#eef4ff;border:1px solid #b9cdfc"></i>partial match</span><span><i style="background:#fff1f3;border:1px solid #f4b4be"></i>weak match</span><span>Impact = semantic match x top-10 SERP rank weight.</span></div>`;}
 function semanticScatterSection(a){const points=a.scatter?.points||[];return `<div class="panel" style="margin-top:14px"><h4>Semantic Scatterplot</h4><div class="panel-body">${sectionNote('Vector space for keyword, target page, competitor titles, headings, and paragraphs. Use filters to isolate entity types and domains.')} ${scatterSvg(points)}</div></div>`;}
 function visualComparisonSection(a){const hasComparison=a.content_comparison||a.topic_coverage_matrix||a.paragraph_match_heatmap||a.content_order_path;if(!hasComparison)return '';return `<div class="panel content-comparison" style="margin-top:14px"><h4>Why These Edits Matter</h4><div class="panel-body">${sectionNote('Top ranking page differences show why the recommended edits matter: compare topic coverage, paragraph depth, heading structure, content order, and which SERP pages cover each missing or partial topic.')} ${visualReasonList(a)}<div class="visual-grid"><div class="visual-card"><h5>SERP rank vs content coverage</h5>${contentComparisonRows(a)}</div><div class="visual-card"><h5>Top ranking page differences</h5>${contentDeltaBoxes(a)}</div></div><div class="visual-card coverage-heatmap-card" style="margin-top:14px"><h5>Topic coverage heatmap</h5>${topicCoverageHeatmap(a)}</div><div class="visual-card paragraph-match-card" style="margin-top:14px"><h5>Paragraph match heatmap</h5>${paragraphMatchHeatmap(a)}</div><div class="visual-card content-path-card" style="margin-top:14px"><h5>Content order semantic path</h5>${contentOrderPathSection(a)}</div></div></div>`;}
-function keywordChartsSection(a){return `${intentWinnabilityPanel(a)}${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
+function keywordChartsSection(a){return `${intentWinnabilityPanel(a)}${serpFeaturesPanel(a)}${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}${domainRatingAttribution()}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
+function serpFeaturesPanel(a){const f=a.serp_features||{};const overview=f.ai_overview;const answer=f.answer_box||{};const rows=[];if(answer.answer)rows.push(`<div class="why-item"><b>Featured snippet:</b> ${esc(answer.format||'paragraph')} · ${n(answer.word_count||0)} words · ${urlLink(answer.url||'')}<div class="mini">${esc(answer.answer||'')}</div></div>`);if(overview&&overview.present){const cites=overview.cited_domains||[];const citesLabel=overview.cites_us===true?esc(ownDomain)+' cited':(overview.cites_us===false?esc(ownDomain)+' not cited':'citation status unknown');rows.push(`<div class="why-item"><b>AI Overview:</b> present · ${citesLabel}${cites.length?`<div class="mini">Cited domains: ${cites.map(d=>esc(d)).join(' · ')}</div>`:''}</div>`);}return rows.length?collapsiblePanel('SERP Features',`${sectionNote('Answer-box and AI Overview evidence available from the SERP provider for this keyword.')}<div class="why-list">${rows.join('')}</div>`,{meta:`${n(rows.length)} feature${rows.length===1?'':'s'}`}):'';}
 function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const outlineRows=a.recommended_outline||[];const outlinePanel=outlineRows.length?collapsiblePanel('Recommended Section Order',`${sectionNote('Section themes ordered by where ranking competitors place them. "add" rows are themes the page does not cover yet.')}<ol style="margin:0;padding-left:20px">${outlineRows.map(r=>`<li style="margin-bottom:6px" title="${esc(r.sample_text||'')}"><span class="chip ${r.status==='have'?'covered':'missing'}">${esc(r.status)}</span> ${esc(r.label||'')} <span class="mini">— seen on ${n(r.competitor_pages||0)} competitor page(s)</span></li>`).join('')}</ol>`,{meta:`${n(outlineRows.filter(r=>r.status==='add').length)} to add`}):'';const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}${outlinePanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
 function decisionChipClass(decision){if(decision==='keep')return 'covered';if(decision==='rewrite')return 'partial';return 'missing';}
 function recommendationSection(page){const rec=page.ai_recommendation||{};if(!rec.status)return '';if(rec.status!=='ok'&&rec.status!=='invalid_recommendation'){return '';}
@@ -6143,6 +6440,7 @@ const d=rec.data||{};const parts=[];
 if(rec.status==='invalid_recommendation'&&(rec.errors||[]).length){parts.push(`<div class="mini" style="color:var(--missing);margin-bottom:8px">Recommendation failed validation: ${rec.errors.slice(0,6).map(e=>esc(e)).join('; ')}</div>`);}
 const verif=rec.verification||{};const vs=verif.summary||{};
 if((verif.topics||[]).length){const unresolved=vs.unresolved_critical||[];parts.push(`<div style="margin-bottom:10px"><div class="chips" style="margin-bottom:6px"><span class="chip ${vs.missing_after>0?'missing':'covered'}">Missing ${n(vs.missing_before)} → ${n(vs.missing_after)}</span><span class="chip ${vs.partial_after>0?'partial':'covered'}">Partial ${n(vs.partial_before)} → ${n(vs.partial_after)}</span><span class="chip ${vs.paa_missing_after>0?'missing':'covered'}">PAA missing ${n(vs.paa_missing_before)} → ${n(vs.paa_missing_after)}</span></div>${unresolved.length?`<div class="mini" style="color:var(--missing)">Still uncovered critical/high topics: ${unresolved.map(t=>esc(t)).join('; ')}</div>`:''}<details><summary class="mini">Coverage check details</summary><table><thead><tr><th>Keyword</th><th>Topic</th><th>Priority</th><th>Before → After</th><th>Best similarity</th></tr></thead><tbody>${verif.topics.map(r=>`<tr><td>${esc(r.keyword||'')}</td><td>${esc(r.label||'')}</td><td>${esc(r.priority||'')}</td><td><span class="chip ${esc(r.before)}">${esc(r.before)}</span> → <span class="chip ${esc(r.after)}">${esc(r.after)}</span></td><td>${esc(String(r.best_similarity??''))}</td></tr>`).join('')}</tbody></table></details></div>`);}
+const unverifiedNums=verif.unverified_numbers||[];if(unverifiedNums.length){parts.push(`<div class="mini" style="color:var(--missing);margin-bottom:10px"><b>Unverified numeric claims:</b> ${unverifiedNums.map(c=>`${esc(c.text||c.number||'')} (${esc(String(c.context||'').slice(0,140))})`).join('; ')}</div>`);}
 const titleRec=d.title||{};const h1Rec=d.h1||{};const metaRec=d.meta_description||{};const assessment=d.page_assessment||{};
 const headParts=[];
 if(assessment.reason)headParts.push(`<div class="mini" style="margin-bottom:6px">Target page check: <b>${assessment.is_right_target_page===false?'wrong target page':'right target page'}</b> — ${esc(assessment.reason||'')}</div>`);
