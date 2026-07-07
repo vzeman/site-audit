@@ -860,6 +860,8 @@ def _editor_prompt_payload(page: dict) -> dict:
                     for row in (analysis.get("paa_coverage") or [])[:10]
                 ],
                 "related_searches": (analysis.get("serp_features") or {}).get("related_searches") or [],
+                "answer_box": (analysis.get("serp_features") or {}).get("answer_box") or {},
+                "ai_overview": (analysis.get("serp_features") or {}).get("ai_overview"),
             },
             "topics": topics,
             "covered_topics": [

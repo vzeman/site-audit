@@ -1585,14 +1585,15 @@ def test_serp_features_parses_serper_payload() -> None:
         {"question": "How much does X cost?", "snippet": "s", "url": "https://a", "title": "t"}
     ]
     assert features["related_searches"] == ["x pricing"]
-    assert features["answer_box"] == {"title": "t", "answer": "a", "url": "https://b"}
+    assert features["answer_box"] == {"title": "t", "answer": "a", "url": "https://b", "format": "paragraph", "word_count": 1}
+    assert features["ai_overview"] is None
 
 
 def test_serp_features_handles_missing_blocks() -> None:
     from site_audit.serp_gap import _serp_features
 
     features = _serp_features({"meta": {"provider": "serper"}, "raw": {}})
-    assert features == {"people_also_ask": [], "related_searches": [], "answer_box": {}}
+    assert features == {"people_also_ask": [], "related_searches": [], "answer_box": {}, "ai_overview": None}
 
 
 def test_serp_features_parses_dataforseo_payload() -> None:
@@ -1615,6 +1616,57 @@ def test_serp_features_parses_dataforseo_payload() -> None:
     assert features["people_also_ask"][0]["snippet"] == "d"
     assert features["related_searches"] == ["x alternatives"]
     assert features["answer_box"]["answer"] == "fd"
+    assert features["answer_box"]["format"] == "paragraph"
+
+
+def test_serp_features_parses_serper_ai_overview() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "serper", "status": "ok", "domain": "ours.example"},
+        "raw": {
+            "organic": [],
+            "aiOverview": {
+                "text": "Overview answer.",
+                "sources": [
+                    {"link": "https://ours.example/guide"},
+                    {"link": "https://competitor.example/post"},
+                ],
+            },
+        },
+    }
+
+    features = _serp_features(payload)
+
+    assert features["ai_overview"] == {
+        "present": True,
+        "cites_us": True,
+        "cited_domains": ["ours.example", "competitor.example"],
+    }
+
+
+def test_serp_features_parses_dataforseo_ai_overview() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "dataforseo", "status": "ok"},
+        "raw": {
+            "tasks": [{"result": [{"items": [
+                {
+                    "type": "ai_overview",
+                    "items": [{"url": "https://source-a.example/a"}, {"url": "https://source-b.example/b"}],
+                },
+            ]}]}],
+        },
+    }
+
+    features = _serp_features(payload, own_domain="ours.example")
+
+    assert features["ai_overview"] == {
+        "present": True,
+        "cites_us": False,
+        "cited_domains": ["source-a.example", "source-b.example"],
+    }
 
 
 def test_paa_coverage_classifies_thresholds() -> None:
@@ -1805,6 +1857,50 @@ def test_structural_and_paa_actions_emitted() -> None:
     assert paa["priority"] == "high"
 
 
+def test_featured_snippet_action_emitted_for_competitor_holder() -> None:
+    from site_audit.serp_gap import _action_points_for_analysis
+
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    analysis = _analysis_base("what is a widget tool")
+    analysis["serp_features"] = {
+        "answer_box": {
+            "answer": "A widget tool helps teams sort widget tasks and route the next action.",
+            "url": "https://competitor.example/snippet",
+            "format": "paragraph",
+            "word_count": 12,
+        }
+    }
+
+    actions = _action_points_for_analysis(page, analysis)
+    action = next(row for row in actions if row["type"] == "win_featured_snippet")
+
+    assert "https://competitor.example/snippet" in action["instruction"]
+    assert "paragraph with 12 words" in action["instruction"]
+    assert "40-55-word direct-answer paragraph" in action["instruction"]
+    assert action["placement"] == "Immediately under an H2 phrased as 'what is a widget tool'."
+    assert any("same snippet format (paragraph)" in row for row in action["acceptance_criteria"])
+    assert action["evidence"]["snippet_format"] == "paragraph"
+
+
+def test_featured_snippet_action_skips_own_holder() -> None:
+    from site_audit.serp_gap import _action_points_for_analysis
+
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    analysis = _analysis_base("what is a widget tool")
+    analysis["serp_features"] = {
+        "answer_box": {
+            "answer": "A widget tool helps teams sort widget tasks.",
+            "url": "https://ours.example/snippet",
+            "format": "paragraph",
+            "word_count": 8,
+        }
+    }
+
+    actions = _action_points_for_analysis(page, analysis)
+
+    assert all(row["type"] != "win_featured_snippet" for row in actions)
+
+
 def test_action_dedupe_across_keywords() -> None:
     from site_audit.serp_gap import _attach_action_points
 
@@ -1986,3 +2082,196 @@ def test_recommended_article_markdown_assembles_full_page() -> None:
     assert "**Title change:** keyword alignment" in md
     # removed paragraphs do not appear
     assert "Weak text." not in md
+
+
+def test_numeric_verification_ignores_numbers_in_untouched_kept_paragraphs() -> None:
+    from site_audit.serp_gap import _verification_for
+
+    tail = "Our team resolved 4817 tickets last quarter."
+    long_paragraph = ("This paragraph explains our support workflow in detail. " * 9) + tail
+    assert len(long_paragraph) > 500 and tail[:-1] in long_paragraph[500:]
+    page = {
+        # own_content stores paragraphs truncated to 500 chars, like run() does
+        "own_content": {"paragraphs": [{"index": 0, "word_count": len(long_paragraph.split()), "text": long_paragraph[:500]}]},
+        "analyses": [],
+    }
+    recommendation = {"paragraph_decisions": [{"index": 0, "decision": "keep"}], "new_sections": []}
+
+    verification = _verification_for(page, recommendation, [long_paragraph], embedder=None)
+
+    assert verification["unverified_numbers"] == []
+
+
+def _chat_recommendation_text(section_draft: str) -> str:
+    rec = {
+        "page_assessment": {"is_right_target_page": True, "reason": "ok"},
+        "title": {"recommended": "Widget tools guide"},
+        "meta_description": {"recommended": "All about widget tools."},
+        "h1": {"recommended": "Widget tools"},
+        "outline": [{"heading": "Why widgets", "status": "new"}],
+        "paragraph_decisions": [{"index": 0, "decision": "keep"}],
+        "new_sections": [{"heading": "Why widgets", "draft": section_draft, "placement_after_paragraph": 0}],
+        "structured_data": [],
+        "internal_links": [],
+    }
+    return "Brief text here.\n```json\n" + json.dumps(rec) + "\n```"
+
+
+def _chat_page() -> dict:
+    return {
+        "url": "https://ours.example/p",
+        "title": "T",
+        "h1": "H",
+        "keywords": ["widget tools"],
+        "own_content": {"paragraphs": [{"index": 0, "word_count": 4, "text": "Widgets help teams work."}]},
+        "analyses": [],
+    }
+
+
+class _ScriptedChatClient:
+    provider = "fake"
+
+    def __init__(self, texts: list[str]) -> None:
+        self.texts = texts
+        self.calls: list[list[dict]] = []
+
+    def complete(self, messages, *, model, temperature=0.2, timeout=120) -> AgentCompletion:
+        self.calls.append(messages)
+        return AgentCompletion(text=self.texts[min(len(self.calls), len(self.texts)) - 1], provider="fake", model=model)
+
+
+def _run_chat_brief(tmp_path: Path, client: _ScriptedChatClient) -> dict:
+    from types import SimpleNamespace
+
+    from site_audit.serp_gap import _attach_chat_brief
+
+    page = _chat_page()
+    config = SimpleNamespace(ai_agent_model="m", ai_agent_refresh=True, ai_agent_max_turns=12)
+    _attach_chat_brief(
+        page,
+        tmp_path,
+        config,
+        {"cache_hits": 0, "editor_briefs": 0},
+        client=client,
+        paragraph_count=1,
+        own_paragraphs=["Widgets help teams work."],
+        embedder=None,
+    )
+    return page
+
+
+def test_chat_brief_numeric_repair_turn_carries_draft_and_rechecks(tmp_path: Path) -> None:
+    client = _ScriptedChatClient([
+        _chat_recommendation_text("Teams report 73% faster resolution with widgets."),
+        _chat_recommendation_text("Teams report faster resolution with widgets [NEEDS DATA]."),
+    ])
+
+    page = _run_chat_brief(tmp_path, client)
+
+    assert len(client.calls) == 2
+    roles = [message["role"] for message in client.calls[1]]
+    assert roles == ["system", "user", "assistant", "user"]
+    assistant = [m for m in client.calls[1] if m["role"] == "assistant"]
+    assert "73%" in assistant[0]["content"]
+    repair_prompt = client.calls[1][-1]["content"]
+    assert "Replace or source these numbers" in repair_prompt
+    assert "73%" in repair_prompt
+    assert "Output the corrected brief and the full recommendation JSON block again." in repair_prompt
+    assert "recommendation.json" not in repair_prompt
+    rec = page["ai_recommendation"]
+    assert rec["status"] == "ok"
+    assert rec["verification_repair_attempted"] is True
+    assert rec["verification"]["unverified_numbers"] == []
+
+
+def test_chat_brief_keeps_valid_recommendation_when_repair_candidate_is_invalid(tmp_path: Path) -> None:
+    client = _ScriptedChatClient([
+        _chat_recommendation_text("Teams report 73% faster resolution with widgets."),
+        "Sorry, I cannot modify files.",
+    ])
+
+    page = _run_chat_brief(tmp_path, client)
+
+    rec = page["ai_recommendation"]
+    assert rec["status"] == "ok"
+    assert rec["data"]["title"]["recommended"] == "Widget tools guide"
+    assert [claim["text"] for claim in rec["verification"]["unverified_numbers"]] == ["73%"]
+    assert "Unverified numeric claims" in rec["article_markdown"]
+    assert "73%" in rec["article_markdown"]
+
+
+def test_recommended_article_markdown_lists_unverified_numbers_without_summary() -> None:
+    from site_audit.serp_gap import _recommended_article_markdown
+
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    rec = {
+        "title": {"recommended": "T2"},
+        "h1": {"recommended": "H2"},
+        "paragraph_decisions": [{"index": 0, "decision": "keep"}],
+        "new_sections": [],
+    }
+    verification = {
+        "summary": {},
+        "unverified_numbers": [{"text": "73%", "context": "Teams report 73% faster resolution."}],
+    }
+
+    md = _recommended_article_markdown(page, rec, ["Widgets help teams work."], verification)
+
+    assert "**Unverified numeric claims:** 73%" in md
+
+
+def test_recommendation_header_notes_ai_overview_only_with_known_citations() -> None:
+    from site_audit.serp_gap import _recommendation_header
+
+    cited = {"serp_features": {"ai_overview": {"present": True, "cites_us": False, "cited_domains": ["competitor.example"]}}}
+    unknown = {"serp_features": {"ai_overview": {"present": True, "cites_us": None, "cited_domains": []}}}
+    citing_us = {"serp_features": {"ai_overview": {"present": True, "cites_us": True, "cited_domains": ["ours.example"]}}}
+
+    assert "AI Overview is present but does not cite this domain" in _recommendation_header(cited)
+    assert _recommendation_header(unknown) == ""
+    assert _recommendation_header(citing_us) == ""
+
+
+def test_featured_snippet_action_deduped_across_keywords() -> None:
+    page = {"url": "https://ours.example/p", "title": "T", "h1": "H"}
+    for keyword, impressions in (("what is a widget tool", 100), ("widget tool definition", 900)):
+        analysis = _analysis_base(keyword)
+        analysis["keyword"]["impressions"] = impressions
+        analysis["serp_features"] = {
+            "answer_box": {
+                "answer": "A widget tool helps teams sort widget tasks.",
+                "url": "https://competitor.example/snippet",
+                "format": "paragraph",
+                "word_count": 8,
+            }
+        }
+        page.setdefault("analyses", []).append(analysis)
+
+    _attach_action_points([page])
+    snippet_actions = [row for row in page["action_points"] if row["type"] == "win_featured_snippet"]
+
+    assert len(snippet_actions) == 1
+    assert snippet_actions[0]["keyword"] == "widget tool definition"
+
+
+def test_serp_features_ai_overview_without_sources_reports_unknown_citation() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {"meta": {"provider": "serper"}, "raw": {"organic": [], "aiOverview": {"text": "Overview answer."}}}
+
+    features = _serp_features(payload, "ours.example")
+
+    assert features["ai_overview"] == {"present": True, "cites_us": None, "cited_domains": []}
+
+
+def test_serp_features_parses_list_shaped_ai_overview() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "serper"},
+        "raw": {"organic": [], "aiOverview": [{"text": "block", "link": "https://competitor.example/post"}]},
+    }
+
+    features = _serp_features(payload, "ours.example")
+
+    assert features["ai_overview"] == {"present": True, "cites_us": False, "cited_domains": ["competitor.example"]}

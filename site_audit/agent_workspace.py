@@ -24,7 +24,8 @@ def _slug(url: str) -> str:
     return slug[:90].strip("-") or "home"
 
 
-def _evidence_payload(page: dict) -> dict:
+def agent_evidence_payload(page: dict) -> dict:
+    """Evidence payload the agent sees: the page copy minus agent outputs and scatter data."""
     payload = copy.deepcopy(page)
     payload.pop("ai_editor_brief", None)
     payload.pop("ai_recommendation", None)
@@ -203,7 +204,7 @@ def write_agent_workspace(
         except FileNotFoundError:
             pass
     (workspace / "evidence.json").write_text(
-        json.dumps(_evidence_payload(page), ensure_ascii=False, indent=1),
+        json.dumps(agent_evidence_payload(page), ensure_ascii=False, indent=1),
         encoding="utf-8",
     )
     (workspace / "our_page.md").write_text(_our_page_markdown(page, own_ext), encoding="utf-8")

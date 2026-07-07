@@ -15,13 +15,13 @@ from .ai_agent import (
     openrouter_api_key,
     openrouter_model,
 )
+from .draft_verification import verify_numeric_claims
 
 
 _DRAFTABLE_PREFIXES = ("title-", "ctr-", "geo-", "gap-")
 _TITLE_PREFIXES = ("title-", "ctr-")
 _SEPARATORS = (" | ", " — ", " - ", " – ", " :: ", " : ")
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
-_DIGIT_RE = re.compile(r"\d{2,}")
 
 
 @dataclass
@@ -553,15 +553,16 @@ def _first_sentence(text: str) -> str:
 
 
 def _has_unseen_number(text: str, context_text: str) -> bool:
-    """Flag digit sequences (2+ digits) in ``text`` that never appear in the context.
+    """Flag numeric claims in ``text`` that are not grounded in the context.
 
-    Known, accepted limitations of this cheap check: single-digit inventions
-    ("Top 5") and digits split across tokens ("7 3") pass, and any 2+-digit
-    number present anywhere in the context JSON (e.g. word_count, evidence
-    volume/position) legitimizes those digits regardless of meaning.
+    Delegates to :func:`site_audit.draft_verification.verify_numeric_claims` so the
+    main report and the SERP-gap verification loop share one digit-grounding
+    checker (typed claims, fuzzy formatting variants, year/list/date exclusions,
+    [NEEDS DATA] exemption). Known, accepted limitation: any number present
+    anywhere in the context JSON (e.g. word_count, evidence volume/position)
+    legitimizes the same number in the draft regardless of meaning.
     """
-    context_numbers = set(_DIGIT_RE.findall(context_text or ""))
-    return any(number not in context_numbers for number in _DIGIT_RE.findall(text or ""))
+    return bool(verify_numeric_claims(text or "", [context_text or ""])["unverified"])
 
 
 def _object_dict(value: Any) -> dict:
