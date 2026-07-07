@@ -1619,6 +1619,47 @@ def test_serp_features_parses_dataforseo_payload() -> None:
     assert features["answer_box"]["format"] == "paragraph"
 
 
+def test_serp_features_honors_explicit_provider_over_raw_shape() -> None:
+    from site_audit.serp_gap import _serp_features
+
+    payload = {
+        "meta": {"provider": "dataforseo", "status": "ok"},
+        "raw": {
+            "organic": [{"title": "Serper-shaped organic block"}],
+            "peopleAlsoAsk": [{"question": "Serper question?"}],
+            "tasks": [{"result": [{"items": [
+                {"type": "related_searches", "items": ["dataforseo related"]},
+            ]}]}],
+        },
+    }
+
+    features = _serp_features(payload, provider="dataforseo")
+
+    assert features["people_also_ask"] == []
+    assert features["related_searches"] == ["dataforseo related"]
+
+
+def test_serp_result_rows_honors_explicit_provider_over_raw_shape() -> None:
+    from site_audit.serp_gap import _serp_result_rows
+
+    payload = {
+        "meta": {"status": "ok"},
+        "raw": {
+            "organic": [{"link": "https://serper.example", "position": 1, "title": "Serper row"}],
+            "tasks": [{"result": [{"items": [
+                {"type": "organic", "url": "https://dfs.example", "rank_group": 2, "title": "DataForSEO row"},
+            ]}]}],
+        },
+    }
+
+    explicit = _serp_result_rows(payload, provider="dataforseo")
+    assert [row["url"] for row in explicit] == ["https://dfs.example"]
+
+    # Legacy payload without a recorded provider falls back to shape sniffing.
+    legacy = _serp_result_rows(payload)
+    assert [row["url"] for row in legacy] == ["https://serper.example"]
+
+
 def test_serp_features_parses_serper_ai_overview() -> None:
     from site_audit.serp_gap import _serp_features
 
@@ -1709,6 +1750,27 @@ def test_paa_coverage_without_own_paragraphs_marks_missing() -> None:
         embedder=None,
     )
     assert rows == [{"question": "Anything?", "status": "missing", "best_similarity": 0.0, "best_paragraph_index": None, "best_paragraph": ""}]
+
+
+def test_title_gap_action_uses_validator_title_limit() -> None:
+    from site_audit.serp_gap import _title_gap_action
+
+    page = {"url": "https://ours.example/p", "title": "Widget", "h1": "Widget"}
+    analysis = {
+        "keyword": {"keyword": "support widget"},
+        "competitor_pages": [
+            {"rank": 1, "title": "Support Widget Software"},
+            {"rank": 2, "title": "Best Support Widget"},
+            {"rank": 3, "title": "Support Widget Guide"},
+        ],
+    }
+
+    action = _title_gap_action(page, analysis, 1)
+
+    assert action is not None
+    assert "<=65 chars" in action["instruction"]
+    assert "first 65 characters" in action["acceptance_criteria"][0]
+    assert "under 65 characters" in action["ai_agent_prompt"]
 
 
 def test_editor_payload_sorts_paragraph_review_by_weakness() -> None:
@@ -2158,6 +2220,91 @@ def _run_chat_brief(tmp_path: Path, client: _ScriptedChatClient) -> dict:
         embedder=None,
     )
     return page
+
+
+class _SecurityEmbedder:
+    def encode(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
+        rows = []
+        for text in texts:
+            rows.append([1.0, 0.0] if "security" in str(text).lower() else [0.0, 1.0])
+        return np.asarray(rows, dtype=np.float32)
+
+
+def test_chat_brief_coverage_repair_turn_is_revalidated(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from site_audit.serp_gap import _attach_chat_brief
+
+    page = _chat_page()
+    page["analyses"] = [{
+        "keyword": {"keyword": "secure widget tools"},
+        "topics": [{
+            "label": "security controls",
+            "centroid": [1.0, 0.0],
+            "coverage": "missing",
+            "priority": "critical",
+        }],
+        "paa_coverage": [],
+    }]
+    client = _ScriptedChatClient([
+        _chat_recommendation_text("Widgets help teams work."),
+        _chat_recommendation_text("Security controls protect widget data."),
+    ])
+    config = SimpleNamespace(ai_agent_model="m", ai_agent_refresh=True, ai_agent_max_turns=12)
+
+    _attach_chat_brief(
+        page,
+        tmp_path,
+        config,
+        {"cache_hits": 0, "editor_briefs": 0},
+        client=client,
+        paragraph_count=1,
+        own_paragraphs=["Widgets help teams work."],
+        embedder=_SecurityEmbedder(),
+    )
+
+    assert len(client.calls) == 2
+    repair_prompt = client.calls[1][-1]["content"]
+    assert "critical/high SERP topics" in repair_prompt
+    assert "security controls" in repair_prompt
+    rec = page["ai_recommendation"]
+    assert rec["status"] == "ok"
+    assert rec["verification_repair_attempted"] is True
+    assert rec["verification"]["summary"]["unresolved_critical"] == []
+    assert rec["data"]["new_sections"][0]["draft"] == "Security controls protect widget data."
+
+
+def test_chat_brief_validation_repair_turn_mirrors_workspace_path(tmp_path: Path) -> None:
+    long_title = "Widget tools guide that is far too long for a Google SERP title tag"
+    assert len(long_title) > 65
+    invalid_text = _chat_recommendation_text("Original draft.").replace("Widget tools guide", long_title)
+    client = _ScriptedChatClient([invalid_text, _chat_recommendation_text("Original draft.")])
+
+    page = _run_chat_brief(tmp_path, client)
+
+    assert len(client.calls) == 2
+    repair_prompt = client.calls[1][-1]["content"]
+    assert "failed validation" in repair_prompt
+    assert "title.recommended" in repair_prompt
+    rec = page["ai_recommendation"]
+    assert rec["status"] == "ok"
+    assert rec["errors"] == []
+    assert rec["repair_attempted"] is True
+    assert rec["data"]["title"]["recommended"] == "Widget tools guide"
+
+
+def test_chat_brief_keeps_errors_when_validation_repair_fails(tmp_path: Path) -> None:
+    long_title = "Widget tools guide that is far too long for a Google SERP title tag"
+    invalid_text = _chat_recommendation_text("Original draft.").replace("Widget tools guide", long_title)
+    client = _ScriptedChatClient([invalid_text, invalid_text])
+
+    page = _run_chat_brief(tmp_path, client)
+
+    assert len(client.calls) == 2
+    rec = page["ai_recommendation"]
+    assert rec["status"] == "invalid_recommendation"
+    assert rec["repair_attempted"] is True
+    assert any("title.recommended" in err for err in rec["errors"])
 
 
 def test_chat_brief_numeric_repair_turn_carries_draft_and_rechecks(tmp_path: Path) -> None:

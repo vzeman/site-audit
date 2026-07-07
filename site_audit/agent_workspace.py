@@ -14,6 +14,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .gap_thresholds import META_MAX_CHARS, TITLE_MAX_CHARS, similarity_band_task_lines
+
 
 def _slug(url: str) -> str:
     parsed = urlparse(url if "://" in url else f"https://{url}")
@@ -150,10 +152,7 @@ def _task_markdown(page: dict, schema_doc: str) -> str:
         "- Decide every paragraph: each [P<index>] from our_page.md must appear exactly once in",
         "  `paragraph_decisions` with decision keep, rewrite, move, merge, or remove.",
         "- Write original copy only. Never reuse competitor wording.",
-        "- How to read similarity scores in evidence.json: >= 0.78 means the topic/question is",
-        "  already covered, 0.62-0.78 means partially covered, < 0.62 means weak or missing.",
-        "  `paragraph_review` is sorted weakest-first, so its values can still be high; never",
-        "  call a score above 0.78 'low'. Cite the actual number and the correct band in reasons.",
+        *similarity_band_task_lines(),
         "- Cover every missing-status People Also Ask question that matches this page's intent",
         "  in a section or FAQ block. If a PAA question is off-intent for this page (for example",
         "  generic AI trivia on a product feature page), do not force a section for it; note it",
@@ -171,8 +170,8 @@ def _task_markdown(page: dict, schema_doc: str) -> str:
         "  and treat link acquisition as the prerequisite.",
         "- Use the benchmark medians in evidence.json as the size target; do not pad with filler.",
         "- Do not duplicate topics whose coverage is already `covered`.",
-        "- Keep `title.recommended` at most 65 characters and `meta_description.recommended` at",
-        "  most 165 characters; both are truncated in Google SERPs beyond that.",
+        f"- Keep `title.recommended` at most {TITLE_MAX_CHARS} characters and `meta_description.recommended` at",
+        f"  most {META_MAX_CHARS} characters; both are truncated in Google SERPs beyond that.",
         "- If demand metrics (impressions, clicks, traffic, volume) are absent, write",
         "  \"demand metrics absent\" instead of guessing numbers.",
         "- NEVER invent statistics, percentages, time savings, customer counts, or product",

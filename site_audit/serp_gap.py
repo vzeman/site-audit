@@ -12,6 +12,7 @@ import copy
 import csv
 import fnmatch
 import json
+import logging
 import os
 import re
 import time
@@ -66,10 +67,12 @@ from .ahrefs import (
 )
 from .embedder import DEFAULT_MODEL, Embedder
 from .extractor import ExtractedPage, extract
+from .gap_thresholds import COVERED, PARTIAL, TITLE_MAX_CHARS, band
 from .page_types import classify_page
 from .scatter import project
 
 
+LOG = logging.getLogger(__name__)
 USER_AGENT = "site-audit-serp-gap/0.1 (+https://github.com/vzeman/site-audit)"
 
 _IGNORED_SERP_HOSTS = {
@@ -385,9 +388,10 @@ def run(config: SerpGapConfig) -> dict:
                 kw,
                 serp,
                 top_n=10,
+                provider=provider,
             )
             targets = _select_targets_with_budget(
-                _targets_from_serp(config.domain, kw["keyword"], serp, config),
+                _targets_from_serp(config.domain, kw["keyword"], serp, config, provider=provider),
                 all_competitor_urls,
                 config,
             )
@@ -485,10 +489,10 @@ def run(config: SerpGapConfig) -> dict:
                 own_paragraphs=own_paragraphs_for_page,
                 own_embeddings=own_embeddings_for_page,
             )
-            features = _serp_features(serp, config.domain)
+            features = _serp_features(serp, config.domain, provider=provider)
             gap["serp_features"] = features
             gap["paa_coverage"] = _paa_coverage(features, own_paragraphs_for_page, own_embeddings_for_page, embedder)
-            serp_rows = _serp_result_rows(serp)
+            serp_rows = _serp_result_rows(serp, provider=provider)
             gap["intent"] = _intent_assessment(
                 kw,
                 own_ext,
@@ -1394,10 +1398,17 @@ def _fetch_serp(keyword: str, provider: str, cache_dir: Path, config: SerpGapCon
     return payload
 
 
-def _targets_from_serp(domain: str, keyword: str, payload: dict, config: SerpGapConfig) -> list[CompetitiveTarget]:
+def _targets_from_serp(
+    domain: str,
+    keyword: str,
+    payload: dict,
+    config: SerpGapConfig,
+    *,
+    provider: str | None = None,
+) -> list[CompetitiveTarget]:
     out = []
     seen = set()
-    for row in _serp_result_rows(payload):
+    for row in _serp_result_rows(payload, provider=provider):
         url = row.get("url") or ""
         if not url or _is_own_url(url, domain) or _is_ignored_serp_url(url) or url in seen:
             continue
@@ -1426,10 +1437,31 @@ def _select_targets_with_budget(
     return selected
 
 
-def _serp_result_rows(payload: dict) -> list[dict]:
-    provider = (payload.get("meta") or {}).get("provider") or ""
+def _serp_provider_name(payload: dict, provider: str | None = None) -> str:
+    """Resolve the SERP payload provider, preferring the caller's explicit value.
+
+    Falls back to sniffing the payload shape (with a debug log) for legacy
+    cached payloads that predate provider tracking or carry an unknown name.
+    """
+    raw = payload.get("raw") or {}
+    provider_name = str(provider or (payload.get("meta") or {}).get("provider") or "").strip().lower()
+    if not provider_name:
+        if "organic" in raw or any(key in raw for key in ("peopleAlsoAsk", "relatedSearches", "answerBox")):
+            provider_name = "serper"
+            LOG.debug("SERP provider missing; falling back to Serper-shaped payload.")
+        else:
+            provider_name = "dataforseo"
+            LOG.debug("SERP provider missing; falling back to DataForSEO-shaped payload.")
+    elif provider_name not in {"serper", "dataforseo"}:
+        inferred = "serper" if "organic" in raw else "dataforseo"
+        LOG.debug("Unsupported SERP provider %r; falling back to %s-shaped payload.", provider_name, inferred)
+        provider_name = inferred
+    return provider_name
+
+
+def _serp_result_rows(payload: dict, *, provider: str | None = None) -> list[dict]:
     rows = []
-    if provider == "serper" or "organic" in (payload.get("raw") or {}):
+    if _serp_provider_name(payload, provider) == "serper":
         for item in (payload.get("raw") or {}).get("organic") or []:
             rows.append({"url": item.get("link"), "rank": item.get("position"), "title": item.get("title", "")})
     else:
@@ -1524,13 +1556,12 @@ def _ai_overview_payload(node, own_domain: str | None = None) -> dict | None:
     }
 
 
-def _serp_features(payload: dict, own_domain: str | None = None) -> dict:
+def _serp_features(payload: dict, own_domain: str | None = None, *, provider: str | None = None) -> dict:
     """Extract People Also Ask, related searches, answer box, and AI Overview from SERP payloads."""
     features: dict = {"people_also_ask": [], "related_searches": [], "answer_box": {}, "ai_overview": None}
     raw = payload.get("raw") or {}
-    provider = (payload.get("meta") or {}).get("provider") or ""
     own_domain = own_domain or (payload.get("meta") or {}).get("domain") or (payload.get("meta") or {}).get("own_domain")
-    if provider == "serper" or "organic" in raw:
+    if _serp_provider_name(payload, provider) == "serper":
         for item in (raw.get("peopleAlsoAsk") or [])[:10]:
             if not isinstance(item, dict):
                 continue
@@ -1625,12 +1656,8 @@ def _paa_coverage(
         sims = own_embeddings @ q_emb
         best_i = int(np.argmax(sims))
         best = float(np.clip(sims[best_i], -1.0, 1.0))
-        if best >= 0.78:
-            status = "covered"
-        elif best >= 0.62:
-            status = "partial"
-        else:
-            status = "missing"
+        score_band = band(best)
+        status = "missing" if score_band == "weak" else score_band
         rows.append({
             "question": q,
             "status": status,
@@ -1785,11 +1812,13 @@ def _add_serp_url_rankings(
     keyword: str | dict,
     payload: dict,
     top_n: int = 10,
+    *,
+    provider: str | None = None,
 ) -> None:
     keyword_text = str(keyword.get("keyword") if isinstance(keyword, dict) else keyword or "")
     keyword_metrics = keyword if isinstance(keyword, dict) else {}
     keyword_seen: set[str] = set()
-    for row in _serp_result_rows(payload):
+    for row in _serp_result_rows(payload, provider=provider):
         rank = _safe_int(row.get("rank"))
         if rank <= 0 or rank > top_n:
             continue
@@ -2592,9 +2621,9 @@ def _paragraph_match_heatmap(
             rank_weight = max(0.0, (11.0 - min(rank, 10)) / 10.0) if rank else 0.0
             rank_impact = max(0.0, best_score) * rank_weight
             scores.append(best_score)
-            if best_score >= 0.78:
+            if best_score >= COVERED:
                 status = "strong"
-            elif best_score >= 0.62:
+            elif best_score >= PARTIAL:
                 status = "partial"
             else:
                 status = "weak"
@@ -2611,9 +2640,9 @@ def _paragraph_match_heatmap(
         max_similarity = max(scores) if scores else 0.0
         average_similarity = sum(scores) / len(scores) if scores else 0.0
         rank_impacts = [_safe_float(cell.get("rank_impact")) for cell in cells]
-        if max_similarity >= 0.78:
+        if max_similarity >= COVERED:
             status = "strong"
-        elif max_similarity >= 0.62:
+        elif max_similarity >= PARTIAL:
             status = "partial"
         else:
             status = "weak"
@@ -3389,7 +3418,7 @@ def _title_gap_action(page: dict, analysis: dict, order: int) -> dict | None:
     if h1_empty:
         problems.append("H1 is empty")
     instruction = (
-        f"{'; '.join(problems)}. Rewrite the title (<=60 chars) to lead with the primary keyword intent; "
+        f"{'; '.join(problems)}. Rewrite the title (<={TITLE_MAX_CHARS} chars) to lead with the primary keyword intent; "
         "align the H1 with the title without duplicating it verbatim."
     )
     return {
@@ -3406,12 +3435,12 @@ def _title_gap_action(page: dict, analysis: dict, order: int) -> dict | None:
         "rationale": "Title and H1 are the strongest on-page relevance and CTR signals; top-ranking competitors align them with the query.",
         "placement": "Page <title> tag and the main H1.",
         "acceptance_criteria": [
-            f"The title contains the primary intent behind '{keyword}' within the first 60 characters.",
+            f"The title contains the primary intent behind '{keyword}' within the first {TITLE_MAX_CHARS} characters.",
             "The H1 matches the title intent without duplicating it word for word.",
         ],
         "ai_agent_prompt": (
             f"Rewrite the title and H1 of {page.get('url', '')} for the keyword '{keyword}'. "
-            "Lead with the keyword intent, keep the title under 60 characters, keep the brand suffix if present."
+            f"Lead with the keyword intent, keep the title under {TITLE_MAX_CHARS} characters, keep the brand suffix if present."
         ),
         "impact_score": round((60 + demand["score"] * 10) * _analysis_winnability_factor(analysis), 3),
         "evidence": {
@@ -4339,8 +4368,40 @@ def _attach_chat_brief(
         state.setdefault("notes", []).append(
             f"Editor brief for {page.get('url', '')} used {completion.provider} after {completion.fallback_from}."
         )
-    recommendation = parse_recommendation(completion.text)
-    errors = validate_recommendation(recommendation, paragraph_count) if recommendation else ["no recommendation JSON found in completion"]
+    def _parse_and_validate(text: str) -> tuple[dict | None, list[str]]:
+        parsed = parse_recommendation(text)
+        parsed_errors = validate_recommendation(parsed, paragraph_count) if parsed else ["no recommendation JSON found in completion"]
+        return parsed, parsed_errors
+
+    recommendation, errors = _parse_and_validate(completion.text)
+    repair_attempted = False
+    if errors:
+        # Mirror the workspace path: one bounded repair turn on validation
+        # failure, then re-validate whatever the repair turn produced.
+        repair_attempted = True
+        repair_prompt = (
+            "Your recommendation JSON failed validation with these errors:\n- "
+            + "\n- ".join(errors[:20])
+            + "\nReply with your full corrected response, including the complete recommendation JSON code block."
+        )
+        repair_messages = messages + [
+            {"role": "assistant", "content": completion.text},
+            {"role": "user", "content": repair_prompt},
+        ]
+        repair_completion = cached_completion(
+            cache_dir,
+            kind=f"editor-brief-validation-repair-{_url_report_slug(page.get('url', ''))}",
+            messages=repair_messages,
+            client=client,
+            model=config.ai_agent_model,
+            refresh=config.ai_agent_refresh,
+            temperature=0.2,
+            timeout=180,
+        )
+        if repair_completion.cache_status == "hit":
+            state["cache_hits"] += 1
+        completion = repair_completion
+        recommendation, errors = _parse_and_validate(completion.text)
     brief_markdown = completion.text
     if recommendation:
         brief_markdown = re.sub(r"```json\s*\{.*?\}\s*```", "", brief_markdown, flags=re.DOTALL | re.IGNORECASE).strip()
@@ -4392,7 +4453,7 @@ def _attach_chat_brief(
         "status": "ok" if not errors else "invalid_recommendation",
         "errors": errors,
         "data": recommendation,
-        "repair_attempted": False,
+        "repair_attempted": repair_attempted,
         "verification": verification,
         "verification_repair_attempted": verification_repair_attempted,
         "workspace": "",
@@ -5057,9 +5118,10 @@ def _todo_markdown(payload: dict) -> str:
                 score = _safe_float(row.get("score"))
                 keyword = row.get("keyword", "")
                 paragraph = str(row.get("paragraph") or "").strip()
-                if score >= 0.78:
+                score_band = band(score)
+                if score_band == "covered":
                     action = "Keep only if it supports the target intent; otherwise move it lower."
-                elif score >= 0.62:
+                elif score_band == "partial":
                     action = "Rewrite with a clearer direct answer and add missing concrete details."
                 else:
                     action = "Rewrite, merge, move, or remove; this paragraph is weakly aligned with top-ranking pages."
