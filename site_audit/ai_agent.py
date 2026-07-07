@@ -296,7 +296,7 @@ Output a single JSON object with exactly these top-level keys:
 
 ```json
 {
-  "page_assessment": {"is_right_target_page": true, "reason": "why this page should (not) target the keywords"},
+  "page_assessment": {"is_right_target_page": true, "reason": "state whether to retarget this page, create a new page, or proceed; address intent mismatch and winnability gates first"},
   "title": {"current": "existing title", "recommended": "new or same title", "reason": "evidence-based reason"},
   "meta_description": {"recommended": "new meta description", "reason": "reason"},
   "h1": {"recommended": "new or same H1", "reason": "reason"},
@@ -319,6 +319,8 @@ Output a single JSON object with exactly these top-level keys:
 ```
 
 Rules: every paragraph index of the page appears exactly once in `paragraph_decisions`;
+`page_assessment.reason` must explicitly say whether the current page should be retargeted, a new page should be created,
+or editing should proceed, especially when evidence contains an intent mismatch or unlikely winnability band;
 `placement_after_paragraph` is -1 for the top of the page or a valid paragraph index;
 `rewrite` must be non-empty exactly when decision is `rewrite`; every new section needs a non-empty `draft`;
 `title.recommended` must be at most 65 characters and `meta_description.recommended` at most 165 characters
@@ -746,6 +748,10 @@ def build_editor_brief_messages(page: dict) -> list[dict[str, str]]:
                 "either in a section or a FAQ block; mark off-intent questions as ignored (off-intent) with one line of "
                 "reasoning instead of forcing coverage. PAA questions are things users ask, not facts — never turn a "
                 "question's wording into a claim. "
+                "If an analysis has intent.match = mismatch, page_assessment must address it first and state whether to "
+                "retarget this page, create a new page, or proceed. If winnability.band = unlikely, say content changes "
+                "alone are unlikely to reach page 1, recommend the supplied alternative keyword when present, and list "
+                "link acquisition as the prerequisite. "
                 "Ignore navigation, footer, cookie, newsletter, and language-switcher items if they appear in own_page "
                 "headings. Keep the recommended title at most 65 characters and the meta description at most 165 characters. "
                 "Respect structural_patterns advice (tables, question-form headings, statistics, schema). "
@@ -834,6 +840,10 @@ def _editor_prompt_payload(page: dict) -> dict:
                 "metrics_source": keyword.get("metrics_source", ""),
             },
             "summary": analysis.get("summary") or {},
+            "intent": analysis.get("intent") or {},
+            "winnability": analysis.get("winnability") or {},
+            "alternative_keyword": analysis.get("alternative_keyword") or {},
+            "recommendation_header": analysis.get("recommendation_header") or "",
             "benchmark": (analysis.get("content_comparison") or {}).get("benchmark") or {},
             "our_profile": _pick(
                 (analysis.get("content_comparison") or {}).get("ours") or {},

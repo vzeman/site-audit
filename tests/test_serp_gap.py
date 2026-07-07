@@ -18,6 +18,7 @@ from site_audit.serp_gap import (
     _action_csv_rows,
     _action_points_for_analysis,
     _ai_agent_state,
+    _attach_winnability,
     _content_comparison,
     _content_order_path,
     _dedupe_semantic_row_texts,
@@ -25,7 +26,13 @@ from site_audit.serp_gap import (
     _extract_serp_keyword_suggestions,
     _enrich_keyword_rows,
     _enrich_serp_domain_ratings,
+    _is_ugc_host,
     _keyword_metrics_lookup,
+    _keyword_priority,
+    _keyword_row,
+    _load_winnability_cache,
+    _page_intent,
+    _save_winnability_cache,
     _overview_scatter,
     _paragraph_match_heatmap,
     _resolve_serp_language,
@@ -34,6 +41,8 @@ from site_audit.serp_gap import (
     _targets_from_serp,
     _todo_markdown,
     _topic_coverage_matrix,
+    _intent_assessment,
+    _winnability,
     run,
 )
 from site_audit.analyzer import PageInfo
@@ -412,6 +421,282 @@ def test_serp_gap_builds_action_points_for_ai_content_agents() -> None:
     review_action = next(action for action in actions if action["type"] == "review_paragraph")
     assert "keep, rewrite, move, merge, or remove" in review_action["ai_agent_prompt"]
     assert review_action["content_brief"]["quality_profile"]["word_count"] == 3
+
+
+def _intent_page(url: str = "https://example.com/product") -> ExtractedPage:
+    return ExtractedPage(
+        url=url,
+        title="Widget Platform",
+        description="",
+        body="",
+        word_count=250,
+        language="en",
+        h1="Widget Platform",
+        headers_rich=[{"level": 1, "text": "Widget Platform"}],
+        paragraphs=["A product page."],
+    )
+
+
+def test_intent_assessment_respects_provider_intent() -> None:
+    intent = _intent_assessment(
+        {"keyword": "widget software", "intents": ["commercial"]},
+        _intent_page(),
+        {"page_type": "listing"},
+        [{"title": "How to use widgets", "url": "https://competitor.example/how", "rank": 1}],
+        {"people_also_ask": [{"question": "How?"}]},
+        [],
+    )
+
+    assert intent["serp_intent"] == "commercial-investigation"
+    assert "provider_intent:commercial-investigation" in intent["evidence"]
+
+
+def test_intent_assessment_falls_back_to_serp_title_patterns() -> None:
+    intent = _intent_assessment(
+        {"keyword": "widget tools", "intents": []},
+        _intent_page(),
+        {"page_type": "listing"},
+        [
+            {"title": "Best widget tools vs alternatives", "url": "https://competitor.example/best", "rank": 1},
+            {"title": "Top 10 widget reviews", "url": "https://competitor.example/top", "rank": 2},
+        ],
+        {"people_also_ask": []},
+        [],
+    )
+
+    assert intent["serp_intent"] == "commercial-investigation"
+    assert any("commercial SERP title/query pattern" in row for row in intent["evidence"])
+
+
+def test_intent_mismatch_adds_retarget_action_first() -> None:
+    page = {"url": "https://example.com/product", "title": "Widget Platform", "h1": "Widget Platform"}
+    analysis = _analysis_base("how to use widgets")
+    analysis["intent"] = {
+        "serp_intent": "informational",
+        "page_intent": "transactional",
+        "match": "mismatch",
+        "evidence": ["audit_page_type:product"],
+    }
+    analysis["missing_topics"] = [{
+        "label": "setup steps",
+        "coverage": "missing",
+        "priority": "high",
+        "competitor_prevalence": 0.9,
+        "best_competitor_rank": 1,
+        "examples": [{"url": "https://competitor.example/how", "rank": 1, "paragraph": "Steps."}],
+    }]
+
+    actions = _action_points_for_analysis(page, analysis)
+
+    assert actions[0]["type"] == "retarget_or_new_page"
+    assert "SERP intent is informational" in actions[0]["instruction"]
+
+
+def test_winnability_bands_from_domain_rating_distribution() -> None:
+    assert _winnability([
+        {"rank": 1, "url": "https://a.example/", "domain_rating": 40},
+        {"rank": 2, "url": "https://b.example/", "domain_rating": 42},
+        {"rank": 3, "url": "https://c.example/", "domain_rating": 45},
+    ], 35)["band"] == "winnable"
+    hard = _winnability([
+        {"rank": 1, "url": "https://a.example/", "domain_rating": 65},
+        {"rank": 2, "url": "https://b.example/", "domain_rating": 70},
+        {"rank": 3, "url": "https://c.example/", "domain_rating": 75},
+    ], 50)
+    assert hard["band"] == "hard"
+    assert hard["top10_dr_median"] == 70
+    unlikely = _winnability([
+        {"rank": 1, "url": "https://a.example/", "domain_rating": 70},
+        {"rank": 2, "url": "https://b.example/", "domain_rating": 82},
+    ], 35)
+    assert unlikely["band"] == "unlikely"
+    assert unlikely["factor"] == 0.25
+    assert _winnability([{"rank": 1, "url": "https://reddit.com/r/widgets", "domain_rating": 91}], 35)["band"] == "winnable"
+
+
+def test_winnability_missing_dr_is_unknown_and_does_not_gate() -> None:
+    result = _winnability([{"rank": 1, "url": "https://a.example/"}], None)
+
+    assert result["band"] == "unknown"
+    assert result["factor"] == 1.0
+    assert "Missing own DR" in result["evidence"][0]
+
+
+def test_unlikely_winnability_changes_header_and_suggests_alternative_keyword() -> None:
+    page = {"url": "https://example.com/product", "title": "Widget Platform", "h1": "Widget Platform"}
+    analysis = _analysis_base("enterprise widget platform")
+    analysis["serp"] = {"top10": [
+        {"rank": 1, "url": "https://strong-a.example/", "domain_rating": 80},
+        {"rank": 2, "url": "https://strong-b.example/", "domain_rating": 84},
+        {"rank": 3, "url": "https://strong-c.example/", "domain_rating": 90},
+    ]}
+    page_results = [{**page, "analyses": [analysis]}]
+    keyword_rows = [
+        {"url": page["url"], "keyword": "enterprise widget platform", "impressions": 1000},
+        {
+            "url": page["url"],
+            "keyword": "widget platform for small teams",
+            "impressions": 300,
+            "winnability_band": "winnable",
+            "winnability_factor": 1.0,
+        },
+    ]
+
+    _attach_winnability(page_results, keyword_rows, 35)
+    actions = _action_points_for_analysis(page, analysis)
+
+    assert analysis["winnability"]["band"] == "unlikely"
+    assert "content changes alone are unlikely" in analysis["recommendation_header"].lower()
+    assert analysis["alternative_keyword"]["keyword"] == "widget platform for small teams"
+    assert actions[0]["type"] == "winnability_prerequisite"
+    assert "link acquisition" in actions[0]["instruction"]
+
+
+def test_keyword_priority_uses_winnability_factor() -> None:
+    base = {"source": "gsc", "position": 8, "impressions": 1000}
+    hard = {**base, "keyword": "hard", "winnability_band": "hard"}
+    winnable = {**base, "keyword": "winnable", "winnability_band": "winnable"}
+    unlikely = {**base, "keyword": "unlikely", "winnability_band": "unlikely"}
+
+    rows = sorted([hard, unlikely, winnable], key=_keyword_priority, reverse=True)
+
+    assert [row["keyword"] for row in rows] == ["winnable", "hard", "unlikely"]
+
+
+def _dr_rows(ratings: list[float]) -> list[dict]:
+    return [
+        {"rank": index + 1, "url": f"https://serp-{index}.example/", "domain_rating": value}
+        for index, value in enumerate(ratings)
+    ]
+
+
+def test_winnability_gap_over_30_is_never_winnable() -> None:
+    # Nothing within reach and a median gap > 30: hopeless even though own DR
+    # is not below min(top10) - 30.
+    assert _winnability(_dr_rows([70, 75, 80]), 40)["band"] == "unlikely"
+    assert _winnability(_dr_rows([65, 95, 95, 95, 95]), 50)["band"] == "unlikely"
+    # One result within reach keeps the same gap merely hard, not winnable.
+    assert _winnability(_dr_rows([55, 95, 95]), 50)["band"] == "hard"
+    assert _winnability(_dr_rows([45] + [95] * 9), 40)["band"] == "hard"
+
+
+def test_winnability_boundary_at_min_minus_30() -> None:
+    rows = _dr_rows([70, 70, 70])
+
+    assert _winnability(rows, 40)["band"] == "hard"  # own == min - 30: strict "<" per spec
+    assert _winnability(rows, 39)["band"] == "unlikely"
+
+
+def test_winnability_small_median_gap_is_winnable() -> None:
+    assert _winnability(_dr_rows([58, 59, 66]), 50)["band"] == "winnable"
+
+
+def test_winnability_empty_serp_and_missing_competitor_dr_are_unknown() -> None:
+    assert _winnability([], 55)["band"] == "unknown"
+    assert _winnability([{"rank": 1, "url": "https://a.example/"}], 55)["band"] == "unknown"
+
+
+def test_weak_result_hosts_match_exact_domains_and_whole_labels() -> None:
+    assert _is_ugc_host("https://old.reddit.com/r/widgets")
+    assert _is_ugc_host("https://forum.acme.com/thread")
+    assert _is_ugc_host("https://community.acme.com/q")
+    assert not _is_ugc_host("https://notmedium.com/post")
+    assert not _is_ugc_host("https://performance-community.io/blog")
+    assert not _is_ugc_host("https://example.com/reddit.com-review")
+
+
+def test_weak_result_low_absolute_dr_is_winnable_with_honest_evidence() -> None:
+    win = _winnability(_dr_rows([25, 90, 92]), 40)
+
+    assert win["band"] == "winnable"
+    assert any("low-authority" in row for row in win["evidence"])
+    # A DR within own reach but above the absolute threshold is not "weak".
+    hard = _winnability(_dr_rows([45] + [95] * 9), 40)
+    assert not any("Weak result signal" in row for row in hard["evidence"])
+
+
+def test_page_intent_prefers_audit_page_type_over_title_wording() -> None:
+    page = ExtractedPage(
+        url="https://shop.example/widget",
+        title="Best Widget for Teams | Acme",
+        description="",
+        body="",
+        word_count=120,
+        language="en",
+        h1="Best Widget",
+        headers_rich=[],
+        paragraphs=[],
+    )
+
+    intent, evidence = _page_intent(page, {"page_type": "product"})
+
+    assert intent == "transactional"
+    assert "audit_page_type:product" in evidence
+
+
+def test_product_page_vs_informational_serp_yields_mismatch_and_retarget_first() -> None:
+    page_ext = ExtractedPage(
+        url="https://shop.example/widget",
+        title="Acme Widget Pro",
+        description="Enterprise widget appliance.",
+        body="",
+        word_count=300,
+        language="en",
+        h1="Acme Widget Pro",
+        headers_rich=[{"level": 2, "text": "Features"}, {"level": 2, "text": "Specifications"}],
+        paragraphs=["Buy the widget."],
+    )
+    serp_rows = [
+        {"title": "How to choose a widget: complete guide", "url": "https://a.example/guide", "rank": 1},
+        {"title": "What is a widget? Definition and examples", "url": "https://b.example/what", "rank": 2},
+        {"title": "Widget tutorial for beginners", "url": "https://c.example/tut", "rank": 3},
+    ]
+
+    intent = _intent_assessment(
+        {"keyword": "widget", "intents": []},
+        page_ext,
+        {"page_type": "product"},
+        serp_rows,
+        {"people_also_ask": [{"question": "How do widgets work?"}]},
+        [],
+    )
+
+    assert intent["serp_intent"] == "informational"
+    assert intent["page_intent"] == "transactional"
+    assert intent["match"] == "mismatch"
+
+    analysis = _analysis_base("widget")
+    analysis["intent"] = intent
+    analysis["missing_topics"] = [{
+        "label": "setup steps",
+        "coverage": "missing",
+        "priority": "high",
+        "competitor_prevalence": 0.9,
+        "best_competitor_rank": 1,
+        "examples": [{"url": "https://a.example/guide", "rank": 1, "paragraph": "Steps."}],
+    }]
+
+    actions = _action_points_for_analysis({"url": "https://shop.example/widget"}, analysis)
+
+    assert actions[0]["type"] == "retarget_or_new_page"
+
+
+def test_winnability_cache_round_trip_feeds_keyword_selection(tmp_path: Path) -> None:
+    _save_winnability_cache(tmp_path, [
+        {"url": "https://example.com/p", "keyword": "Hard KW", "winnability_band": "hard"},
+        {"url": "https://example.com/p", "keyword": "no band yet", "winnability_band": "unknown"},
+    ])
+
+    lookup = _load_winnability_cache(tmp_path)
+    page = PageInfo("https://example.com/p", "Widget Page", "", "", 100, "en")
+    metrics = {"impressions": 500, "position": 8}
+    cached_row = _keyword_row(page, "hard kw", "gsc", row=metrics, winnability_lookup=lookup)
+    fresh_row = _keyword_row(page, "no band yet", "gsc", row=metrics, winnability_lookup=lookup)
+
+    assert cached_row["winnability_band"] == "hard"
+    assert cached_row["winnability_factor"] == 0.6
+    assert "winnability_band" not in fresh_row  # unknown bands are not persisted
+    assert _keyword_priority(cached_row) < _keyword_priority({**cached_row, "winnability_band": "winnable", "winnability_factor": 1.0})
 
 
 def test_serp_gap_attaches_page_content_briefs() -> None:
@@ -1058,9 +1343,10 @@ def test_serp_gap_enriches_serp_domains_with_ahrefs_domain_rating(tmp_path: Path
     }]
     overview_rows = [{"url": "https://www.example.com/", "domain": "www.example.com"}]
 
-    meta = _enrich_serp_domain_ratings(rankings, page_results, overview_rows, tmp_path, refresh=True)
+    meta = _enrich_serp_domain_ratings("example.com", rankings, page_results, overview_rows, tmp_path, refresh=True)
 
     assert meta["domains_enriched"] == 2
+    assert meta["own_domain_rating"] == 42.0
     assert rankings["https://competitor-one.com/a"]["domain_rating"] == 71.2
     assert page_results[0]["analyses"][0]["competitor_pages"][0]["domain_rating"] == 71.2
     assert overview_rows[0]["domain_rating"] == 42.0

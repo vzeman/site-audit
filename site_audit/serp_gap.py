@@ -66,6 +66,7 @@ from .ahrefs import (
 )
 from .embedder import DEFAULT_MODEL, Embedder
 from .extractor import ExtractedPage, extract
+from .page_types import classify_page
 from .scatter import project
 
 
@@ -84,6 +85,41 @@ _IGNORED_SERP_HOSTS = {
     "reddit.com",
     "play.google.com",
     "apps.apple.com",
+}
+
+WINNABILITY_FACTORS = {
+    "winnable": 1.0,
+    "hard": 0.6,
+    "unlikely": 0.25,
+    "unknown": 1.0,
+}
+
+# Impact scores for the gating actions that must lead every action list.
+RETARGET_ACTION_IMPACT = 10000.0
+WINNABILITY_GATE_ACTION_IMPACT = 9000.0
+
+# A top-10 result at or below this absolute DR counts as a low-authority
+# ("weak") result: if a page this weak ranks, the SERP is reachable.
+WEAK_RESULT_DR_MAX = 30.0
+
+# Registrable UGC/forum domains (matched exactly or as a suffix) plus host
+# labels that mark community properties (matched as whole labels only, so
+# "performance-community.io" does not trip on "community").
+_WEAK_RESULT_UGC_DOMAINS = {
+    "reddit.com",
+    "quora.com",
+    "stackoverflow.com",
+    "stackexchange.com",
+    "medium.com",
+    "substack.com",
+    "wordpress.com",
+    "blogspot.com",
+}
+
+_WEAK_RESULT_HOST_LABELS = {
+    "forum",
+    "forums",
+    "community",
 }
 
 
@@ -158,6 +194,7 @@ def run(config: SerpGapConfig) -> dict:
     if (config.use_ahrefs_metrics or config.keyword_source == "ahrefs") and not config.dry_run:
         ahrefs_payload = _load_or_fetch_ahrefs_payload(config.domain, project_dir, pages, config)
         search_payload = _merge_search_payloads(search_payload, ahrefs_payload)
+    page_type_lookup = _load_page_type_lookup(base_report_dir)
     language_info = _resolve_serp_language(
         selected_pages,
         search_payload,
@@ -168,11 +205,13 @@ def run(config: SerpGapConfig) -> dict:
     )
     keyword_metrics = _keyword_metrics_lookup(search_payload, ahrefs_payload)
     manual_keywords = _load_manual_keywords(config)
+    winnability_lookup = _load_winnability_cache(cache_dir)
     keyword_rows, skipped_keywords = _select_keywords(
         selected_pages,
         search_payload,
         manual_keywords,
         config,
+        winnability_lookup,
     )
     ai_keyword_rows, ai_keyword_skips = _ai_agent_keyword_rows(
         selected_pages,
@@ -449,9 +488,28 @@ def run(config: SerpGapConfig) -> dict:
             features = _serp_features(serp)
             gap["serp_features"] = features
             gap["paa_coverage"] = _paa_coverage(features, own_paragraphs_for_page, own_embeddings_for_page, embedder)
+            serp_rows = _serp_result_rows(serp)
+            gap["intent"] = _intent_assessment(
+                kw,
+                own_ext,
+                page_type_lookup.get(_metric_url_key(page.url), {}),
+                serp_rows,
+                features,
+                competitor_pages,
+            )
             gap["serp"] = {
                 "provider": provider,
                 "cache_status": serp_meta.get("cache_status", ""),
+                "top10": [
+                    {
+                        "url": str(row.get("url") or ""),
+                        "domain": urlparse(str(row.get("url") or "")).netloc,
+                        "rank": _safe_int(row.get("rank")),
+                        "title": str(row.get("title") or ""),
+                    }
+                    for row in serp_rows
+                    if 0 < _safe_int(row.get("rank")) <= 10
+                ],
                 "targets": [
                     {"url": t.competitor_url, "rank": t.rank}
                     for t in targets
@@ -480,6 +538,16 @@ def run(config: SerpGapConfig) -> dict:
             "analyses": page_blocks,
         })
 
+    domain_rating_meta = _enrich_serp_domain_ratings(
+        config.domain,
+        serp_url_rankings,
+        page_results,
+        overview_rows,
+        cache_dir,
+        refresh=config.refresh_serp,
+    )
+    _attach_winnability(page_results, keyword_rows, domain_rating_meta.get("own_domain_rating"))
+    _save_winnability_cache(cache_dir, keyword_rows)
     aggregate_action_points = _attach_action_points(page_results)
     _attach_ai_editor_briefs(
         page_results,
@@ -490,13 +558,6 @@ def run(config: SerpGapConfig) -> dict:
         own_exts=own_exts,
         report_dir=report_dir,
         embedder=embedder,
-    )
-    domain_rating_meta = _enrich_serp_domain_ratings(
-        serp_url_rankings,
-        page_results,
-        overview_rows,
-        cache_dir,
-        refresh=config.refresh_serp,
     )
     payload = {
         "status": "ok",
@@ -543,6 +604,22 @@ def _load_pages(path: Path) -> list[PageInfo]:
             language=row.get("language"),
         ))
     return pages
+
+
+def _load_page_type_lookup(report_dir: Path) -> dict[str, dict]:
+    path = report_dir / "page_types.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    out: dict[str, dict] = {}
+    for row in payload.get("per_page") or []:
+        url = str(row.get("url") or "")
+        if url:
+            out[_metric_url_key(url)] = row
+    return out
 
 
 def _select_pages(pages: list[PageInfo], config: SerpGapConfig) -> tuple[list[PageInfo], list[dict]]:
@@ -1079,20 +1156,25 @@ def _select_keywords(
     search_payload: dict,
     manual_keywords: dict[str, list[str]],
     config: SerpGapConfig,
+    winnability_lookup: dict[str, dict] | None = None,
 ) -> tuple[list[dict], list[dict]]:
+    # Winnability comes from SERP DR data gathered later in the same run, so a
+    # first run selects with the neutral factor 1.0 for every keyword. Bands
+    # persisted by previous runs (keyword_winnability.json) re-rank selection
+    # from the second run onward.
     rows = []
     skipped = []
     search_rows = list(search_payload.get("organic_keywords") or [])
     for page in pages:
         candidates: list[dict] = []
         for kw in manual_keywords.get("*", []):
-            candidates.append(_keyword_row(page, kw, "manual", synthetic=False))
+            candidates.append(_keyword_row(page, kw, "manual", synthetic=False, winnability_lookup=winnability_lookup))
         for url_key, kws in manual_keywords.items():
             if url_key == "*":
                 continue
             if _same_url(url_key, page.url) or _pattern_match(page.url, url_key):
                 for kw in kws:
-                    candidates.append(_keyword_row(page, kw, "file", synthetic=False))
+                    candidates.append(_keyword_row(page, kw, "file", synthetic=False, winnability_lookup=winnability_lookup))
         if config.keyword_source in {"auto", "gsc", "ahrefs", "dataforseo", "google_ads"}:
             for row in search_rows:
                 matched = row.get("matched_url") or row.get("url") or ""
@@ -1111,11 +1193,11 @@ def _select_keywords(
                 if impressions < config.min_impressions or traffic < config.min_traffic:
                     skipped.append({"url": page.url, "keyword": keyword, "reason": "below demand threshold"})
                     continue
-                candidates.append(_keyword_row(page, keyword, provider, row=row))
+                candidates.append(_keyword_row(page, keyword, provider, row=row, winnability_lookup=winnability_lookup))
         if config.use_h1_keyword or config.keyword_source == "h1":
             title = page.title.strip()
             if title:
-                candidates.append(_keyword_row(page, title, "h1", synthetic=True))
+                candidates.append(_keyword_row(page, title, "h1", synthetic=True, winnability_lookup=winnability_lookup))
         candidates = _dedupe_keywords(candidates)
         candidates.sort(key=_keyword_priority, reverse=True)
         if not candidates:
@@ -1124,9 +1206,16 @@ def _select_keywords(
     return rows, skipped
 
 
-def _keyword_row(page: PageInfo, keyword: str, source: str, row: dict | None = None, synthetic: bool = False) -> dict:
+def _keyword_row(
+    page: PageInfo,
+    keyword: str,
+    source: str,
+    row: dict | None = None,
+    synthetic: bool = False,
+    winnability_lookup: dict[str, dict] | None = None,
+) -> dict:
     row = row or {}
-    return {
+    out = {
         "url": page.url,
         "page_title": page.title,
         "keyword": keyword,
@@ -1137,7 +1226,13 @@ def _keyword_row(page: PageInfo, keyword: str, source: str, row: dict | None = N
         "clicks": _safe_int(row.get("clicks")),
         "traffic": _safe_float(row.get("traffic")),
         "volume": _safe_int(row.get("volume")),
+        "intents": list(row.get("intents") or []),
     }
+    cached = (winnability_lookup or {}).get(_winnability_cache_key(page.url, keyword)) or {}
+    if cached.get("band"):
+        out["winnability_band"] = str(cached.get("band"))
+        out["winnability_factor"] = _safe_float(cached.get("factor")) or WINNABILITY_FACTORS.get(str(cached.get("band")), 1.0)
+    return out
 
 
 def _dedupe_keywords(rows: list[dict]) -> list[dict]:
@@ -1211,7 +1306,7 @@ def _keyword_priority(row: dict) -> float:
     demand = max(_safe_int(row.get("impressions")), _safe_int(row.get("volume")), int(_safe_float(row.get("traffic")) * 20))
     opportunity = min(max(position - 1.0, 0.0), 30.0) / 30.0
     source_weight = {"gsc": 1.2, "ahrefs": 1.0, "dataforseo": 1.0, "google_ads": 0.85, "manual": 1.4, "file": 1.4, "h1": 0.5}.get(str(row.get("source")), 0.8)
-    return source_weight * (np.log1p(demand) + opportunity)
+    return source_weight * (np.log1p(demand) + opportunity) * _keyword_winnability_factor(row)
 
 
 def _plan(keyword_rows: list[dict], cache_dir: Path, config: SerpGapConfig) -> dict:
@@ -1460,6 +1555,144 @@ def _paa_coverage(
     return rows
 
 
+def _normalize_intent_label(value: str) -> str:
+    label = re.sub(r"[_\s]+", "-", str(value or "").strip().lower())
+    if label in {"commercial", "commercial-investigation", "commercial-informational"}:
+        return "commercial-investigation"
+    if label in {"informational", "information"}:
+        return "informational"
+    if label in {"transactional", "transaction"}:
+        return "transactional"
+    if label in {"navigational", "navigation", "branded"}:
+        return "navigational"
+    return label
+
+
+def _provider_intent(keyword: dict) -> tuple[str, list[str]]:
+    intents = [_normalize_intent_label(str(intent)) for intent in keyword.get("intents") or []]
+    intents = [intent for intent in intents if intent]
+    if not intents:
+        return "", []
+    priority = ["transactional", "commercial-investigation", "informational", "navigational"]
+    for label in priority:
+        if label in intents:
+            return label, [f"provider_intent:{label}"]
+    return intents[0], [f"provider_intent:{intents[0]}"]
+
+
+def _intent_from_text(text: str) -> tuple[str, str]:
+    lower = str(text or "").lower()
+    if re.search(r"\b(best|top\s+\d+|vs|versus|compare|comparison|alternative|alternatives|review|reviews)\b", lower):
+        return "commercial-investigation", "commercial SERP title/query pattern"
+    if re.search(r"\b(price|pricing|cost|buy|order|demo|quote|trial|plan|plans|coupon|discount)\b", lower):
+        return "transactional", "transactional SERP title/query pattern"
+    if re.search(r"\b(how|what|why|when|where|which|guide|tutorial|examples?|definition|meaning|learn)\b", lower):
+        return "informational", "informational SERP title/query pattern"
+    return "", ""
+
+
+def _serp_evidence_intent(keyword: dict, serp_rows: list[dict], features: dict) -> tuple[str, list[str]]:
+    votes: dict[str, int] = {}
+    evidence: list[str] = []
+    for text in [str(keyword.get("keyword") or "")] + [str(row.get("title") or "") for row in serp_rows[:10]]:
+        intent, reason = _intent_from_text(text)
+        if not intent:
+            continue
+        votes[intent] = votes.get(intent, 0) + 1
+        if len(evidence) < 5:
+            evidence.append(f"{reason}: {text[:90]}")
+    paa_count = len(features.get("people_also_ask") or [])
+    if paa_count:
+        votes["informational"] = votes.get("informational", 0) + 1
+        evidence.append(f"People Also Ask present ({paa_count} questions)")
+    if not votes:
+        return "unknown", evidence
+    intent = sorted(votes.items(), key=lambda item: (-item[1], item[0]))[0][0]
+    return intent, evidence
+
+
+def _page_intent_for_type(page_type: str) -> str:
+    if page_type in {"article", "blog_post", "docs", "faq"}:
+        return "informational"
+    if page_type in {"listing", "search"}:
+        return "commercial-investigation"
+    if page_type in {"product", "service", "home"}:
+        return "transactional"
+    if page_type in {"contact", "about"}:
+        return "navigational"
+    return ""
+
+
+def _page_intent(page: ExtractedPage, page_type_row: dict) -> tuple[str, list[str]]:
+    # The page type is the primary signal: a product page stays transactional
+    # even when its title happens to contain "best"/"how" wording. Text
+    # patterns are only a fallback for unknown/unmapped page types.
+    page_type = str(page_type_row.get("page_type") or "").strip()
+    evidence: list[str] = []
+    if page_type:
+        evidence.append(f"audit_page_type:{page_type}")
+    else:
+        try:
+            classified = classify_page(page)
+            page_type = classified.page_type
+            evidence.append(f"classified_page_type:{page_type}")
+        except Exception:
+            page_type = ""
+    type_intent = _page_intent_for_type(page_type)
+    if type_intent:
+        return type_intent, evidence
+    text = " ".join([
+        str(page.title or ""),
+        str(page.h1 or ""),
+        str(page.description or ""),
+        " ".join(str(h.get("text") or "") for h in (page.headers_rich or [])[:12]),
+    ])
+    text_intent, reason = _intent_from_text(text)
+    if text_intent:
+        evidence.append(f"{reason}: target title/H1/headings")
+        return text_intent, evidence
+    return "unknown", evidence
+
+
+def _intent_match(serp_intent: str, page_intent: str) -> str:
+    if not serp_intent or not page_intent or "unknown" in {serp_intent, page_intent}:
+        return "partial"
+    if serp_intent == page_intent:
+        return "match"
+    if {serp_intent, page_intent} <= {"transactional", "commercial-investigation"}:
+        return "mismatch"
+    if {serp_intent, page_intent} <= {"informational", "commercial-investigation"}:
+        return "partial"
+    return "mismatch"
+
+
+def _intent_assessment(
+    keyword: dict,
+    own_ext: ExtractedPage,
+    page_type_row: dict,
+    serp_rows: list[dict],
+    features: dict,
+    competitor_pages: list[CompetitorPage],
+) -> dict:
+    serp_intent, evidence = _provider_intent(keyword)
+    if not serp_intent:
+        serp_intent, evidence = _serp_evidence_intent(keyword, serp_rows, features)
+    page_intent, page_evidence = _page_intent(own_ext, page_type_row)
+    if competitor_pages and len(evidence) < 6:
+        top_titles = [
+            cp.title for cp in sorted(competitor_pages, key=lambda cp: cp.target.rank or 999)
+            if cp.title
+        ][:3]
+        if top_titles:
+            evidence.append("top_competitor_titles:" + " | ".join(title[:80] for title in top_titles))
+    return {
+        "serp_intent": serp_intent or "unknown",
+        "page_intent": page_intent or "unknown",
+        "match": _intent_match(serp_intent or "unknown", page_intent or "unknown"),
+        "evidence": evidence + page_evidence,
+    }
+
+
 def _add_serp_url_rankings(
     rankings: dict[str, dict],
     domain: str,
@@ -1560,7 +1793,252 @@ def _apply_domain_rating(row: dict, ratings: dict[str, dict]) -> None:
     row["domain_rating_attribution"] = rating.get("attribution") or AHREFS_DOMAIN_RATING_ATTRIBUTION
 
 
+def _domain_rating_value(row: dict) -> float | None:
+    raw = row.get("domain_rating")
+    if raw in (None, ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _is_ugc_host(url: str) -> bool:
+    host = urlparse(str(url or "")).netloc.lower().removeprefix("www.")
+    if not host:
+        return False
+    for domain in _WEAK_RESULT_UGC_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return True
+    labels = set(host.split("."))
+    return bool(labels & _WEAK_RESULT_HOST_LABELS)
+
+
+def _is_low_dr_result(row: dict) -> bool:
+    dr = _domain_rating_value(row)
+    return dr is not None and dr <= WEAK_RESULT_DR_MAX
+
+
+def _median(values: list[float]) -> float:
+    clean = sorted(values)
+    if not clean:
+        return 0.0
+    middle = len(clean) // 2
+    if len(clean) % 2:
+        return clean[middle]
+    return round((clean[middle - 1] + clean[middle]) / 2, 2)
+
+
+def _winnability(serp_rows: list[dict], own_dr: float | int | None) -> dict:
+    """Estimate whether page-one competition is reachable from free DR data."""
+    try:
+        own_value = None if own_dr in (None, "") else float(own_dr)
+    except (TypeError, ValueError):
+        own_value = None
+    top_rows = [row for row in serp_rows if 0 < _safe_int(row.get("rank")) <= 10]
+    dr_values = [value for value in (_domain_rating_value(row) for row in top_rows) if value is not None]
+    if own_value is None or not dr_values:
+        return {
+            "band": "unknown",
+            "factor": WINNABILITY_FACTORS["unknown"],
+            "own_dr": own_value,
+            "top10_dr_min": None,
+            "top10_dr_median": None,
+            "within_reach_count": 0,
+            "weak_result_present": False,
+            "evidence": ["Missing own DR or top-10 DR data; winnability was not used as a gate."],
+        }
+    min_dr = min(dr_values)
+    median_dr = _median(dr_values)
+    within_reach = sum(1 for value in dr_values if value <= own_value + 10)
+    ugc_rows = [row for row in top_rows if _is_ugc_host(str(row.get("url") or ""))]
+    low_dr_rows = [row for row in top_rows if _is_low_dr_result(row)]
+    weak_present = bool(ugc_rows or low_dr_rows)
+    gap = median_dr - own_value
+    if within_reach >= 3 or weak_present:
+        band = "winnable"
+    elif own_value < min_dr - 30:
+        band = "unlikely"
+    elif gap > 30:
+        # A median gap this large is never "winnable"; with nothing in reach
+        # it is effectively hopeless.
+        band = "unlikely" if within_reach == 0 else "hard"
+    elif gap >= 10:
+        band = "hard"
+    else:
+        band = "winnable"
+    evidence = [
+        f"Own DR {own_value:g}; top-10 DR min {min_dr:g}; median {median_dr:g}.",
+        f"{within_reach} top-10 result(s) are within own DR + 10.",
+    ]
+    if ugc_rows:
+        host = urlparse(str(ugc_rows[0].get("url") or "")).netloc or ugc_rows[0].get("url")
+        evidence.append(f"Weak result signal: UGC/forum host {host} ranks in the top 10.")
+    if low_dr_rows:
+        low_dr = _domain_rating_value(low_dr_rows[0])
+        host = urlparse(str(low_dr_rows[0].get("url") or "")).netloc or low_dr_rows[0].get("url")
+        evidence.append(f"Weak result signal: low-authority page (DR {low_dr:g}, {host}) ranks in the top 10.")
+    return {
+        "band": band,
+        "factor": WINNABILITY_FACTORS[band],
+        "own_dr": round(own_value, 1),
+        "top10_dr_min": round(min_dr, 1),
+        "top10_dr_median": round(median_dr, 1),
+        "within_reach_count": within_reach,
+        "weak_result_present": weak_present,
+        "evidence": evidence,
+    }
+
+
+def _keyword_winnability_factor(row: dict) -> float:
+    raw = row.get("winnability_factor")
+    if raw is not None:
+        value = _safe_float(raw)
+        if value > 0:
+            return value
+    band = str((row.get("winnability") or {}).get("band") or row.get("winnability_band") or "")
+    return WINNABILITY_FACTORS.get(band, 1.0)
+
+
+def _keyword_demand_score(row: dict) -> float:
+    demand = max(
+        _safe_int(row.get("impressions")),
+        _safe_int(row.get("volume")),
+        int(_safe_float(row.get("traffic")) * 20),
+        _safe_int(row.get("clicks")) * 50,
+    )
+    return float(np.log1p(demand)) if demand > 0 else 0.0
+
+
+def _keyword_similarity_score(a: str, b: str) -> float:
+    left = {token for token in re.split(r"\W+", a.lower()) if len(token) > 2}
+    right = {token for token in re.split(r"\W+", b.lower()) if len(token) > 2}
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _alternative_keyword(analysis: dict, keyword_rows: list[dict]) -> dict:
+    current = analysis.get("keyword") or {}
+    current_keyword = str(current.get("keyword") or analysis.get("query") or "").strip()
+    current_url = str(current.get("url") or "")
+    current_demand = _keyword_demand_score(current)
+    candidates = []
+    for row in keyword_rows:
+        keyword = str(row.get("keyword") or "").strip()
+        if not keyword or keyword.lower() == current_keyword.lower():
+            continue
+        if current_url and not _same_url(str(row.get("url") or ""), current_url):
+            continue
+        factor = _keyword_winnability_factor(row)
+        if factor <= WINNABILITY_FACTORS["unlikely"]:
+            continue
+        band = str((row.get("winnability") or {}).get("band") or row.get("winnability_band") or "")
+        verified = band == "winnable"
+        demand = _keyword_demand_score(row)
+        candidates.append((
+            verified,
+            factor,
+            _keyword_similarity_score(current_keyword, keyword),
+            demand <= current_demand,
+            demand,
+            row,
+        ))
+    if not candidates:
+        return {}
+    # Verified-winnable rows beat rows whose winnability was never assessed.
+    candidates.sort(key=lambda item: (not item[0], -item[1], -item[2], not item[3], -item[4], str(item[5].get("keyword") or "")))
+    verified, _, _, _, _, row = candidates[0]
+    return {
+        "keyword": row.get("keyword", ""),
+        "band": (row.get("winnability") or {}).get("band") or row.get("winnability_band", ""),
+        "verified": verified,
+        "impressions": row.get("impressions", 0),
+        "traffic": row.get("traffic", 0),
+        "volume": row.get("volume", 0),
+    }
+
+
+def _winnability_cache_key(url: str, keyword: str) -> str:
+    return f"{_metric_url_key(url)}|{str(keyword or '').strip().lower()}"
+
+
+def _load_winnability_cache(cache_dir: Path) -> dict[str, dict]:
+    path = Path(cache_dir) / "keyword_winnability.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_winnability_cache(cache_dir: Path, keyword_rows: list[dict]) -> None:
+    """Persist per-keyword winnability bands so the next run's keyword
+    selection can deprioritize hard/unlikely keywords before SERPs are fetched."""
+    data = _load_winnability_cache(cache_dir)
+    changed = False
+    for row in keyword_rows:
+        band = str(row.get("winnability_band") or "")
+        if band not in WINNABILITY_FACTORS or band == "unknown":
+            continue
+        key = _winnability_cache_key(str(row.get("url") or ""), str(row.get("keyword") or ""))
+        entry = {"band": band, "factor": WINNABILITY_FACTORS[band]}
+        if data.get(key) != entry:
+            data[key] = entry
+            changed = True
+    if not changed:
+        return
+    try:
+        (Path(cache_dir) / "keyword_winnability.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _attach_winnability(page_results: list[dict], keyword_rows: list[dict], own_dr: float | int | None) -> None:
+    by_keyword: dict[tuple[str, str], dict] = {}
+    for page in page_results:
+        for analysis in page.get("analyses") or []:
+            if analysis.get("status") != "ok":
+                continue
+            top10 = (analysis.get("serp") or {}).get("top10") or analysis.get("competitor_pages") or []
+            win = _winnability(top10, own_dr)
+            analysis["winnability"] = win
+            analysis["recommendation_header"] = _recommendation_header(analysis)
+            keyword = analysis.get("keyword") or {}
+            keyword["winnability"] = win
+            keyword["winnability_band"] = win.get("band", "unknown")
+            keyword["winnability_factor"] = win.get("factor", 1.0)
+            by_keyword[(str(keyword.get("url") or ""), str(keyword.get("keyword") or "").lower())] = win
+    for row in keyword_rows:
+        win = by_keyword.get((str(row.get("url") or ""), str(row.get("keyword") or "").lower()))
+        if not win:
+            continue
+        row["winnability"] = win
+        row["winnability_band"] = win.get("band", "")
+        row["winnability_factor"] = win.get("factor", 1.0)
+    for page in page_results:
+        for analysis in page.get("analyses") or []:
+            if analysis.get("status") == "ok" and (analysis.get("winnability") or {}).get("band") == "unlikely":
+                analysis["alternative_keyword"] = _alternative_keyword(analysis, keyword_rows)
+
+
+def _recommendation_header(analysis: dict) -> str:
+    win = analysis.get("winnability") or {}
+    band = win.get("band")
+    if band == "unlikely":
+        return "Content changes alone are unlikely to reach page 1; build authority or target an easier variant first."
+    if band == "hard":
+        return "Hard SERP: proceed with content improvements, but expect link acquisition or authority gains to matter."
+    return ""
+
+
 def _enrich_serp_domain_ratings(
+    own_domain: str,
     serp_url_rankings: dict[str, dict],
     page_results: list[dict],
     overview_rows: list[dict],
@@ -1569,12 +2047,19 @@ def _enrich_serp_domain_ratings(
     refresh: bool = False,
 ) -> dict:
     domains: set[str] = set()
+    own_host = urlparse(own_domain if "://" in own_domain else f"https://{own_domain}").netloc.lower().removeprefix("www.")
+    if own_host:
+        domains.add(own_host)
     for item in serp_url_rankings.values():
         host = str(item.get("domain") or urlparse(str(item.get("url") or "")).netloc or "").lower().removeprefix("www.")
         if host:
             domains.add(host)
     for page in page_results:
         for analysis in page.get("analyses") or []:
+            for row in (analysis.get("serp") or {}).get("top10") or []:
+                host = str(row.get("domain") or urlparse(str(row.get("url") or "")).netloc or "").lower().removeprefix("www.")
+                if host:
+                    domains.add(host)
             for cp in analysis.get("competitor_pages") or []:
                 host = str(cp.get("domain") or urlparse(str(cp.get("url") or "")).netloc or "").lower().removeprefix("www.")
                 if host:
@@ -1588,6 +2073,8 @@ def _enrich_serp_domain_ratings(
         _apply_domain_rating(item, ratings)
     for page in page_results:
         for analysis in page.get("analyses") or []:
+            for row in (analysis.get("serp") or {}).get("top10") or []:
+                _apply_domain_rating(row, ratings)
             for cp in analysis.get("competitor_pages") or []:
                 _apply_domain_rating(cp, ratings)
     for row in overview_rows:
@@ -1602,6 +2089,8 @@ def _enrich_serp_domain_ratings(
         "provider": "ahrefs_public_domain_rating_free",
         "attribution": AHREFS_DOMAIN_RATING_ATTRIBUTION,
         "license": AHREFS_DOMAIN_RATING_LICENSE,
+        "own_domain": own_host,
+        "own_domain_rating": _domain_rating_value(ratings.get(own_host) or {}),
         "domains_requested": len(domains),
         "domains_enriched": len(ok),
         "errors": errors[:20],
@@ -2607,6 +3096,10 @@ def _topic_content_brief(
     }
 
 
+def _analysis_winnability_factor(analysis: dict) -> float:
+    return WINNABILITY_FACTORS.get(str((analysis.get("winnability") or {}).get("band") or "unknown"), 1.0)
+
+
 def _topic_action(action_type: str, page: dict, analysis: dict, topic: dict, order: int) -> dict:
     keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "")
     demand = _keyword_demand(analysis)
@@ -2662,9 +3155,11 @@ def _topic_action(action_type: str, page: dict, analysis: dict, topic: dict, ord
         "acceptance_criteria": content_brief["acceptance_criteria"],
         "ai_agent_prompt": content_brief["ai_agent_prompt"],
         "impact_score": round(
-            _safe_float(topic.get("competitor_prevalence")) * 100
-            + max(0, 11 - _safe_int(topic.get("best_competitor_rank") or 11))
-            + demand["score"] * 10,
+            (
+                _safe_float(topic.get("competitor_prevalence")) * 100
+                + max(0, 11 - _safe_int(topic.get("best_competitor_rank") or 11))
+                + demand["score"] * 10
+            ) * _analysis_winnability_factor(analysis),
             3,
         ),
         "evidence": {
@@ -2744,7 +3239,7 @@ def _paragraph_action(page: dict, analysis: dict, row: dict, order: int) -> dict
         "placement": content_brief["placement"],
         "acceptance_criteria": content_brief["acceptance_criteria"],
         "ai_agent_prompt": content_brief["ai_agent_prompt"],
-        "impact_score": round(max(0.0, 1.0 - similarity) * 100 + demand["score"] * 10, 3),
+        "impact_score": round((max(0.0, 1.0 - similarity) * 100 + demand["score"] * 10) * _analysis_winnability_factor(analysis), 3),
         "evidence": {
             "keyword_impressions": demand["impressions"],
             "keyword_clicks": demand["clicks"],
@@ -2828,7 +3323,7 @@ def _title_gap_action(page: dict, analysis: dict, order: int) -> dict | None:
             f"Rewrite the title and H1 of {page.get('url', '')} for the keyword '{keyword}'. "
             "Lead with the keyword intent, keep the title under 60 characters, keep the brand suffix if present."
         ),
-        "impact_score": round(60 + demand["score"] * 10, 3),
+        "impact_score": round((60 + demand["score"] * 10) * _analysis_winnability_factor(analysis), 3),
         "evidence": {
             "our_title": our_title,
             "our_h1": our_h1,
@@ -2878,7 +3373,7 @@ def _depth_action(page: dict, analysis: dict, order: int) -> dict | None:
             f"Expand {page.get('url', '')} toward the competitor median depth by implementing the missing-topic sections "
             f"for '{keyword}'. Do not pad existing sections with filler."
         ),
-        "impact_score": round(30 + demand["score"] * 8, 3),
+        "impact_score": round((30 + demand["score"] * 8) * _analysis_winnability_factor(analysis), 3),
         "evidence": {"ours": ours, "benchmark": bench},
     }
 
@@ -2908,7 +3403,7 @@ def _structural_action(page: dict, analysis: dict, pattern: dict, order: int) ->
         "placement": "Page structure (markup, headings, or content blocks) as described.",
         "acceptance_criteria": [f"The page matches or beats the competitor pattern for: {signal}."],
         "ai_agent_prompt": f"On {page.get('url', '')}: {advice}",
-        "impact_score": round(20 + competitors * 8 + demand["score"] * 5, 3),
+        "impact_score": round((20 + competitors * 8 + demand["score"] * 5) * _analysis_winnability_factor(analysis), 3),
         "evidence": dict(pattern),
     }
 
@@ -2941,8 +3436,89 @@ def _paa_action(page: dict, analysis: dict, row: dict, order: int, *, top_questi
             f"On {page.get('url', '')}, add a question-form section answering '{question}' for the keyword '{keyword}'. "
             "Direct answer first (40-60 words), supporting detail after."
         ),
-        "impact_score": round(40 + demand["score"] * 10, 3),
+        "impact_score": round((40 + demand["score"] * 10) * _analysis_winnability_factor(analysis), 3),
         "evidence": dict(row),
+    }
+
+
+def _retarget_or_new_page_action(page: dict, analysis: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    intent = analysis.get("intent") or {}
+    evidence = intent.get("evidence") or []
+    instruction = (
+        f"SERP intent is {intent.get('serp_intent', 'unknown')} but the selected page reads as "
+        f"{intent.get('page_intent', 'unknown')}. Decide whether to retarget this page, create a new page for "
+        f"'{keyword}', or choose a keyword whose SERP intent matches the current page before doing paragraph rewrites."
+    )
+    return {
+        "id": f"retarget_or_new_page_{order}",
+        "order": order,
+        "type": "retarget_or_new_page",
+        "priority": "critical",
+        "action": "Retarget or create a new page",
+        "task_summary": "Resolve SERP intent mismatch before content edits.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "search intent mismatch",
+        "instruction": instruction,
+        "rationale": "Paragraph-level edits are unlikely to work when the page type does not match what the SERP rewards.",
+        "placement": "Strategy decision before editing this URL.",
+        "acceptance_criteria": [
+            "The recommendation states whether to retarget this page, create a new page, or proceed with a clear reason.",
+            "No paragraph rewrite task is started until the target page/keyword intent match is resolved.",
+        ],
+        "ai_agent_prompt": (
+            f"For {page.get('url', '')}, address the intent mismatch first: SERP intent "
+            f"{intent.get('serp_intent', 'unknown')} vs page intent {intent.get('page_intent', 'unknown')}. "
+            "State whether to retarget, create a new page, or proceed, then justify the decision from evidence."
+        ),
+        "impact_score": RETARGET_ACTION_IMPACT,
+        "evidence": {"intent": intent, "evidence": evidence},
+    }
+
+
+def _winnability_prerequisite_action(page: dict, analysis: dict, order: int) -> dict:
+    keyword = str((analysis.get("keyword") or {}).get("keyword") or analysis.get("query") or "").strip()
+    win = analysis.get("winnability") or {}
+    alternative = analysis.get("alternative_keyword") or {}
+    if alternative.get("keyword") and alternative.get("band") == "winnable":
+        alt_text = (
+            f"Closest lower-difficulty variant from the keyword pool: '{alternative.get('keyword')}' (winnable)."
+        )
+    elif alternative.get("keyword"):
+        alt_text = (
+            f"Closest variant from the keyword pool: '{alternative.get('keyword')}' "
+            "(winnability not yet assessed for this keyword)."
+        )
+    else:
+        alt_text = "No lower-difficulty variant was found in the current keyword pool."
+    instruction = (
+        f"Content changes alone are unlikely to reach page 1 for '{keyword}'. {alt_text} "
+        "Treat link acquisition or authority building as the prerequisite before investing in detailed rewrite work."
+    )
+    return {
+        "id": f"winnability_prerequisite_{order}",
+        "order": order,
+        "type": "winnability_prerequisite",
+        "priority": "critical",
+        "action": "Treat authority as the prerequisite",
+        "task_summary": "Content changes alone are unlikely to reach page 1.",
+        "target_url": page.get("url", ""),
+        "keyword": keyword,
+        "topic": "SERP winnability",
+        "instruction": instruction,
+        "rationale": "Top-10 Domain Rating evidence shows an authority gap that content edits alone are unlikely to close.",
+        "placement": "Recommendation header and prioritization.",
+        "acceptance_criteria": [
+            "The recommendation names the authority gap before content tasks.",
+            "The plan either targets the easier variant keyword or includes link acquisition as a prerequisite.",
+        ],
+        "ai_agent_prompt": (
+            f"For '{keyword}', state that content changes alone are unlikely to reach page 1. "
+            "Recommend the easier variant keyword when available and list link acquisition as prerequisite."
+        ),
+        "impact_score": WINNABILITY_GATE_ACTION_IMPACT,
+        "evidence": {"winnability": win, "alternative_keyword": alternative},
     }
 
 
@@ -2982,7 +3558,14 @@ def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
     if analysis.get("status") != "ok":
         return []
     actions: list[dict] = []
+    leading_actions: list[dict] = []
     order = 1
+    if (analysis.get("intent") or {}).get("match") == "mismatch":
+        leading_actions.append(_retarget_or_new_page_action(page, analysis, order))
+        order += 1
+    if (analysis.get("winnability") or {}).get("band") == "unlikely":
+        leading_actions.append(_winnability_prerequisite_action(page, analysis, order))
+        order += 1
     for topic in (analysis.get("missing_topics") or [])[:8]:
         actions.append(_topic_action("add_topic", page, analysis, topic, order))
         order += 1
@@ -3010,6 +3593,7 @@ def _action_points_for_analysis(page: dict, analysis: dict) -> list[dict]:
         actions.append(_paa_action(page, analysis, row, order, top_question=question in top_questions))
         order += 1
     actions.sort(key=_action_priority_score)
+    actions = leading_actions + actions
     for index, action in enumerate(actions, start=1):
         action["order"] = index
     return actions
@@ -5485,6 +6069,7 @@ function domainRatingText(row){const v=domainRatingValue(row);return v===null?''
 function domainRatingAttribution(){const meta=data.domain_ratings||{};if(!meta.domains_enriched)return '';const license=meta.license||'http://ahrefs.com/legal/domain-rating-license';return `<div class="mini" style="margin-top:10px">Domain Rating by <a href="https://ahrefs.com/" target="_blank" rel="noopener noreferrer">Ahrefs</a>. <a href="${esc(license)}" target="_blank" rel="noopener noreferrer">License</a>. ${n(meta.domains_enriched)} domain${Number(meta.domains_enriched)===1?'':'s'} enriched.</div>`;}
 function competitorList(rows){if(!rows||!rows.length)return '<div class="empty">No competitors fetched.</div>';return '<ol class="competitors">'+rows.map(c=>`<li>${urlLink(c.url,c.title||c.url)}<div class="mini">Rank ${esc(c.rank||'')} · Paragraphs ${esc(c.paragraph_count||0)}${domainRatingText(c)}${c.error?' · '+esc(c.error):''}</div></li>`).join('')+'</ol>';}
 function reviewList(rows){if(!rows||!rows.length)return `<div class="empty">No high-distance ${esc(ownDomain)} paragraphs were flagged for this keyword. This means the analyzed paragraphs stayed close enough to either the target keyword vector or the SERP topic space.</div>`;return '<ul class="review">'+rows.map(p=>`<li><b>${esc(p.similarity_to_serp_topics)}</b> <span class="mini">similarity · ${esc(p.review_reason||'review candidate')}</span><br>${esc(p.paragraph)}</li>`).join('')+'</ul>';}
+function intentWinnabilityPanel(a){const intent=a.intent||{};const win=a.winnability||{};if(!intent.serp_intent&&!win.band)return '';const evidence=(intent.evidence||[]).concat(win.evidence||[]).slice(0,7);const alt=a.alternative_keyword||{};const header=a.recommendation_header?`<div class="why-item">${esc(a.recommendation_header)}</div>`:'';return `<div class="panel" style="margin-top:14px"><h4>Intent & Winnability</h4><div class="panel-body">${header}<div class="chips"><span class="chip ${intent.match==='mismatch'?'missing':intent.match==='match'?'covered':'partial'}">Intent ${esc(intent.match||'unknown')}</span><span class="chip">SERP ${esc(intent.serp_intent||'unknown')}</span><span class="chip">Page ${esc(intent.page_intent||'unknown')}</span><span class="chip ${win.band==='unlikely'?'missing':win.band==='hard'?'partial':win.band==='winnable'?'covered':''}">Winnability ${esc(win.band||'unknown')}</span>${win.own_dr!==null&&win.own_dr!==undefined?`<span class="chip">Own DR ${esc(win.own_dr)}</span>`:''}${win.top10_dr_median!==null&&win.top10_dr_median!==undefined?`<span class="chip">Top-10 median DR ${esc(win.top10_dr_median)}</span>`:''}</div>${alt.keyword?`<div class="mini" style="margin-top:8px">Alternative keyword: <b>${esc(alt.keyword)}</b>${alt.band?` · ${esc(alt.band)}`:''}</div>`:''}${evidence.length?listHtml(evidence):''}</div></div>`;}
 function sharedKeywordNames(a,b){const aKeywords=new Set((a.keywords||[]).map(k=>String(k.keyword||'')));return (b.keywords||[]).map(k=>String(k.keyword||'')).filter(k=>aKeywords.has(k));}
 function rankForKeyword(row,keyword){const match=(row.keywords||[]).find(k=>String(k.keyword||'')===String(keyword||''));return Number(match?.rank||0);}
 function serpTrafficScore(a,b,keywords){if(!keywords.length)return 0;const total=keywords.reduce((sum,keyword)=>{const ar=rankForKeyword(a,keyword),br=rankForKeyword(b,keyword);return sum+Math.max(0,11-ar)+Math.max(0,11-br);},0);return total/(keywords.length*20);}
@@ -5548,7 +6133,7 @@ function topicCoverageHeatmap(a){const matrix=a.topic_coverage_matrix||{};const 
 function paragraphMatchHeatmap(a){const heat=a.paragraph_match_heatmap||{};const columns=heat.columns||[];const rows=heat.rows||[];if(!columns.length||!rows.length)return '<div class="empty">No paragraph match heatmap available.</div>';const header=`<div class="heatmap-head"><div>${esc(ownDomain)} paragraph</div>${columns.map(col=>`<div title="${esc(col.url||'')}">${esc(col.domain||'Page').slice(0,22)}${col.rank?`<br>#${esc(col.rank)}`:''}</div>`).join('')}</div>`;const body=rows.map(row=>`<div class="paragraph-row"><div class="paragraph-topic"><strong>P${n(Number(row.paragraph_index||0)+1)} · ${esc(row.status||'')} · impact ${Number(row.max_rank_impact||0).toFixed(2)}</strong><span title="${esc(row.paragraph||'')}">${esc(row.paragraph||'')}</span></div>${(row.cells||[]).map((cell,index)=>{const col=columns[index]||{};const status=cell.status||'no_match';const sim=Number(cell.similarity||0);const impact=Number(cell.rank_impact||0);const label=sim?sim.toFixed(2):'-';const title=[`P${Number(row.paragraph_index||0)+1}`,col.domain||col.url||'',`SERP rank ${cell.rank||col.rank||''}`,`similarity ${label}`,`rank impact proxy ${impact.toFixed(3)}`,cell.paragraph||''].filter(Boolean).join(' · ');return `<div class="heatmap-cell ${esc(status)}" title="${esc(title)}">${esc(label)}<br><span class="mini">impact ${impact.toFixed(2)}</span></div>`;}).join('')}</div>`).join('');return `<div class="paragraph-heatmap-wrap"><div class="paragraph-heatmap" style="--paragraph-cols:${columns.length}">${header}${body}</div></div><div class="heatmap-legend"><span><i style="background:#eefbf4;border:1px solid #a5dabb"></i>strong paragraph match</span><span><i style="background:#eef4ff;border:1px solid #b9cdfc"></i>partial match</span><span><i style="background:#fff1f3;border:1px solid #f4b4be"></i>weak match</span><span>Impact = semantic match x top-10 SERP rank weight.</span></div>`;}
 function semanticScatterSection(a){const points=a.scatter?.points||[];return `<div class="panel" style="margin-top:14px"><h4>Semantic Scatterplot</h4><div class="panel-body">${sectionNote('Vector space for keyword, target page, competitor titles, headings, and paragraphs. Use filters to isolate entity types and domains.')} ${scatterSvg(points)}</div></div>`;}
 function visualComparisonSection(a){const hasComparison=a.content_comparison||a.topic_coverage_matrix||a.paragraph_match_heatmap||a.content_order_path;if(!hasComparison)return '';return `<div class="panel content-comparison" style="margin-top:14px"><h4>Why These Edits Matter</h4><div class="panel-body">${sectionNote('Top ranking page differences show why the recommended edits matter: compare topic coverage, paragraph depth, heading structure, content order, and which SERP pages cover each missing or partial topic.')} ${visualReasonList(a)}<div class="visual-grid"><div class="visual-card"><h5>SERP rank vs content coverage</h5>${contentComparisonRows(a)}</div><div class="visual-card"><h5>Top ranking page differences</h5>${contentDeltaBoxes(a)}</div></div><div class="visual-card coverage-heatmap-card" style="margin-top:14px"><h5>Topic coverage heatmap</h5>${topicCoverageHeatmap(a)}</div><div class="visual-card paragraph-match-card" style="margin-top:14px"><h5>Paragraph match heatmap</h5>${paragraphMatchHeatmap(a)}</div><div class="visual-card content-path-card" style="margin-top:14px"><h5>Content order semantic path</h5>${contentOrderPathSection(a)}</div></div></div>`;}
-function keywordChartsSection(a){return `${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
+function keywordChartsSection(a){return `${intentWinnabilityPanel(a)}${semanticScatterSection(a)}${visualComparisonSection(a)}`;}
 function keywordId(pageIndex, keywordIndex){return `keyword-${pageIndex}-${keywordIndex}`;}
 function overviewSection(){const points=data.overview_scatter?.points||[];const rankings=data.serp_url_rankings||[];const serpEvidence=`<div class="panel"><h4>Top-10 URLs Across Selected Keywords</h4><div class="panel-body">${sectionNote('Repeated winners show which URLs and intents Google currently rewards for the selected keywords.')} ${serpUrlGraph(rankings)}${serpRankingChart(rankings)}${urlDemandMetricsSection(rankings)}${serpRankingList(rankings)}${domainRatingAttribution()}</div></div>${keywordMetricsSection()}`;const semanticEvidence=`${keywordParagraphRidgelineSection(points)}<div class="panel" style="margin-top:14px"><h4>All Keywords, URLs, and Content</h4><div class="panel-body">${sectionNote('Vector-space chart for keywords, URLs, titles, headings, and paragraphs across the selected SERP set.')} ${scatterSvg(points)}</div></div>${keywordFrequencySection(points)}<div class="panel" style="margin-top:14px"><h4>Topic Traffic Impact</h4><div class="panel-body">${sectionNote('Directional demand by aggregate semantic cluster. Use it to decide which topic groups deserve editing effort first.')} ${clusterImpactChart(points)}</div></div><div class="panel" style="margin-top:14px"><h4>Aggregate Semantic Clusters</h4><div class="panel-body">${sectionNote('Broad topic groups across selected keywords and processed URLs.')} ${clusterCards(points)}</div></div>`;return `<section class="page-section" id="overview-section"><div class="page-head"><h2>SERP Content Task Board</h2><div class="mini">Charts first, then tasks: validate SERP and vector-space evidence before editing.</div></div><div class="keyword-card">${serpEvidence}${semanticEvidence}${aiAgentStatusSection()}${contentBriefsSection()}${aggregateActionsSection()}${paragraphRulesSection()}</div></section>`;}
 function keywordCard(a, pageIndex, keywordIndex){const s=a.summary||{};const reviewRows=(a.off_intent_paragraphs&&a.off_intent_paragraphs.length)?a.off_intent_paragraphs:a.own_paragraphs_to_review;const semanticEvidence=`<div class="tables"><div class="panel"><h4>Competitor SERP</h4><div class="panel-body">${sectionNote('Ranking pages fetched for this keyword after ignored hosts are skipped.')} ${competitorList(a.competitor_pages)}</div></div></div>`;const actionRows=a.action_points||[];const actionsPanel=collapsiblePanel('Keyword Content Actions',`${sectionNote('Edit these after reviewing the charts. Each task describes paragraph structure, placement, and completion criteria.')} ${actionList(actionRows,10)}`,{meta:`${n(actionRows.length)} task${actionRows.length===1?'':'s'}`});const structRows=(a.structural_patterns||[]).filter(r=>(r.competitors||0)>=1);const outlineRows=a.recommended_outline||[];const outlinePanel=outlineRows.length?collapsiblePanel('Recommended Section Order',`${sectionNote('Section themes ordered by where ranking competitors place them. "add" rows are themes the page does not cover yet.')}<ol style="margin:0;padding-left:20px">${outlineRows.map(r=>`<li style="margin-bottom:6px" title="${esc(r.sample_text||'')}"><span class="chip ${r.status==='have'?'covered':'missing'}">${esc(r.status)}</span> ${esc(r.label||'')} <span class="mini">— seen on ${n(r.competitor_pages||0)} competitor page(s)</span></li>`).join('')}</ol>`,{meta:`${n(outlineRows.filter(r=>r.status==='add').length)} to add`}):'';const paaRows=a.paa_coverage||[];const paaCovered=paaRows.filter(r=>r.status==='covered').length;const relatedQueries=(a.serp_features&&a.serp_features.related_searches)||[];const paaPanel=paaRows.length?collapsiblePanel('People Also Ask Coverage',`${sectionNote('Questions Google shows for this keyword, scored against this page\'s paragraphs. Missing questions are direct content opportunities.')}<table><thead><tr><th>Question</th><th>Status</th><th>Best similarity</th><th>Closest paragraph</th></tr></thead><tbody>${paaRows.map(r=>`<tr><td>${esc(r.question)}</td><td><span class="chip ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(String(r.best_similarity??''))}</td><td>${esc(r.best_paragraph||'')}</td></tr>`).join('')}</tbody></table>${relatedQueries.length?`<div class="mini" style="margin-top:8px">Related searches: ${relatedQueries.map(q=>esc(q)).join(' · ')}</div>`:''}`,{meta:`${n(paaCovered)}/${n(paaRows.length)} covered`}):'';const structPanel=structRows.length?collapsiblePanel('Structural / GEO Gaps',`${sectionNote('Page-structure signals where ranking competitors beat this page: schema, question headings, statistics, citations, tables, depth.')}<table><thead><tr><th>Signal</th><th>Competitors</th><th>Ours</th><th>Theirs (max)</th><th>Advice</th></tr></thead><tbody>${structRows.map(r=>`<tr><td>${esc(r.signal)}</td><td>${n(r.competitors)}</td><td>${esc(String(r.ours))}</td><td>${esc(String(r.max_theirs))}</td><td>${esc(r.advice)}</td></tr>`).join('')}</tbody></table>`,{meta:`${n(structRows.length)} signal${structRows.length===1?'':'s'}`}):'';const topicPanel=collapsiblePanel('Topic Relations',`${sectionNote('Missing and partial topics are the source evidence for the content tasks above.')} ${topicChart(a.topics)}<table><thead><tr><th>Coverage</th><th>Priority</th><th>Topic and Example</th><th>Seen</th><th>${esc(ownDomain)} sim</th><th>Example URL</th></tr></thead><tbody>${topicRows(a.topics,18)}</tbody></table>`,{meta:`${n((a.topics||[]).length)} topics`,style:''});const reviewPanel=collapsiblePanel(`${ownDomain} Paragraphs To Review`,`${sectionNote('Review candidates for intent drift, thinness, or filler. Keep useful facts, but rewrite, move, merge, or remove weak paragraphs.')} ${reviewList(reviewRows)}`,{meta:`${n((reviewRows||[]).length)} paragraph${(reviewRows||[]).length===1?'':'s'}`,style:''});return `<div class="keyword-card" id="${keywordId(pageIndex, keywordIndex)}"><div class="keyword-head"><div><h3>${esc(a.query || a.keyword?.keyword || '')}</h3><div class="mini">Status ${esc(a.status)} · Competitors ${esc(a.competitors||a.competitor_pages?.length||0)} · Scatter points ${esc(a.scatter?.shown||0)}</div></div><div class="chips"><span class="chip missing">Missing ${n(s.missing||0)}</span><span class="chip partial">Partial ${n(s.partial||0)}</span><span class="chip covered">Covered ${n(s.covered||0)}</span></div></div>${keywordChartsSection(a)}${actionsPanel}${structPanel}${paaPanel}${outlinePanel}<div class="two-col" style="margin-top:14px">${topicPanel}${reviewPanel}</div>${diagnosticDetails('Raw semantic evidence for this keyword',semanticEvidence,false)}</div>`;}
