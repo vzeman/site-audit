@@ -60,6 +60,8 @@ class LinkGraphResult:
     dead_ends: list[str]
     edge_count: int
     recommendations: list[dict]
+    internal_http_links: dict[str, list[str]] = field(default_factory=dict)
+    internal_https_links: dict[str, list[str]] = field(default_factory=dict)
     cluster_authorities: list[dict] = field(default_factory=list)
     anchor_analysis: list[dict] = field(default_factory=list)
 
@@ -88,6 +90,25 @@ def build_graph(
             clean.append(target)
         graph[url] = clean
     return graph, dict(anchors)
+
+
+def _outgoing_links_by_scheme(
+    pages_with_outlinks: list[tuple[str, list[tuple[str, str]]]],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    http_links: dict[str, list[str]] = {}
+    https_links: dict[str, list[str]] = {}
+    for url, outs in pages_with_outlinks:
+        seen_http: set[str] = set()
+        seen_https: set[str] = set()
+        for target, _anchor in outs:
+            scheme = urlparse(target or "").scheme.lower()
+            if scheme == "http" and target not in seen_http:
+                seen_http.add(target)
+                http_links.setdefault(url, []).append(target)
+            elif scheme == "https" and target not in seen_https:
+                seen_https.add(target)
+                https_links.setdefault(url, []).append(target)
+    return http_links, https_links
 
 
 # --- PageRank -------------------------------------------------------------
@@ -545,6 +566,7 @@ def analyze(
     top_recommendations: int = 75,
 ) -> LinkGraphResult:
     graph, anchors = build_graph(pages_with_outlinks)
+    internal_http_links, internal_https_links = _outgoing_links_by_scheme(pages_with_outlinks)
 
     in_deg: dict[str, int] = defaultdict(int)
     for outs in graph.values():
@@ -587,6 +609,8 @@ def analyze(
         dead_ends=dead_ends,
         edge_count=edge_count,
         recommendations=recs,
+        internal_http_links=internal_http_links,
+        internal_https_links=internal_https_links,
         cluster_authorities=cluster_auth,
         anchor_analysis=anchors_payload,
     )
@@ -626,6 +650,9 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
     # title + degrees + click_depth so the JSON stays small even on big sites.
     page_link_counts: list[dict] = []
     for p in pages:
+        http_links = result.internal_http_links.get(p.url, [])
+        https_links = result.internal_https_links.get(p.url, [])
+        raw_internal_links = sorted(set(http_links + https_links))
         page_link_counts.append({
             "url": p.url,
             "title": p.title,
@@ -635,6 +662,11 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
             "hub_score": round(float(result.hub_score.get(p.url, 0.0)), 8),
             "in_degree": int(result.in_degree.get(p.url, 0)),
             "out_degree": int(result.out_degree.get(p.url, 0)),
+            "raw_internal_link_count": len(raw_internal_links),
+            "internal_http_link_count": len(http_links),
+            "internal_http_links": http_links[:25],
+            "internal_https_link_count": len(https_links),
+            "internal_https_links": https_links[:25],
             "click_depth": int(result.click_depth.get(p.url, -1)) if p.url in result.click_depth else None,
         })
 
@@ -656,6 +688,124 @@ def to_payload(result: LinkGraphResult, pages, top_n: int = 25) -> dict:
         "recommendations": result.recommendations,
         "page_link_counts": page_link_counts,
     }
+
+
+def annotate_link_target_statuses(linkgraph_payload: dict, outlinks_map: dict[str, list[tuple[str, str]]], indexability: dict | None) -> dict:
+    status_by_url: dict[str, int] = {}
+    redirect_by_url: dict[str, str] = {}
+    for row in (indexability or {}).get("per_page") or []:
+        url = row.get("url")
+        if not url:
+            continue
+        status = _safe_int(row.get("http_status"))
+        status_by_url[str(url)] = status
+        status_by_url[_canonical_url(str(url))] = status
+        requested_url = row.get("requested_url") or ""
+        redirect_target_url = row.get("redirect_target_url") or ""
+        if requested_url and redirect_target_url and _canonical_url(requested_url) != _canonical_url(redirect_target_url):
+            redirect_by_url[str(requested_url)] = str(redirect_target_url)
+            redirect_by_url[_canonical_url(str(requested_url))] = str(redirect_target_url)
+
+    for row in (linkgraph_payload or {}).get("page_link_counts") or []:
+        source_url = row.get("url") or ""
+        broken: list[dict] = []
+        redirects: list[dict] = []
+        seen: set[str] = set()
+        for target, _anchor in (outlinks_map or {}).get(source_url, []) or []:
+            if not target or target in seen:
+                continue
+            seen.add(target)
+            status = status_by_url.get(target, status_by_url.get(_canonical_url(target), 0))
+            if 400 <= status < 600:
+                broken.append({"url": target, "http_status": status})
+            redirect_target_url = redirect_by_url.get(target, redirect_by_url.get(_canonical_url(target), ""))
+            if redirect_target_url:
+                redirects.append({"url": target, "redirect_target_url": redirect_target_url})
+        row["broken_internal_link_count"] = len(broken)
+        row["broken_internal_links"] = broken[:25]
+        row["redirect_internal_link_count"] = len(redirects)
+        row["redirect_internal_links"] = redirects[:25]
+    return linkgraph_payload
+
+
+def annotate_internal_link_rel_stats(linkgraph_payload: dict, extracted_pages: list) -> dict:
+    rows = (linkgraph_payload or {}).get("page_link_counts") or []
+    row_by_normalized_url = {
+        _canonical_url(row.get("url", "")): row
+        for row in rows
+        if row.get("url")
+    }
+    stats: dict[str, dict] = {
+        row.get("url", ""): {
+            "nofollow": 0,
+            "dofollow": 0,
+            "nofollow_sources": [],
+            "dofollow_sources": [],
+            "outgoing_nofollow": 0,
+            "outgoing_nofollow_targets": [],
+        }
+        for row in rows
+        if row.get("url")
+    }
+
+    for source in extracted_pages or []:
+        source_url = getattr(source, "url", "") or ""
+        source_row = row_by_normalized_url.get(_canonical_url(source_url))
+        source_stats = stats.setdefault(
+            source_row.get("url", "") if source_row else source_url,
+            {
+                "nofollow": 0,
+                "dofollow": 0,
+                "nofollow_sources": [],
+                "dofollow_sources": [],
+                "outgoing_nofollow": 0,
+                "outgoing_nofollow_targets": [],
+            },
+        )
+        for link in getattr(source, "link_audit_rows", []) or []:
+            if not link.get("is_internal"):
+                continue
+            if link.get("nofollow"):
+                source_stats["outgoing_nofollow"] += 1
+                if len(source_stats["outgoing_nofollow_targets"]) < 25:
+                    source_stats["outgoing_nofollow_targets"].append({
+                        "target_url": link.get("target_url", ""),
+                        "anchor": link.get("anchor", ""),
+                    })
+            target_row = row_by_normalized_url.get(_canonical_url(link.get("target_url", "")))
+            if not target_row:
+                continue
+            target_url = target_row.get("url", "")
+            target_stats = stats.setdefault(
+                target_url,
+                {
+                    "nofollow": 0,
+                    "dofollow": 0,
+                    "nofollow_sources": [],
+                    "dofollow_sources": [],
+                    "outgoing_nofollow": 0,
+                    "outgoing_nofollow_targets": [],
+                },
+            )
+            source_record = {"source_url": source_url, "target_url": link.get("target_url", ""), "anchor": link.get("anchor", "")}
+            if link.get("nofollow"):
+                target_stats["nofollow"] += 1
+                if len(target_stats["nofollow_sources"]) < 25:
+                    target_stats["nofollow_sources"].append(source_record)
+            else:
+                target_stats["dofollow"] += 1
+                if len(target_stats["dofollow_sources"]) < 25:
+                    target_stats["dofollow_sources"].append(source_record)
+
+    for row in rows:
+        target_stats = stats.get(row.get("url", ""), {})
+        row["incoming_nofollow_internal_link_count"] = int(target_stats.get("nofollow", 0) or 0)
+        row["incoming_dofollow_internal_link_count"] = int(target_stats.get("dofollow", 0) or 0)
+        row["incoming_nofollow_internal_links"] = list(target_stats.get("nofollow_sources") or [])
+        row["incoming_dofollow_internal_links"] = list(target_stats.get("dofollow_sources") or [])
+        row["outgoing_nofollow_internal_link_count"] = int(target_stats.get("outgoing_nofollow", 0) or 0)
+        row["outgoing_nofollow_internal_links"] = list(target_stats.get("outgoing_nofollow_targets") or [])
+    return linkgraph_payload
 
 
 def _canonical_url(url: str) -> str:

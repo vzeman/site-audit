@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urlparse
@@ -153,14 +153,11 @@ def recommend(
 
     LOG.info("  paragraph link recs: scoring %d paragraphs vs %d pages", n_paras, n_pages)
 
-    # full sim matrix, paragraphs x pages — n_paras * n_pages * 4 bytes
-    # 30 000 * 5 000 = 600 MB which is too much. Block-process if so.
+    # Keep the matrix work block-local. Large audits can have hundreds of
+    # thousands of paragraphs and tens of thousands of pages; materializing the
+    # full paragraphs x pages matrix would require tens of GB.
     block_size = max(1, 5_000_000 // n_pages)
-    sims_blocks: list[np.ndarray] = []
-    for start in range(0, n_paras, block_size):
-        sub = para_embs[start : start + block_size]
-        sims_blocks.append(np.clip(sub @ page_embeddings.T, -1.0, 1.0))
-    sims = np.vstack(sims_blocks)
+    candidate_window = min(30, n_pages)
 
     # average per-page similarity to its own pages' paragraphs is what
     # we'll use as the "fit baseline" for lift. Equivalent to:
@@ -168,9 +165,23 @@ def recommend(
     by_page: dict[int, list[int]] = defaultdict(list)
     for pi, (page_i, _, _, _) in enumerate(paragraph_records):
         by_page[page_i].append(pi)
-    page_avg_sims = np.zeros((n_pages, n_pages), dtype=np.float32)
+    page_para_centroids = np.zeros((n_pages, page_embeddings.shape[1]), dtype=np.float32)
     for page_i, para_idxs in by_page.items():
-        page_avg_sims[page_i] = sims[para_idxs].mean(axis=0)
+        page_para_centroids[page_i] = para_embs[para_idxs].mean(axis=0)
+
+    page_avg_cache: OrderedDict[int, np.ndarray] = OrderedDict()
+    page_avg_cache_max = 64
+
+    def page_avg_for(page_i: int) -> np.ndarray:
+        cached = page_avg_cache.get(page_i)
+        if cached is not None:
+            page_avg_cache.move_to_end(page_i)
+            return cached
+        row = np.clip(page_para_centroids[page_i] @ page_embeddings.T, -1.0, 1.0).astype(np.float32, copy=False)
+        page_avg_cache[page_i] = row
+        if len(page_avg_cache) > page_avg_cache_max:
+            page_avg_cache.popitem(last=False)
+        return row
 
     existing_links = _existing_link_targets_for_page(pages_with_outlinks)
     canonical_existing_links = {
@@ -190,48 +201,64 @@ def recommend(
     can_score_anchors = embedder is not None
 
     # Pass 1: pick accepted (paragraph, target) pairs without anchor scoring.
-    accepted: list[tuple[int, int, float, float]] = []  # (pi, tgt_i, fit, lift)
-    page_target_seen: set[tuple[int, int]] = set()  # one rec per (source_page, target_page)
+    accepted_by_pair: dict[tuple[int, int], tuple[int, int, float, float]] = {}  # (page_i, tgt_i) -> (pi, tgt_i, fit, lift)
+    accepted_prune_limit = max(top_k_total * 50, 10_000) if top_k_total > 0 else 0
     saturated_skipped = 0
 
-    for pi, (page_i, para_i, _, _) in enumerate(paragraph_records):
-        # Already link-saturated paragraphs don't get new recommendations.
-        if paragraph_saturation is not None:
-            density = paragraph_saturation.get((page_i, para_i), 0.0)
-            if density >= saturation_floor_per_100w:
-                saturated_skipped += 1
-                continue
-        row = sims[pi]
-        page_avg = page_avg_sims[page_i]
-        order = np.argsort(-row)
-        para_recs_count = 0
-        for tgt_i in order[:30]:
-            tgt_i = int(tgt_i)
-            if tgt_i == page_i or tgt_i in drop_target_idx:
-                continue
-            fit = float(row[tgt_i])
-            if fit < similarity_floor:
-                break  # row is sorted, nothing else will pass
-            lift = fit - float(page_avg[tgt_i])
-            if lift < lift_floor:
-                continue
-            src_url = pages[page_i].url
-            tgt_url = pages[tgt_i].url
-            canonical_src = _canonical_url(src_url)
-            canonical_tgt = _canonical_url(tgt_url)
-            if canonical_src == canonical_tgt:
-                continue
-            if tgt_url in existing_links.get(src_url, set()):
-                continue
-            if canonical_tgt in canonical_existing_links.get(canonical_src, set()):
-                continue
-            if (page_i, tgt_i) in page_target_seen:
-                continue
-            page_target_seen.add((page_i, tgt_i))
-            accepted.append((pi, tgt_i, fit, lift))
-            para_recs_count += 1
-            if para_recs_count >= top_k_per_page:
-                break
+    def prune_accepted() -> None:
+        if accepted_prune_limit <= 0 or len(accepted_by_pair) <= accepted_prune_limit:
+            return
+        keep = sorted(accepted_by_pair.items(), key=lambda item: (item[1][3], item[1][2]), reverse=True)[:accepted_prune_limit]
+        accepted_by_pair.clear()
+        accepted_by_pair.update(keep)
+
+    for start in range(0, n_paras, block_size):
+        block = np.clip(para_embs[start : start + block_size] @ page_embeddings.T, -1.0, 1.0)
+        for offset, row in enumerate(block):
+            pi = start + offset
+            page_i, para_i, _, _ = paragraph_records[pi]
+            # Already link-saturated paragraphs don't get new recommendations.
+            if paragraph_saturation is not None:
+                density = paragraph_saturation.get((page_i, para_i), 0.0)
+                if density >= saturation_floor_per_100w:
+                    saturated_skipped += 1
+                    continue
+            if candidate_window >= n_pages:
+                order = np.argsort(-row)
+            else:
+                top_idx = np.argpartition(row, -candidate_window)[-candidate_window:]
+                order = top_idx[np.argsort(-row[top_idx])]
+            page_avg = page_avg_for(page_i)
+            para_recs_count = 0
+            for tgt_i in order:
+                tgt_i = int(tgt_i)
+                if tgt_i == page_i or tgt_i in drop_target_idx:
+                    continue
+                fit = float(row[tgt_i])
+                if fit < similarity_floor:
+                    break  # candidates are sorted, nothing else in the window will pass
+                lift = fit - float(page_avg[tgt_i])
+                if lift < lift_floor:
+                    continue
+                src_url = pages[page_i].url
+                tgt_url = pages[tgt_i].url
+                canonical_src = _canonical_url(src_url)
+                canonical_tgt = _canonical_url(tgt_url)
+                if canonical_src == canonical_tgt:
+                    continue
+                if tgt_url in existing_links.get(src_url, set()):
+                    continue
+                if canonical_tgt in canonical_existing_links.get(canonical_src, set()):
+                    continue
+                pair = (page_i, tgt_i)
+                previous = accepted_by_pair.get(pair)
+                candidate = (pi, tgt_i, fit, lift)
+                if previous is None or (lift, fit) > (previous[3], previous[2]):
+                    accepted_by_pair[pair] = candidate
+                    para_recs_count += 1
+                if para_recs_count >= top_k_per_page:
+                    break
+        prune_accepted()
 
     if saturated_skipped:
         LOG.info(
@@ -239,7 +266,7 @@ def recommend(
             saturated_skipped, saturation_floor_per_100w,
         )
 
-    accepted.sort(key=lambda item: (item[3], item[2]), reverse=True)
+    accepted = sorted(accepted_by_pair.values(), key=lambda item: (item[3], item[2]), reverse=True)
     if top_k_total <= 0:
         return []
     if len(accepted) > top_k_total:

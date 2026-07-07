@@ -75,6 +75,210 @@ def test_canonical_consistency_flags_missing_external_non_self_and_bad_targets()
     assert payload["interpretation"]["how_to_use"]
 
 
+def test_canonical_consistency_flags_canonical_points_to_4xx() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/broken",
+            },
+            {
+                "url": "https://example.com/broken",
+                "title": "",
+                "status": "skipped",
+                "reason": "non_2xx_status",
+                "http_status": 404,
+                "canonical_url": "",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/broken", "indexability_status": "not_analyzed", "http_status": 404},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_points_to_4xx" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_target_http_status"] == 404
+    assert payload["summary"]["canonical_points_to_4xx"] == 1
+    issue = next(row for row in payload["issues"] if row["issue"] == "canonical_points_to_4xx")
+    assert issue["canonical_target_http_status"] == 404
+
+
+def test_canonical_consistency_flags_canonical_points_to_5xx() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/error",
+            },
+            {
+                "url": "https://example.com/error",
+                "title": "",
+                "status": "skipped",
+                "reason": "non_2xx_status",
+                "http_status": 503,
+                "canonical_url": "",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/error", "indexability_status": "not_analyzed", "http_status": 503},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_points_to_5xx" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_target_http_status"] == 503
+    assert payload["summary"]["canonical_points_to_5xx"] == 1
+
+
+def test_canonical_consistency_flags_canonical_points_to_redirect() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/redirecting",
+            },
+            {
+                "url": "https://example.com/final",
+                "title": "Final",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/final",
+                "requested_url": "https://example.com/redirecting",
+                "redirect_target_url": "https://example.com/final",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/final", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_points_to_redirect" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_redirect_target_url"] == "https://example.com/final"
+    assert payload["summary"]["canonical_points_to_redirect"] == 1
+
+
+def test_canonical_consistency_flags_non_canonical_target() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/source",
+                "title": "Source",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/variant",
+            },
+            {
+                "url": "https://example.com/variant",
+                "title": "Variant",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/final",
+            },
+            {
+                "url": "https://example.com/final",
+                "title": "Final",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/final",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/source", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/variant", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/final", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "non_canonical_page_specified_as_canonical_one" in by_url["https://example.com/source"]["issues"]
+    assert by_url["https://example.com/source"]["canonical_target_canonical_url"] == "https://example.com/final"
+    assert payload["summary"]["non_canonical_page_specified_as_canonical_one"] == 1
+
+
+def test_canonical_consistency_flags_canonical_from_http_to_https() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "http://example.com/page",
+                "title": "HTTP Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/page",
+            },
+            {
+                "url": "https://example.com/page",
+                "title": "HTTPS Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "https://example.com/page",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "http://example.com/page", "indexability_status": "indexable", "http_status": 200},
+                {"url": "https://example.com/page", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_from_http_to_https" in by_url["http://example.com/page"]["issues"]
+    assert payload["summary"]["canonical_from_http_to_https"] == 1
+
+
+def test_canonical_consistency_flags_canonical_from_https_to_http() -> None:
+    payload = analyze(
+        [
+            {
+                "url": "https://example.com/page",
+                "title": "HTTPS Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "http://example.com/page",
+            },
+            {
+                "url": "http://example.com/page",
+                "title": "HTTP Page",
+                "status": "analyzed",
+                "http_status": 200,
+                "canonical_url": "http://example.com/page",
+            },
+        ],
+        {
+            "per_page": [
+                {"url": "https://example.com/page", "indexability_status": "indexable", "http_status": 200},
+                {"url": "http://example.com/page", "indexability_status": "indexable", "http_status": 200},
+            ]
+        },
+    )
+
+    by_url = {row["url"]: row for row in payload["rows"]}
+    assert "canonical_from_https_to_http" in by_url["https://example.com/page"]["issues"]
+    assert payload["summary"]["canonical_from_https_to_http"] == 1
+
+
 def test_canonical_consistency_exports_json_and_csv(tmp_path) -> None:
     payload = {
         "summary": {"total_pages": 1},

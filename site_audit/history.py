@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import shutil
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .cache import domain_slug
+
+
+HISTORY_CORRELATION_CAVEATS = [
+    "Impact rows are before/after associations, not causal proof.",
+    "The configured comparison window is used as the observation window; confirm the same window in GSC or analytics when available.",
+    "Validate against seasonality, provider sampling noise, ranking volatility, and unrelated site changes.",
+    "Use wider windows for low-traffic pages before treating a delta as meaningful.",
+]
+
+RECOMMENDATION_OUTCOME_CAVEAT = HISTORY_CORRELATION_CAVEATS[0]
+
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into", "is",
+    "it", "of", "on", "or", "the", "this", "to", "vs", "with", "without", "your",
+}
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -101,6 +118,7 @@ def _search_lookup(search_payload: dict | None) -> dict[str, dict]:
             "keywords": _safe_int(row.get("keywords") or row.get("keywords_total")),
             "position": _safe_float(row.get("top_keyword_position") or row.get("position")),
             "top_keyword": row.get("top_keyword") or "",
+            "serp_title": row.get("top_keyword_title") or row.get("serp_title") or "",
             "clicks": _safe_float(row.get("clicks")),
             "impressions": _safe_float(row.get("impressions")),
         }, score_key="traffic")
@@ -117,6 +135,7 @@ def _search_lookup(search_payload: dict | None) -> dict[str, dict]:
             "keywords": max(_safe_int(current.get("keywords")), 1),
             "position": position if position < 999.0 else 0,
             "top_keyword": current.get("top_keyword") or row.get("keyword") or "",
+            "serp_title": current.get("serp_title") or row.get("page_title") or row.get("serp_title") or "",
         }, score_key="traffic")
     return out
 
@@ -130,6 +149,36 @@ def _row_lookup(rows: list[dict], keys: tuple[str, ...] = ("url",), score_key: s
     return out
 
 
+def _snapshot_recommendations(recommendations_payload: dict | list | None, limit: int = 100) -> list[dict]:
+    if isinstance(recommendations_payload, dict):
+        rows = list(recommendations_payload.get("items") or [])
+    elif isinstance(recommendations_payload, list):
+        rows = list(recommendations_payload)
+    else:
+        rows = []
+    compact: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("suppressed"):
+            continue
+        rec_id = str(row.get("id") or "").strip()
+        if not rec_id:
+            continue
+        targets = [str(target) for target in (row.get("targets") or []) if target]
+        compact.append({
+            "id": rec_id,
+            "category": str(row.get("category") or ""),
+            "type": str(row.get("type") or ""),
+            "priority": str(row.get("priority") or ""),
+            "primary_url": str(row.get("primary_url") or (targets[0] if targets else "")),
+            "targets": targets,
+            "title": str(row.get("title") or ""),
+            "estimated_clicks_gain": row.get("estimated_clicks_gain"),
+        })
+        if len(compact) >= limit:
+            break
+    return compact
+
+
 def build_history_snapshot(
     domain: str,
     pages: list,
@@ -139,14 +188,37 @@ def build_history_snapshot(
     structured_data: dict | None = None,
     freshness: dict | None = None,
     metadata_quality: dict | None = None,
+    indexability: dict | None = None,
     search_payload: dict | None = None,
+    recommendations_payload: dict | list | None = None,
     snapshot_id: str | None = None,
 ) -> dict:
+    raw_max_pages = os.getenv("SITE_AUDIT_HISTORY_MAX_PAGES", "20000")
+    try:
+        max_pages = max(0, int(raw_max_pages))
+    except ValueError:
+        max_pages = 20000
+    if max_pages and len(pages) > max_pages:
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        return {
+            "summary": {
+                "status": "skipped_large_site",
+                "model": "history_snapshot_v1",
+                "domain": domain,
+                "snapshot_id": snapshot_id or "",
+                "created_at": now,
+                "pages": len(pages),
+                "max_pages": max_pages,
+                "reason": "History snapshots include per-page headings, paragraphs, and links; skipped to keep large audits memory-safe.",
+            },
+            "pages": [],
+        }
     extracted_pages = extracted_pages or []
     outlinks_map = outlinks_map or {}
     structured = _row_lookup((structured_data or {}).get("per_page") or [], ("url",))
     fresh = _row_lookup((freshness or {}).get("per_page") or [], ("url",))
     metadata = _row_lookup((metadata_quality or {}).get("per_page") or [], ("url",))
+    index_rows = _row_lookup((indexability or {}).get("per_page") or [], ("url",))
     search = _search_lookup(search_payload)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -179,17 +251,34 @@ def build_history_snapshot(
         structured_row = _lookup_url(structured, url)
         fresh_row = _lookup_url(fresh, url)
         metadata_row = _lookup_url(metadata, url)
+        index_row = _lookup_url(index_rows, url)
         search_row = _lookup_url(search, url)
         schema_types = sorted(set(structured_row.get("types") or getattr(ext, "schema_types", []) or []))
         title = getattr(page, "title", "") or getattr(ext, "title", "") or ""
         description = getattr(page, "description", "") or getattr(ext, "description", "") or ""
+        canonical_url = metadata_row.get("canonical_url") or getattr(ext, "canonical_url", "") or ""
+        h1 = getattr(ext, "h1", "") or ""
+        redirect_target_url = index_row.get("redirect_target_url") or ""
+        status_code = _safe_int(index_row.get("http_status") or index_row.get("status_code"))
+        serp_title = search_row.get("serp_title") or ""
         page_rows.append({
             "url": url,
             "title": title,
+            "description": description,
             "section": getattr(page, "section", "") or "",
             "word_count": _safe_int(getattr(page, "word_count", 0)),
+            "word_count_hash": _hash(str(_safe_int(getattr(page, "word_count", 0)))),
             "title_hash": _hash(title),
             "description_hash": _hash(description),
+            "canonical_url": canonical_url,
+            "canonical_hash": _hash(canonical_url),
+            "h1": h1,
+            "h1_hash": _hash(h1),
+            "serp_title": serp_title,
+            "serp_title_hash": _hash(serp_title),
+            "redirect_target_url": redirect_target_url,
+            "status_code": status_code,
+            "redirect_target_hash": _hash(redirect_target_url),
             "heading_hash": _hash("|".join(h["hash"] for h in headings)),
             "paragraph_hash": _hash("|".join(p["hash"] for p in paragraphs)),
             "link_hash": _hash("|".join(links)),
@@ -212,6 +301,7 @@ def build_history_snapshot(
                 "keywords": _safe_int(search_row.get("keywords")),
                 "position": _safe_float(search_row.get("position")),
                 "top_keyword": search_row.get("top_keyword") or "",
+                "serp_title": serp_title,
                 "clicks": _safe_float(search_row.get("clicks")),
                 "impressions": _safe_float(search_row.get("impressions")),
             },
@@ -225,6 +315,7 @@ def build_history_snapshot(
         for row in page_rows
         if _safe_float(row["metrics"].get("position")) > 0
     ]
+    recommendations = _snapshot_recommendations(recommendations_payload)
     return {
         "summary": {
             "status": "ok",
@@ -240,8 +331,10 @@ def build_history_snapshot(
             "total_keywords": sum(_safe_int(row["metrics"].get("keywords")) for row in page_rows),
             "paragraphs": sum(len(row.get("paragraphs") or []) for row in page_rows),
             "links": sum(len(row.get("links") or []) for row in page_rows),
+            "recommendations": len(recommendations),
         },
         "pages": page_rows,
+        "recommendations": recommendations,
     }
 
 
@@ -299,7 +392,10 @@ def save_report_snapshot(
 def _snapshot_payload(domain: str, projects_root: Path, snapshot_id: str) -> dict:
     path = snapshot_root(projects_root, domain) / snapshot_id
     payload = _load_json(path / "report" / "history_snapshot.json", {})
-    if payload:
+    if isinstance(payload, dict) and payload:
+        summary = payload.setdefault("summary", {})
+        if isinstance(summary, dict) and not summary.get("snapshot_id"):
+            summary["snapshot_id"] = snapshot_id
         return payload
     report = path / "report"
     pages = _load_json(report / "pages.json", [])
@@ -307,6 +403,7 @@ def _snapshot_payload(domain: str, projects_root: Path, snapshot_id: str) -> dic
     structured = _load_json(report / "structured_data.json", {})
     freshness = _load_json(report / "freshness.json", {})
     metadata = _load_json(report / "metadata_quality.json", {})
+    recommendations = _load_json(report / "recommendations.json", {})
     page_objs = [type("Page", (), row)() for row in pages]
     return build_history_snapshot(
         domain,
@@ -316,8 +413,13 @@ def _snapshot_payload(domain: str, projects_root: Path, snapshot_id: str) -> dic
         freshness=freshness,
         metadata_quality=metadata,
         search_payload=search,
+        recommendations_payload=recommendations,
         snapshot_id=snapshot_id,
     )
+
+
+def load_snapshot_payload(domain: str, projects_root: Path, snapshot_id: str) -> dict:
+    return _snapshot_payload(domain, projects_root, snapshot_id)
 
 
 def _page_map(snapshot: dict) -> dict[str, dict]:
@@ -356,6 +458,304 @@ def _snapshot_avg_position(snapshot: dict) -> float:
         if _safe_float((row.get("metrics") or {}).get("position")) > 0
     ]
     return round(sum(positions) / len(positions), 2) if positions else 0.0
+
+
+def _snapshot_lookup(snapshot: dict) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in snapshot.get("pages") or []:
+        _store_url(out, row.get("url"), row)
+    return out
+
+
+def _inbound_counts(snapshot: dict) -> Counter:
+    counts: Counter = Counter()
+    for row in snapshot.get("pages") or []:
+        for target in row.get("links") or []:
+            for key in _url_keys(target):
+                counts[key] += 1
+    return counts
+
+
+def _rec_prefix(rec: dict) -> str:
+    rec_id = str(rec.get("id") or "")
+    if rec_id.startswith("geo-access-"):
+        return "geo-access"
+    if rec_id.startswith("geo-aio-"):
+        return "geo-aio"
+    if rec_id.startswith("geo-cite-"):
+        return "geo-cite"
+    if rec_id.startswith("geo-chunk-"):
+        return "geo-chunk"
+    return rec_id.split("-", 1)[0]
+
+
+def _rec_query(rec: dict) -> str:
+    evidence = rec.get("evidence") or {}
+    for key in ("query", "keyword"):
+        value = str(evidence.get(key) or "").strip()
+        if value:
+            return value
+    title = str(rec.get("title") or "")
+    match = re.search(r'"([^"]+)"', title)
+    return match.group(1) if match else title
+
+
+def _tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", str(text or "").lower())
+        if len(token) > 1 and token not in _STOPWORDS
+    ]
+
+
+def _gap_page_match(rec: dict, before_lookup: dict[str, dict], after_snapshot: dict) -> dict:
+    query_tokens = _tokens(_rec_query(rec))
+    if not query_tokens:
+        return {}
+    required = max(1, (len(query_tokens) + 1) // 2)
+    candidates = [
+        row for row in after_snapshot.get("pages") or []
+        if not _lookup_url(before_lookup, row.get("url"))
+    ]
+    for row in candidates:
+        haystack = f"{row.get('url') or ''} {row.get('title') or ''}".lower()
+        if sum(1 for token in query_tokens if token in haystack) >= required:
+            return row
+    return {}
+
+
+def _is_redirect_page(page: dict) -> bool:
+    status_code = _safe_int(page.get("status_code"))
+    return bool(300 <= status_code < 400 or page.get("redirect_target_url"))
+
+
+def _page_hash_changed(before: dict, after: dict, keys: tuple[str, ...]) -> bool:
+    if not before or not after:
+        return False
+    return any(
+        before.get(key) != after.get(key)
+        for key in keys
+        if key in before and key in after
+    )
+
+
+def _target_change_status(
+    rec: dict,
+    after_snapshot: dict,
+    before_lookup: dict[str, dict],
+    after_lookup: dict[str, dict],
+    before_inbound: Counter,
+    after_inbound: Counter,
+) -> tuple[str, dict]:
+    prefix = _rec_prefix(rec)
+    targets = [str(target) for target in (rec.get("targets") or []) if target]
+    primary_url = str(rec.get("primary_url") or (targets[0] if targets else "") or "")
+
+    if prefix == "gap":
+        match = _gap_page_match(rec, before_lookup, after_snapshot)
+        return ("implemented" if match else "not_implemented"), match
+
+    if prefix in {"dup", "cann"}:
+        removal_targets = targets[1:] if len(targets) > 1 else targets
+        if not removal_targets:
+            return "unknown", {}
+        outcomes = []
+        metric_page: dict = {}
+        for target in removal_targets:
+            before_page = _lookup_url(before_lookup, target)
+            after_page = _lookup_url(after_lookup, target)
+            if not before_page:
+                outcomes.append("unknown")
+            elif not after_page or _is_redirect_page(after_page):
+                outcomes.append("implemented")
+            else:
+                outcomes.append("not_implemented")
+                metric_page = metric_page or after_page
+        if all(status == "implemented" for status in outcomes):
+            return "implemented", metric_page
+        if any(status == "implemented" for status in outcomes):
+            return "partially", metric_page
+        if any(status == "unknown" for status in outcomes):
+            return "unknown", metric_page
+        return "not_implemented", metric_page
+
+    if not primary_url:
+        return "unknown", {}
+    before_primary = _lookup_url(before_lookup, primary_url)
+    after_primary = _lookup_url(after_lookup, primary_url)
+    if not before_primary:
+        return "unknown", {}
+    if not after_primary:
+        return "page_removed", before_primary
+
+    if prefix in {"title", "ctr"}:
+        changed = [_page_hash_changed(before_primary, after_primary, ("title_hash", "description_hash"))]
+    elif prefix in {"geo", "geo-aio", "geo-cite", "geo-chunk", "out", "wh", "move"}:
+        check_targets = targets or [primary_url]
+        changed = []
+        for target in check_targets:
+            before_page = _lookup_url(before_lookup, target)
+            after_page = _lookup_url(after_lookup, target)
+            if before_page and after_page:
+                changed.append(_page_hash_changed(before_page, after_page, ("paragraph_hash", "heading_hash", "h1_hash")))
+        if not changed:
+            return "unknown", after_primary
+    elif prefix in {"link", "plink", "anchor"}:
+        changed = [_page_hash_changed(before_primary, after_primary, ("link_hash",))]
+    elif prefix in {"orphan", "deep"}:
+        inbound_before = max((before_inbound.get(key, 0) for key in _url_keys(primary_url)), default=0)
+        inbound_after = max((after_inbound.get(key, 0) for key in _url_keys(primary_url)), default=0)
+        changed = [
+            _page_hash_changed(before_primary, after_primary, ("link_hash",))
+            or inbound_after > inbound_before
+        ]
+    else:
+        return "unknown", after_primary
+
+    if all(changed):
+        return "implemented", after_primary
+    if any(changed):
+        return "partially", after_primary
+    return "not_implemented", after_primary
+
+
+def _metric_delta(before_page: dict, after_page: dict) -> dict:
+    before_metrics = before_page.get("metrics") or {}
+    after_metrics = after_page.get("metrics") or {}
+    traffic_before = _safe_float(before_metrics.get("traffic"))
+    traffic_after = _safe_float(after_metrics.get("traffic"))
+    clicks_before = _safe_float(before_metrics.get("clicks"))
+    clicks_after = _safe_float(after_metrics.get("clicks"))
+    impressions_before = _safe_float(before_metrics.get("impressions"))
+    impressions_after = _safe_float(after_metrics.get("impressions"))
+    before_position = _safe_float(before_metrics.get("position"))
+    after_position = _safe_float(after_metrics.get("position"))
+    position_delta = round(after_position - before_position, 2) if before_position and after_position else None
+    change_count = sum(
+        1
+        for key in ("title_hash", "description_hash", "heading_hash", "paragraph_hash", "link_hash", "schema_hash")
+        if before_page.get(key) != after_page.get(key)
+    )
+    confidence, caveat = _confidence(
+        change_count,
+        traffic_before,
+        traffic_after - traffic_before,
+        clicks_after - clicks_before,
+        impressions_after - impressions_before,
+    )
+    return {
+        "traffic_delta": round(traffic_after - traffic_before, 1),
+        "clicks_delta": round(clicks_after - clicks_before, 1),
+        "position_delta": position_delta,
+        "confidence": confidence,
+        "confidence_caveat": caveat,
+    }
+
+
+def _avg(values: list[float]) -> float | None:
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def _outcome_aggregates(rows: list[dict]) -> dict:
+    by_category: dict[str, dict] = {}
+    by_status: dict[str, dict] = {}
+    position_by_status: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        category = row.get("category") or "uncategorized"
+        status = row.get("change_status") or "unknown"
+        by_category.setdefault(category, {"count": 0, "statuses": {}})
+        by_category[category]["count"] += 1
+        by_category[category]["statuses"][status] = by_category[category]["statuses"].get(status, 0) + 1
+        by_status.setdefault(status, {"count": 0})
+        by_status[status]["count"] += 1
+        if row.get("position_delta") is not None:
+            position_by_status[status].append(_safe_float(row.get("position_delta")))
+    for status, values in position_by_status.items():
+        by_status.setdefault(status, {"count": 0})["avg_position_delta"] = _avg(values)
+    implemented = position_by_status.get("implemented", [])
+    not_implemented = position_by_status.get("not_implemented", [])
+    return {
+        "by_category": by_category,
+        "by_status": by_status,
+        "implemented_count": by_status.get("implemented", {}).get("count", 0),
+        "not_implemented_count": by_status.get("not_implemented", {}).get("count", 0),
+        "avg_position_delta_implemented": _avg(implemented),
+        "avg_position_delta_not_implemented": _avg(not_implemented),
+    }
+
+
+def detect_recommendation_outcomes(prev_snapshot: dict, curr_snapshot: dict) -> dict:
+    """Classify whether recommendations from a prior snapshot appear implemented."""
+    prev_recommendations = list(prev_snapshot.get("recommendations") or [])
+    if not prev_recommendations:
+        return {
+            "available": False,
+            "reason": "previous snapshot has no recommendation data",
+            "summary": {"total": 0},
+            "aggregates": {"by_category": {}, "by_status": {}},
+            "rows": [],
+            "caveats": HISTORY_CORRELATION_CAVEATS,
+            "caveat": RECOMMENDATION_OUTCOME_CAVEAT,
+        }
+    before_lookup = _snapshot_lookup(prev_snapshot)
+    after_lookup = _snapshot_lookup(curr_snapshot)
+    before_inbound = _inbound_counts(prev_snapshot)
+    after_inbound = _inbound_counts(curr_snapshot)
+    before_summary = prev_snapshot.get("summary") or {}
+    rows: list[dict] = []
+    for rec in prev_recommendations[:100]:
+        if not isinstance(rec, dict):
+            continue
+        status, matched_page = _target_change_status(
+            rec,
+            curr_snapshot,
+            before_lookup,
+            after_lookup,
+            before_inbound,
+            after_inbound,
+        )
+        targets = [str(target) for target in (rec.get("targets") or []) if target]
+        primary_url = str(rec.get("primary_url") or (targets[0] if targets else "") or "")
+        metric_url = (matched_page or {}).get("url") or primary_url
+        before_page = _lookup_url(before_lookup, metric_url)
+        after_page = _lookup_url(after_lookup, metric_url)
+        metrics = _metric_delta(before_page, after_page) if before_page or after_page else {
+            "traffic_delta": None,
+            "clicks_delta": None,
+            "position_delta": None,
+            "confidence": "none",
+            "confidence_caveat": "No tracked page change was detected for this URL.",
+        }
+        rows.append({
+            "id": rec.get("id") or "",
+            "category": rec.get("category") or "",
+            "type": rec.get("type") or "",
+            "priority": rec.get("priority") or "",
+            "title": rec.get("title") or "",
+            "primary_url": primary_url,
+            "matched_url": metric_url or "",
+            "targets": targets,
+            "issued_at": before_summary.get("created_at") or "",
+            "issued_snapshot_id": before_summary.get("snapshot_id") or "",
+            "change_status": status,
+            "estimated_clicks_gain": rec.get("estimated_clicks_gain"),
+            **metrics,
+        })
+    aggregates = _outcome_aggregates(rows)
+    return {
+        "available": True,
+        "summary": {
+            "total": len(rows),
+            "implemented": aggregates.get("implemented_count", 0),
+            "not_implemented": aggregates.get("not_implemented_count", 0),
+            "issued_snapshot_id": before_summary.get("snapshot_id") or "",
+            "issued_at": before_summary.get("created_at") or "",
+        },
+        "aggregates": aggregates,
+        "rows": rows,
+        "caveats": HISTORY_CORRELATION_CAVEATS,
+        "caveat": RECOMMENDATION_OUTCOME_CAVEAT,
+    }
 
 
 def _confidence(
@@ -398,6 +798,11 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
         for label, key in [
             ("title", "title_hash"),
             ("description", "description_hash"),
+            ("canonical", "canonical_hash"),
+            ("h1", "h1_hash"),
+            ("serp_title", "serp_title_hash"),
+            ("word_count", "word_count_hash"),
+            ("redirect_target", "redirect_target_hash"),
             ("headings", "heading_hash"),
             ("paragraphs", "paragraph_hash"),
             ("links", "link_hash"),
@@ -439,6 +844,8 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "url": a.get("url") or b.get("url") or url,
             "title_before": b.get("title") or "",
             "title_after": a.get("title") or "",
+            "description_before": b.get("description") or "",
+            "description_after": a.get("description") or "",
             "section": a.get("section") or b.get("section") or "",
             "status": status if fields or status in {"added", "removed"} else "unchanged",
             "changed_fields": fields,
@@ -452,6 +859,16 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "schema_removed": schema_removed,
             "metadata_before": b.get("metadata_issues") or [],
             "metadata_after": a.get("metadata_issues") or [],
+            "canonical_before": b.get("canonical_url") or "",
+            "canonical_after": a.get("canonical_url") or "",
+            "h1_before": b.get("h1") or "",
+            "h1_after": a.get("h1") or "",
+            "serp_title_before": b.get("serp_title") or "",
+            "serp_title_after": a.get("serp_title") or "",
+            "word_count_before": _safe_int(b.get("word_count")),
+            "word_count_after": _safe_int(a.get("word_count")),
+            "redirect_target_before": b.get("redirect_target_url") or "",
+            "redirect_target_after": a.get("redirect_target_url") or "",
             "freshness_before": b.get("freshness") or {},
             "freshness_after": a.get("freshness") or {},
             "traffic_before": round(traffic_before, 1),
@@ -511,6 +928,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
     link_changes = totals["link_additions"] + totals["link_removals"]
     schema_changes = totals["schema_additions"] + totals["schema_removals"]
     content_changes = paragraph_changes + totals["heading_additions"] + totals["heading_removals"]
+    recommendation_outcomes = detect_recommendation_outcomes(before_payload, after_payload)
     return {
         "summary": {
             "status": "ok",
@@ -543,12 +961,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
             "link_changes": link_changes,
             "schema_changes": schema_changes,
             "change_counts": dict(totals),
-            "caveats": [
-                "Impact rows are before/after associations, not causal proof.",
-                "The configured comparison window is used as the observation window; confirm the same window in GSC or analytics when available.",
-                "Validate against seasonality, provider sampling noise, ranking volatility, and unrelated site changes.",
-                "Use wider windows for low-traffic pages before treating a delta as meaningful.",
-            ],
+            "caveats": HISTORY_CORRELATION_CAVEATS,
         },
         "timeline": [
             {
@@ -582,6 +995,7 @@ def compare_snapshots(domain: str, before: str, after: str, projects_root: Path,
         ],
         "changes": changes[:1200],
         "impact_table": impact[:600],
+        "recommendation_outcomes": recommendation_outcomes,
     }
 
 

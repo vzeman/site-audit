@@ -20,19 +20,25 @@ import collections
 import gzip
 import io
 import logging
+import os
 import random
 import re
+import resource
 import time
 import urllib.robotparser
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Iterable, Optional, Set
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse, urldefrag
 
 import requests
 from bs4 import BeautifulSoup
+from lxml import html as lxml_html
+
+from .robots_txt import analyze as analyze_robots_txt
 
 # `curl_cffi` mimics a real browser's TLS fingerprint, which lets us past
 # Cloudflare / Shopify / DataDome / PerimeterX bot challenges that
@@ -62,6 +68,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36 site-audit/+https://github.com/vzeman/site-audit"
 )
+MAX_SITEMAP_BYTES = 50 * 1024 * 1024
 DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -112,11 +119,18 @@ class CrawlConfig:
     domain: str
     max_pages: int = 10000
     max_workers: int = 8
+    link_parse_processes: int = 0
+    adaptive_concurrency: bool = True
+    min_crawl_workers: int = 1
+    adaptive_success_threshold: int = 50
+    adaptive_slow_seconds: float = 3.0
+    adaptive_max_rss_mb: int = 0
     request_delay: float = 0.0  # extra delay per worker between requests
     timeout: float = 20.0
     follow_subdomains: bool = False
     respect_robots: bool = True
     use_cache: bool = True
+    retain_bodies: bool = False
     crawl_discovered_links: bool = True
     strip_header_footer: bool = False
     content_include_classes: list = field(default_factory=list)
@@ -140,9 +154,92 @@ class FetchResult:
     content_type: str
     from_cache: bool
     content_length_bytes: int = 0
+    content_encoding: str = ""
     x_robots_tag: str = ""                               # raw X-Robots-Tag header (lowercased)
+    page_links: list = field(default_factory=list)       # all extracted (target_url, anchor_text) pairs
     outlinks: list = field(default_factory=list)         # same-site (target_url, anchor_text)
     external_links: list = field(default_factory=list)   # cross-site (target_url, anchor_text)
+    error: str = ""
+    requested_url: str = ""
+    redirect_target_url: str = ""
+    redirect_chain: list[str] = field(default_factory=list)
+    redirect_hop_count: int = 0
+    redirect_status_codes: list[int] = field(default_factory=list)
+    elapsed_seconds: float = 0.0
+    body_cache_url: str = ""
+    body_released: bool = False
+
+
+@dataclass
+class AdaptiveConcurrency:
+    max_workers: int
+    min_workers: int = 1
+    enabled: bool = True
+    success_threshold: int = 50
+    slow_seconds: float = 3.0
+    max_rss_mb: int = 0
+    target_workers: int = 0
+    success_streak: int = 0
+
+    def __post_init__(self) -> None:
+        self.max_workers = max(1, int(self.max_workers or 1))
+        self.min_workers = max(1, min(int(self.min_workers or 1), self.max_workers))
+        self.success_threshold = max(1, int(self.success_threshold or 1))
+        self.slow_seconds = max(0.0, float(self.slow_seconds or 0.0))
+        self.max_rss_mb = int(self.max_rss_mb or _auto_rss_limit_mb())
+        self.target_workers = self.max_workers
+
+    def record(self, result: FetchResult | None = None, *, error: str = "") -> int:
+        if not self.enabled:
+            return self.target_workers
+        status = int(getattr(result, "status", 0) or 0) if result is not None else 0
+        result_error = (error or getattr(result, "error", "") or "").lower()
+        from_cache = bool(getattr(result, "from_cache", False)) if result is not None else False
+        elapsed = float(getattr(result, "elapsed_seconds", 0.0) or 0.0) if result is not None else 0.0
+        rss_mb = _current_rss_mb()
+        throttled = (
+            not from_cache
+            and (
+                status in {0, 408, 425, 429, 500, 502, 503, 504}
+                or result_error in {"timed_out", "fetch_failed"}
+                or (self.slow_seconds > 0 and elapsed > self.slow_seconds)
+            )
+        )
+        system_pressure = rss_mb > 0 and self.max_rss_mb > 0 and rss_mb > self.max_rss_mb
+        previous = self.target_workers
+        if throttled or system_pressure:
+            self.success_streak = 0
+            self.target_workers = max(self.min_workers, max(1, self.target_workers // 2))
+            return previous
+        if 200 <= status < 400 or from_cache:
+            self.success_streak += 1
+            if self.success_streak >= self.success_threshold and self.target_workers < self.max_workers:
+                self.target_workers += 1
+                self.success_streak = 0
+        return previous
+
+
+def _current_rss_mb() -> int:
+    try:
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        return 0
+    # Linux reports KiB, macOS reports bytes.
+    if value > 10_000_000:
+        return int(value / 1024 / 1024)
+    return int(value / 1024)
+
+
+def _auto_rss_limit_mb() -> int:
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        total_mb = int((pages * page_size) / 1024 / 1024)
+    except Exception:
+        total_mb = 0
+    if total_mb <= 0:
+        return 8192
+    return max(2048, min(16384, int(total_mb * 0.25)))
 
 
 @dataclass
@@ -152,16 +249,135 @@ class SitemapEntry:
     lastmod: str = ""
 
 
+_TRACKING_QUERY_PARAMS = {
+    "source",
+    "fbclid",
+    "gclid",
+    "dclid",
+    "msclkid",
+    "gbraid",
+    "wbraid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+}
+
+
 def normalize_url(url: str) -> str:
-    """Strip fragments and trailing slashes consistently."""
+    """Strip fragments and known tracking query parameters consistently."""
     url, _ = urldefrag(url)
-    return url
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    kept = [
+        (key, value)
+        for key, value in params
+        if not _is_tracking_query_param(key)
+    ]
+    if len(kept) == len(params):
+        return url
+    query = urlencode(kept, doseq=True)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+
+
+def _is_tracking_query_param(name: str) -> bool:
+    lower = (name or "").lower()
+    return lower.startswith("utm_") or lower in _TRACKING_QUERY_PARAMS
+
+
+def _response_redirect_chain(response, requested_url: str, final_url: str) -> list[str]:
+    history = list(getattr(response, "history", []) or [])
+    if not history and requested_url == final_url:
+        return []
+    chain: list[str] = []
+    for item in history:
+        item_url = normalize_url(getattr(item, "url", "") or "")
+        if item_url and (not chain or chain[-1] != item_url):
+            chain.append(item_url)
+    if not chain and requested_url != final_url:
+        chain.append(requested_url)
+    if final_url and (not chain or chain[-1] != final_url):
+        chain.append(final_url)
+    return chain
+
+
+def _response_redirect_status_codes(response) -> list[int]:
+    codes: list[int] = []
+    for item in list(getattr(response, "history", []) or []):
+        try:
+            code = int(getattr(item, "status_code", 0) or 0)
+        except Exception:
+            code = 0
+        if 300 <= code < 400:
+            codes.append(code)
+    return codes
 
 
 def _starting_url(domain: str) -> str:
     if domain.startswith("http://") or domain.startswith("https://"):
         return domain.rstrip("/")
     return f"https://{domain.rstrip('/')}"
+
+
+def _extract_links_from_html(
+    base_url: str,
+    body: str,
+    *,
+    strip_header_footer: bool = False,
+) -> list[tuple[str, str]]:
+    try:
+        doc = lxml_html.fromstring(body)
+    except Exception:
+        try:
+            soup = BeautifulSoup(body, "html.parser")
+        except Exception:
+            return []
+        if strip_header_footer:
+            for tag in soup.find_all(["header", "footer"]):
+                tag.decompose()
+        out: list[tuple[str, str]] = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
+                continue
+            absolute = normalize_url(urljoin(base_url, href))
+            anchor = " ".join(a.get_text(" ").split())
+            if not anchor:
+                anchor = (a.get("title") or a.get("aria-label") or "").strip()
+            out.append((absolute, anchor[:200]))
+        return out
+
+    if strip_header_footer:
+        for el in doc.xpath("//header|//footer"):
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+
+    out: list[tuple[str, str]] = []
+    for a in doc.iter("a"):
+        href = (a.get("href") or "").strip()
+        if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
+            continue
+        absolute = normalize_url(urljoin(base_url, href))
+        anchor = " ".join(a.text_content().split())
+        if not anchor:
+            anchor = (a.get("title") or a.get("aria-label") or "").strip()
+        out.append((absolute, anchor[:200]))
+    return out
+
+
+def _extract_links_from_file(args: tuple[str, str, bool]) -> list[tuple[str, str]]:
+    base_url, path, strip_header_footer = args
+    try:
+        body = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return _extract_links_from_html(
+        base_url,
+        body,
+        strip_header_footer=strip_header_footer,
+    )
 
 
 class Crawler:
@@ -179,6 +395,13 @@ class Crawler:
         self._robots: Optional[urllib.robotparser.RobotFileParser] = None
         self.sitemap_entries: list[dict] = []
         self.sitemap_urls_seen: list[str] = []
+        self.sitemap_errors: list[dict] = []
+        self.robots_txt_info: dict = {}
+        self.llms_txt_info: dict | None = None
+        self.llms_full_txt_info: dict | None = None
+        self.robots_disallowed_urls: set[str] = set()
+        self.link_parse_process_hits = 0
+        self.link_parse_process_fallbacks: collections.Counter[str] = collections.Counter()
         if _HAS_CFFI:
             # impersonate a real Chrome to bypass TLS-fingerprint bot detection
             self._session = _cffi.Session(impersonate="chrome124")
@@ -195,6 +418,7 @@ class Crawler:
         # Manager) 429 the first request from a fresh client until the
         # homepage has been visited and a session cookie has been issued.
         self._warm_session()
+        self._load_ai_text_files()
         sitemap_urls = self._discover_via_sitemaps()
         seeds = [normalize_url(urljoin(self.base_url, p)) for p in self.config.seed_paths]
         frontier_seed: Set[str] = set()
@@ -207,7 +431,10 @@ class Crawler:
         if not frontier_seed:
             frontier_seed.add(self.base_url)
 
-        return self._bfs(frontier_seed)
+        results = self._bfs(frontier_seed)
+        if self.robots_txt_info:
+            self.robots_txt_info["disallowed_urls"] = sorted(self.robots_disallowed_urls)
+        return results
 
     def _warm_session(self) -> None:
         """Fetch the homepage so CDNs hand us their bot-challenge cookie.
@@ -236,7 +463,7 @@ class Crawler:
         final_url: Optional[str] = canonical_url
         if final_url is None:
             r = self._request_with_retry(self.base_url + "/")
-            if r is None or r.status_code >= 400:
+            if r is None or r.status_code <= 0 or r.status_code >= 400:
                 return
             final_url = str(r.url)
             if self.config.use_cache and "html" in (r.headers.get("Content-Type") or "").lower():
@@ -262,18 +489,75 @@ class Crawler:
 
     def _load_robots(self) -> Optional[urllib.robotparser.RobotFileParser]:
         if not self.config.respect_robots:
+            # Still fetch robots.txt for reporting (AI access, technical SEO)
+            # without enforcing it against the crawl frontier.
+            self._fetch_robots_info()
             return None
         if self._robots is not None:
             return self._robots
+        self._fetch_robots_info()
         rp = urllib.robotparser.RobotFileParser()
-        robots_url = f"{self.base_url}/robots.txt"
-        r = self._request_with_retry(robots_url)
-        if r is not None and r.status_code == 200:
-            rp.parse(r.text.splitlines())
+        body = self.robots_txt_info.get("body")
+        if int(self.robots_txt_info.get("status") or 0) == 200 and body is not None:
+            rp.parse(body.splitlines())
         else:
             rp.parse([])
         self._robots = rp
         return rp
+
+    def _fetch_robots_info(self) -> None:
+        """Fetch and analyze robots.txt once, retaining the raw body on 200."""
+        if self.robots_txt_info:
+            return
+        robots_url = f"{self.base_url}/robots.txt"
+        r = self._request_with_retry(robots_url)
+        if r is not None and r.status_code == 200:
+            self.robots_txt_info = analyze_robots_txt(
+                robots_url,
+                r.status_code,
+                r.text,
+                final_url=r.url,
+                redirect_status_codes=_response_redirect_status_codes(r),
+            )
+            self.robots_txt_info["body"] = r.text
+        else:
+            status = r.status_code if r is not None else 0
+            self.robots_txt_info = analyze_robots_txt(
+                robots_url,
+                status,
+                "",
+                final_url=(r.url if r is not None else robots_url),
+                error=(getattr(r, "reason", "") if r is not None else "request_failed"),
+                redirect_status_codes=(_response_redirect_status_codes(r) if r is not None else []),
+            )
+
+    def _load_ai_text_files(self) -> None:
+        self._fetch_robots_info()
+        self.llms_txt_info = self._fetch_ai_text_file("/llms.txt")
+        self.llms_full_txt_info = self._fetch_ai_text_file("/llms-full.txt")
+
+    def _fetch_ai_text_file(self, path: str) -> dict:
+        url = f"{self.base_url}{path}"
+        r = self._request_with_retry(url)
+        content_type = str((r.headers.get("Content-Type") if r is not None else "") or "").lower()
+        if r is None or r.status_code != 200 or "html" in content_type:
+            # A 200 with an HTML content type is almost always an SPA /
+            # soft-404 catch-all page, not a real llms.txt file.
+            return {
+                "present": False,
+                "url": url,
+                "size_bytes": 0,
+                "first_lines": [],
+                "status": r.status_code if r is not None else 0,
+            }
+        text = r.text or ""
+        return {
+            "present": True,
+            "url": str(r.url or url),
+            "size_bytes": len(text.encode("utf-8", errors="ignore")),
+            "first_lines": text.splitlines()[:20],
+            "status": r.status_code,
+        }
 
     def _sitemaps_from_robots(self) -> list[str]:
         rp = self._load_robots()
@@ -295,9 +579,11 @@ class Crawler:
         seen_sitemaps: Set[str] = set()
         urls: Set[str] = set()
         entries: dict[str, SitemapEntry] = {}
+        out_of_scope_counts: collections.Counter[str] = collections.Counter()
         queue = collections.deque(dict.fromkeys(sm for sm in candidates if self._sitemap_allowed(sm)))
         self.sitemap_entries = []
         self.sitemap_urls_seen = []
+        self.sitemap_errors = []
 
         while queue:
             sm = queue.popleft()
@@ -306,6 +592,12 @@ class Crawler:
             seen_sitemaps.add(sm)
             r = self._request_with_retry(sm)
             if r is None or r.status_code != 200:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_is_not_accessible",
+                    "http_status": getattr(r, "status_code", 0) if r is not None else 0,
+                    "message": "not accessible" if r is None else f"HTTP {r.status_code}",
+                })
                 continue
             content = r.content
             if sm.endswith(".gz") or r.headers.get("Content-Type", "").endswith("gzip"):
@@ -313,10 +605,23 @@ class Crawler:
                     content = gzip.decompress(content)
                 except Exception:
                     pass
+            if len(content or b"") > MAX_SITEMAP_BYTES:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_larger_than_50mb",
+                    "http_status": r.status_code,
+                    "size_bytes": len(content or b""),
+                    "message": f"{len(content or b'')} bytes",
+                })
             try:
                 root = ET.fromstring(content)
             except Exception as exc:
                 LOG.warning("sitemap parse failed for %s: %s", sm, exc)
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_has_syntax_error",
+                    "message": str(exc),
+                })
                 continue
 
             tag = root.tag.split("}", 1)[-1]
@@ -344,6 +649,9 @@ class Crawler:
                     if not loc_text:
                         continue
                     url = normalize_url(loc_text)
+                    if not self._same_site(urlparse(url).netloc):
+                        out_of_scope_counts[sm] += 1
+                        continue
                     if self._url_pattern_allowed(url) and self._lastmod_allowed(lastmod_text):
                         urls.add(url)
                         entry = entries.setdefault(url, SitemapEntry(url=url))
@@ -351,6 +659,13 @@ class Crawler:
                             entry.source_sitemaps.append(sm)
                         if lastmod_text and not entry.lastmod:
                             entry.lastmod = lastmod_text
+            else:
+                self.sitemap_errors.append({
+                    "sitemap_url": sm,
+                    "issue": "sitemap_in_the_wrong_format",
+                    "http_status": r.status_code,
+                    "message": f"root element {tag}",
+                })
 
         self.sitemap_urls_seen = sorted(seen_sitemaps)
         self.sitemap_entries = [
@@ -361,6 +676,26 @@ class Crawler:
             }
             for entry in sorted(entries.values(), key=lambda item: item.url)
         ]
+        sitemap_url_counts = collections.Counter(
+            source
+            for entry in entries.values()
+            for source in entry.source_sitemaps
+        )
+        for sitemap_url, url_count in sitemap_url_counts.items():
+            if url_count > 50_000:
+                self.sitemap_errors.append({
+                    "sitemap_url": sitemap_url,
+                    "issue": "sitemap_with_over_50k_urls",
+                    "url_count": url_count,
+                    "message": f"{url_count} URLs",
+                })
+        for sitemap_url, url_count in out_of_scope_counts.items():
+            self.sitemap_errors.append({
+                "sitemap_url": sitemap_url,
+                "issue": "sitemap_includes_urls_out_of_its_scope",
+                "url_count": url_count,
+                "message": f"{url_count} out-of-scope URLs",
+            })
         LOG.info("Sitemap discovery: %d URLs across %d sitemaps", len(urls), len(seen_sitemaps))
         return sorted(urls)
 
@@ -436,6 +771,7 @@ class Crawler:
         if rp is not None:
             try:
                 if not rp.can_fetch(self.config.user_agent, url):
+                    self.robots_disallowed_urls.add(normalize_url(url))
                     return False
             except Exception:
                 pass
@@ -468,97 +804,215 @@ class Crawler:
         results: list[FetchResult] = []
         max_pages = self.config.max_pages
         active: dict = {}
+        adaptive = AdaptiveConcurrency(
+            max_workers=self.config.max_workers,
+            min_workers=self.config.min_crawl_workers,
+            enabled=self.config.adaptive_concurrency,
+            success_threshold=self.config.adaptive_success_threshold,
+            slow_seconds=self.config.adaptive_slow_seconds,
+            max_rss_mb=self.config.adaptive_max_rss_mb,
+        )
+        link_parse_processes = self._link_parse_process_count()
+        link_parse_pool = None
+        if link_parse_processes > 1:
+            link_parse_pool = ProcessPoolExecutor(max_workers=link_parse_processes)
+            LOG.info("  crawl link parsing: %d processes", link_parse_processes)
 
-        with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
-            while frontier and len(results) < max_pages:
-                while frontier and len(active) < self.config.max_workers and len(active) + len(results) < max_pages:
-                    url = frontier.popleft()
-                    fut = pool.submit(self._fetch, url)
-                    active[fut] = url
+        try:
+            with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
+                while (frontier or active) and len(results) < max_pages:
+                    while frontier and len(active) < adaptive.target_workers and len(active) + len(results) < max_pages:
+                        url = frontier.popleft()
+                        fut = pool.submit(self._fetch_with_links, url, link_parse_pool)
+                        active[fut] = url
 
-                if not active:
-                    break
+                    if not active:
+                        break
 
-                done_futures = []
-                for fut in as_completed(list(active.keys()), timeout=None):
-                    done_futures.append(fut)
-                    break  # process one at a time so we can refill the pool
+                    done_futures = []
+                    for fut in as_completed(list(active.keys()), timeout=None):
+                        done_futures.append(fut)
+                        break  # process one at a time so we can refill the pool
 
-                for fut in done_futures:
-                    url = active.pop(fut)
-                    try:
-                        result = fut.result()
-                    except Exception as exc:
-                        LOG.warning("fetch failed %s: %s", url, exc)
-                        continue
-                    if result is None:
-                        continue
-                    # Skip duplicates that arise when several request URLs
-                    # redirect to the same canonical (with/without trailing
-                    # slash, with/without www, redirected query params).
-                    if result.url in result_urls:
-                        # Still mark the pre-redirect URL as seen so we
-                        # don't try it again.
-                        seen.add(url)
-                        continue
-                    result_urls.add(result.url)
-                    seen.add(result.url)
-                    results.append(result)
-
-                    if "html" in result.content_type:
-                        page_outlinks: list[tuple[str, str]] = []
-                        page_external: list[tuple[str, str]] = []
-                        for link, anchor in self._extract_links(result.url, result.body):
-                            try:
-                                netloc = urlparse(link).netloc
-                            except Exception:
-                                continue
-                            if not netloc:
-                                continue
-                            if self._same_site(netloc):
-                                if link == result.url:
+                    for fut in done_futures:
+                        url = active.pop(fut)
+                        try:
+                            result = fut.result()
+                        except Exception as exc:
+                            LOG.warning("fetch failed %s: %s", url, exc)
+                            previous_workers = adaptive.record(None, error="fetch_failed")
+                            if adaptive.target_workers != previous_workers:
+                                LOG.info(
+                                    "  adaptive crawl workers: %d -> %d after fetch exception",
+                                    previous_workers,
+                                    adaptive.target_workers,
+                                )
+                            continue
+                        if result is None:
+                            continue
+                        previous_workers = adaptive.record(result)
+                        if adaptive.target_workers != previous_workers:
+                            LOG.info(
+                                "  adaptive crawl workers: %d -> %d after status %s",
+                                previous_workers,
+                                adaptive.target_workers,
+                                result.status,
+                            )
+                        # Skip duplicates that arise when several request URLs
+                        # redirect to the same canonical (with/without trailing
+                        # slash, with/without www, redirected query params).
+                        if result.url in result_urls:
+                            # Still mark the pre-redirect URL as seen so we
+                            # don't try it again.
+                            seen.add(url)
+                            continue
+                        result_urls.add(result.url)
+                        seen.add(result.url)
+                        if 200 <= result.status < 400 and "html" in result.content_type:
+                            page_outlinks: list[tuple[str, str]] = []
+                            page_external: list[tuple[str, str]] = []
+                            for link, anchor in result.page_links or []:
+                                try:
+                                    netloc = urlparse(link).netloc
+                                except Exception:
                                     continue
-                                page_outlinks.append((link, anchor))
-                                if not self.config.crawl_discovered_links:
+                                if not netloc:
                                     continue
-                                if link in seen:
-                                    continue
-                                if not self._allowed(link):
-                                    continue
-                                seen.add(link)
-                                frontier.append(link)
-                            else:
-                                page_external.append((link, anchor))
-                        result.outlinks = page_outlinks
-                        result.external_links = page_external
+                                if self._same_site(netloc):
+                                    if link == result.url:
+                                        continue
+                                    page_outlinks.append((link, anchor))
+                                    if not self.config.crawl_discovered_links:
+                                        continue
+                                    if link in seen:
+                                        continue
+                                    if not self._allowed(link):
+                                        continue
+                                    seen.add(link)
+                                    frontier.append(link)
+                                else:
+                                    page_external.append((link, anchor))
+                            result.outlinks = page_outlinks
+                            result.external_links = page_external
+                            result.page_links = []
+                            if (
+                                not self.config.retain_bodies
+                                and self.config.use_cache
+                                and result.body
+                                and result.body_cache_url
+                            ):
+                                result.body = ""
+                                result.body_released = True
 
-                    if len(results) % 25 == 0:
-                        LOG.info("crawled %d / queue %d / cache %s",
-                                 len(results), len(frontier),
-                                 "hit" if result.from_cache else "miss")
+                        results.append(result)
+
+                        if len(results) % 25 == 0:
+                            parse_note = ""
+                            if link_parse_pool is not None:
+                                top_fallback = self.link_parse_process_fallbacks.most_common(1)
+                                fallback_note = ""
+                                if top_fallback:
+                                    fallback_note = " %s=%d" % top_fallback[0]
+                                parse_note = (
+                                    " / parse proc %d fallback %d%s"
+                                    % (
+                                        self.link_parse_process_hits,
+                                        sum(self.link_parse_process_fallbacks.values()),
+                                        fallback_note,
+                                    )
+                                )
+                            LOG.info("crawled %d / queue %d / cache %s%s",
+                                     len(results), len(frontier),
+                                     "hit" if result.from_cache else "miss",
+                                     parse_note)
+        finally:
+            if link_parse_pool is not None:
+                link_parse_pool.shutdown()
 
         LOG.info("Crawl finished: %d pages", len(results))
         return results
 
+    def _link_parse_process_count(self) -> int:
+        configured = int(self.config.link_parse_processes or 0)
+        if configured > 0:
+            return min(configured, max(1, self.config.max_workers))
+        if not self.config.use_cache:
+            return 0
+        if self.config.max_pages < 1000:
+            return 0
+        cpu_count = os.cpu_count() or 2
+        return min(max(2, cpu_count - 1), max(1, self.config.max_workers), 8)
+
+    def _fetch_with_links(self, url: str, link_parse_pool=None) -> Optional[FetchResult]:
+        if link_parse_pool is not None:
+            cached = self._fetch_cached_with_links(url, link_parse_pool)
+            if cached is not None:
+                self.link_parse_process_hits += 1
+                return cached
+        result = self._fetch(url)
+        if result is None:
+            return None
+        if 200 <= result.status < 400 and "html" in result.content_type and result.body:
+            result.page_links = _extract_links_from_html(result.url, result.body)
+        return result
+
+    def _fetch_cached_with_links(self, url: str, link_parse_pool) -> Optional[FetchResult]:
+        if (
+            self.config.content_include_classes
+            or self.config.content_exclude_classes
+        ):
+            self.link_parse_process_fallbacks["content_scope"] += 1
+            return None
+        started = time.perf_counter()
+        meta = self.cache.get_metadata(url)
+        if not meta:
+            self.link_parse_process_fallbacks["metadata_miss"] += 1
+            return None
+        status = int(meta.get("status") or 0)
+        content_type = (meta.get("content_type") or "").lower()
+        if not (200 <= status < 400) or "html" not in content_type:
+            self.link_parse_process_fallbacks["not_html_success"] += 1
+            return None
+        body_path = self.cache.body_file_path(url)
+        if not body_path.is_file():
+            self.link_parse_process_fallbacks["body_file_missing"] += 1
+            return None
+        final_url = meta.get("canonical_url") or url
+        headers = meta.get("headers") or {}
+        xrt = ""
+        content_encoding = ""
+        for k, v in headers.items():
+            if k.lower() == "x-robots-tag":
+                xrt = (v or "").lower()
+            if k.lower() == "content-encoding":
+                content_encoding = (v or "").lower()
+        page_links = link_parse_pool.submit(
+            _extract_links_from_file,
+            (final_url, str(body_path), bool(self.config.strip_header_footer)),
+        ).result()
+        return FetchResult(
+            url=final_url,
+            status=status,
+            body="",
+            content_type=content_type,
+            from_cache=True,
+            content_length_bytes=int(meta.get("body_size_bytes") or 0),
+            content_encoding=content_encoding,
+            x_robots_tag=xrt,
+            requested_url=url,
+            redirect_target_url=final_url if final_url != url else "",
+            redirect_chain=[url, final_url] if final_url != url else [],
+            redirect_hop_count=1 if final_url != url else 0,
+            redirect_status_codes=[],
+            elapsed_seconds=time.perf_counter() - started,
+            body_cache_url=url,
+            body_released=True,
+            page_links=page_links,
+        )
+
     def _extract_links(self, base_url: str, body: str) -> list[tuple[str, str]]:
         """Return list of (absolute_url, anchor_text)."""
-        try:
-            soup = BeautifulSoup(body, "html.parser")
-        except Exception:
-            return []
-        out: list[tuple[str, str]] = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"].strip()
-            if not href or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
-                continue
-            absolute = urljoin(base_url, href)
-            absolute = normalize_url(absolute)
-            anchor = " ".join(a.get_text(" ").split())
-            if not anchor:
-                # Fall back to title attribute or aria-label so image links aren't blank
-                anchor = (a.get("title") or a.get("aria-label") or "").strip()
-            out.append((absolute, anchor[:200]))
-        return out
+        return _extract_links_from_html(base_url, body)
 
     # --- single fetch --------------------------------------------------
 
@@ -591,7 +1045,19 @@ class Crawler:
                     r = self._session.get(url, timeout=self.config.timeout, allow_redirects=True)
             except Exception as exc:
                 LOG.warning("%s %s failed: %s", method, url, exc)
-                return None
+                resp = requests.Response()
+                resp.status_code = 0
+                resp.url = url
+                resp._content = b""
+                resp.headers = {}
+                message = str(exc).lower()
+                if isinstance(exc, requests.TooManyRedirects):
+                    resp.reason = "redirect_loop"
+                elif "timeout" in message or "timed out" in message:
+                    resp.reason = "timed_out"
+                else:
+                    resp.reason = "fetch_failed"
+                return resp
             if r.status_code in (429, 503):
                 # honour Retry-After when present, else exponential + jitter
                 retry_after = r.headers.get("Retry-After")
@@ -620,6 +1086,7 @@ class Crawler:
         return r  # last response (still 429)
 
     def _fetch(self, url: str) -> Optional[FetchResult]:
+        started = time.perf_counter()
         if self.config.use_cache:
             cached = self.cache.get(url)
             if cached and 200 <= cached.status < 400:
@@ -630,10 +1097,12 @@ class Crawler:
                 # case-insensitive lookup for X-Robots-Tag (cache may
                 # preserve original casing — be defensive).
                 xrt = ""
+                content_encoding = ""
                 for k, v in cached_headers.items():
                     if k.lower() == "x-robots-tag":
                         xrt = (v or "").lower()
-                        break
+                    if k.lower() == "content-encoding":
+                        content_encoding = (v or "").lower()
                 return FetchResult(
                     url=cached.canonical_url or url,
                     status=cached.status,
@@ -641,7 +1110,15 @@ class Crawler:
                     content_type=cached_content_type,
                     from_cache=True,
                     content_length_bytes=len(cached.body or b""),
+                    content_encoding=content_encoding,
                     x_robots_tag=xrt,
+                    requested_url=url,
+                    redirect_target_url=cached.canonical_url or "",
+                    redirect_chain=[url, cached.canonical_url] if cached.canonical_url and cached.canonical_url != url else [],
+                    redirect_hop_count=1 if cached.canonical_url and cached.canonical_url != url else 0,
+                    redirect_status_codes=[],
+                    elapsed_seconds=time.perf_counter() - started,
+                    body_cache_url=url,
                 )
 
         if self.config.request_delay > 0:
@@ -653,7 +1130,30 @@ class Crawler:
 
         final_url = normalize_url(r.url)
         ctype = r.headers.get("Content-Type", "").lower()
+        content_encoding = (r.headers.get("Content-Encoding", "") or "").lower()
         body_bytes = r.content
+
+        redirect_chain = _response_redirect_chain(r, url, final_url)
+        redirect_hop_count = max(len(redirect_chain) - 1, 0)
+        redirect_status_codes = _response_redirect_status_codes(r)
+
+        if r.status_code <= 0:
+            return FetchResult(
+                url=final_url,
+                status=0,
+                body="",
+                content_type=ctype,
+                from_cache=False,
+                content_length_bytes=0,
+                content_encoding=content_encoding,
+                error=getattr(r, "reason", "") or "fetch_failed",
+                requested_url=url,
+                redirect_target_url=final_url if url != final_url else "",
+                redirect_chain=redirect_chain,
+                redirect_hop_count=redirect_hop_count,
+                redirect_status_codes=redirect_status_codes,
+                elapsed_seconds=time.perf_counter() - started,
+            )
 
         if self.config.use_cache and 200 <= r.status_code < 400 and "html" in ctype:
             self.cache.put(final_url, r.status_code, dict(r.headers), body_bytes)
@@ -665,9 +1165,25 @@ class Crawler:
                 self.cache.put(url, r.status_code, dict(r.headers), body_bytes,
                                canonical_url=final_url)
 
-        if "html" not in ctype:
-            return None
         if r.status_code >= 400:
+            return FetchResult(
+                url=final_url,
+                status=r.status_code,
+                body="",
+                content_type=ctype,
+                from_cache=False,
+                content_length_bytes=len(body_bytes or b""),
+                content_encoding=content_encoding,
+                x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
+                requested_url=url,
+                redirect_target_url=final_url if url != final_url else "",
+                redirect_chain=redirect_chain,
+                redirect_hop_count=redirect_hop_count,
+                redirect_status_codes=redirect_status_codes,
+                elapsed_seconds=time.perf_counter() - started,
+                body_cache_url=final_url if self.config.use_cache else "",
+            )
+        if "html" not in ctype:
             return None
 
         try:
@@ -682,7 +1198,15 @@ class Crawler:
             content_type=ctype,
             from_cache=False,
             content_length_bytes=len(body_bytes or b""),
+            content_encoding=content_encoding,
             x_robots_tag=(r.headers.get("X-Robots-Tag", "") or "").lower(),
+            requested_url=url,
+            redirect_target_url=final_url if url != final_url else "",
+            redirect_chain=redirect_chain,
+            redirect_hop_count=redirect_hop_count,
+            redirect_status_codes=redirect_status_codes,
+            elapsed_seconds=time.perf_counter() - started,
+            body_cache_url=final_url if self.config.use_cache else "",
         )
 
     def _prepare_html_body(self, body: str) -> str:

@@ -53,11 +53,14 @@ class ExtractedPage:
     body: str
     word_count: int
     language: Optional[str]
+    html_lang: str = ""
     canonical_url: str = ""
     robots_content: str = ""
+    hreflang: list[dict] = field(default_factory=list)
     og_title: str = ""
     og_description: str = ""
     og_image: str = ""
+    og_url: str = ""
     twitter_card: str = ""
     twitter_title: str = ""
     twitter_description: str = ""
@@ -79,7 +82,13 @@ class ExtractedPage:
     content_sequence: list[dict] = field(default_factory=list)  # headings + body blocks in DOM order for order/path analysis
     paragraph_link_counts: list[tuple[int, int]] = field(default_factory=list)  # (internal, external) per paragraph, aligned with .paragraphs
     noindex: bool = False  # set when meta robots / X-Robots-Tag asks search engines not to index this URL
-    noindex_source: str = ""  # "meta" | "header" | "" — diagnostic only
+    noindex_source: str = ""  # "meta" | "header" | "meta+header" | "" — diagnostic only
+    nofollow: bool = False  # set when meta robots / X-Robots-Tag asks search engines not to follow links on this URL
+    nofollow_source: str = ""  # "meta" | "header" | "meta+header" | "" — diagnostic only
+    meta_refresh_redirect: bool = False
+    meta_refresh_target_url: str = ""
+    title_tag_count: int = 0
+    meta_description_tag_count: int = 0
     link_quality: dict = field(default_factory=dict)  # per-page link quality counters (total, has_text, has_title, image_only, empty, …)
     link_audit_rows: list[dict] = field(default_factory=list)  # one row per <a href>: anchor + flags, used for site-level aggregation
     media_items: list[dict] = field(default_factory=list)  # images/video/audio/iframes with accessibility-relevant attributes
@@ -112,6 +121,25 @@ def _meta(soup: BeautifulSoup, name: str) -> str:
     if tag and tag.get("content"):
         return _clean(html.unescape(tag["content"]))
     return ""
+
+
+def _meta_refresh_target(soup: BeautifulSoup, base_url: str) -> str:
+    tag = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.I)})
+    if not tag:
+        return ""
+    content = str(tag.get("content") or "")
+    match = re.search(r"url\s*=\s*['\"]?([^'\";]+)", content, re.I)
+    if not match:
+        return ""
+    return urljoin(base_url, match.group(1).strip())
+
+
+def _meta_description_tag_count(soup: BeautifulSoup) -> int:
+    return sum(
+        1
+        for tag in soup.find_all("meta")
+        if str(tag.get("name") or "").strip().lower() == "description"
+    )
 
 
 def _schema_type_values(value) -> list[str]:
@@ -261,6 +289,20 @@ def _canonical_url(soup: BeautifulSoup) -> str:
     tag = soup.find("link", rel=lambda value: value and "canonical" in [str(v).lower() for v in (value if isinstance(value, list) else [value])])
     href = (tag.get("href") or "").strip() if tag else ""
     return _clean(html.unescape(href))
+
+
+def _hreflang_annotations(soup: BeautifulSoup) -> list[dict]:
+    rows: list[dict] = []
+    for tag in soup.find_all("link"):
+        rel = tag.get("rel")
+        rel_values = [str(v).lower() for v in (rel if isinstance(rel, list) else [rel]) if v]
+        if "alternate" not in rel_values or not tag.get("hreflang"):
+            continue
+        hreflang = _clean(html.unescape(str(tag.get("hreflang") or "")))
+        href = _clean(html.unescape(str(tag.get("href") or "")))
+        if hreflang or href:
+            rows.append({"hreflang": hreflang, "href": href})
+    return rows
 
 
 def _robots_content(soup: BeautifulSoup) -> str:
@@ -509,6 +551,7 @@ def _extract_headings(soup: BeautifulSoup) -> tuple[str, list[str], list[dict], 
 #   2. X-Robots-Tag HTTP header (same syntax, optional bot prefix).
 # We split on commas and on whitespace + colon so all reasonable forms parse.
 _NOINDEX_TOKEN_RE = re.compile(r"\bnoindex\b", re.IGNORECASE)
+_NOFOLLOW_TOKEN_RE = re.compile(r"\bnofollow\b", re.IGNORECASE)
 _INDEX_BOTS = ("robots", "googlebot", "bingbot", "slurp", "duckduckbot", "baiduspider", "yandex")
 
 
@@ -516,20 +559,47 @@ def _has_noindex_directive(value: str) -> bool:
     return bool(_NOINDEX_TOKEN_RE.search(value or ""))
 
 
-def _detect_noindex(soup: BeautifulSoup, header_value: str = "") -> tuple[bool, str]:
-    """Return (is_noindex, source). Source is "meta" / "header" / ""."""
-    # X-Robots-Tag may name a specific bot: "googlebot: noindex". We treat
-    # any bot directive that contains "noindex" as a hard noindex signal.
-    if header_value and _has_noindex_directive(header_value):
-        return True, "header"
+def _has_nofollow_directive(value: str) -> bool:
+    return bool(_NOFOLLOW_TOKEN_RE.search(value or ""))
+
+
+def _source(meta_has_directive: bool, header_has_directive: bool) -> str:
+    if meta_has_directive and header_has_directive:
+        return "meta+header"
+    if meta_has_directive:
+        return "meta"
+    if header_has_directive:
+        return "header"
+    return ""
+
+
+def _detect_robots_directives(soup: BeautifulSoup, header_value: str = "") -> dict:
+    """Return robots noindex/nofollow directives and their source channels."""
+    header_noindex = bool(header_value and _has_noindex_directive(header_value))
+    header_nofollow = bool(header_value and _has_nofollow_directive(header_value))
+    meta_noindex = False
+    meta_nofollow = False
     for tag in soup.find_all("meta"):
         name = (tag.get("name") or tag.get("http-equiv") or "").strip().lower()
         if name not in _INDEX_BOTS:
             continue
         content = (tag.get("content") or "").strip()
         if _has_noindex_directive(content):
-            return True, "meta"
-    return False, ""
+            meta_noindex = True
+        if _has_nofollow_directive(content):
+            meta_nofollow = True
+    return {
+        "noindex": meta_noindex or header_noindex,
+        "noindex_source": _source(meta_noindex, header_noindex),
+        "nofollow": meta_nofollow or header_nofollow,
+        "nofollow_source": _source(meta_nofollow, header_nofollow),
+    }
+
+
+def _detect_noindex(soup: BeautifulSoup, header_value: str = "") -> tuple[bool, str]:
+    """Return (is_noindex, source). Source is "meta" / "header" / "meta+header" / ""."""
+    directives = _detect_robots_directives(soup, header_value)
+    return bool(directives["noindex"]), str(directives["noindex_source"])
 
 
 def _link_quality(soup: BeautifulSoup, page_url: str) -> tuple[dict, list[dict]]:
@@ -604,11 +674,16 @@ def _link_quality(soup: BeautifulSoup, page_url: str) -> tuple[dict, list[dict]]
         target_url = urldefrag(urljoin(page_url, href))[0]
         context_parent = a.find_parent(["p", "li", "h1", "h2", "h3", "h4", "td", "th", "section", "article"])
         context_text = _clean(context_parent.get_text(" "))[:320] if context_parent else ""
+        rel_attr = a.get("rel") or []
+        if isinstance(rel_attr, str):
+            rel_attr = rel_attr.split()
+        rel_tokens = {str(item).lower() for item in rel_attr}
         rows.append({
             "anchor": eff[:200],
             "href": href[:500],
             "target_url": target_url[:1000],
             "context": context_text,
+            "nofollow": "nofollow" in rel_tokens,
             "has_text": bool(text),
             "has_title": bool(title_attr),
             "has_aria": bool(aria_label),
@@ -836,7 +911,7 @@ def extract(
         return None
 
     soup = BeautifulSoup(html_body, "html.parser")
-    is_noindex, noindex_source = _detect_noindex(soup, x_robots_tag)
+    robots_directives = _detect_robots_directives(soup, x_robots_tag)
     title = _title_from_html(soup)
     description = _meta(soup, "description") or _meta(soup, "og:description")
     canonical_url = _canonical_url(soup)
@@ -844,11 +919,17 @@ def extract(
     og_title = _meta(soup, "og:title")
     og_description = _meta(soup, "og:description")
     og_image = _meta(soup, "og:image")
+    og_url = _meta(soup, "og:url")
     twitter_card = _meta(soup, "twitter:card")
     twitter_title = _meta(soup, "twitter:title")
     twitter_description = _meta(soup, "twitter:description")
+    meta_refresh_target_url = _meta_refresh_target(soup, url)
+    title_tag_count = len(soup.find_all("title"))
+    meta_description_tag_count = _meta_description_tag_count(soup)
     lang_attr = soup.find("html")
-    language = lang_attr.get("lang") if lang_attr and lang_attr.has_attr("lang") else None
+    html_lang = _clean(str(lang_attr.get("lang") or "")) if lang_attr and lang_attr.has_attr("lang") else ""
+    language = html_lang or None
+    hreflang = _hreflang_annotations(soup)
 
     body_text: str = ""
     if (
@@ -901,11 +982,14 @@ def extract(
         body=truncated,
         word_count=word_count,
         language=language,
+        html_lang=html_lang,
         canonical_url=canonical_url,
         robots_content=robots_content,
+        hreflang=hreflang,
         og_title=og_title,
         og_description=og_description,
         og_image=og_image,
+        og_url=og_url,
         twitter_card=twitter_card,
         twitter_title=twitter_title,
         twitter_description=twitter_description,
@@ -926,8 +1010,14 @@ def extract(
         paragraphs=paragraphs,
         content_sequence=content_sequence,
         paragraph_link_counts=paragraph_link_counts,
-        noindex=is_noindex,
-        noindex_source=noindex_source,
+        noindex=bool(robots_directives["noindex"]),
+        noindex_source=str(robots_directives["noindex_source"]),
+        nofollow=bool(robots_directives["nofollow"]),
+        nofollow_source=str(robots_directives["nofollow_source"]),
+        meta_refresh_redirect=bool(meta_refresh_target_url),
+        meta_refresh_target_url=meta_refresh_target_url,
+        title_tag_count=title_tag_count,
+        meta_description_tag_count=meta_description_tag_count,
         link_quality=link_quality,
         link_audit_rows=link_audit_rows,
         media_items=media_items,

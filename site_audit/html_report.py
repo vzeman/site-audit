@@ -41,6 +41,12 @@ _PLACEHOLDERS = {
     "__KEYWORD_ATTRIBUTION_JSON__": "keyword_attribution",
     "__ANSWER_BLOCKS_JSON__": "answer_blocks",
     "__FRESHNESS_IMPACT_JSON__": "freshness_impact",
+    "__STRIKING_DISTANCE_JSON__": "striking_distance",
+    "__CTR_ANOMALIES_JSON__": "ctr_anomalies",
+    "__AI_ACCESS_JSON__": "ai_access",
+    "__AI_CITATIONS_JSON__": "ai_citations",
+    "__CRUX_JSON__": "crux",
+    "__CHUNK_RETRIEVABILITY_JSON__": "chunk_retrievability",
     "__CANNIBALIZATION_JSON__": "cannibalization",
     "__DUPLICATE_FRAGMENTS_JSON__": "duplicate_fragments",
     "__TEMPLATE_PATTERNS_JSON__": "template_patterns",
@@ -73,6 +79,7 @@ _PLACEHOLDERS = {
     "__AHREFS_JSON__": "ahrefs",
     "__BEST_PAGES_JSON__": "best_pages",
     "__PERFORMANCE_EXPLAINER_JSON__": "performance_explainer",
+    "__RECOMMENDATION_OUTCOMES_JSON__": "recommendation_outcomes",
 }
 
 
@@ -267,6 +274,12 @@ def write_html_report(
     keyword_attribution: Optional[dict] = None,
     answer_blocks: Optional[dict] = None,
     freshness_impact: Optional[dict] = None,
+    striking_distance: Optional[dict] = None,
+    ctr_anomalies: Optional[dict] = None,
+    ai_access: Optional[dict] = None,
+    ai_citations: Optional[dict] = None,
+    crux: Optional[dict] = None,
+    chunk_retrievability: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
     template_patterns: Optional[dict] = None,
@@ -299,6 +312,7 @@ def write_html_report(
     ahrefs: Optional[dict] = None,
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
+    recommendation_outcomes: Optional[dict] = None,
 ) -> Path:
     template = template_path.read_text(encoding="utf-8")
     out_path = Path(output_dir) / "index.html"
@@ -330,6 +344,12 @@ def write_html_report(
         "keyword_attribution": keyword_attribution or {},
         "answer_blocks": answer_blocks or {},
         "freshness_impact": freshness_impact or {},
+        "striking_distance": striking_distance or {},
+        "ctr_anomalies": ctr_anomalies or {},
+        "ai_access": ai_access or {},
+        "ai_citations": ai_citations or {},
+        "crux": crux or {},
+        "chunk_retrievability": chunk_retrievability or {},
         "cannibalization": cannibalization or {},
         "duplicate_fragments": duplicate_fragments or {},
         "template_patterns": template_patterns or {},
@@ -362,6 +382,7 @@ def write_html_report(
         "ahrefs": ahrefs or {},
         "best_pages": best_pages or {},
         "performance_explainer": performance_explainer or {},
+        "recommendation_outcomes": recommendation_outcomes or {},
     }
 
     rendered = template

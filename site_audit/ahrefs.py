@@ -72,6 +72,7 @@ METRICS_ENDPOINT = "metrics"
 PAGES_BY_TRAFFIC_ENDPOINT = "pages-by-traffic"
 TOP_PAGES_ENDPOINT = "top-pages"
 ORGANIC_KEYWORDS_ENDPOINT = "organic-keywords"
+MAX_QUERY_PAGES_ROWS = 5000
 
 
 @dataclass
@@ -312,10 +313,15 @@ def _url_keys(url: str) -> list[str]:
     keys = [norm]
     host = parsed.netloc
     path = parsed.path or "/"
-    if host.startswith("www."):
-        keys.append(urlunparse((parsed.scheme, host[4:], path, "", "", "")))
-    else:
-        keys.append(urlunparse((parsed.scheme, f"www.{host}", path, "", "", "")))
+    hosts = [host[4:] if host.startswith("www.") else f"www.{host}", host]
+    schemes = [parsed.scheme]
+    if parsed.scheme == "https":
+        schemes.append("http")
+    elif parsed.scheme == "http":
+        schemes.append("https")
+    for scheme in schemes:
+        for candidate_host in hosts:
+            keys.append(urlunparse((scheme, candidate_host, path, "", "", "")))
     keys.append(path.rstrip("/") or "/")
     return list(dict.fromkeys(keys))
 
@@ -536,6 +542,7 @@ def build_analysis(
                 "pages_by_traffic": {},
                 "top_pages": [],
                 "organic_keywords": [],
+                "query_pages": [],
                 "directories": [],
                 "clusters": [],
                 "semantic_map": {"points": [], "shown": 0},
@@ -564,6 +571,7 @@ def build_analysis(
         cluster_labels,
         cluster_lookup,
     )
+    query_pages = _query_pages_payload(organic_keywords)
     directories = _aggregate_directories(top_pages, organic_keywords)
     clusters = _aggregate_clusters(top_pages, organic_keywords, cluster_lookup)
     metrics = raw.get("metrics", {}).get("metrics") or {}
@@ -618,6 +626,7 @@ def build_analysis(
         "pages_by_traffic": traffic_buckets,
         "top_pages": top_pages,
         "organic_keywords": organic_keywords,
+        "query_pages": query_pages,
         "directories": directories,
         "clusters": clusters,
         "semantic_map": {
@@ -631,10 +640,17 @@ def build_analysis(
 
 
 def _page_lookup(pages: list[PageInfo]) -> dict[str, int]:
+    # Register keys tier-by-tier so every page's exact/normalized key wins
+    # before any page's looser variants (www/protocol/path fallbacks). This
+    # keeps e.g. a crawled http:// page from shadowing the distinct https://
+    # page's exact URL.
+    keyed = [(i, _url_keys(page.url)) for i, page in enumerate(pages)]
     lookup: dict[str, int] = {}
-    for i, page in enumerate(pages):
-        for key in _url_keys(page.url):
-            lookup.setdefault(key, i)
+    max_keys = max((len(keys) for _, keys in keyed), default=0)
+    for tier in range(max_keys):
+        for i, keys in keyed:
+            if tier < len(keys):
+                lookup.setdefault(keys[tier], i)
     return lookup
 
 
@@ -779,6 +795,31 @@ def _normalize_keywords(
         })
     rows.sort(key=lambda r: r["traffic"], reverse=True)
     return rows
+
+
+def _query_pages_payload(organic_keywords: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for row in organic_keywords:
+        rows.append({
+            "query": row.get("keyword") or "",
+            "url": row.get("matched_url") or row.get("url") or "",
+            "clicks": row.get("traffic", 0),
+            "impressions": row.get("volume", 0),
+            "ctr": None,
+            "position": row.get("position", 0),
+            "source": "ahrefs",
+            "provider": "ahrefs",
+            "provider_label": "Ahrefs",
+            "matched_url": row.get("matched_url", ""),
+            "page_title": row.get("page_title", ""),
+            "cluster": row.get("cluster"),
+            "cluster_label": row.get("cluster_label", ""),
+            "intents": row.get("intents") or [],
+            "traffic": row.get("traffic", 0),
+            "volume": row.get("volume", 0),
+        })
+    rows.sort(key=lambda r: _to_int(r.get("impressions")), reverse=True)
+    return rows[:MAX_QUERY_PAGES_ROWS]
 
 
 def _empty_group(key: str, label: str = "") -> dict:

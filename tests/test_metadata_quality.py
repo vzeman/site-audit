@@ -12,7 +12,11 @@ def _page(
     canonical_url: str = "https://example.com/page",
     og_title: str = "OG title",
     og_description: str = "OG description",
+    og_image: str = "",
+    og_url: str = "",
     twitter_card: str = "summary",
+    twitter_title: str = "Twitter title",
+    twitter_description: str = "Twitter description",
 ) -> ExtractedPage:
     return ExtractedPage(
         url=url,
@@ -24,20 +28,27 @@ def _page(
         canonical_url=canonical_url,
         og_title=og_title,
         og_description=og_description,
+        og_image=og_image,
+        og_url=og_url,
         twitter_card=twitter_card,
+        twitter_title=twitter_title,
+        twitter_description=twitter_description,
     )
 
 
 def test_extract_serp_metadata_fields() -> None:
     html = """
-    <html><head>
+    <html lang="sk-SK"><head>
       <title>Complete metadata example</title>
       <meta name="description" content="A complete description for search result snippets and previews.">
       <link rel="canonical" href="https://example.com/canonical">
+      <link rel="alternate" hreflang="sk" href="https://example.com/page">
+      <link rel="alternate" hreflang="en" href="https://example.com/en/page">
       <meta name="robots" content="index,follow">
       <meta property="og:title" content="Open graph title">
       <meta property="og:description" content="Open graph description">
       <meta property="og:image" content="https://example.com/image.png">
+      <meta property="og:url" content="https://example.com/page">
       <meta name="twitter:card" content="summary_large_image">
       <meta name="twitter:title" content="Twitter title">
       <meta name="twitter:description" content="Twitter description">
@@ -55,32 +66,144 @@ def test_extract_serp_metadata_fields() -> None:
     assert page is not None
     assert page.description == "A complete description for search result snippets and previews."
     assert page.canonical_url == "https://example.com/canonical"
+    assert page.html_lang == "sk-SK"
+    assert page.hreflang == [
+        {"hreflang": "sk", "href": "https://example.com/page"},
+        {"hreflang": "en", "href": "https://example.com/en/page"},
+    ]
     assert page.robots_content == "index,follow"
     assert page.og_title == "Open graph title"
     assert page.og_description == "Open graph description"
     assert page.og_image == "https://example.com/image.png"
+    assert page.og_url == "https://example.com/page"
     assert page.twitter_card == "summary_large_image"
     assert page.twitter_title == "Twitter title"
     assert page.twitter_description == "Twitter description"
+
+
+def test_extract_robots_nofollow_sources_from_meta_and_header() -> None:
+    html = """
+    <html><head>
+      <title>Robots directives</title>
+      <meta name="robots" content="index,nofollow">
+    </head><body>
+      <p>This page has enough body copy for the extractor fallback to keep it.
+      It discusses robots directives and contains enough useful text for the
+      extraction test body threshold to be satisfied without external parsers.</p>
+    </body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000, x_robots_tag="googlebot: nofollow")
+
+    assert page is not None
+    assert page.nofollow is True
+    assert page.nofollow_source == "meta+header"
+    assert page.noindex is False
+
+
+def test_extract_link_audit_rows_include_nofollow_rel() -> None:
+    html = """
+    <html><head><title>Link rel page</title></head><body>
+      <p>This page has enough body copy for the extractor fallback to keep it.
+      It contains internal links with different rel attributes so the link audit
+      rows can record whether each individual link is nofollow.</p>
+      <a href="/target" rel="nofollow">Nofollow target</a>
+      <a href="/other">Dofollow target</a>
+    </body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000)
+
+    assert page is not None
+    by_target = {row["target_url"]: row for row in page.link_audit_rows}
+    assert by_target["https://example.com/target"]["nofollow"] is True
+    assert by_target["https://example.com/other"]["nofollow"] is False
+
+
+def test_extract_detects_meta_refresh_redirect_target() -> None:
+    html = """
+    <html><head>
+      <title>Refresh page</title>
+      <meta http-equiv="refresh" content="0; url=/target">
+    </head><body><main><p>Useful page content for extraction and metadata checks.</p></main></body></html>
+    """
+
+    page = extract("https://example.com/source", html, max_chars=2000)
+
+    assert page is not None
+    assert page.meta_refresh_redirect is True
+    assert page.meta_refresh_target_url == "https://example.com/target"
+
+
+def test_extract_counts_title_and_meta_description_tags() -> None:
+    html = """
+    <html><head>
+      <title>Primary title</title>
+      <title>Duplicate title</title>
+      <meta name="description" content="First description">
+      <meta name="description" content="Second description">
+    </head><body><main><h1>Primary title</h1><p>Useful page content for extraction checks.</p></main></body></html>
+    """
+
+    page = extract("https://example.com/page", html, max_chars=2000)
+
+    assert page is not None
+    assert page.title_tag_count == 2
+    assert page.meta_description_tag_count == 2
 
 
 def test_metadata_quality_payload_flags_duplicates_and_missing_fields() -> None:
     report = to_payload(analyze([
         _page("https://example.com/a", title="Same title", description=""),
         _page("https://example.com/b", title="Same title", canonical_url="", og_description=""),
-        _page("https://example.com/c", canonical_url="https://other.example/c", twitter_card=""),
+        _page("https://example.com/c", canonical_url="https://other.example/c", twitter_card="", twitter_title="", twitter_description=""),
+        _page(
+            "https://example.com/d",
+            title="Useful Search Title Long Enough",
+            description="A unique description that keeps this control page free of metadata issues.",
+            og_title="",
+            og_description="",
+            og_image="",
+            og_url="",
+        ),
     ]))
 
-    assert report["summary"]["total_pages"] == 3
-    assert report["summary"]["pages_with_issues"] == 3
+    assert report["summary"]["total_pages"] == 4
+    assert report["summary"]["pages_with_issues"] == 4
     assert report["summary"]["missing_description"] == 1
     assert report["summary"]["duplicate_title_pages"] == 2
     assert report["summary"]["missing_canonical"] == 1
     assert report["summary"]["canonical_external_host"] == 1
     assert report["summary"]["incomplete_open_graph"] == 1
+    assert report["summary"]["missing_open_graph"] == 1
     assert report["summary"]["missing_twitter_card"] == 1
     assert report["issues_by_type"]["duplicate_title"] == 2
     assert any("missing_description" in row["issues"] for row in report["per_page"])
+    incomplete = next(row for row in report["per_page"] if row["url"] == "https://example.com/b")
+    missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/d")
+    canonical_external = next(row for row in report["per_page"] if row["url"] == "https://example.com/c")
+    assert canonical_external["html_lang"] == "en"
+    assert canonical_external["hreflang"] == []
+    assert incomplete["og_missing_fields"] == ["og_description"]
+    assert "incomplete_open_graph" not in missing["issues"]
+    assert "missing_open_graph" in missing["issues"]
+
+
+def test_metadata_quality_payload_distinguishes_incomplete_twitter_cards() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/incomplete", twitter_card="summary", twitter_title="", twitter_description="Preview description"),
+        _page("https://example.com/missing", twitter_card="", twitter_title="", twitter_description=""),
+        _page("https://example.com/complete"),
+    ]))
+
+    incomplete = next(row for row in report["per_page"] if row["url"] == "https://example.com/incomplete")
+    missing = next(row for row in report["per_page"] if row["url"] == "https://example.com/missing")
+
+    assert report["summary"]["incomplete_twitter_card"] == 1
+    assert report["summary"]["missing_twitter_card"] == 1
+    assert incomplete["twitter_missing_fields"] == ["twitter_title"]
+    assert "incomplete_twitter_card" in incomplete["issues"]
+    assert "missing_twitter_card" in missing["issues"]
 
 
 def test_compare_leaderboard_includes_metadata_quality_metrics(tmp_path: Path) -> None:

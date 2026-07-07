@@ -2,8 +2,50 @@ from pathlib import Path
 
 import numpy as np
 
-from site_audit.ahrefs import AhrefsClient, AhrefsConfig, _entity_alignment, build_analysis, fetch_domain_rating_free
+from site_audit.ahrefs import (
+    AhrefsClient,
+    AhrefsConfig,
+    _entity_alignment,
+    _match_page,
+    _page_lookup,
+    _url_keys,
+    build_analysis,
+    fetch_domain_rating_free,
+)
 from site_audit.analyzer import PageInfo
+
+
+def test_url_keys_add_protocol_variants_after_exact_and_www_keys() -> None:
+    keys = _url_keys("https://www.example.com/a/")
+
+    assert keys[0] == "https://www.example.com/a"
+    assert keys[1] == "https://example.com/a"
+    assert "http://www.example.com/a" in keys
+    assert "http://example.com/a" in keys
+    assert keys[-1] == "/a"
+
+
+def test_page_lookup_prefers_exact_scheme_over_protocol_variants() -> None:
+    def _page(url: str) -> PageInfo:
+        return PageInfo(
+            url=url,
+            title=url,
+            description="",
+            section="",
+            word_count=100,
+            language="en",
+        )
+
+    # Two genuinely different crawled pages: http and https variants of the
+    # same path. The exact-scheme page must win over another page's variant.
+    pages = [_page("http://example.com/a"), _page("https://example.com/a")]
+    lookup = _page_lookup(pages)
+
+    assert _match_page("http://example.com/a", lookup) == 0
+    assert _match_page("https://example.com/a", lookup) == 1
+    # Variant matching still works when only one protocol was crawled.
+    solo_lookup = _page_lookup([_page("https://example.com/b")])
+    assert _match_page("http://www.example.com/b/", solo_lookup) == 0
 
 
 def test_ahrefs_client_reuses_latest_cached_snapshot_without_api_key(tmp_path: Path) -> None:

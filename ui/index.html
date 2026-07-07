@@ -411,6 +411,7 @@
           <button data-rec-cat="geo" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">GEO</button>
           <button data-rec-cat="linking" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Linking</button>
           <button data-rec-cat="onpage" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">On-page</button>
+          <button data-rec-cat="technical" class="rec-cat-btn px-2 py-1 rounded border border-gray-300 bg-white">Technical</button>
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
@@ -420,6 +421,7 @@
         <select id="rec-sort" class="border border-gray-300 rounded px-2 py-1 bg-white">
           <option value="priority_score">Sort by priority</option>
           <option value="impact">Sort by impact</option>
+          <option value="estimated_clicks_gain">Sort by modeled gain</option>
           <option value="effort_score">Sort by effort</option>
           <option value="confidence">Sort by confidence</option>
           <option value="risk">Sort by risk</option>
@@ -437,6 +439,33 @@
       <div id="audit-action-plan" class="text-sm">
         <div class="text-gray-500">Loading…</div>
       </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="rec-outcomes-block">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 class="text-lg font-semibold">Past recommendations scoreboard</h3>
+          <p class="text-xs text-gray-500" id="rec-outcomes-meta">recommendation implementation and follow-on metric movement from the previous audit</p>
+        </div>
+      </div>
+      <div id="rec-outcomes-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto max-h-[32rem] overflow-y-auto">
+        <table class="min-w-full text-xs">
+          <thead class="sticky top-0 bg-white border-b border-gray-200">
+            <tr>
+              <th class="text-left px-2 py-2">Recommendation</th>
+              <th class="text-left px-2 py-2">Category</th>
+              <th class="text-left px-2 py-2">Issued</th>
+              <th class="text-left px-2 py-2">Status</th>
+              <th class="text-right px-2 py-2">Position Δ</th>
+              <th class="text-right px-2 py-2">Clicks Δ</th>
+              <th class="text-left px-2 py-2">Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="rec-outcomes-rows"></tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-500 mt-3" id="rec-outcomes-caveat"></p>
     </div>
 
     <!-- GEO: pages most in need of editing -->
@@ -814,6 +843,66 @@
           <div id="best-page-detail" class="text-xs bg-gray-50 border border-gray-200 rounded-lg p-4 min-h-[20rem]"></div>
         </div>
       </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="striking-distance-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">Striking-distance opportunities</h3>
+        <p class="text-xs text-gray-500 mt-1" id="striking-distance-meta">
+          Query+page rankings in positions 4-20 with enough impressions to model incremental clicks from a move to position 3.
+        </p>
+      </div>
+      <div id="striking-distance-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 text-gray-600">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Query</th>
+              <th class="px-2 py-1.5 text-left">URL</th>
+              <th class="px-2 py-1.5 text-right">Pos</th>
+              <th class="px-2 py-1.5 text-right">Impr.</th>
+              <th class="px-2 py-1.5 text-right">CTR</th>
+              <th class="px-2 py-1.5 text-right">Modeled gain</th>
+              <th class="px-2 py-1.5 text-left">Page title</th>
+            </tr>
+          </thead>
+          <tbody id="striking-distance-rows"></tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3">
+        Modeled gains use a generic organic CTR curve and are not guaranteed. Treat them as prioritization estimates for pages already close to stronger rankings.
+      </p>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ctr-anomalies-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">CTR anomalies</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ctr-anomalies-meta">
+          GSC query+page rows ranking on page one where actual CTR is below the expected curve for that position.
+        </p>
+      </div>
+      <div id="ctr-anomalies-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 text-gray-600">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Query</th>
+              <th class="px-2 py-1.5 text-left">URL</th>
+              <th class="px-2 py-1.5 text-right">Pos</th>
+              <th class="px-2 py-1.5 text-right">Impr.</th>
+              <th class="px-2 py-1.5 text-right">Actual CTR</th>
+              <th class="px-2 py-1.5 text-right">Expected CTR</th>
+              <th class="px-2 py-1.5 text-right">Missed clicks</th>
+              <th class="px-2 py-1.5 text-left">Probable cause</th>
+              <th class="px-2 py-1.5 text-left">Current title</th>
+            </tr>
+          </thead>
+          <tbody id="ctr-anomalies-rows"></tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-3">
+        Expected CTR is an industry-average curve; branded queries and SERP-feature-heavy queries naturally deviate.
+      </p>
     </div>
 
     <!-- Paragraph impact -->
@@ -1327,6 +1416,33 @@
       </div>
     </div>
 
+    <!-- Core Web Vitals field data -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="cwv-block">
+      <div class="mb-3">
+        <h3 class="text-lg font-semibold">Core Web Vitals (field data)</h3>
+        <p class="text-xs text-gray-500 mt-1">
+          CrUX is a 28-day rolling window of real Chrome users. Origin-level rows are aggregates used when URL-level data is unavailable.
+        </p>
+      </div>
+      <div id="audit-cwv-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-5"></div>
+      <div id="audit-cwv-caption" class="text-xs bg-blue-50 text-blue-900 border border-blue-100 rounded p-3 mb-4"></div>
+      <div class="overflow-x-auto max-h-[560px]">
+        <table class="min-w-full text-xs">
+          <thead class="sticky top-0 bg-white">
+            <tr>
+              <th class="text-left py-2 pr-3">URL</th>
+              <th class="text-left py-2 pr-3">Form factor</th>
+              <th class="text-left py-2 pr-3">Level</th>
+              <th class="text-left py-2 pr-3">LCP p75</th>
+              <th class="text-left py-2 pr-3">INP p75</th>
+              <th class="text-left py-2 pr-3">CLS p75</th>
+            </tr>
+          </thead>
+          <tbody id="audit-cwv-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Performance explainer -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="performance-explainer-block">
       <div class="mb-3">
@@ -1374,6 +1490,97 @@
       </div>
     </div>
 
+    <!-- AI crawler access -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ai-access-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">AI crawler access</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ai-access-meta">
+          robots.txt access for major AI search, user-fetch, and training crawlers, plus llms.txt discovery status.
+        </p>
+      </div>
+      <div id="ai-access-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div id="ai-access-llms" class="grid md:grid-cols-2 gap-3 text-xs mb-4"></div>
+      <div id="ai-access-recommendations" class="text-xs mb-4"></div>
+      <div id="ai-access-notes" class="text-xs mb-4"></div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 text-gray-600">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Agent</th>
+              <th class="px-2 py-1.5 text-left">Operator</th>
+              <th class="px-2 py-1.5 text-left">Purpose</th>
+              <th class="px-2 py-1.5 text-left">Access</th>
+              <th class="px-2 py-1.5 text-left">Matched group</th>
+              <th class="px-2 py-1.5 text-left">Explicitly named</th>
+            </tr>
+          </thead>
+          <tbody id="ai-access-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- AI Overview citations -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="ai-citations-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">AI Overview citations</h3>
+        <p class="text-xs text-gray-500 mt-1" id="ai-citations-meta">
+          Google AI Overview citations found in DataForSEO Labs ranked keyword samples.
+        </p>
+      </div>
+      <div id="ai-citations-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div id="ai-citations-note" class="text-xs mb-4"></div>
+      <div class="grid lg:grid-cols-2 gap-5 text-xs mb-5">
+        <div>
+          <h4 class="font-semibold mb-2">Cited pages</h4>
+          <div class="overflow-x-auto max-h-96">
+            <table class="min-w-full text-xs">
+              <thead class="bg-gray-50 text-gray-600">
+                <tr>
+                  <th class="px-2 py-1.5 text-left">URL</th>
+                  <th class="px-2 py-1.5 text-left">Title</th>
+                  <th class="px-2 py-1.5 text-left">Queries</th>
+                  <th class="px-2 py-1.5 text-right">Volume</th>
+                </tr>
+              </thead>
+              <tbody id="ai-citations-cited-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-2">Cited but stale</h4>
+          <div id="ai-citations-risk-wrap" class="overflow-x-auto max-h-96">
+            <table class="min-w-full text-xs">
+              <thead class="bg-gray-50 text-gray-600">
+                <tr>
+                  <th class="px-2 py-1.5 text-left">URL</th>
+                  <th class="px-2 py-1.5 text-left">Top query</th>
+                  <th class="px-2 py-1.5 text-left">Freshness</th>
+                </tr>
+              </thead>
+              <tbody id="ai-citations-risk-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="text-xs">
+        <h4 class="font-semibold mb-2">Opportunities</h4>
+        <div id="ai-citations-opportunity-note"></div>
+        <div id="ai-citations-opportunity-wrap" class="overflow-x-auto max-h-96">
+          <table class="min-w-full text-xs">
+            <thead class="bg-gray-50 text-gray-600">
+              <tr>
+                <th class="px-2 py-1.5 text-left">Keyword</th>
+                <th class="px-2 py-1.5 text-left">URL</th>
+                <th class="px-2 py-1.5 text-right">Rank</th>
+                <th class="px-2 py-1.5 text-right">Volume</th>
+              </tr>
+            </thead>
+            <tbody id="ai-citations-opportunity-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Answerability -->
     <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="answerability-block">
       <div class="mb-3">
@@ -1413,6 +1620,31 @@
           <h4 class="font-semibold mb-2">Candidate snippets</h4>
           <div id="answer-blocks-inventory" class="max-h-[520px] overflow-y-auto"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Chunk retrievability -->
+    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-5 mb-8" id="chunk-retrievability-block">
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold">RAG chunk retrievability</h3>
+        <p class="text-xs text-gray-500 mt-1" id="chunk-retrievability-meta">
+          Checks whether each mapped query has one self-contained retrieval chunk on its best page.
+        </p>
+      </div>
+      <div id="chunk-retrievability-summary" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-4"></div>
+      <div class="overflow-x-auto max-h-[36rem] overflow-y-auto">
+        <table class="min-w-full text-xs">
+          <thead class="text-gray-500 sticky top-0 bg-white">
+            <tr>
+              <th class="px-2 py-1.5 text-left">Query</th>
+              <th class="px-2 py-1.5 text-left">Page</th>
+              <th class="px-2 py-1.5 text-right">Best chunk</th>
+              <th class="px-2 py-1.5 text-left">Status</th>
+              <th class="px-2 py-1.5 text-left">Chunk heading(s)</th>
+            </tr>
+          </thead>
+          <tbody id="chunk-retrievability-rows"></tbody>
+        </table>
       </div>
     </div>
 
@@ -2094,6 +2326,12 @@
 <script type="application/json" id="data-coverage">__COVERAGE_JSON__</script>
 <script type="application/json" id="data-answerability">__ANSWERABILITY_JSON__</script>
 <script type="application/json" id="data-answer-blocks">__ANSWER_BLOCKS_JSON__</script>
+<script type="application/json" id="data-striking-distance">__STRIKING_DISTANCE_JSON__</script>
+<script type="application/json" id="data-ctr-anomalies">__CTR_ANOMALIES_JSON__</script>
+<script type="application/json" id="data-ai-access">__AI_ACCESS_JSON__</script>
+<script type="application/json" id="data-ai-citations">__AI_CITATIONS_JSON__</script>
+<script type="application/json" id="data-crux">__CRUX_JSON__</script>
+<script type="application/json" id="data-chunk-retrievability">__CHUNK_RETRIEVABILITY_JSON__</script>
 <script type="application/json" id="data-cannibalization">__CANNIBALIZATION_JSON__</script>
 <script type="application/json" id="data-duplicate-fragments">__DUPLICATE_FRAGMENTS_JSON__</script>
 <script type="application/json" id="data-linkgraph">__LINKGRAPH_JSON__</script>
@@ -2114,6 +2352,7 @@
 <script type="application/json" id="data-page-improvement">__PAGE_IMPROVEMENT_JSON__</script>
 <script type="application/json" id="data-competitive">__COMPETITIVE_JSON__</script>
 <script type="application/json" id="data-recommendations">__RECOMMENDATIONS_JSON__</script>
+<script type="application/json" id="data-recommendation-outcomes">__RECOMMENDATION_OUTCOMES_JSON__</script>
 <script type="application/json" id="data-paragraph-density">__PARAGRAPH_DENSITY_JSON__</script>
 <script type="application/json" id="data-header-analysis">__HEADER_ANALYSIS_JSON__</script>
 <script type="application/json" id="data-header-scatter">__HEADER_SCATTER_JSON__</script>
@@ -2150,34 +2389,34 @@
   const REPORT_SECTION_GUIDE_URL = 'https://github.com/vzeman/site-audit/blob/main/docs/report-sections.md';
   const REPORT_NAV_SECTIONS = [
     {key: 'overview', label: 'Overview', selectors: ['body > .max-w-7xl > header'], ids: ['audit-metrics-primary', 'audit-metrics-secondary', 'hist-block']},
-    {key: 'action-plan', label: 'Action plan', ids: ['action-plan-block']},
+    {key: 'action-plan', label: 'Action plan', ids: ['action-plan-block', 'rec-outcomes-block']},
     {key: 'editing', label: 'Pages needing edits', ids: ['improvement-block']},
     {key: 'titles', label: 'Titles and headings', ids: ['title-mismatch-block', 'headers-block', 'heading-impact-block']},
     {key: 'semantic-map', label: 'Semantic map', ids: ['scatter-block', 'section-outliers-block', 'link-addition-block']},
     {key: 'clusters', label: 'Topic clusters', ids: ['clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block', 'heatmap-block']},
-    {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'coverage-block']},
+    {key: 'search-demand', label: 'Search demand', ids: ['ahrefs-block', 'best-pages-block', 'striking-distance-block', 'ctr-anomalies-block', 'coverage-block']},
     {key: 'paragraphs', label: 'Paragraph analysis', ids: ['paragraph-impact-block', 'weak-paragraphs-block', 'semantic-ablation-block', 'keyword-attribution-block']},
     {key: 'technical', label: 'Technical SEO', ids: ['indexability-block', 'technical-seo-block', 'structured-data-block', 'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block']},
     {key: 'authority', label: 'Authority and trust', ids: ['trust-signals-block', 'entities-block', 'entity-coverage-block', 'information-gain-block']},
     {key: 'freshness', label: 'Freshness', ids: ['freshness-block', 'freshness-impact-block']},
-    {key: 'performance', label: 'Performance', ids: ['performance-block', 'performance-explainer-block']},
+    {key: 'performance', label: 'Performance', ids: ['performance-block', 'cwv-block', 'performance-explainer-block']},
     {key: 'conversion', label: 'Conversion', ids: ['conversion-balance-block', 'conversion-block']},
-    {key: 'geo', label: 'GEO and snippets', ids: ['answerability-block', 'answer-blocks-block', 'fanout-block']},
+    {key: 'geo', label: 'GEO and snippets', ids: ['ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'fanout-block']},
     {key: 'duplication', label: 'Cannibalization', ids: ['cannibalization-block', 'duplicate-fragments-block', 'wrong-home-block', 'para-clusters-block']},
     {key: 'links', label: 'Internal links', ids: ['linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block', 'hub-bottleneck-block', 'link-removal-block', 'linkbuilding-block', 'link-counts-block', 'para-density-block', 'para-links-block', 'cluster-auth-block', 'anchor-block', 'contextual-link-block', 'internal-link-patterns-block']},
     {key: 'competitive', label: 'SERP competitors', ids: ['competitive-block']},
     {key: 'crawl', label: 'Crawl diagnostics', ids: ['hits-block', 'depth-block', 'external-block', 'broken-block', 'report-summary-note']},
   ];
   const SECTION_DOC_BLOCKS = [
-    'hist-block', 'action-plan-block', 'improvement-block', 'title-mismatch-block',
+    'hist-block', 'action-plan-block', 'rec-outcomes-block', 'improvement-block', 'title-mismatch-block',
     'headers-block', 'heading-impact-block', 'clusters-block', 'treemap-block', 'para-treemap-block', 'para-heatmap-block', 'para-relations-block',
-    'ahrefs-block', 'best-pages-block', 'paragraph-impact-block', 'weak-paragraphs-block',
+    'ahrefs-block', 'best-pages-block', 'striking-distance-block', 'ctr-anomalies-block', 'paragraph-impact-block', 'weak-paragraphs-block',
     'semantic-ablation-block', 'keyword-attribution-block', 'heatmap-block', 'coverage-block',
     'indexability-block', 'technical-seo-block', 'structured-data-block', 'trust-signals-block', 'conversion-balance-block',
     'metadata-quality-block', 'media-accessibility-block', 'page-types-block', 'template-patterns-block',
     'entities-block', 'entity-coverage-block', 'information-gain-block', 'freshness-block',
-    'freshness-impact-block', 'performance-block', 'performance-explainer-block', 'conversion-block',
-    'answerability-block', 'answer-blocks-block', 'cannibalization-block', 'duplicate-fragments-block',
+    'freshness-impact-block', 'performance-block', 'cwv-block', 'performance-explainer-block', 'conversion-block',
+    'ai-access-block', 'ai-citations-block', 'answerability-block', 'answer-blocks-block', 'chunk-retrievability-block', 'cannibalization-block', 'duplicate-fragments-block',
     'linkgraph-block', 'linkflow-block', 'traffic-pagerank-block', 'high-demand-link-block',
     'hub-bottleneck-block', 'link-removal-block', 'link-addition-block', 'linkbuilding-block',
     'link-counts-block', 'para-density-block', 'para-links-block', 'wrong-home-block',
@@ -2361,6 +2600,12 @@
       const inlinedCoverage = readInlined('data-coverage');
       const inlinedAnswerability = readInlined('data-answerability');
       const inlinedAnswerBlocks = readInlined('data-answer-blocks');
+      const inlinedStrikingDistance = readInlined('data-striking-distance');
+      const inlinedCtrAnomalies = readInlined('data-ctr-anomalies');
+      const inlinedAiAccess = readInlined('data-ai-access');
+      const inlinedAiCitations = readInlined('data-ai-citations');
+      const inlinedCrux = readInlined('data-crux');
+      const inlinedChunkRetrievability = readInlined('data-chunk-retrievability');
       const inlinedCannibalization = readInlined('data-cannibalization');
       const inlinedDuplicateFragments = readInlined('data-duplicate-fragments');
       const inlinedLinkgraph = readInlined('data-linkgraph');
@@ -2381,6 +2626,7 @@
       const inlinedImprovement = readInlined('data-page-improvement');
       const inlinedCompetitive = readInlined('data-competitive');
       const inlinedRecommendations = readInlined('data-recommendations');
+      const inlinedRecommendationOutcomes = readInlined('data-recommendation-outcomes');
       const inlinedParaDensity = readInlined('data-paragraph-density');
       const inlinedHeaderAnalysis = readInlined('data-header-analysis');
       const inlinedHeaderScatter = readInlined('data-header-scatter');
@@ -2406,7 +2652,7 @@
       const inlinedBestPages = readInlined('data-best-pages');
       const inlinedPerformanceExplainer = readInlined('data-performance-explainer');
 
-      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
+      let scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, crux, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer;
       if (inlinedMetrics) {
         scatter = inlinedScatter;
         metrics = inlinedMetrics;
@@ -2417,6 +2663,12 @@
         coverage = inlinedCoverage || [];
         answerability = inlinedAnswerability || [];
         answerBlocks = inlinedAnswerBlocks || {};
+        strikingDistance = inlinedStrikingDistance || {};
+        ctrAnomalies = inlinedCtrAnomalies || {};
+        aiAccess = inlinedAiAccess || {};
+        aiCitations = inlinedAiCitations || {};
+        crux = inlinedCrux || {};
+        chunkRetrievability = inlinedChunkRetrievability || {};
         cannibalization = inlinedCannibalization || {};
         duplicateFragments = inlinedDuplicateFragments || {};
         linkgraph = inlinedLinkgraph || {};
@@ -2437,6 +2689,7 @@
         improvement = inlinedImprovement || [];
         competitive = inlinedCompetitive || [];
         recommendations = inlinedRecommendations || {};
+        recommendationOutcomes = inlinedRecommendationOutcomes || {};
         paraDensity = inlinedParaDensity || {};
         headerAnalysis = inlinedHeaderAnalysis || {};
         headerScatter = inlinedHeaderScatter || {};
@@ -2462,7 +2715,7 @@
         bestPages = inlinedBestPages || {};
         performanceExplainer = inlinedPerformanceExplainer || {};
       } else {
-        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
+        [scatter, metrics, sections, outliers, duplicates, clusters, coverage, answerability, answerBlocks, strikingDistance, ctrAnomalies, aiAccess, aiCitations, crux, chunkRetrievability, cannibalization, duplicateFragments, linkgraph, external, paraLinks, clusterOverlap, paraClusters, paraClusterOverlap, paraScatter, fanout, paragraphImpact, semanticAblation, keywordAttribution, winningParagraphs, weakParagraphs, titleMismatch, wrongHome, improvement, competitive, recommendations, recommendationOutcomes, paraDensity, headerAnalysis, headerScatter, headingImpact, entityCoverage, informationGain, linkbuilding, structuredData, trustSignals, conversionBalance, metadataQuality, mediaAccessibility, pageTypes, templatePatterns, entities, freshness, freshnessImpact, conversion, indexability, performance, technicalSeo, ahrefs, bestPages, performanceExplainer] = await Promise.all([
           loadJSON('scatterplot.json').catch(() => null),
           loadJSON('site_metrics.json'),
           loadJSON('section_report.json').catch(() => []),
@@ -2472,6 +2725,12 @@
           loadJSON('keyword_coverage.json').catch(() => []),
           loadJSON('answerability.json').catch(() => []),
           loadJSON('answer_blocks.json').catch(() => ({})),
+          loadJSON('striking_distance.json').catch(() => ({})),
+          loadJSON('ctr_anomalies.json').catch(() => ({})),
+          loadJSON('ai_access.json').catch(() => ({})),
+          loadJSON('ai_citations.json').catch(() => ({})),
+          loadJSON('crux.json').catch(() => ({})),
+          loadJSON('chunk_retrievability.json').catch(() => ({})),
           loadJSON('cannibalization.json').catch(() => ({})),
           loadJSON('duplicate_fragments.json').catch(() => ({})),
           loadJSON('linkgraph.json').catch(() => ({})),
@@ -2492,6 +2751,7 @@
           loadJSON('page_improvement.json').catch(() => []),
           loadJSON('competitive_analysis.json').catch(() => []),
           loadJSON('recommendations.json').catch(() => ({})),
+          loadJSON('recommendation_outcomes.json').catch(() => ({})),
           loadJSON('paragraph_density.json').catch(() => ({})),
           loadJSON('header_analysis.json').catch(() => ({})),
           loadJSON('header_scatter.json').catch(() => ({})),
@@ -2528,6 +2788,12 @@
       state.coverage = coverage;
       state.answerability = answerability;
       state.answerBlocks = answerBlocks || {};
+      state.strikingDistance = strikingDistance || {};
+      state.ctrAnomalies = ctrAnomalies || {};
+      state.aiAccess = aiAccess || {};
+      state.aiCitations = aiCitations || {};
+      state.crux = crux || {};
+      state.chunkRetrievability = chunkRetrievability || {};
       state.cannibalization = cannibalization || {};
       state.duplicateFragments = duplicateFragments || {};
       state.linkgraph = linkgraph;
@@ -2548,6 +2814,7 @@
       state.improvement = improvement;
       state.competitive = competitive;
       state.recommendations = recommendations || {};
+      state.recommendationOutcomes = recommendationOutcomes || {};
       state.recPriFilter = 'all';
       state.recCatFilter = 'all';
       state.recOwnerFilter = 'all';
@@ -2584,6 +2851,7 @@
         `${metrics.domain || ''} · ${metrics.page_count || 0} pages · model ${metrics.model || ''}`;
       renderMetrics();
       renderActionPlan();
+      renderRecommendationOutcomes();
       wireActionPlanButtons();
       if (state.pages.length) {
         renderScatter();
@@ -2598,6 +2866,10 @@
       renderTreemap();
       renderAhrefs();
       renderBestPages();
+      renderStrikingDistance();
+      renderCtrAnomalies();
+      renderAiAccess();
+      renderAiCitations();
       renderParagraphImpact();
       renderWeakParagraphs();
       renderSemanticAblation();
@@ -2619,10 +2891,12 @@
       renderFreshness();
       renderFreshnessImpact();
       renderPerformance();
+      renderCrux();
       renderPerformanceExplainer();
       renderConversion();
       renderAnswerability();
       renderAnswerBlocks();
+      renderChunkRetrievability();
       renderCannibalization('all');
       renderDuplicateFragments();
       renderLinkgraph();
@@ -2679,6 +2953,7 @@
     geo: 'GEO',
     linking: 'Linking',
     onpage: 'On-page',
+    technical: 'Technical',
   };
   const REC_CAT_COLORS = {
     content_debt: '#dc2626',
@@ -2686,7 +2961,55 @@
     geo: '#7c3aed',
     linking: '#16a34a',
     onpage: '#f59e0b',
+    technical: '#0891b2',
   };
+
+  function renderRecommendationOutcomes() {
+    const block = document.getElementById('rec-outcomes-block');
+    if (!block) return;
+    const data = state.recommendationOutcomes || {};
+    const rows = data.rows || [];
+    if (data.available !== true || !rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const aggregates = data.aggregates || {};
+    const byStatus = aggregates.by_status || {};
+    const statusCounts = Object.entries(byStatus)
+      .map(([status, row]) => `${String(status).replaceAll('_', ' ')} ${Number(row.count || 0).toLocaleString()}`)
+      .join(' · ');
+    document.getElementById('rec-outcomes-meta').textContent =
+      `${Number(summary.total || rows.length).toLocaleString()} previous recommendations` +
+      (summary.issued_at ? ` · issued ${String(summary.issued_at).slice(0, 10)}` : '') +
+      (statusCounts ? ` · ${statusCounts}` : '');
+    document.getElementById('rec-outcomes-summary').innerHTML =
+      card('Implemented', Number(summary.implemented || aggregates.implemented_count || 0).toLocaleString(), 'tracked changes detected') +
+      card('Not implemented', Number(summary.not_implemented || aggregates.not_implemented_count || 0).toLocaleString(), 'baseline comparison') +
+      card('Avg position Δ implemented', aggregates.avg_position_delta_implemented ?? 'n/a', 'lower is better') +
+      card('Avg position Δ not implemented', aggregates.avg_position_delta_not_implemented ?? 'n/a', 'honest baseline');
+    const statusClass = status => status === 'implemented' ? 'bg-green-100 text-green-800'
+      : status === 'partially' ? 'bg-amber-100 text-amber-800'
+      : status === 'not_implemented' ? 'bg-gray-100 text-gray-700'
+      : status === 'page_removed' ? 'bg-red-100 text-red-800'
+      : 'bg-slate-100 text-slate-700';
+    document.getElementById('rec-outcomes-rows').innerHTML = rows.slice(0, 100).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top">
+          <div class="font-medium text-gray-900">${escapeHtml(row.title || row.id || '')}</div>
+          <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.primary_url || row.matched_url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.primary_url || row.matched_url || '', 74))}</a>
+        </td>
+        <td class="px-2 py-2 align-top">${escapeHtml(REC_CAT_LABELS[row.category] || row.category || '')}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(String(row.issued_at || '').slice(0, 10))}</td>
+        <td class="px-2 py-2 align-top"><span class="px-1.5 py-0.5 rounded ${statusClass(row.change_status)}">${escapeHtml(String(row.change_status || '').replaceAll('_', ' '))}</span></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${row.position_delta === null || row.position_delta === undefined ? 'n/a' : Number(row.position_delta).toFixed(2)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${row.clicks_delta === null || row.clicks_delta === undefined ? 'n/a' : Number(row.clicks_delta).toLocaleString()}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(row.confidence || '')}</td>
+      </tr>`).join('');
+    document.getElementById('rec-outcomes-caveat').textContent =
+      data.caveat || (data.caveats || [])[0] || '';
+  }
 
   function setSelectOptions(select, values, allLabel) {
     if (!select) return;
@@ -2733,7 +3056,8 @@
     const block = document.getElementById('action-plan-block');
     const r = state.recommendations || {};
     const items = (r.items || []);
-    if (!items.length) { block.style.display = 'none'; return; }
+    const suppressed = (r.suppressed || []);
+    if (!items.length && !suppressed.length) { block.style.display = 'none'; return; }
     prepareActionPlanControls(items);
 
     const meta = document.getElementById('action-plan-meta');
@@ -2744,7 +3068,7 @@
       .filter(k => catCounts[k])
       .map(k => `${REC_CAT_LABELS[k]} ${catCounts[k]}`)
       .join(' · ');
-    meta.textContent = `${r.total} actions · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} · avg priority ${Number(summary.avg_priority_score || 0).toFixed(1)} — ${catParts}`;
+    meta.textContent = `${r.total} actions · ${summary.cards || (r.cards || []).length || 0} cards · high ${counts.high || 0} · medium ${counts.medium || 0} · low ${counts.low || 0} · suppressed ${summary.suppressed || suppressed.length || 0} · avg priority ${Number(summary.avg_priority_score || 0).toFixed(1)} — ${catParts}`;
 
     document.querySelectorAll('.rec-pri-btn').forEach(b => {
       const on = b.dataset.recPri === state.recPriFilter;
@@ -2762,11 +3086,47 @@
     const filtered = filteredActionItems();
     drawActionPriorityMatrix(filtered);
 
-    if (!filtered.length) {
-      document.getElementById('audit-action-plan').innerHTML =
-        '<div class="text-gray-500 text-xs py-3">No actions match this filter.</div>';
-      return;
-    }
+    const renderFixDraft = draft => {
+      if (!draft) return '';
+      const label = draft.generated_by === 'llm'
+        ? 'AI-generated suggestion — verify claims before publishing'
+        : 'auto-generated suggestion — verify claims before publishing';
+      const parts = [];
+      if (draft.proposed_title) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed title</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml(draft.proposed_title)}</code>
+          </div>`);
+      }
+      if (draft.proposed_meta) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed meta description</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml(draft.proposed_meta)}</code>
+          </div>`);
+      }
+      if ((draft.questions || []).length) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed FAQ H2s</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml((draft.questions || []).join('\n'))}</code>
+          </div>`);
+      }
+      if ((draft.outline || []).length) {
+        parts.push(`
+          <div>
+            <div class="text-[11px] font-semibold text-gray-600">Proposed H2 outline</div>
+            <code class="block select-all whitespace-pre-wrap rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-gray-900">${escapeHtml((draft.outline || []).join('\n'))}</code>
+          </div>`);
+      }
+      if (!parts.length) return '';
+      return `
+        <div class="mt-2 rounded border border-blue-100 bg-white p-2">
+          <div class="text-[11px] font-semibold text-blue-800 mb-1">Proposed: ${escapeHtml(label)}</div>
+          <div class="space-y-1.5">${parts.join('')}</div>
+        </div>`;
+    };
 
     const renderRec = rec => {
       const priClass = rec.priority === 'high' ? 'bg-red-100 text-red-800'
@@ -2795,10 +3155,12 @@
       if (ev.paragraph_excerpt) evidenceBits.push(`para: "${String(ev.paragraph_excerpt).slice(0, 140)}…"`);
       const evidenceLine = evidenceBits.length
         ? `<div class="text-xs text-gray-500 mt-1">${escapeHtml(evidenceBits.join(' · '))}</div>` : '';
+      const gainText = rec.gain_label || (rec.estimated_clicks_gain != null ? `≈ +${Number(rec.estimated_clicks_gain || 0).toFixed(0)} clicks/period` : '—');
       const scoreLine = `
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px] mt-2">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-[11px] mt-2">
           <span class="bg-gray-50 rounded px-2 py-1">Priority <strong>${Number(rec.priority_score || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Impact <strong>${Number(rec.impact || 0).toFixed(1)}</strong></span>
+          <span class="bg-gray-50 rounded px-2 py-1">Modeled gain <strong>${escapeHtml(gainText)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Conf. <strong>${Number(rec.confidence || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Effort <strong>${Number(rec.effort_score || 0).toFixed(1)}</strong></span>
           <span class="bg-gray-50 rounded px-2 py-1">Risk <strong>${Number(rec.risk || 0).toFixed(1)}</strong></span>
@@ -2808,35 +3170,120 @@
           <div class="flex items-start gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${rec.priority}</span>
             <span class="text-xs px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${rec.effort}</span>
-            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${REC_CAT_LABELS[rec.category] || rec.category}</span>
+            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[rec.category] || rec.category)}</span>
             ${rec.owner ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(rec.owner)}</span>` : ''}
             ${rec.cluster ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(truncateMiddle(rec.cluster, 32))}</span>` : ''}
             <span class="font-medium text-gray-900">${escapeHtml(rec.title)}</span>
           </div>
           <div class="text-sm text-gray-700 mt-1.5">${escapeHtml(rec.instruction)}</div>
+          ${renderFixDraft(rec.fix_draft)}
           ${targets ? `<div class="text-xs mt-1">${targets}</div>` : ''}
           ${evidenceLine}
           ${scoreLine}
         </div>`;
     };
+    const priorityRank = { high: 0, medium: 1, low: 2 };
+    const renderCard = (card, cardIndex) => {
+      const recs = card.recommendations || [];
+      const priClass = card.top_priority === 'high' ? 'bg-red-100 text-red-800'
+        : card.top_priority === 'medium' ? 'bg-orange-100 text-orange-800'
+        : 'bg-gray-100 text-gray-700';
+      const effortClass = card.effort_total === 'quick' ? 'bg-green-50 text-green-700'
+        : card.effort_total === 'deep' ? 'bg-purple-50 text-purple-700'
+        : 'bg-blue-50 text-blue-700';
+      const gainText = card.total_estimated_clicks_gain != null
+        ? `≈ +${Number(card.total_estimated_clicks_gain || 0).toFixed(0)} clicks/period`
+        : '—';
+      const cats = (card.categories || []).map(cat =>
+        `<span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[cat] || cat)}</span>`
+      ).join('');
+      const urlLine = card.url
+        ? `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">${escapeHtml(card.url)}</a>`
+        : `<span class="text-gray-600">New content: ${escapeHtml(card.query || card.title || '')}</span>`;
+      const related = (card.related_urls || []).slice(0, 5).map(u =>
+        `<a class="text-blue-600 hover:underline break-all" href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`
+      ).join(' · ');
+      return `
+        <details class="border border-gray-200 rounded-lg bg-white mb-3"${cardIndex < 3 ? ' open' : ''}>
+          <summary class="cursor-pointer list-none p-3 hover:bg-gray-50">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="min-w-0">
+                <div class="font-semibold text-gray-900">${escapeHtml(card.title || card.url || card.query || 'Action group')}</div>
+                <div class="text-xs mt-1">${urlLine}</div>
+                ${related ? `<div class="text-xs text-gray-500 mt-1">Related: ${related}</div>` : ''}
+              </div>
+              <div class="flex items-center gap-2 flex-wrap justify-end text-xs">
+                <span class="px-2 py-0.5 rounded font-medium ${priClass} whitespace-nowrap">${escapeHtml(card.top_priority || '')}</span>
+                <span class="px-2 py-0.5 rounded ${effortClass} whitespace-nowrap">${escapeHtml(card.effort_total || '')}</span>
+                ${cats}
+                <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${escapeHtml(gainText)}</span>
+                <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 whitespace-nowrap">${recs.length} actions</span>
+              </div>
+            </div>
+          </summary>
+          <div class="px-3 pb-1 border-t border-gray-100">${recs.map(renderRec).join('')}</div>
+        </details>`;
+    };
+    const renderSuppressed = rec => `
+      <div class="py-3 border-b border-gray-200 opacity-75">
+        <div class="flex items-start gap-2 flex-wrap">
+          <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 whitespace-nowrap">suppressed</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 whitespace-nowrap">${escapeHtml(REC_CAT_LABELS[rec.category] || rec.category)}</span>
+          <span class="font-medium text-gray-800">${escapeHtml(rec.title || '')}</span>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(rec.suppressed_reason || '')}</div>
+        <div class="text-sm text-gray-600 mt-1.5">${escapeHtml(rec.instruction || '')}</div>
+      </div>`;
+
+    const visibleIds = new Set(filtered.map(rec => rec.id));
+    const filteredCards = (r.cards || []).map(card => {
+      const recs = (card.recommendations || []).filter(rec => visibleIds.has(rec.id));
+      if (!recs.length) return null;
+      const gains = recs.filter(rec => rec.estimated_clicks_gain != null).map(rec => Number(rec.estimated_clicks_gain || 0));
+      const priorities = recs.map(rec => rec.priority || 'low').sort((a, b) => (priorityRank[a] ?? 9) - (priorityRank[b] ?? 9));
+      return {
+        ...card,
+        recommendations: recs,
+        recommendation_ids: recs.map(rec => rec.id),
+        categories: Array.from(new Set(recs.map(rec => rec.category).filter(Boolean))).sort(),
+        total_estimated_clicks_gain: gains.length ? gains.reduce((a, b) => a + b, 0) : null,
+        top_priority: priorities[0] || card.top_priority,
+        top_priority_score: Math.max(...recs.map(rec => Number(rec.priority_score || 0))),
+      };
+    }).filter(Boolean);
+
     let html = '';
-    if (state.recGroup) {
+    if (!filtered.length) {
+      html = '<div class="text-gray-500 text-xs py-3">No active actions match this filter.</div>';
+    } else {
+      html = `<div class="text-xs text-gray-500 mb-2">${filteredCards.length}/${(r.cards || []).length} cards shown · ${filtered.length}/${items.length} actions shown</div>` +
+        filteredCards.map(renderCard).join('') +
+        '<h4 class="text-sm font-semibold text-gray-900 mt-5 mb-1">All actions</h4>';
+    }
+    if (state.recGroup && filtered.length) {
       const groups = new Map();
       filtered.forEach(rec => {
         const key = rec[state.recGroup] || 'Unassigned';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(rec);
       });
-      html = Array.from(groups.entries()).map(([key, rows]) => `
+      html += Array.from(groups.entries()).map(([key, rows]) => `
         <div class="mt-4 first:mt-0">
           <div class="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-1">${escapeHtml(String(key).replaceAll('_', ' '))} · ${rows.length}</div>
           ${rows.map(renderRec).join('')}
         </div>`).join('');
-    } else {
-      html = filtered.map(renderRec).join('');
+    } else if (filtered.length) {
+      html += filtered.map(renderRec).join('');
+    }
+    if (suppressed.length) {
+      html += `
+        <details class="mt-5 rounded-lg border border-gray-200 bg-gray-50">
+          <summary class="cursor-pointer p-3 text-sm font-semibold text-gray-700">${suppressed.length} suppressed actions</summary>
+          <div class="px-3 pb-1 border-t border-gray-200">${suppressed.map(renderSuppressed).join('')}</div>
+        </details>`;
     }
     document.getElementById('audit-action-plan').innerHTML =
-      `<div class="text-xs text-gray-500 mb-2">${filtered.length}/${items.length} actions shown</div>` + html;
+      html;
   }
 
   function drawActionPriorityMatrix(rows) {
@@ -2893,10 +3340,19 @@
 
   function exportActionPlanCsv() {
     const rows = filteredActionItems();
-    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','title','instruction','targets'];
+    const cols = ['priority','priority_score','impact','confidence','effort','effort_score','risk','owner','category','type','cluster','traffic_opportunity','estimated_clicks_gain','estimate_basis','gain_label','title','instruction','targets','proposed_title','proposed_meta'];
     const csv = [cols.join(',')].concat(rows.map(row => cols.map(col => {
-      const value = col === 'targets' ? (row.targets || []).join(' | ') : row[col];
-      return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+      const value = col === 'targets'
+        ? (row.targets || []).join(' | ')
+        : col === 'proposed_title'
+          ? ((row.fix_draft || {}).proposed_title || '')
+          : col === 'proposed_meta'
+            ? ((row.fix_draft || {}).proposed_meta || '')
+            : row[col];
+      // Prefix a leading apostrophe so spreadsheet apps do not treat cell text as a formula.
+      const text = String(value == null ? '' : value);
+      const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
     }).join(','))).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -3904,6 +4360,215 @@
       });
     });
     renderBestPageDetail(pages.find(p => p.url === state.selectedBestPageUrl) || pages[0], payload);
+  }
+
+  function renderStrikingDistance() {
+    const block = document.getElementById('striking-distance-block');
+    const data = state.strikingDistance || {};
+    const rows = data.rows || [];
+    const summary = data.summary || {};
+    const model = data.model || {};
+    if (!block) return;
+    if (!data.available || !rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const period = model.period_days ? `${Number(model.period_days).toLocaleString()} days` : 'selected period';
+    document.getElementById('striking-distance-meta').textContent =
+      `${Number(summary.opportunities || rows.length).toLocaleString()} query+page opportunities · target position ${Number(model.target_position || 3).toFixed(0)} · ${period}.`;
+    document.getElementById('striking-distance-summary').innerHTML =
+      card('modeled click gain', Number(summary.total_modeled_click_gain || 0).toLocaleString(undefined, {maximumFractionDigits: 1}), 'CTR curve estimate per period') +
+      card('opportunities', Number(summary.opportunities || rows.length).toLocaleString(), `positions ${summary.min_position || 4}-${summary.max_position || 20}`) +
+      card('shown rows', Number(summary.shown || rows.length).toLocaleString(), `minimum ${Number(summary.min_impressions || 10).toLocaleString()} impressions`) +
+      card('date window', summary.start_date ? `${escapeHtml(summary.start_date)} to ${escapeHtml(summary.end_date || '')}` : period, escapeHtml(model.curve || 'site-audit-v1'));
+    document.getElementById('striking-distance-rows').innerHTML = rows.map(r => {
+      const ctr = r.ctr === null || r.ctr === undefined || r.ctr === '' ? `${(Number(r.expected_ctr_current || 0) * 100).toFixed(1)}% model` : `${(Number(r.ctr || 0) * 100).toFixed(1)}%`;
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top font-medium">${escapeHtml(r.query || '')}<div class="text-gray-500 font-normal">${escapeHtml(r.source || '')}</div></td>
+          <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.url || '')}</a></td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(r.position || 0).toFixed(1)}</td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(r.impressions || 0).toLocaleString()}</td>
+          <td class="px-2 py-2 align-top text-right font-mono">${ctr}</td>
+          <td class="px-2 py-2 align-top text-right font-mono font-semibold">${Number(r.estimated_clicks_gain || 0).toLocaleString(undefined, {maximumFractionDigits: 1})}</td>
+          <td class="px-2 py-2 align-top">${escapeHtml(r.page_title || '')}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  function renderCtrAnomalies() {
+    const block = document.getElementById('ctr-anomalies-block');
+    const data = state.ctrAnomalies || {};
+    const rows = data.rows || [];
+    const summary = data.summary || {};
+    const model = data.model || {};
+    if (!block) return;
+    if (!data.available || !rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const period = model.period_days ? `${Number(model.period_days).toLocaleString()} days` : 'selected period';
+    document.getElementById('ctr-anomalies-meta').textContent =
+      `${Number(summary.anomalies || rows.length).toLocaleString()} CTR anomalies · positions <= ${Number(model.max_position || summary.max_position || 10).toFixed(0)} · ${period}.`;
+    document.getElementById('ctr-anomalies-summary').innerHTML =
+      card('missed clicks', Number(summary.total_missed_clicks || 0).toLocaleString(undefined, {maximumFractionDigits: 1}), 'expected-vs-actual CTR') +
+      card('anomalies', Number(summary.anomalies || rows.length).toLocaleString(), `CTR below ${Number(model.underperformance_ratio || 0.6).toLocaleString(undefined, {style: 'percent', maximumFractionDigits: 0})} of curve`) +
+      card('shown rows', Number(summary.shown || rows.length).toLocaleString(), `minimum ${Number(model.min_impressions || 100).toLocaleString()} impressions`) +
+      card('date window', summary.start_date ? `${escapeHtml(summary.start_date)} to ${escapeHtml(summary.end_date || '')}` : period, escapeHtml(model.curve || 'site-audit-v1'));
+    document.getElementById('ctr-anomalies-rows').innerHTML = rows.map(r => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top font-medium">${escapeHtml(r.query || '')}<div class="text-gray-500 font-normal">${escapeHtml(r.source || '')}</div></td>
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.url || '')}</a></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(r.position || 0).toFixed(1)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(r.impressions || 0).toLocaleString()}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${(Number(r.actual_ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${(Number(r.expected_ctr || 0) * 100).toFixed(1)}%</td>
+        <td class="px-2 py-2 align-top text-right font-mono font-semibold">${Number(r.missed_clicks || 0).toLocaleString(undefined, {maximumFractionDigits: 1})}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml((r.probable_cause || '').replaceAll('_', ' '))}</td>
+        <td class="px-2 py-2 align-top">${escapeHtml(r.current_title || r.page_title || '')}</td>
+      </tr>`).join('');
+  }
+
+  function renderAiAccess() {
+    const block = document.getElementById('ai-access-block');
+    const data = state.aiAccess || {};
+    const rows = data.agents || [];
+    const summary = data.summary || {};
+    if (!block) return;
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const evaluated = data.evaluated !== false;
+    const blocked = Number(summary.search_blocked || 0) + Number(summary.user_fetch_blocked || 0);
+    const robotsStatus = data.available === false
+      ? (data.reason || 'no robots.txt found; crawlers allowed by default')
+      : 'robots.txt evaluated for /';
+    document.getElementById('ai-access-meta').textContent = evaluated
+      ? `${robotsStatus}. ${blocked.toLocaleString()} AI search/user-fetch agents blocked.`
+      : `${robotsStatus}.`;
+    document.getElementById('ai-access-summary').innerHTML =
+      card('search blocked', Number(summary.search_blocked || 0).toLocaleString(), 'AI search crawlers') +
+      card('user fetch blocked', Number(summary.user_fetch_blocked || 0).toLocaleString(), 'URL fetch on user request') +
+      card('training blocked', Number(summary.training_blocked || 0).toLocaleString(), 'often intentional') +
+      card('blanket block', summary.blanket_block ? 'Yes' : 'No', `${Number(summary.total_agents || rows.length).toLocaleString()} agents checked`);
+    document.getElementById('ai-access-llms').innerHTML =
+      aiAccessTextFileCard('llms.txt', data.llms_txt || {}) +
+      aiAccessTextFileCard('llms-full.txt', data.llms_full_txt || {});
+    const recs = data.recommendations || [];
+    document.getElementById('ai-access-recommendations').innerHTML = recs.length ? `
+      <div class="border border-red-200 bg-red-50 text-red-900 rounded p-3">
+        <div class="font-semibold mb-1">Recommendations</div>
+        <ul class="list-disc list-inside space-y-1">${recs.map(rec => `<li>${escapeHtml(rec)}</li>`).join('')}</ul>
+      </div>` : '';
+    const notes = data.notes || [];
+    document.getElementById('ai-access-notes').innerHTML = notes.length ? `
+      <div class="border border-gray-200 bg-gray-50 text-gray-700 rounded p-3">
+        <div class="font-semibold mb-1">Notes</div>
+        <ul class="list-disc list-inside space-y-1">${notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+      </div>` : '';
+    document.getElementById('ai-access-rows').innerHTML = rows.map(row => {
+      const allowed = row.allowed_root;
+      const unknown = allowed === null || allowed === undefined;
+      const accessClass = unknown ? 'text-gray-500' : (allowed ? 'text-green-700' : 'text-red-700');
+      const accessLabel = unknown ? 'Unknown' : (allowed ? 'Allowed' : 'Blocked');
+      const purpose = String(row.purpose || '').replaceAll('_', ' ');
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top font-medium">${escapeHtml(row.agent || '')}</td>
+          <td class="px-2 py-2 align-top">${escapeHtml(row.operator || '')}</td>
+          <td class="px-2 py-2 align-top">${escapeHtml(purpose)}</td>
+          <td class="px-2 py-2 align-top ${accessClass} font-semibold">${accessLabel}</td>
+          <td class="px-2 py-2 align-top font-mono">${escapeHtml(row.matched_group || (data.available === false ? 'none' : '*'))}</td>
+          <td class="px-2 py-2 align-top">${row.explicitly_named ? 'Yes' : 'No'}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  function renderAiCitations() {
+    const block = document.getElementById('ai-citations-block');
+    const data = state.aiCitations || {};
+    if (!block) return;
+    if (data.available !== true) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const cited = data.cited_pages || [];
+    const risk = data.at_risk || [];
+    const opportunities = data.opportunities || [];
+    document.getElementById('ai-citations-meta').textContent =
+      `${Number(summary.cited_pages || cited.length).toLocaleString()} cited pages from DataForSEO Labs samples. ${data.coverage_note || ''}`;
+    document.getElementById('ai-citations-summary').innerHTML =
+      card('cited pages', Number(summary.cited_pages || cited.length).toLocaleString(), 'protect and strengthen') +
+      card('citing queries', Number(summary.citing_queries || 0).toLocaleString(), 'unique keywords') +
+      card('citing volume', Number(summary.citing_query_volume || 0).toLocaleString(), 'monthly search volume') +
+      card('top pages cited', `${Math.round(Number(summary.top_traffic_pages_cited_share || 0) * 100)}%`, `${Number(summary.top_traffic_pages_cited || 0).toLocaleString()} of ${Number(summary.top_traffic_pages || 0).toLocaleString()}`);
+    document.getElementById('ai-citations-note').innerHTML = data.coverage_note ? `
+      <div class="border border-amber-200 bg-amber-50 text-amber-900 rounded p-3">${escapeHtml(data.coverage_note)}</div>` : '';
+
+    document.getElementById('ai-citations-cited-rows').innerHTML = cited.length ? cited.slice(0, 80).map(row => {
+      const queries = (row.queries || []).slice(0, 4).map(q => `
+        <div>
+          <span class="font-medium">${escapeHtml(q.keyword || '')}</span>
+          <span class="text-gray-500"> ${Number(q.search_volume || 0).toLocaleString()}/mo</span>
+        </div>`).join('');
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 58))}</a></td>
+          <td class="px-2 py-2 align-top">${escapeHtml(row.title || '')}<div class="text-gray-500">${escapeHtml(row.cluster || row.section || '')}</div></td>
+          <td class="px-2 py-2 align-top">${queries}</td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(row.total_volume || 0).toLocaleString()}</td>
+        </tr>`;
+    }).join('') : '<tr><td class="px-2 py-3 text-gray-500" colspan="4">No cited pages found.</td></tr>';
+
+    document.getElementById('ai-citations-risk-rows').innerHTML = risk.length ? risk.slice(0, 50).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 54))}</a></td>
+        <td class="px-2 py-2 align-top">${escapeHtml(row.top_keyword || '')}<div class="text-gray-500">${Number(row.top_keyword_volume || 0).toLocaleString()}/mo</div></td>
+        <td class="px-2 py-2 align-top"><span class="font-semibold text-amber-700">${escapeHtml(String(row.bucket || '').replaceAll('_', ' '))}</span><div class="text-gray-500">${row.age_days == null ? '' : Number(row.age_days).toLocaleString() + ' days'}</div></td>
+      </tr>`).join('') : '<tr><td class="px-2 py-3 text-gray-500" colspan="3">No cited pages are marked stale or very stale.</td></tr>';
+
+    const oppWrap = document.getElementById('ai-citations-opportunity-wrap');
+    const oppNote = document.getElementById('ai-citations-opportunity-note');
+    if (!opportunities.length) {
+      oppWrap.style.display = 'none';
+      oppNote.innerHTML = `
+        <div class="border border-gray-200 bg-gray-50 text-gray-700 rounded p-3">
+          No deterministic opportunity rows. ${escapeHtml(data.coverage_note || '')}
+        </div>`;
+      return;
+    }
+    oppWrap.style.display = '';
+    oppNote.innerHTML = '';
+    document.getElementById('ai-citations-opportunity-rows').innerHTML = opportunities.slice(0, 80).map(row => `
+      <tr class="border-t border-gray-100">
+        <td class="px-2 py-2 align-top font-medium">${escapeHtml(row.keyword || '')}</td>
+        <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 70))}</a><div class="text-gray-500">${escapeHtml(row.title || '')}</div></td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(row.position || 0).toFixed(0)}</td>
+        <td class="px-2 py-2 align-top text-right font-mono">${Number(row.search_volume || 0).toLocaleString()}</td>
+      </tr>`).join('');
+  }
+
+  function aiAccessTextFileCard(label, file) {
+    const present = !!file.present;
+    const lines = (file.first_lines || []).slice(0, 3).map(line => escapeHtml(line)).join('<br>');
+    return `
+      <div class="border border-gray-200 rounded p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="font-semibold">${escapeHtml(label)}</div>
+            <div class="text-gray-500 break-all">${escapeHtml(file.url || '')}</div>
+          </div>
+          <div class="${present ? 'text-green-700' : 'text-gray-500'} font-semibold">${present ? 'Present' : 'Absent'}</div>
+        </div>
+        <div class="text-gray-500 mt-2">${Number(file.size_bytes || 0).toLocaleString()} bytes</div>
+        ${lines ? `<pre class="mt-2 bg-gray-50 border border-gray-100 rounded p-2 overflow-x-auto whitespace-pre-wrap">${lines}</pre>` : ''}
+      </div>`;
   }
 
   function bestPageSignalList(rows, emptyText) {
@@ -5100,6 +5765,49 @@
     }).join('') || '<div class="text-gray-500">No candidate snippets.</div>';
   }
 
+  function renderChunkRetrievability() {
+    const block = document.getElementById('chunk-retrievability-block');
+    const data = state.chunkRetrievability || {};
+    if (!block) return;
+    if (data.available !== true) {
+      block.style.display = 'none';
+      return;
+    }
+    const summary = data.summary || {};
+    const model = data.model || {};
+    const rows = data.queries || [];
+    if (!rows.length) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const truncated = summary.truncated ? ` · ${Number(summary.truncated).toLocaleString()} truncated by importance` : '';
+    document.getElementById('chunk-retrievability-meta').textContent =
+      `${Number(summary.queries || rows.length).toLocaleString()} mapped queries · strong threshold ${Number(model.strong_similarity || 0.65).toFixed(2)} · chunk target ≤${Number(model.chunk_max_words || 250)} words${truncated}.`;
+    document.getElementById('chunk-retrievability-summary').innerHTML =
+      card('retrievable', Number(summary.retrievable || 0).toLocaleString(), `${Math.round(Number(summary.retrievable_share || 0) * 100)}% of queries`) +
+      card('split answers', Number(summary.split_answer || 0).toLocaleString(), 'fragmented across near-tied chunks') +
+      card('missing', Number(summary.missing || 0).toLocaleString(), 'no chunk clears the floor') +
+      card('recommendations', Number(summary.recommendations || 0).toLocaleString(), summary.recommendations_truncated ? `${Number(summary.recommendations_truncated).toLocaleString()} capped` : 'demand-filtered');
+    const badge = status => status === 'retrievable' ? 'bg-green-100 text-green-800'
+      : status === 'split_answer' ? 'bg-amber-100 text-amber-800'
+      : 'bg-red-100 text-red-800';
+    document.getElementById('chunk-retrievability-rows').innerHTML = rows.slice(0, 200).map(row => {
+      const status = row.status || 'missing';
+      const headings = status === 'split_answer'
+        ? `${escapeHtml(row.chunk_heading || '')}<div class="text-gray-500">${escapeHtml(row.second_heading || '')}</div>`
+        : escapeHtml(row.chunk_heading || '');
+      return `
+        <tr class="border-t border-gray-100">
+          <td class="px-2 py-2 align-top font-medium">${escapeHtml(row.query || '')}<div class="text-gray-500 font-normal">${escapeHtml(row.source || '')}</div></td>
+          <td class="px-2 py-2 align-top"><a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '#')}" target="_blank" rel="noopener">${escapeHtml(truncateMiddle(row.url || '', 58))}</a><div class="text-gray-500">${escapeHtml(row.title || '')}</div></td>
+          <td class="px-2 py-2 align-top text-right font-mono">${Number(row.best_similarity || 0).toFixed(3)}</td>
+          <td class="px-2 py-2 align-top"><span class="px-1.5 py-0.5 rounded ${badge(status)}">${escapeHtml(status.replaceAll('_', ' '))}</span></td>
+          <td class="px-2 py-2 align-top">${headings}<div class="text-gray-500">¶ ${(row.paragraph_indexes || []).join(', ')}</div></td>
+        </tr>`;
+    }).join('');
+  }
+
   function renderCannibalization(filter='all') {
     const block = document.getElementById('cannibalization-block');
     const data = state.cannibalization || {};
@@ -6224,6 +6932,57 @@
       (data.top_heavy_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No heavy pages found.</div>';
     document.getElementById('audit-performance-blocking').innerHTML =
       (data.render_blocking_pages || []).slice(0, 100).map(pageRow).join('') || '<div class="text-gray-500">No render-blocking resources found.</div>';
+  }
+
+  function renderCrux() {
+    const block = document.getElementById('cwv-block');
+    const data = state.crux || {};
+    if (!data.available) {
+      block.style.display = 'none';
+      return;
+    }
+    block.style.display = '';
+    const summary = data.summary || {};
+    const period = data.collection_period || {};
+    const share = summary.phone_good_share || {};
+    const pct = metric => `${(Number(share[metric] || 0) * 100).toFixed(0)}%`;
+    const periodText = period.first_date && period.last_date ? `${period.first_date} to ${period.last_date}` : 'Collection window unavailable';
+    document.getElementById('audit-cwv-summary').innerHTML =
+      card('Phone LCP good', pct('largest_contentful_paint'), 'URL/origin rows with good p75') +
+      card('Phone INP good', pct('interaction_to_next_paint'), 'URL/origin rows with good p75') +
+      card('Phone CLS good', pct('cumulative_layout_shift'), 'URL/origin rows with good p75') +
+      card('Collection window', period.last_date || 'n/a', periodText);
+    document.getElementById('audit-cwv-caption').textContent =
+      `${Number(summary.total_rows || 0).toLocaleString()} CrUX rows · ${Number(summary.url_rows || 0).toLocaleString()} URL-level · ${Number(summary.origin_rows || 0).toLocaleString()} origin fallback${data.truncated ? ` · URL selection capped at ${Number(data.max_urls || 0).toLocaleString()}` : ''}.`;
+    const chip = value => {
+      const label = String(value || 'n/a').replaceAll('_', ' ');
+      const cls = value === 'good' ? 'bg-green-100 text-green-800' : value === 'poor' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800';
+      return `<span class="inline-block rounded px-1.5 py-0.5 ${cls}">${escapeHtml(label)}</span>`;
+    };
+    // Neutral chip for the url/origin level column: assessment colors would
+    // wrongly read as a warning.
+    const levelChip = value =>
+      `<span class="inline-block rounded px-1.5 py-0.5 bg-gray-100 text-gray-700">${escapeHtml(String(value || 'n/a'))}</span>`;
+    const metricCell = (row, short) => {
+      const p75 = row[`${short}_p75`];
+      const assessment = row[`${short}_assessment`];
+      if (p75 === undefined || p75 === null || p75 === '') return '<td class="py-2 pr-3 text-gray-400">n/a</td>';
+      const value = short === 'lcp' ? `${(Number(p75 || 0) / 1000).toFixed(1)}s` : short === 'inp' ? `${Number(p75 || 0).toFixed(0)}ms` : Number(p75 || 0).toFixed(2).replace(/0+$/,'').replace(/\.$/,'');
+      return `<td class="py-2 pr-3 whitespace-nowrap"><span class="font-medium">${escapeHtml(value)}</span> ${chip(assessment)}</td>`;
+    };
+    document.getElementById('audit-cwv-rows').innerHTML =
+      (data.rows || []).slice(0, 250).map(row => `
+        <tr class="border-b border-gray-100">
+          <td class="py-2 pr-3 min-w-[22rem]">
+            <a class="text-blue-600 hover:underline break-all" href="${escapeHtml(row.url || '')}" target="_blank" rel="noopener">${escapeHtml(row.title || row.url || '')}</a>
+            <div class="text-gray-500 break-all">${escapeHtml(row.url || '')}${Number(row.traffic || 0) > 0 ? ` · traffic ${Number(row.traffic || 0).toLocaleString()}` : ''}</div>
+          </td>
+          <td class="py-2 pr-3">${escapeHtml(row.form_factor || '')}</td>
+          <td class="py-2 pr-3">${levelChip(row.level)}</td>
+          ${metricCell(row, 'lcp')}
+          ${metricCell(row, 'inp')}
+          ${metricCell(row, 'cls')}
+        </tr>`).join('') || '<tr><td colspan="6" class="py-3 text-gray-500">No CrUX rows.</td></tr>';
   }
 
   function renderPerformanceExplainer() {

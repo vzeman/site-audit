@@ -73,6 +73,8 @@ class ExternalLinksResult:
     per_page: list[dict]                  # [{url, external_count, distinct_domains, citation_density, authority_share, ...}]
     top_domains: list[dict]               # site-wide most-cited domains
     broken_links: list[dict] = field(default_factory=list)
+    link_issues: list[dict] = field(default_factory=list)
+    per_page_issues: list[dict] = field(default_factory=list)
     citation_density_summary: dict = field(default_factory=dict)
 
 
@@ -142,16 +144,22 @@ def analyze(
             "top_anchors": [a for a, _ in domain_anchors[d].most_common(3)],
         })
 
+    link_issues: list[dict] = []
     broken_links: list[dict] = []
+    per_page_issues: list[dict] = []
     if check_links:
         # gather candidate (url, anchor) pairs once, dedup by URL
         unique_urls: dict[str, str] = {}
-        for _, externals in pages_with_external:
+        target_sources: dict[str, list[dict]] = defaultdict(list)
+        for page_url, externals in pages_with_external:
             for tgt, anchor in externals:
                 if tgt not in unique_urls:
                     unique_urls[tgt] = anchor
+                target_sources[tgt].append({"url": page_url, "anchor": anchor})
         if unique_urls:
-            broken_links = _check_links(list(unique_urls.items()), http_cache=http_cache, max_workers=max_workers, timeout=timeout)
+            link_issues = _check_links(list(unique_urls.items()), http_cache=http_cache, max_workers=max_workers, timeout=timeout)
+            broken_links = [issue for issue in link_issues if _is_broken_external_link_issue(issue)]
+            per_page_issues = _per_page_issue_rows(link_issues, target_sources)
 
     if densities:
         import statistics
@@ -168,6 +176,8 @@ def analyze(
         per_page=per_page,
         top_domains=top_domains_payload,
         broken_links=broken_links,
+        link_issues=link_issues,
+        per_page_issues=per_page_issues,
         citation_density_summary=density_summary,
     )
 
@@ -178,10 +188,11 @@ def _check_links(
     max_workers: int = 8,
     timeout: float = 12.0,
 ) -> list[dict]:
-    """HEAD-check unique external URLs; return only the broken ones.
+    """HEAD-check unique external URLs; return URLs with link issues.
 
-    We treat anything in [400, 599] as broken. 4xx domains often
-    redirect 200, so we follow redirects and use the final status.
+    Redirects and final 4xx/5xx statuses are tracked as reusable external
+    issue signals. 4xx domains often redirect 200, so we follow redirects
+    and use the final status while preserving redirect history.
     """
     session = requests.Session()
     session.headers.update({
@@ -193,8 +204,15 @@ def _check_links(
         if http_cache is not None:
             cached = http_cache.get(url)
             if cached is not None:
-                if 400 <= cached.status < 600:
-                    return {"url": url, "anchor": anchor, "status": cached.status, "from_cache": True}
+                issues = _external_issue_types(cached.status, [])
+                if issues:
+                    return {
+                        "url": url,
+                        "anchor": anchor,
+                        "status": cached.status,
+                        "issues": issues,
+                        "from_cache": True,
+                    }
                 return None
         try:
             r = session.head(url, allow_redirects=True, timeout=timeout)
@@ -203,17 +221,39 @@ def _check_links(
                 r = session.get(url, allow_redirects=True, timeout=timeout, stream=True)
                 r.close()
         except requests.RequestException as exc:
-            return {"url": url, "anchor": anchor, "status": None, "error": str(exc)[:120]}
-        if http_cache is not None and r.status_code < 400:
+            return {
+                "url": url,
+                "anchor": anchor,
+                "status": None,
+                "error": str(exc)[:120],
+                "issues": ["external_time_out"],
+                "from_cache": False,
+            }
+
+        redirect_status_codes = [
+            response.status_code
+            for response in r.history
+            if 300 <= response.status_code < 400
+        ]
+        issues = _external_issue_types(r.status_code, redirect_status_codes)
+        if http_cache is not None and r.status_code < 400 and not issues:
             try:
                 http_cache.put(url, r.status_code, dict(r.headers), b"")
             except Exception:
                 pass
-        if 400 <= r.status_code < 600:
-            return {"url": url, "anchor": anchor, "status": r.status_code, "from_cache": False}
+        if issues:
+            return {
+                "url": url,
+                "anchor": anchor,
+                "status": r.status_code,
+                "final_url": r.url,
+                "redirect_status_codes": redirect_status_codes,
+                "issues": issues,
+                "from_cache": False,
+            }
         return None
 
-    broken: list[dict] = []
+    issues: list[dict] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futs = {pool.submit(_check, url, anchor): url for url, anchor in targets}
         done = 0
@@ -226,9 +266,65 @@ def _check_links(
             except Exception:
                 continue
             if res is not None:
-                broken.append(res)
-    broken.sort(key=lambda r: (r.get("status") or 999, r.get("url", "")))
-    return broken
+                issues.append(res)
+    issues.sort(key=lambda r: (r.get("status") or 999, r.get("url", "")))
+    return issues
+
+
+def _external_issue_types(status: int | None, redirect_status_codes: list[int]) -> list[str]:
+    issues: list[str] = []
+    if redirect_status_codes:
+        issues.append("external_3xx_redirect")
+    if status is None:
+        return issues
+    if 400 <= status < 500:
+        issues.append("external_4xx")
+    elif 500 <= status < 600:
+        issues.append("external_5xx")
+    return issues
+
+
+def _is_broken_external_link_issue(issue: dict) -> bool:
+    issue_types = set(issue.get("issues") or [])
+    return bool(issue.get("error")) or bool(issue_types & {"external_4xx", "external_5xx", "external_time_out"})
+
+
+def _per_page_issue_rows(link_issues: list[dict], target_sources: dict[str, list[dict]]) -> list[dict]:
+    page_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    page_details: dict[str, list[dict]] = defaultdict(list)
+    for issue in link_issues:
+        target_url = issue.get("url") or ""
+        issue_types = list(issue.get("issues") or [])
+        if not target_url or not issue_types:
+            continue
+        for source in target_sources.get(target_url, []):
+            page_url = source.get("url") or ""
+            if not page_url:
+                continue
+            for issue_type in issue_types:
+                page_counts[page_url][issue_type] += 1
+            page_details[page_url].append(
+                {
+                    "url": target_url,
+                    "anchor": source.get("anchor", ""),
+                    "status": issue.get("status"),
+                    "final_url": issue.get("final_url", ""),
+                    "redirect_status_codes": list(issue.get("redirect_status_codes") or []),
+                    "issues": issue_types,
+                }
+            )
+    rows = []
+    for page_url, counts in page_counts.items():
+        rows.append(
+            {
+                "url": page_url,
+                "issues": dict(counts),
+                "issue_count": sum(counts.values()),
+                "external_links_with_issues": page_details.get(page_url, []),
+            }
+        )
+    rows.sort(key=lambda row: (row["issue_count"], row["url"]), reverse=True)
+    return rows
 
 
 def to_payload(result: ExternalLinksResult, top_n: int = 50) -> dict:
@@ -237,4 +333,6 @@ def to_payload(result: ExternalLinksResult, top_n: int = 50) -> dict:
         "per_page": result.per_page[:top_n * 4],   # surface more pages here than other tables
         "top_domains": result.top_domains[:top_n],
         "broken_links": result.broken_links,
+        "link_issues": result.link_issues,
+        "per_page_issues": result.per_page_issues,
     }

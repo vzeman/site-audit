@@ -66,6 +66,10 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["pages_with_media"] == 2
     assert report["summary"]["pages_with_issues"] == 2
     assert report["summary"]["images_missing_alt"] == 1
+    assert report["summary"]["broken_images"] == 0
+    assert report["summary"]["large_images"] == 0
+    assert report["summary"]["https_pages_linking_to_http_images"] == 0
+    assert report["summary"]["redirected_images"] == 0
     assert report["summary"]["decorative_images"] == 1
     assert report["summary"]["linked_images_empty_alt"] == 1
     assert report["summary"]["images_filename_alt"] == 1
@@ -74,6 +78,82 @@ def test_media_accessibility_payload_flags_media_issues() -> None:
     assert report["summary"]["iframes_missing_title"] == 1
     assert report["issues_by_type"]["image_missing_alt"] == 1
     assert any(row["type"] == "video" for row in report["media_with_issues"])
+
+
+def test_media_accessibility_payload_flags_broken_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "/broken.jpg", "alt_present": True, "alt": "Broken", "http_status": 404},
+            {"type": "image", "src": "/flagged.jpg", "alt_present": True, "alt": "Flagged", "broken": True},
+            {"type": "image", "src": "/ok.jpg", "alt_present": True, "alt": "OK", "http_status": 200},
+        ]),
+    ]))
+
+    assert report["summary"]["broken_images"] == 2
+    assert report["issues_by_type"]["image_broken"] == 2
+    assert report["per_page"][0]["issues"]["image_broken"] == 2
+    broken_rows = [row for row in report["media_with_issues"] if "image_broken" in row["issues"]]
+    assert [row["src"] for row in broken_rows] == ["/broken.jpg", "/flagged.jpg"]
+    assert broken_rows[0]["http_status"] == 404
+
+
+def test_media_accessibility_payload_flags_large_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "/large.jpg", "alt_present": True, "alt": "Large", "size_bytes": 1_400_000},
+            {"type": "image", "src": "/also-large.jpg", "alt_present": True, "alt": "Large", "content_length_bytes": 1_100_000},
+            {"type": "image", "src": "/ok.jpg", "alt_present": True, "alt": "OK", "size_bytes": 800_000},
+        ]),
+    ]))
+
+    assert report["summary"]["large_images"] == 2
+    assert report["issues_by_type"]["image_file_size_too_large"] == 2
+    assert report["per_page"][0]["issues"]["image_file_size_too_large"] == 2
+    large_rows = [row for row in report["media_with_issues"] if "image_file_size_too_large" in row["issues"]]
+    assert [row["src"] for row in large_rows] == ["/large.jpg", "/also-large.jpg"]
+    assert large_rows[0]["size_bytes"] == 1_400_000
+
+
+def test_media_accessibility_payload_flags_https_pages_linking_to_http_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {"type": "image", "src": "http://cdn.example.com/insecure.jpg", "alt_present": True, "alt": "Insecure"},
+            {"type": "image", "src": "https://cdn.example.com/secure.jpg", "alt_present": True, "alt": "Secure"},
+        ]),
+        _page("http://example.com/b", [
+            {"type": "image", "src": "http://cdn.example.com/http-page.jpg", "alt_present": True, "alt": "HTTP page"},
+        ]),
+    ]))
+
+    assert report["summary"]["https_pages_linking_to_http_images"] == 1
+    assert report["issues_by_type"]["https_page_links_to_http_image"] == 1
+    insecure_rows = [row for row in report["media_with_issues"] if "https_page_links_to_http_image" in row["issues"]]
+    assert len(insecure_rows) == 1
+    assert insecure_rows[0]["url"] == "https://example.com/a"
+    assert insecure_rows[0]["src"] == "http://cdn.example.com/insecure.jpg"
+
+
+def test_media_accessibility_payload_flags_redirected_images() -> None:
+    report = to_payload(analyze([
+        _page("https://example.com/a", [
+            {
+                "type": "image",
+                "src": "/redirect.jpg",
+                "alt_present": True,
+                "alt": "Redirect",
+                "http_status": 301,
+                "redirect_target_url": "/final.jpg",
+            },
+            {"type": "image", "src": "/flagged.jpg", "alt_present": True, "alt": "Flagged", "redirected": True},
+            {"type": "image", "src": "/ok.jpg", "alt_present": True, "alt": "OK", "http_status": 200},
+        ]),
+    ]))
+
+    assert report["summary"]["redirected_images"] == 2
+    assert report["issues_by_type"]["image_redirects"] == 2
+    redirected_rows = [row for row in report["media_with_issues"] if "image_redirects" in row["issues"]]
+    assert [row["src"] for row in redirected_rows] == ["/redirect.jpg", "/flagged.jpg"]
+    assert redirected_rows[0]["redirect_target_url"] == "/final.jpg"
 
 
 def test_compare_leaderboard_includes_media_accessibility_metrics(tmp_path: Path) -> None:

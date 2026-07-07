@@ -1,7 +1,20 @@
+from types import SimpleNamespace
+
 import numpy as np
 
 from site_audit.analyzer import PageInfo
-from site_audit.linkgraph import analyze, high_demand_low_link_payload, hub_bottleneck_payload, link_flow_payload, link_recommendations, link_removal_simulation_payload, traffic_weighted_pagerank_payload
+from site_audit.linkgraph import (
+    analyze,
+    annotate_internal_link_rel_stats,
+    annotate_link_target_statuses,
+    high_demand_low_link_payload,
+    hub_bottleneck_payload,
+    link_flow_payload,
+    link_recommendations,
+    link_removal_simulation_payload,
+    to_payload as linkgraph_payload,
+    traffic_weighted_pagerank_payload,
+)
 
 
 def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
@@ -49,6 +62,179 @@ def test_link_flow_payload_keeps_traffic_nodes_and_weighted_edges() -> None:
     assert target_edge["target_cluster"] == "guides"
     assert target_edge["target_page_type"] == "article"
     assert "guide" in target_edge["anchor_samples"]
+
+
+def test_linkgraph_payload_counts_internal_links_by_protocol() -> None:
+    pages = [
+        PageInfo(url="https://example.com/source", title="Source", description="", section="root", word_count=100, language="en"),
+        PageInfo(url="https://example.com/target", title="Target", description="", section="root", word_count=100, language="en"),
+    ]
+    outlinks = [
+        (pages[0].url, [
+            ("http://example.com/legacy", "legacy"),
+            ("http://example.com/legacy", "legacy duplicate"),
+            (pages[1].url, "target"),
+        ]),
+        (pages[1].url, []),
+    ]
+
+    result = analyze(pages, np.eye(2, dtype=np.float32), outlinks, home_url=pages[0].url)
+    payload = linkgraph_payload(result, pages)
+    source = next(row for row in payload["page_link_counts"] if row["url"] == pages[0].url)
+
+    assert source["internal_http_link_count"] == 1
+    assert source["internal_http_links"] == ["http://example.com/legacy"]
+    assert source["internal_https_link_count"] == 1
+    assert source["internal_https_links"] == [pages[1].url]
+    assert source["raw_internal_link_count"] == 2
+
+
+def test_linkgraph_payload_annotates_broken_internal_link_targets() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/source", "in_degree": 1, "out_degree": 3},
+            {"url": "https://example.com/clean", "in_degree": 1, "out_degree": 1},
+        ]
+    }
+    outlinks = {
+        "https://example.com/source": [
+            ("https://example.com/missing", "missing"),
+            ("https://example.com/missing", "duplicate"),
+            ("https://example.com/error", "error"),
+            ("https://example.com/redirecting", "redirect"),
+            ("https://example.com/live", "live"),
+        ],
+        "https://example.com/clean": [("https://example.com/live", "live")],
+    }
+    indexability = {
+        "per_page": [
+            {"url": "https://example.com/missing", "http_status": 404},
+            {"url": "https://example.com/error", "http_status": 500},
+            {
+                "url": "https://example.com/final",
+                "http_status": 200,
+                "requested_url": "https://example.com/redirecting",
+                "redirect_target_url": "https://example.com/final",
+            },
+            {"url": "https://example.com/live", "http_status": 200},
+        ]
+    }
+
+    annotated = annotate_link_target_statuses(payload, outlinks, indexability)
+    source = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/source")
+    clean = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/clean")
+
+    assert source["broken_internal_link_count"] == 2
+    assert source["broken_internal_links"] == [
+        {"url": "https://example.com/missing", "http_status": 404},
+        {"url": "https://example.com/error", "http_status": 500},
+    ]
+    assert source["redirect_internal_link_count"] == 1
+    assert source["redirect_internal_links"] == [
+        {"url": "https://example.com/redirecting", "redirect_target_url": "https://example.com/final"}
+    ]
+    assert clean["broken_internal_link_count"] == 0
+    assert clean["redirect_internal_link_count"] == 0
+
+
+def test_linkgraph_payload_annotates_incoming_nofollow_and_dofollow_links() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/nofollow-only", "in_degree": 1, "out_degree": 1},
+            {"url": "https://example.com/mixed", "in_degree": 2, "out_degree": 1},
+        ]
+    }
+    extracted = [
+        SimpleNamespace(
+            url="https://example.com/source-a",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/nofollow-only",
+                    "anchor": "nofollow target",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+                {
+                    "target_url": "https://example.com/mixed",
+                    "anchor": "mixed nofollow",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+            ],
+        ),
+        SimpleNamespace(
+            url="https://example.com/source-b",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/mixed",
+                    "anchor": "mixed dofollow",
+                    "is_internal": True,
+                    "nofollow": False,
+                },
+            ],
+        ),
+    ]
+
+    annotated = annotate_internal_link_rel_stats(payload, extracted)
+    nofollow_only = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/nofollow-only")
+    mixed = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/mixed")
+
+    assert nofollow_only["incoming_nofollow_internal_link_count"] == 1
+    assert nofollow_only["incoming_dofollow_internal_link_count"] == 0
+    assert nofollow_only["incoming_nofollow_internal_links"][0]["source_url"] == "https://example.com/source-a"
+    assert mixed["incoming_nofollow_internal_link_count"] == 1
+    assert mixed["incoming_dofollow_internal_link_count"] == 1
+
+
+def test_linkgraph_payload_annotates_outgoing_nofollow_internal_links() -> None:
+    payload = {
+        "page_link_counts": [
+            {"url": "https://example.com/source", "in_degree": 1, "out_degree": 2},
+            {"url": "https://example.com/clean", "in_degree": 1, "out_degree": 1},
+            {"url": "https://example.com/target", "in_degree": 1, "out_degree": 0},
+        ]
+    }
+    extracted = [
+        SimpleNamespace(
+            url="https://example.com/source",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/target",
+                    "anchor": "nofollow target",
+                    "is_internal": True,
+                    "nofollow": True,
+                },
+                {
+                    "target_url": "https://external.example/page",
+                    "anchor": "external nofollow",
+                    "is_internal": False,
+                    "nofollow": True,
+                },
+            ],
+        ),
+        SimpleNamespace(
+            url="https://example.com/clean",
+            link_audit_rows=[
+                {
+                    "target_url": "https://example.com/target",
+                    "anchor": "clean target",
+                    "is_internal": True,
+                    "nofollow": False,
+                },
+            ],
+        ),
+    ]
+
+    annotated = annotate_internal_link_rel_stats(payload, extracted)
+    source = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/source")
+    clean = next(row for row in annotated["page_link_counts"] if row["url"] == "https://example.com/clean")
+
+    assert source["outgoing_nofollow_internal_link_count"] == 1
+    assert source["outgoing_nofollow_internal_links"] == [
+        {"target_url": "https://example.com/target", "anchor": "nofollow target"}
+    ]
+    assert clean["outgoing_nofollow_internal_link_count"] == 0
+    assert clean["outgoing_nofollow_internal_links"] == []
 
 
 def test_link_recommendations_skip_canonical_self_link_variants() -> None:

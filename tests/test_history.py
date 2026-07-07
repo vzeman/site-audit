@@ -50,13 +50,15 @@ def test_history_snapshot_captures_page_paragraph_link_schema_and_metrics() -> N
         outlinks_map={"https://example.com/a": [("https://example.com/b", "B")]},
         structured_data={"per_page": [{"url": "https://example.com/a", "types": ["Article"], "valid_blocks": 1}]},
         freshness={"per_page": [{"url": "https://example.com/a", "bucket": "fresh", "date": "2026-01-01"}]},
-        metadata_quality={"per_page": [{"url": "https://example.com/a", "issues": []}]},
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/a", "issues": []}]},
         search_payload=search,
     )
 
     row = payload["pages"][0]
     assert row["paragraphs"][0]["hash"]
     assert row["links"] == ["https://example.com/b"]
+    assert row["canonical_url"] == "https://example.com/a"
+    assert row["canonical_hash"]
     assert row["schema_types"] == ["Article"]
     assert row["metrics"]["traffic"] == 100
     assert row["metrics"]["clicks"] == 50
@@ -65,6 +67,20 @@ def test_history_snapshot_captures_page_paragraph_link_schema_and_metrics() -> N
     assert payload["summary"]["total_clicks"] == 50
     assert payload["summary"]["total_impressions"] == 1000
     assert payload["summary"]["avg_position"] == 5
+
+
+def test_history_snapshot_skips_large_sites(monkeypatch) -> None:
+    monkeypatch.setenv("SITE_AUDIT_HISTORY_MAX_PAGES", "1")
+    pages = [
+        PageInfo(url="https://example.com/a", title="A", description="", section="root", word_count=10, language="en"),
+        PageInfo(url="https://example.com/b", title="B", description="", section="root", word_count=20, language="en"),
+    ]
+
+    payload = build_history_snapshot("example.com", pages)
+
+    assert payload["summary"]["status"] == "skipped_large_site"
+    assert payload["summary"]["pages"] == 2
+    assert payload["pages"] == []
 
 
 def test_compare_snapshots_reports_content_link_schema_metadata_and_metric_deltas(tmp_path: Path) -> None:
@@ -116,6 +132,201 @@ def test_compare_snapshots_reports_content_link_schema_metadata_and_metric_delta
     assert row["schema_added"] == ["FAQPage"]
     assert row["confidence"] in {"medium", "low-medium"}
     assert diff["summary"]["caveats"]
+    assert diff["recommendation_outcomes"]["available"] is False
+
+
+def test_compare_snapshots_reports_canonical_url_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/a", "issues": []}]},
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        metadata_quality={"per_page": [{"url": "https://example.com/a", "canonical_url": "https://example.com/canonical", "issues": []}]},
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "canonical" in row["changed_fields"]
+    assert row["canonical_before"] == "https://example.com/a"
+    assert row["canonical_after"] == "https://example.com/canonical"
+
+
+def test_compare_snapshots_reports_redirect_target_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        indexability={"per_page": [{"url": "https://example.com/a", "redirect_target_url": "https://example.com/old"}]},
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        indexability={"per_page": [{"url": "https://example.com/a", "redirect_target_url": "https://example.com/new"}]},
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "redirect_target" in row["changed_fields"]
+    assert row["redirect_target_before"] == "https://example.com/old"
+    assert row["redirect_target_after"] == "https://example.com/new"
+
+
+def test_compare_snapshots_reports_h1_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_extracted[0].h1 = "Old H1"
+    after_extracted[0].h1 = "New H1"
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "h1" in row["changed_fields"]
+    assert row["h1_before"] == "Old H1"
+    assert row["h1_after"] == "New H1"
+
+
+def test_compare_snapshots_reports_description_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_pages[0].description = "Old meta description"
+    before_extracted[0].description = "Old meta description"
+    after_pages[0].description = "New meta description"
+    after_extracted[0].description = "New meta description"
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "description" in row["changed_fields"]
+    assert row["description_before"] == "Old meta description"
+    assert row["description_after"] == "New meta description"
+
+
+def test_compare_snapshots_reports_serp_title_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_search["top_pages"][0]["top_keyword_title"] = "Old SERP title"
+    after_search["top_pages"][0]["top_keyword_title"] = "New SERP title"
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        search_payload=before_search,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        search_payload=after_search,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "serp_title" in row["changed_fields"]
+    assert row["serp_title_before"] == "Old SERP title"
+    assert row["serp_title_after"] == "New SERP title"
+
+
+def test_compare_snapshots_reports_word_count_changes(tmp_path: Path) -> None:
+    before_pages, before_extracted, _before_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    after_pages, after_extracted, _after_search = _snapshot_page("Support automation", "Original paragraph.", 100, [])
+    before_pages[0].word_count = 120
+    before_extracted[0].word_count = 120
+    after_pages[0].word_count = 260
+    after_extracted[0].word_count = 260
+    before_payload = build_history_snapshot(
+        "example.com",
+        before_pages,
+        before_extracted,
+        snapshot_id="before",
+    )
+    after_payload = build_history_snapshot(
+        "example.com",
+        after_pages,
+        after_extracted,
+        snapshot_id="after",
+    )
+    for snapshot_id, payload in [("before", before_payload), ("after", after_payload)]:
+        report = tmp_path / "example.com" / "snapshots" / snapshot_id / "report"
+        report.mkdir(parents=True)
+        (report / "history_snapshot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    diff = compare_snapshots("example.com", "before", "after", tmp_path)
+    row = diff["changes"][0]
+
+    assert "word_count" in row["changed_fields"]
+    assert row["word_count_before"] == 120
+    assert row["word_count_after"] == 260
 
 
 def test_save_report_snapshot_copies_current_report_and_lists_it(tmp_path: Path) -> None:

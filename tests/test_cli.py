@@ -1,6 +1,6 @@
 import sys
 
-from site_audit.cli import _domain_from_target_url, _run_serp_gap_menu, build_parser, main
+from site_audit.cli import _benchmark_command, _domain_from_target_url, _run_serp_gap_menu, build_parser, main
 
 
 def test_run_parser_accepts_crawl_filter_flags() -> None:
@@ -125,6 +125,125 @@ def test_run_parser_accepts_crawl_filter_flags() -> None:
     assert args.competitive_auto_product_seed == ["AI workflow automation", "AI agents"]
     assert args.competitive_auto_allow_nonlatin is True
     assert args.competitive_auto_refresh_serp is True
+
+
+def test_run_parser_accepts_large_audit_mode_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "example.com",
+            "--preset",
+            "technical",
+            "--technical-only",
+            "--allow-large-embeddings",
+            "--large-site-embedding-threshold",
+            "50000",
+            "--extraction-workers",
+            "4",
+            "--analysis-workers",
+            "5",
+            "--no-adaptive-concurrency",
+            "--min-crawl-workers",
+            "2",
+            "--adaptive-success-threshold",
+            "10",
+            "--adaptive-slow-seconds",
+            "1.5",
+            "--adaptive-max-rss-mb",
+            "4096",
+            "--embed-body-chars",
+            "8000",
+            "--embed-max-seq-length",
+            "384",
+            "--embedding-batch-size",
+            "64",
+            "--max-workers",
+            "9",
+            "--resume",
+            "--no-checkpoints",
+        ]
+    )
+
+    assert args.preset == "technical"
+    assert args.technical_only is True
+    assert args.allow_large_embeddings is True
+    assert args.large_site_embedding_threshold == 50000
+    assert args.extraction_workers == 4
+    assert args.analysis_workers == 5
+    assert args.no_adaptive_concurrency is True
+    assert args.min_crawl_workers == 2
+    assert args.adaptive_success_threshold == 10
+    assert args.adaptive_slow_seconds == 1.5
+    assert args.adaptive_max_rss_mb == 4096
+    assert args.embed_body_chars == 8000
+    assert args.embed_max_seq_length == 384
+    assert args.embedding_batch_size == 64
+    assert args.workers == 9
+    assert args.resume is True
+    assert args.no_checkpoints is True
+
+
+def test_run_parser_keeps_workers_alias_for_max_workers() -> None:
+    args = build_parser().parse_args(["run", "example.com", "--workers", "7"])
+
+    assert args.workers == 7
+
+
+def test_benchmark_parser_accepts_cached_report_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "example.com",
+            "--projects-root",
+            "projects",
+            "--include",
+            "*.json",
+            "--output",
+            "bench.json",
+        ]
+    )
+
+    assert args.command == "benchmark"
+    assert args.domain == "example.com"
+    assert args.include == ["*.json"]
+    assert args.output == "bench.json"
+
+
+def test_benchmark_command_writes_result(tmp_path) -> None:
+    report_dir = tmp_path / "report"
+    report_dir.mkdir()
+    (report_dir / "site_metrics.json").write_text("{}", encoding="utf-8")
+    out = tmp_path / "bench.json"
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "example.com",
+            "--report-dir",
+            str(report_dir),
+            "--output",
+            str(out),
+        ]
+    )
+
+    assert _benchmark_command(args) == 0
+    assert out.is_file()
+
+
+def test_cache_migrate_parser_accepts_options() -> None:
+    args = build_parser().parse_args([
+        "cache-migrate",
+        "example.com",
+        "--batch-size",
+        "10",
+        "--progress-interval",
+        "100",
+        "--delete-original",
+    ])
+
+    assert args.domain == "example.com"
+    assert args.batch_size == 10
+    assert args.progress_interval == 100
+    assert args.delete_original is True
 
 
 def test_run_parser_strips_header_footer_by_default() -> None:

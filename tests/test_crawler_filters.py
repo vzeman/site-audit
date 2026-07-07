@@ -1,4 +1,7 @@
-from site_audit.crawler import CrawlConfig, Crawler, FetchResult
+import requests
+
+from site_audit.cache import HttpCache
+from site_audit.crawler import AdaptiveConcurrency, CrawlConfig, Crawler, FetchResult, normalize_url
 
 
 class _Cache:
@@ -7,12 +10,35 @@ class _Cache:
 
 
 class _Response:
-    def __init__(self, body: str, url: str = "https://example.com/sitemap.xml"):
-        self.status_code = 200
+    def __init__(
+        self,
+        body: str,
+        url: str = "https://example.com/sitemap.xml",
+        status_code: int = 200,
+        content_type: str = "application/xml",
+        history: list | None = None,
+    ):
+        self.status_code = status_code
         self.content = body.encode("utf-8")
         self.text = body
         self.url = url
-        self.headers = {"Content-Type": "application/xml"}
+        self.headers = {"Content-Type": content_type}
+        self.reason = ""
+        self.encoding = "utf-8"
+        self.history = history or []
+
+
+class _InlineFuture:
+    def __init__(self, value):
+        self._value = value
+
+    def result(self):
+        return self._value
+
+
+class _InlinePool:
+    def submit(self, fn, *args):
+        return _InlineFuture(fn(*args))
 
 
 def _crawler(config: CrawlConfig, responses: dict[str, str]) -> Crawler:
@@ -163,12 +189,275 @@ def test_sitemap_only_keeps_outlinks_but_does_not_enqueue_them() -> None:
         body='<a href="https://example.com/linked">Linked</a>',
         content_type="text/html",
         from_cache=True,
+        body_cache_url=url,
     )
 
     results = crawler._bfs(["https://example.com/start"])
 
     assert [result.url for result in results] == ["https://example.com/start"]
     assert results[0].outlinks == [("https://example.com/linked", "Linked")]
+    assert results[0].body == ""
+    assert results[0].body_released is True
+
+
+def test_bfs_can_retain_bodies_when_requested() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=1,
+            respect_robots=False,
+            retain_bodies=True,
+        ),
+        _Cache(),
+    )
+    crawler._fetch = lambda url: FetchResult(
+        url=url,
+        status=200,
+        body='<a href="https://example.com/linked">Linked</a>',
+        content_type="text/html",
+        from_cache=True,
+        body_cache_url=url,
+    )
+
+    results = crawler._bfs(["https://example.com/start"])
+
+    assert results[0].body
+    assert results[0].body_released is False
+
+
+def test_fetch_cached_with_links_reads_body_file_without_retaining_body(tmp_path) -> None:
+    cache = HttpCache(tmp_path / "http.sqlite")
+    url = "https://example.com/start"
+    cache.put(
+        url,
+        200,
+        {"Content-Type": "text/html", "X-Robots-Tag": "noindex"},
+        b"""
+        <html><body>
+          <header><a href="/header">Header</a></header>
+          <main><a href="/linked">Linked</a></main>
+          <footer><a href="/footer">Footer</a></footer>
+        </body></html>
+        """,
+    )
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, strip_header_footer=True),
+        cache,
+    )
+
+    result = crawler._fetch_cached_with_links(url, _InlinePool())
+
+    assert result is not None
+    assert result.body == ""
+    assert result.body_released is True
+    assert result.body_cache_url == url
+    assert result.x_robots_tag == "noindex"
+    assert result.page_links == [("https://example.com/linked", "Linked")]
+
+
+def test_bfs_drains_active_futures_when_frontier_is_empty() -> None:
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=2,
+            respect_robots=False,
+        ),
+        _Cache(),
+    )
+    crawler._fetch = lambda url: FetchResult(
+        url=url,
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    )
+
+    results = crawler._bfs(["https://example.com/a", "https://example.com/b"])
+
+    assert {result.url for result in results} == {
+        "https://example.com/a",
+        "https://example.com/b",
+    }
+
+
+def test_adaptive_concurrency_backs_off_and_recovers() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=8, min_workers=2, success_threshold=2)
+
+    previous = adaptive.record(FetchResult(
+        url="https://example.com/slow",
+        status=429,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+
+    assert previous == 8
+    assert adaptive.target_workers == 4
+
+    adaptive.record(FetchResult(
+        url="https://example.com/ok-1",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+    adaptive.record(FetchResult(
+        url="https://example.com/ok-2",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+    ))
+
+    assert adaptive.target_workers == 5
+
+
+def test_adaptive_concurrency_backs_off_on_slow_live_response() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=6, min_workers=1, slow_seconds=1.0, max_rss_mb=999_999)
+
+    previous = adaptive.record(FetchResult(
+        url="https://example.com/slow",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=False,
+        elapsed_seconds=2.5,
+    ))
+
+    assert previous == 6
+    assert adaptive.target_workers == 3
+
+
+def test_adaptive_concurrency_backs_off_on_local_memory_pressure() -> None:
+    adaptive = AdaptiveConcurrency(max_workers=6, min_workers=1, max_rss_mb=1)
+
+    adaptive.record(FetchResult(
+        url="https://example.com/cache",
+        status=200,
+        body="",
+        content_type="text/html",
+        from_cache=True,
+    ))
+
+    assert adaptive.target_workers == 3
+
+
+def test_normalize_url_strips_tracking_params_but_keeps_business_query_params() -> None:
+    assert normalize_url(
+        "https://example.com/page?utm_source=newsletter&source=feed&page=2&sort=price#reviews"
+    ) == "https://example.com/page?page=2&sort=price"
+    assert normalize_url(
+        "https://example.com/page?gclid=abc&fbclid=def"
+    ) == "https://example.com/page"
+
+
+def test_bfs_dedupes_tracking_variants_before_enqueue() -> None:
+    fetched: list[str] = []
+    crawler = Crawler(
+        CrawlConfig(
+            "example.com",
+            max_pages=10,
+            max_workers=1,
+            respect_robots=False,
+        ),
+        _Cache(),
+    )
+
+    def fake_fetch(url: str) -> FetchResult:
+        fetched.append(url)
+        body = ""
+        if url == "https://example.com/start":
+            body = """
+                <a href="/target?utm_source=newsletter">One</a>
+                <a href="/target?source=feed">Two</a>
+                <a href="/target">Three</a>
+                <a href="/target?page=2&utm_campaign=spring">Paged</a>
+            """
+        return FetchResult(
+            url=url,
+            status=200,
+            body=body,
+            content_type="text/html",
+            from_cache=False,
+        )
+
+    crawler._fetch = fake_fetch
+    results = crawler._bfs(["https://example.com/start"])
+
+    assert fetched == [
+        "https://example.com/start",
+        "https://example.com/target",
+        "https://example.com/target?page=2",
+    ]
+    assert [result.url for result in results] == fetched
+
+
+def test_fetch_preserves_requested_url_and_redirect_target() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "<html><title>Final</title></html>",
+        url="https://example.com/final",
+        status_code=200,
+        content_type="text/html",
+    )
+
+    result = crawler._fetch("https://example.com/redirecting")
+
+    assert result is not None
+    assert result.url == "https://example.com/final"
+    assert result.requested_url == "https://example.com/redirecting"
+    assert result.redirect_target_url == "https://example.com/final"
+
+
+def test_fetch_preserves_redirect_chain_from_response_history() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "<html><title>Final</title></html>",
+        url="https://example.com/final",
+        status_code=200,
+        content_type="text/html",
+        history=[
+            _Response("", url="https://example.com/start", status_code=301, content_type="text/html"),
+            _Response("", url="https://example.com/middle", status_code=302, content_type="text/html"),
+        ],
+    )
+
+    result = crawler._fetch("https://example.com/start")
+
+    assert result is not None
+    assert result.redirect_chain == [
+        "https://example.com/start",
+        "https://example.com/middle",
+        "https://example.com/final",
+    ]
+    assert result.redirect_hop_count == 2
+    assert result.redirect_status_codes == [301, 302]
+
+
+def test_request_with_retry_classifies_too_many_redirects_as_redirect_loop() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+
+    def raise_loop(*args, **kwargs):
+        raise requests.TooManyRedirects("Exceeded 30 redirects")
+
+    crawler._session.get = raise_loop
+
+    response = crawler._request_with_retry("https://example.com/loop")
+
+    assert response is not None
+    assert response.status_code == 0
+    assert response.reason == "redirect_loop"
 
 
 def test_strip_header_footer_removes_chrome_before_link_extraction() -> None:
@@ -289,3 +578,39 @@ def test_content_exclude_classes_apply_inside_included_scope() -> None:
     links = crawler._extract_links("https://example.com/", body)
 
     assert links == [("https://example.com/article", "Article")]
+
+
+def test_fetch_keeps_internal_error_page_for_technical_audit() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    crawler._request_with_retry = lambda url: _Response(
+        "Not found",
+        url="https://example.com/missing",
+        status_code=404,
+    )
+
+    result = crawler._fetch("https://example.com/missing")
+
+    assert result is not None
+    assert result.url == "https://example.com/missing"
+    assert result.status == 404
+    assert result.body == ""
+
+
+def test_fetch_keeps_timeout_for_technical_audit() -> None:
+    crawler = Crawler(
+        CrawlConfig("example.com", respect_robots=False, use_cache=False),
+        _Cache(),
+    )
+    response = _Response("", url="https://example.com/slow", status_code=0)
+    response.reason = "timed_out"
+    crawler._request_with_retry = lambda url: response
+
+    result = crawler._fetch("https://example.com/slow")
+
+    assert result is not None
+    assert result.url == "https://example.com/slow"
+    assert result.status == 0
+    assert result.error == "timed_out"

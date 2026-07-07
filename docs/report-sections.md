@@ -20,9 +20,20 @@ Action: review the low-similarity tail. Keep pages that serve a strategic purpos
 <a id="action-plan-block"></a>
 ## Action plan
 
-Aggregates findings from multiple analyses into a prioritized task list.
+Aggregates findings from multiple analyses into prioritized URL cards. Each card combines all active recommendations for the same primary page, sums any modeled click gains, and lists the underlying actions. Multi-URL merge/consolidation actions are filed under the canonical or best URL, with related URLs shown on the card. Coverage gaps for new pages appear as new-content cards keyed by query.
 
-Action: start here when you need execution priorities. Validate the suggested URL and issue type, then assign each item to content, technical SEO, internal linking, or product/UX.
+For the top title, CTR, GEO answerability, and coverage-gap actions, the report can include generated fix text: proposed titles, meta descriptions, FAQ H2 questions, or new-page H2 outlines. LLM suggestions are labeled as AI-generated and deterministic fallbacks as auto-generated; both are starting points and must be checked for claim accuracy before publishing.
+
+Actions that would conflict with a redirect or merge are suppressed and shown separately with the recommendation that caused suppression — including internal-link suggestions pointing at a page slated for removal. The card effort label is the heaviest member action's effort (quick/medium/deep); the summed effort score is exposed separately.
+
+Action: start here when you need execution priorities. Validate the suggested URL and issue type, assign the card to content, technical SEO, internal linking, or product/UX, then use the "All actions" list for the flat recommendation workflow.
+
+<a id="rec-outcomes-block"></a>
+## Past recommendations scoreboard
+
+Compares the previous audit's recommendation list with the current snapshot. It labels each previous recommendation as implemented, partially implemented, not implemented, page removed, or unknown based on tracked title, description, content, heading, link, redirect, and page-existence hashes.
+
+Action: use it as a follow-up checklist and a directional performance readout. Treat position, click, and traffic movement as correlation only; validate major conclusions against analytics windows and unrelated site changes.
 
 <a id="improvement-block"></a>
 ## GEO pages most in need of editing
@@ -72,6 +83,20 @@ Action: compare content mass with business importance. Large low-value clusters 
 Shows GSC, Google Ads, Ahrefs, and DataForSEO search demand mapped onto audited pages and clusters. With `--search-provider all`, keywords from each source appear in one semantic scatterplot against page content, page titles, H1-H4 headings, paragraphs, and link titles.
 
 Action: use the source filters to compare first-party demand, paid spend, and third-party estimates. Prioritize terms that are commercially relevant and close to existing content vectors; treat far-away keyword clusters as candidates for new pages or major rewrites.
+
+<a id="striking-distance-block"></a>
+## Striking-distance opportunities
+
+Lists query+page rankings in positions 4-20 with enough impressions to model the click gain from moving to a top-3 position.
+
+Action: prioritize pages with the largest modeled gain. Improve intent fit, title/heading alignment, answer depth, freshness, and internal links; treat modeled clicks as directional, not guaranteed.
+
+<a id="ctr-anomalies-block"></a>
+## CTR anomalies
+
+Lists GSC query+page rows ranking on page one where actual CTR falls below the expected CTR curve for that position.
+
+Action: rewrite titles and meta descriptions for the largest missed-click rows first. Treat the curve as directional because branded queries and SERP-feature-heavy queries naturally deviate.
 
 <a id="best-pages-block"></a>
 ## Best page reverse engineering
@@ -227,6 +252,13 @@ Reports simple page-weight and render-blocking indicators.
 
 Action: use this as a triage signal. Run Lighthouse/WebPageTest before major performance engineering.
 
+<a id="cwv-block"></a>
+## Core Web Vitals (field data)
+
+Shows CrUX Core Web Vitals p75 LCP, INP, and CLS from real Chrome users by URL and form factor, with origin-level fallback where URL data is unavailable.
+
+Action: prioritize poor mobile URL-level metrics on pages with traffic. Run Lighthouse on the affected URL to find the failing element because CrUX field data does not identify the element.
+
 <a id="performance-explainer-block"></a>
 ## Performance explainer
 
@@ -241,6 +273,22 @@ Audits CTAs, forms, contacts, and conversion paths.
 
 Action: ensure commercial pages have clear next steps and informational pages have appropriate soft conversions.
 
+<a id="ai-access-block"></a>
+## AI crawler access
+
+Shows whether major AI search, user-fetch, and training crawlers can access `/` according to robots.txt, and whether llms.txt / llms-full.txt are present.
+
+Action: unblock AI search and user-fetch agents when generative-search visibility matters. Treat training-bot blocks as a policy choice, not automatically an SEO defect.
+
+<a id="ai-citations-block"></a>
+## AI Overview citations
+
+Shows pages that DataForSEO Labs reports as cited by Google AI Overview reference items, the citing queries, monthly search volume, and cited pages that are stale or very stale.
+
+This is based on DataForSEO Labs ranked keyword sampling, not live SERP scraping. Coverage is limited to the audited domain's own returned SERP items, so opportunities are only shown when a returned ranking row explicitly exposes an AI Overview item type without an AI Overview citation for the same page and query.
+
+Action: protect cited pages by keeping them fresh and evidence-backed. For deterministic opportunities, strengthen the matching answer block with a direct answer under a question H2 and cited evidence.
+
 <a id="answerability-block"></a>
 ## GEO answer-ability score
 
@@ -254,6 +302,13 @@ Action: add concise answer blocks, question headings, lists, tables, definitions
 Finds paragraphs that could serve as answer/snippet blocks.
 
 Action: improve weak answer blocks with direct wording, specificity, and source-backed facts.
+
+<a id="chunk-retrievability-block"></a>
+## RAG chunk retrievability
+
+Checks whether each target query's mapped page has one retrieval-sized chunk that semantically answers it. Chunks merge consecutive same-heading paragraphs and target ≤250 words each; a leftover chunk under 120 words folds back into the previous chunk when both share a heading. Statuses: retrievable means the best chunk clears the strong similarity threshold; split answer means two near-tied chunks are both close to the threshold but neither is strong enough alone; missing means no chunk is a plausible answer.
+
+Action: consolidate split answers into one self-contained passage under a question H2, or add a concise 40–90 word answer block for missing demand queries. Chunking approximates retrieval windows, so validate wording and page layout before editing.
 
 <a id="cannibalization-block"></a>
 ## Content cannibalization by intent

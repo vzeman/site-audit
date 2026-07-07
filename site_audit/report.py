@@ -21,15 +21,18 @@ from __future__ import annotations
 import csv
 import html
 import json
+import logging
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 from urllib.parse import urlparse
 
 import numpy as np
 
 from .analyzer import AuditResult, recommend_action
+
+LOG = logging.getLogger(__name__)
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
@@ -37,15 +40,635 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
         path.write_text("")
         return
+    fieldnames: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            if key in seen:
+                continue
+            seen.add(key)
+            fieldnames.append(key)
     with open(path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
 
+def _write_csv_safe_iter(path: Path, rows: Iterable[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows_list = rows if isinstance(rows, list) else list(rows)
+    if not rows_list:
+        path.write_text("")
+        return
+    fieldnames: list[str] = []
+    seen: set[str] = set()
+    for row in rows_list:
+        for key in row.keys():
+            if key in seen:
+                continue
+            seen.add(key)
+            fieldnames.append(key)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows_list:
+            writer.writerow(_csv_safe_row(row))
+
+
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    tmp_path.replace(path)
+
+
+def _write_json_object_with_array(path: Path, payload: dict, array_key: str, rows: Iterable[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write("{\n")
+        first = True
+        for key, value in payload.items():
+            if key == array_key:
+                continue
+            if not first:
+                f.write(",\n")
+            f.write(f"  {json.dumps(str(key), ensure_ascii=False)}: ")
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            first = False
+        if not first:
+            f.write(",\n")
+        f.write(f"  {json.dumps(array_key, ensure_ascii=False)}: [")
+        wrote_row = False
+        for row in rows:
+            if wrote_row:
+                f.write(",")
+            f.write("\n    ")
+            json.dump(row, f, ensure_ascii=False)
+            wrote_row = True
+        if wrote_row:
+            f.write("\n  ]\n")
+        else:
+            f.write("]\n")
+        f.write("}\n")
+    tmp_path.replace(path)
+
+
+def _write_report_json(path: Path, payload, label: str) -> None:
+    LOG.info("  report export: %s", label)
+    _write_json(path, payload)
+
+
+def _html_escape(value) -> str:
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _format_number(value) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return _html_escape(value)
+
+
+def _technical_report_domain(domain: Optional[str], technical_seo: dict) -> str:
+    if domain:
+        return str(domain)
+    for page in (technical_seo or {}).get("pages") or []:
+        parsed = urlparse(str(page.get("url") or ""))
+        if parsed.netloc:
+            return parsed.netloc
+    return "Technical SEO audit"
+
+
+def _technical_report_rows(title: str, rows: list[tuple[str, object]]) -> str:
+    rendered = "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+        if value not in (None, "")
+    )
+    if not rendered:
+        return ""
+    return f"""
+      <section>
+        <h2>{_html_escape(title)}</h2>
+        <table>{rendered}</table>
+      </section>
+    """
+
+
+def _technical_report_count_rows(counts: dict, limit: int = 25) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "<p>No issues recorded.</p>"
+    rows = sorted(counts.items(), key=lambda item: item[1] or 0, reverse=True)[:limit]
+    return "<table>" + "\n".join(
+        f"<tr><th>{_html_escape(label)}</th><td>{_format_number(value)}</td></tr>"
+        for label, value in rows
+    ) + "</table>"
+
+
+def _first_present(mapping: dict, keys: list[str]):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _inline_json(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _technical_report_links(output_dir: Path) -> str:
+    files = [
+        ("Run summary", "run_summary.json"),
+        ("Technical pages JSON", "technical_pages.json"),
+        ("Technical pages CSV", "technical_pages.csv"),
+        ("Technical issues JSON", "technical_issues.json"),
+        ("Technical issues CSV", "technical_issues.csv"),
+        ("Issue catalog JSON", "technical_issue_catalog.json"),
+        ("Issue catalog CSV", "technical_issue_catalog.csv"),
+        ("Indexability JSON", "indexability.json"),
+        ("Sitemap coverage JSON", "sitemap_coverage.json"),
+        ("Canonical consistency JSON", "canonical_consistency.json"),
+        ("Performance JSON", "performance.json"),
+        ("Resource status JSON", "resource_status.json"),
+    ]
+    links = []
+    for label, filename in files:
+        if (output_dir / filename).is_file():
+            links.append(f'<a href="{_html_escape(filename)}">{_html_escape(label)}</a>')
+    if not links:
+        return ""
+    return "<div class=\"links\">" + "\n".join(links) + "</div>"
+
+
+def write_technical_index_html(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    domain_name = _technical_report_domain(domain, technical_seo)
+    summary = (technical_seo or {}).get("summary") or {}
+    issue_counts = (technical_seo or {}).get("issue_counts") or {}
+    category_counts = (technical_seo or {}).get("category_counts") or {}
+    severity_counts = (technical_seo or {}).get("severity_counts") or {}
+    interpretation = (technical_seo or {}).get("interpretation") or {}
+    summary_rows = [
+        ("Pages analyzed", _first_present(summary, ["total_pages", "pages"])),
+        ("Pages fetched", summary.get("fetched_pages")),
+        ("Pages skipped", summary.get("skipped_pages")),
+        ("Noindex pages dropped", summary.get("noindex_dropped")),
+        ("Canonical duplicates dropped", summary.get("canonical_duplicates_dropped")),
+        ("Pages with issues", summary.get("pages_with_issues")),
+        ("Technical issues", _first_present(summary, ["total_issues", "technical_issues"])),
+        ("High priority issues", _first_present(summary, ["high_issues", "high_technical_issues"])),
+        ("Catalog issue types", summary.get("catalog_issue_types")),
+    ]
+    bootstrap = {
+        "domain": domain_name,
+        "summaryRows": [(label, value) for label, value in summary_rows if value not in (None, "")],
+        "summary": summary,
+        "severityCounts": severity_counts,
+        "categoryCounts": category_counts,
+        "issueCounts": issue_counts,
+        "issueCatalog": (technical_seo or {}).get("issue_catalog") or [],
+    }
+    html_text = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_html_escape(domain_name)} technical SEO audit</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #5f6b7a;
+      --border: #d8e0ea;
+      --accent: #0b6bcb;
+      --danger: #b42318;
+      --warn: #b54708;
+      --info: #175cd3;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    header {{
+      margin-bottom: 24px;
+    }}
+    .header-row {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+    }}
+    h2 {{
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 650;
+    }}
+    p {{
+      margin: 0 0 16px;
+      color: var(--muted);
+    }}
+    .cards {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 22px 0;
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    .card span {{
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .card strong {{
+      display: block;
+      margin-top: 6px;
+      font-size: 26px;
+      line-height: 1.1;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }}
+    .wide {{
+      grid-column: 1 / -1;
+    }}
+    section {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    th, td {{
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }}
+    tr:last-child th, tr:last-child td {{
+      border-bottom: 0;
+    }}
+    th {{
+      width: 70%;
+      color: var(--muted);
+      font-weight: 500;
+      padding-right: 16px;
+    }}
+    td {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) 86px;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }}
+    .bar-row:last-child {{
+      border-bottom: 0;
+    }}
+    .bar-label {{
+      overflow-wrap: anywhere;
+    }}
+    .bar-track {{
+      height: 10px;
+      background: #edf1f7;
+      border-radius: 999px;
+      overflow: hidden;
+    }}
+    .bar-fill {{
+      height: 100%;
+      min-width: 2px;
+      background: var(--accent);
+    }}
+    .bar-fill.high {{ background: var(--danger); }}
+    .bar-fill.medium {{ background: var(--warn); }}
+    .bar-fill.low {{ background: var(--info); }}
+    .bar-value {{
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 650;
+    }}
+    .toolbar {{
+      display: grid;
+      grid-template-columns: 1fr 160px 160px;
+      gap: 10px;
+      margin: 12px 0 16px;
+    }}
+    input, select, button {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      min-height: 38px;
+      padding: 7px 10px;
+    }}
+    button {{
+      cursor: pointer;
+    }}
+    .issue-table-wrap {{
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }}
+    .issue-table th, .issue-table td {{
+      min-width: 130px;
+      padding: 10px 12px;
+      text-align: left;
+    }}
+    .issue-table th:first-child, .issue-table td:first-child {{
+      min-width: 260px;
+    }}
+    .issue-table th:last-child, .issue-table td:last-child {{
+      min-width: 360px;
+    }}
+    .pill {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      background: #eef2f6;
+      color: var(--muted);
+      text-transform: capitalize;
+    }}
+    .pill.high {{ background: #fee4e2; color: var(--danger); }}
+    .pill.medium {{ background: #fef0c7; color: var(--warn); }}
+    .pill.low {{ background: #d1e9ff; color: var(--info); }}
+    .pager {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+    }}
+    .links {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }}
+    a {{
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid #b8d6f3;
+      background: #eef6ff;
+      border-radius: 6px;
+      padding: 7px 10px;
+    }}
+    a:hover {{
+      text-decoration: underline;
+    }}
+    @media (max-width: 720px) {{
+      .toolbar {{
+        grid-template-columns: 1fr;
+      }}
+      .bar-row {{
+        grid-template-columns: 1fr 86px;
+      }}
+      .bar-track {{
+        grid-column: 1 / -1;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="header-row">
+        <div>
+          <h1>{_html_escape(domain_name)} technical SEO audit</h1>
+          <p>Interactive technical SEO dashboard generated from the audit exports.</p>
+        </div>
+      </div>
+    </header>
+    <div id="cards" class="cards"></div>
+    <div class="grid">
+      <section>
+        <h2>Issue severity</h2>
+        <div id="severity-bars"></div>
+      </section>
+      <section>
+        <h2>Issue categories</h2>
+        <div id="category-bars"></div>
+      </section>
+      <section class="wide">
+        <h2>Top issue types</h2>
+        <div id="issue-bars"></div>
+      </section>
+      <section class="wide">
+        <h2>All issues</h2>
+        <p id="issue-status">Loading technical_issues.json...</p>
+        <div class="toolbar">
+          <input id="issue-search" type="search" placeholder="Filter by URL, issue type, category, severity, or message">
+          <select id="severity-filter"><option value="">All severities</option></select>
+          <select id="category-filter"><option value="">All categories</option></select>
+        </div>
+        <div class="issue-table-wrap">
+          <table class="issue-table">
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Severity</th>
+                <th>Category</th>
+                <th>Issue</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="issue-rows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="pager-label"></span>
+          <div>
+            <button id="prev-page" type="button">Previous</button>
+            <button id="next-page" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+      <section class="wide">
+        <h2>Exports</h2>
+        <p>{_html_escape(interpretation.get("exports") or "Open the JSON or CSV files for raw row-level audit data.")}</p>
+        {_technical_report_links(output_dir)}
+      </section>
+    </div>
+  </main>
+  <script id="technical-bootstrap" type="application/json">{_inline_json(bootstrap)}</script>
+  <script>
+    const bootstrap = JSON.parse(document.getElementById('technical-bootstrap').textContent);
+    const fmt = new Intl.NumberFormat();
+    const pageSize = 250;
+    let allIssues = [];
+    let filteredIssues = [];
+    let page = 0;
+
+    function escapeHtml(value) {{
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({{
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }}[ch]));
+    }}
+
+    function normalize(value) {{
+      return String(value ?? '').toLowerCase();
+    }}
+
+    function renderCards() {{
+      const cards = [
+        ['Pages analyzed', bootstrap.summary.total_pages ?? bootstrap.summary.pages],
+        ['Pages with issues', bootstrap.summary.pages_with_issues],
+        ['Technical issues', bootstrap.summary.total_issues ?? bootstrap.summary.technical_issues],
+        ['High priority issues', bootstrap.summary.high_issues ?? bootstrap.summary.high_technical_issues],
+        ['Catalog issue types', bootstrap.summary.catalog_issue_types],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+      document.getElementById('cards').innerHTML = cards.map(([label, value]) =>
+        `<div class="card"><span>${{escapeHtml(label)}}</span><strong>${{fmt.format(Number(value) || 0)}}</strong></div>`
+      ).join('');
+    }}
+
+    function renderBars(id, counts, limit = 12) {{
+      const entries = Object.entries(counts || {{}})
+        .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+        .slice(0, limit);
+      const max = Math.max(...entries.map(([, value]) => Number(value) || 0), 1);
+      document.getElementById(id).innerHTML = entries.map(([label, value]) => {{
+        const cls = ['high', 'medium', 'low'].includes(label) ? label : '';
+        const pct = Math.max(1, Math.round(((Number(value) || 0) / max) * 100));
+        return `<div class="bar-row">
+          <div class="bar-label">${{escapeHtml(label.replaceAll('_', ' '))}}</div>
+          <div class="bar-track"><div class="bar-fill ${{cls}}" style="width:${{pct}}%"></div></div>
+          <div class="bar-value">${{fmt.format(Number(value) || 0)}}</div>
+        </div>`;
+      }}).join('') || '<p>No issues recorded.</p>';
+    }}
+
+    function issueField(issue, names) {{
+      for (const name of names) {{
+        const value = issue?.[name];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }}
+      return '';
+    }}
+
+    function fillFilters() {{
+      const severities = [...new Set(allIssues.map(row => issueField(row, ['severity', 'importance'])).filter(Boolean))].sort();
+      const categories = [...new Set(allIssues.map(row => issueField(row, ['category'])).filter(Boolean))].sort();
+      document.getElementById('severity-filter').innerHTML = '<option value="">All severities</option>' + severities.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+      document.getElementById('category-filter').innerHTML = '<option value="">All categories</option>' + categories.map(v => `<option value="${{escapeHtml(v)}}">${{escapeHtml(v)}}</option>`).join('');
+    }}
+
+    function applyFilters() {{
+      const q = normalize(document.getElementById('issue-search').value);
+      const severity = document.getElementById('severity-filter').value;
+      const category = document.getElementById('category-filter').value;
+      filteredIssues = allIssues.filter(issue => {{
+        if (severity && issueField(issue, ['severity', 'importance']) !== severity) return false;
+        if (category && issueField(issue, ['category']) !== category) return false;
+        if (!q) return true;
+        return [
+          issueField(issue, ['url', 'page_url']),
+          issueField(issue, ['severity', 'importance']),
+          issueField(issue, ['category']),
+          issueField(issue, ['issue_type', 'name', 'issue']),
+          issueField(issue, ['message', 'details', 'description', 'recommendation']),
+        ].some(value => normalize(value).includes(q));
+      }});
+      page = 0;
+      renderIssuePage();
+    }}
+
+    function renderIssuePage() {{
+      const start = page * pageSize;
+      const rows = filteredIssues.slice(start, start + pageSize);
+      document.getElementById('issue-rows').innerHTML = rows.map(issue => {{
+        const severity = issueField(issue, ['severity', 'importance']);
+        const issueName = issueField(issue, ['issue_type', 'name', 'issue']).replaceAll('_', ' ');
+        const details = issueField(issue, ['message', 'details', 'description', 'recommendation']);
+        return `<tr>
+          <td>${{escapeHtml(issueField(issue, ['url', 'page_url']))}}</td>
+          <td><span class="pill ${{escapeHtml(normalize(severity))}}">${{escapeHtml(severity)}}</span></td>
+          <td>${{escapeHtml(issueField(issue, ['category']))}}</td>
+          <td>${{escapeHtml(issueName)}}</td>
+          <td>${{escapeHtml(details)}}</td>
+        </tr>`;
+      }}).join('');
+      const end = Math.min(start + rows.length, filteredIssues.length);
+      document.getElementById('pager-label').textContent = filteredIssues.length
+        ? `${{fmt.format(start + 1)}}-${{fmt.format(end)}} of ${{fmt.format(filteredIssues.length)}} issues`
+        : 'No matching issues';
+      document.getElementById('prev-page').disabled = page === 0;
+      document.getElementById('next-page').disabled = end >= filteredIssues.length;
+    }}
+
+    async function loadIssues() {{
+      try {{
+        const response = await fetch('technical_issues.json');
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        const payload = await response.json();
+        allIssues = Array.isArray(payload.issues) ? payload.issues : [];
+        filteredIssues = allIssues;
+        document.getElementById('issue-status').textContent = `${{fmt.format(allIssues.length)}} issues loaded from technical_issues.json.`;
+        fillFilters();
+        renderIssuePage();
+      }} catch (err) {{
+        document.getElementById('issue-status').innerHTML =
+          `Unable to load all issue rows in this browser context. Use <a href="technical_issues.csv">technical_issues.csv</a> or serve the report with <code>site-audit serve</code>.`;
+      }}
+    }}
+
+    document.getElementById('issue-search').addEventListener('input', applyFilters);
+    document.getElementById('severity-filter').addEventListener('change', applyFilters);
+    document.getElementById('category-filter').addEventListener('change', applyFilters);
+    document.getElementById('prev-page').addEventListener('click', () => {{ page = Math.max(0, page - 1); renderIssuePage(); }});
+    document.getElementById('next-page').addEventListener('click', () => {{ page += 1; renderIssuePage(); }});
+
+    renderCards();
+    renderBars('severity-bars', bootstrap.severityCounts, 6);
+    renderBars('category-bars', bootstrap.categoryCounts, 12);
+    renderBars('issue-bars', bootstrap.issueCounts, 25);
+    loadIssues();
+  </script>
+</body>
+</html>
+"""
+    out_path = output_dir / "index.html"
+    out_path.write_text(html_text, encoding="utf-8")
+    return out_path
 
 
 def _html_escape(value) -> str:
@@ -831,12 +1454,11 @@ def write_internal_linkbuilding_csv(
 
 
 def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: Optional[str] = None) -> None:
-    pages = list((technical_seo or {}).get("pages") or [])
-    issues = list((technical_seo or {}).get("issues") or [])
-    catalog = list((technical_seo or {}).get("issue_catalog") or [])
+    pages = (technical_seo or {}).get("pages") or []
+    issues = (technical_seo or {}).get("issues") or []
+    catalog = (technical_seo or {}).get("issue_catalog") or []
     page_payload = {
         "summary": (technical_seo or {}).get("summary", {}),
-        "pages": pages,
         "interpretation": (technical_seo or {}).get("interpretation", {}),
     }
     issue_payload = {
@@ -860,16 +1482,88 @@ def write_technical_seo_exports(output_dir: Path, technical_seo: dict, domain: O
         "issue_catalog": catalog,
         "interpretation": (technical_seo or {}).get("interpretation", {}),
     }
-    _write_json(output_dir / "technical_pages.json", page_payload)
-    _write_json(output_dir / "technical_issues.json", issue_payload)
+    _write_json_object_with_array(output_dir / "technical_pages.json", page_payload, "pages", pages)
+    _write_json_object_with_array(output_dir / "technical_issues.json", issue_payload, "issues", issues)
     _write_json(output_dir / "technical_issue_catalog.json", catalog_payload)
     issue_groups = write_technical_issue_group_exports(output_dir, issues)
     overview_payload["issue_groups"] = issue_groups
     _write_json(output_dir / "technical_overview.json", overview_payload)
-    _write_csv(output_dir / "technical_pages.csv", [_csv_safe_row(row) for row in pages])
-    _write_csv(output_dir / "technical_issues.csv", [_csv_safe_row(row) for row in issues])
-    _write_csv(output_dir / "technical_issue_catalog.csv", [_csv_safe_row(row) for row in catalog])
+    _write_csv_safe_iter(output_dir / "technical_pages.csv", pages)
+    _write_csv_safe_iter(output_dir / "technical_issues.csv", issues)
+    _write_csv_safe_iter(output_dir / "technical_issue_catalog.csv", catalog)
     write_technical_index_html(output_dir, {**(technical_seo or {}), "issue_groups": issue_groups}, domain=domain)
+
+
+def write_technical_audit_bundle(
+    output_dir: Path,
+    *,
+    domain: str,
+    mode: str,
+    summary: dict,
+    timings: list[dict],
+    technical_seo: dict,
+    indexability: dict | None = None,
+    sitemap_coverage: dict | None = None,
+    canonical_consistency: dict | None = None,
+    performance: dict | None = None,
+    resource_status: dict | None = None,
+    metadata_quality: dict | None = None,
+    media_accessibility: dict | None = None,
+    page_types: dict | None = None,
+    entities: dict | None = None,
+    freshness: dict | None = None,
+    conversion: dict | None = None,
+    structured_data: dict | None = None,
+    external_links: dict | None = None,
+    linkgraph: dict | None = None,
+) -> None:
+    """Write the non-embedding technical audit bundle.
+
+    This is intentionally JSON/CSV-first. The existing rich HTML report assumes
+    an embedding-backed ``AuditResult``; technical-only runs should not have to
+    load a model just to serialize crawl/indexability/resource findings.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _copy_report_docs(output_dir)
+    _write_json(
+        output_dir / "run_summary.json",
+        {
+            "domain": domain,
+            "mode": mode,
+            "summary": summary,
+            "stage_timings": timings,
+        },
+    )
+    if indexability is not None:
+        _write_json(output_dir / "indexability.json", indexability)
+        write_indexability_issues_csv(output_dir, indexability)
+    if sitemap_coverage is not None:
+        write_sitemap_coverage_exports(output_dir, sitemap_coverage)
+    if canonical_consistency is not None:
+        write_canonical_consistency_exports(output_dir, canonical_consistency)
+    if performance is not None:
+        _write_json(output_dir / "performance.json", performance)
+    if resource_status is not None:
+        _write_json(output_dir / "resource_status.json", resource_status)
+    if metadata_quality is not None:
+        _write_json(output_dir / "metadata_quality.json", metadata_quality)
+    if media_accessibility is not None:
+        _write_json(output_dir / "media_accessibility.json", media_accessibility)
+    if page_types is not None:
+        _write_json(output_dir / "page_types.json", page_types)
+    if entities is not None:
+        _write_json(output_dir / "entities.json", entities)
+    if freshness is not None:
+        _write_json(output_dir / "freshness.json", freshness)
+    if conversion is not None:
+        _write_json(output_dir / "conversion.json", conversion)
+    if structured_data is not None:
+        _write_json(output_dir / "structured_data.json", structured_data)
+    if external_links is not None:
+        _write_json(output_dir / "external_links.json", external_links)
+    if linkgraph is not None:
+        _write_json(output_dir / "linkgraph.json", _slim_linkgraph_payload(linkgraph))
+    write_technical_seo_exports(output_dir, technical_seo, domain=domain)
 
 
 def write_indexability_issues_csv(output_dir: Path, indexability: dict) -> None:
@@ -1236,6 +1930,12 @@ def write_all(
     keyword_attribution: Optional[dict] = None,
     answer_blocks: Optional[dict] = None,
     freshness_impact: Optional[dict] = None,
+    striking_distance: Optional[dict] = None,
+    ctr_anomalies: Optional[dict] = None,
+    ai_access: Optional[dict] = None,
+    ai_citations: Optional[dict] = None,
+    crux: Optional[dict] = None,
+    chunk_retrievability: Optional[dict] = None,
     cannibalization: Optional[dict] = None,
     duplicate_fragments: Optional[dict] = None,
     template_patterns: Optional[dict] = None,
@@ -1258,6 +1958,7 @@ def write_all(
     conversion_balance: Optional[dict] = None,
     metadata_quality: Optional[dict] = None,
     media_accessibility: Optional[dict] = None,
+    resource_status: Optional[dict] = None,
     page_types: Optional[dict] = None,
     entities: Optional[dict] = None,
     freshness: Optional[dict] = None,
@@ -1270,9 +1971,11 @@ def write_all(
     best_pages: Optional[dict] = None,
     performance_explainer: Optional[dict] = None,
     history_snapshot: Optional[dict] = None,
+    recommendation_outcomes: Optional[dict] = None,
     technical_seo: Optional[dict] = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    LOG.info("  report export: core metrics and CSVs")
     _copy_report_docs(output_dir)
     write_site_metrics(output_dir / "site_metrics.json", result, model_name, domain)
     write_section_report(output_dir / "section_report.json", result)
@@ -1281,6 +1984,7 @@ def write_all(
     duplicates = write_duplicates(output_dir / "duplicates.csv", result)
     write_pages(output_dir / "pages.json", result)
     write_scatterplot(output_dir / "scatterplot.json", result, coords, cluster_labels)
+    LOG.info("  report export: semantic and link payloads")
     if cluster_summaries:
         write_clusters(output_dir / "clusters.json", cluster_summaries)
     if coverage is not None:
@@ -1314,6 +2018,18 @@ def write_all(
         _write_json(output_dir / "answer_blocks.json", answer_blocks)
     if freshness_impact is not None:
         _write_json(output_dir / "freshness_impact.json", freshness_impact)
+    if striking_distance is not None:
+        _write_json(output_dir / "striking_distance.json", striking_distance)
+    if ctr_anomalies is not None:
+        _write_json(output_dir / "ctr_anomalies.json", ctr_anomalies)
+    if ai_access is not None:
+        _write_json(output_dir / "ai_access.json", ai_access)
+    if ai_citations is not None:
+        _write_json(output_dir / "ai_citations.json", ai_citations)
+    if crux is not None:
+        _write_json(output_dir / "crux.json", crux)
+    if chunk_retrievability is not None:
+        _write_json(output_dir / "chunk_retrievability.json", chunk_retrievability)
     if cannibalization is not None:
         _write_json(output_dir / "cannibalization.json", cannibalization)
     if duplicate_fragments is not None:
@@ -1348,6 +2064,7 @@ def write_all(
         _write_json(output_dir / "header_scatter.json", header_scatter)
     if linkbuilding is not None:
         _write_json(output_dir / "linkbuilding.json", linkbuilding)
+    LOG.info("  report export: technical/content payloads")
     if structured_data is not None:
         _write_json(output_dir / "structured_data.json", structured_data)
     if trust_signals is not None:
@@ -1358,6 +2075,8 @@ def write_all(
         _write_json(output_dir / "metadata_quality.json", metadata_quality)
     if media_accessibility is not None:
         _write_json(output_dir / "media_accessibility.json", media_accessibility)
+    if resource_status is not None:
+        _write_json(output_dir / "resource_status.json", resource_status)
     if page_types is not None:
         _write_json(output_dir / "page_types.json", page_types)
     if entities is not None:
@@ -1387,6 +2106,10 @@ def write_all(
         _write_json(output_dir / "performance_explainer.json", performance_explainer)
     if history_snapshot is not None:
         _write_json(output_dir / "history_snapshot.json", history_snapshot)
+    if recommendation_outcomes is not None:
+        _write_json(output_dir / "recommendation_outcomes.json", recommendation_outcomes)
     if technical_seo is not None:
+        LOG.info("  report export: technical SEO exports")
         write_technical_seo_exports(output_dir, technical_seo, domain=domain)
+    LOG.info("  report export: done")
     return {"outliers": len(outliers), "duplicates": len(result.duplicate_pairs)}

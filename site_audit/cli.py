@@ -23,7 +23,8 @@ from urllib.parse import urlparse
 from . import __version__
 from .ai_agent import DEFAULT_OPENROUTER_MODEL, openrouter_model
 from . import compare as _compare
-from .cache import domain_slug
+from .benchmark import benchmark_callable, fingerprint_files, write_benchmark
+from .cache import HttpCache, domain_slug
 from .config_env import apply_env_defaults
 from .embedder import DEFAULT_MODEL
 from .history import compare_snapshots, list_snapshots, save_report_snapshot, write_history_html
@@ -101,6 +102,10 @@ def _run_command(args: argparse.Namespace) -> int:
             shutil.rmtree(cache_dir)
             print(f"  cleaned cache: {cache_dir}")
 
+    preset = args.preset
+    technical_only = args.technical_only or preset == "technical"
+    allow_large_embeddings = args.allow_large_embeddings or preset == "full-content"
+
     config = PipelineConfig(
         domain=args.domain,
         projects_root=Path(args.projects_root),
@@ -109,6 +114,16 @@ def _run_command(args: argparse.Namespace) -> int:
         model=args.model,
         max_pages=args.max_pages,
         max_workers=args.workers,
+        link_parse_processes=args.link_parse_processes,
+        extraction_workers=args.extraction_workers,
+        analysis_workers=args.analysis_workers,
+        adaptive_concurrency=not args.no_adaptive_concurrency,
+        min_crawl_workers=args.min_crawl_workers,
+        adaptive_success_threshold=args.adaptive_success_threshold,
+        adaptive_slow_seconds=args.adaptive_slow_seconds,
+        adaptive_max_rss_mb=args.adaptive_max_rss_mb,
+        resume=args.resume,
+        write_checkpoints=not args.no_checkpoints,
         request_delay=args.request_delay,
         duplicate_threshold=args.duplicate_threshold,
         duplicate_knn=args.duplicate_knn,
@@ -123,16 +138,25 @@ def _run_command(args: argparse.Namespace) -> int:
         content_exclude_classes=args.content_exclude_class,
         skip_scatterplot=args.no_scatterplot,
         max_chars=args.max_chars,
+        embed_body_chars=args.embed_body_chars,
+        embed_max_seq_length=args.embed_max_seq_length,
+        embedding_batch_size=args.embedding_batch_size,
+        audit_preset=preset,
+        technical_only=technical_only,
+        allow_large_embeddings=allow_large_embeddings,
+        large_site_embedding_threshold=args.large_site_embedding_threshold,
         enable_cluster_labels=not args.no_cluster_labels,
         enable_keyword_coverage=not args.no_keyword_coverage,
         enable_answerability=not args.no_answerability,
         enable_answer_blocks=not args.no_answer_blocks,
+        enable_chunk_retrievability=not args.no_chunk_retrievability,
         enable_freshness_impact=not args.no_freshness_impact,
         enable_cannibalization=not args.no_cannibalization,
         enable_duplicate_fragments=not args.no_duplicate_fragments,
         enable_template_patterns=not args.no_template_patterns,
         enable_trust_signals=not args.no_trust_signals,
         enable_conversion_balance=not args.no_conversion_balance,
+        enable_fix_drafts=not args.no_fix_drafts,
         enable_linkgraph=not args.no_linkgraph,
         enable_external_links=not args.no_external_links,
         enable_paragraph_links=not args.no_paragraph_links,
@@ -143,6 +167,8 @@ def _run_command(args: argparse.Namespace) -> int:
         enable_information_gain=not args.no_information_gain,
         enable_content_quality=not args.no_content_quality,
         enable_paragraph_fanout=not args.no_paragraph_fanout,
+        enable_crux=not args.no_crux,
+        crux_refresh=args.crux_refresh,
         check_external_links=args.check_external,
         competitive_pairs_file=Path(args.competitive) if args.competitive else None,
         queries_file=Path(args.queries_file) if args.queries_file else None,
@@ -209,6 +235,19 @@ def _run_command(args: argparse.Namespace) -> int:
         print("No pages were processed — check the domain and try again.")
         return 1
     print("\nDone.")
+    if summary.get("status") in {"technical_only", "stopped_before_large_embedding"}:
+        print(f"  status:              {summary['status']}")
+        if summary.get("message"):
+            print(f"  note:                {summary['message']}")
+        print(f"  pages:               {summary['pages']}")
+        print(f"  technical issues:    {summary.get('technical_issues', 0)}")
+        print(f"  high issues:         {summary.get('high_technical_issues', 0)}")
+        print(f"  link edges:          {summary.get('linkgraph_edges', 0)}")
+        print(f"  orphans:             {summary.get('linkgraph_orphans', 0)}")
+        print(f"  cited domains:       {summary.get('external_domains', 0)}")
+        print(f"  broken outbound:     {summary.get('broken_external', 0)}")
+        print(f"  report dir:          {summary['report_dir']}")
+        return 0
     print(f"  pages:               {summary['pages']}")
     print(f"  raw focus:           {summary['site_focus_score']:.4f}")
     print(f"  calibrated focus:    {summary.get('calibrated_focus', 0):.4f}")
@@ -272,6 +311,58 @@ def _compare_command(args: argparse.Namespace) -> int:
     package_path = _compare.package_comparison(out_dir, projects_root, payload.get("domains", []))
     print(f"Wrote {package_path}")
 
+    return 0
+
+
+def _cache_migrate_command(args: argparse.Namespace) -> int:
+    if not args.domain and not args.cache_dir:
+        print("cache-migrate needs a domain or --cache-dir.")
+        return 1
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    else:
+        cfg = PipelineConfig(domain=args.domain, projects_root=Path(args.projects_root))
+        cache_dir, _ = project_paths(cfg)
+    cache_path = cache_dir / "http.sqlite"
+    if not cache_path.exists():
+        print(f"HTTP cache not found: {cache_path}")
+        return 1
+
+    cache = HttpCache(cache_path)
+    before = cache.stats()
+    print(f"Migrating HTTP cache: {cache_path}")
+    print(f"  rows:         {before.get('entries', 0)}")
+    print(f"  sqlite size:  {before.get('sqlite_size_bytes', 0):,} bytes")
+    print(f"  body size:    {before.get('body_size_bytes', 0):,} bytes")
+
+    last_reported = 0
+
+    def progress(row: dict) -> None:
+        nonlocal last_reported
+        processed = int(row.get("processed") or 0)
+        if processed - last_reported < args.progress_interval and processed != int(row.get("total") or 0):
+            return
+        last_reported = processed
+        print(
+            f"  processed {processed:,}/{int(row.get('total') or 0):,} "
+            f"(moved {int(row.get('moved') or 0):,})"
+        )
+
+    result = cache.migrate_bodies_to_files(
+        batch_size=args.batch_size,
+        keep_backup=not args.delete_original,
+        progress_callback=progress,
+    )
+    after = cache.stats()
+    print("Done.")
+    print(f"  rows:         {result['rows']:,}")
+    print(f"  moved:        {result['moved']:,}")
+    print(f"  preserved:    {result['preserved']:,}")
+    print(f"  body bytes:   {result['body_bytes_moved']:,}")
+    print(f"  sqlite size:  {after.get('sqlite_size_bytes', 0):,} bytes")
+    print(f"  body size:    {after.get('body_size_bytes', 0):,} bytes")
+    if result.get("backup_path"):
+        print(f"  backup:       {result['backup_path']}")
     return 0
 
 
@@ -1131,7 +1222,57 @@ def _history_compare_command(args: argparse.Namespace) -> int:
         out_html = out_dir / "index.html"
         write_history_html(template, payload, out_html)
         print(f"Wrote {out_html}")
+    outcomes = payload.get("recommendation_outcomes") or {}
+    if outcomes.get("available"):
+        summary = outcomes.get("summary") or {}
+        aggregates = outcomes.get("aggregates") or {}
+        by_status = aggregates.get("by_status") or {}
+        status_text = ", ".join(
+            f"{status} {row.get('count', 0)}"
+            for status, row in sorted(by_status.items())
+        )
+        print(
+            "Past recommendations scoreboard: "
+            f"{summary.get('total', 0)} issued"
+            + (f" ({status_text})" if status_text else "")
+        )
+        avg_implemented = aggregates.get("avg_position_delta_implemented")
+        avg_not_implemented = aggregates.get("avg_position_delta_not_implemented")
+        print(
+            "Position delta: "
+            f"implemented {'n/a' if avg_implemented is None else avg_implemented}, "
+            f"not implemented {'n/a' if avg_not_implemented is None else avg_not_implemented}"
+        )
+    else:
+        print("Past recommendations scoreboard: unavailable (previous snapshot has no recommendation data).")
     print(f"Wrote {out_dir / 'history.json'}")
+    return 0
+
+
+def _benchmark_command(args: argparse.Namespace) -> int:
+    domain = args.domain
+    report_dir = Path(args.report_dir) if args.report_dir else Path(args.projects_root) / domain_slug(domain) / "report"
+    if not report_dir.is_dir():
+        print(f"Report directory does not exist: {report_dir}")
+        return 1
+    patterns = args.include or ["*.json", "*.csv", "index.html"]
+    files = []
+    for pattern in patterns:
+        files.extend(path for path in report_dir.glob(pattern) if path.is_file())
+    if not files:
+        print(f"No benchmarkable files found in {report_dir}")
+        return 1
+
+    result = benchmark_callable(
+        f"cached-report:{domain}",
+        lambda: {"files": len(files), "fingerprint": fingerprint_files(files)},
+    )
+    out_path = Path(args.output) if args.output else report_dir / "benchmark.json"
+    write_benchmark(out_path, result)
+    print(f"Wrote benchmark: {out_path}")
+    print(f"  files: {len(files)}")
+    print(f"  wall seconds: {result.wall_seconds:.3f}")
+    print(f"  max RSS MB: {result.max_rss_mb:.1f}")
     return 0
 
 
@@ -1148,12 +1289,59 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--output-dir", default=None, help="Override report directory")
     run_p.add_argument("--model", default=DEFAULT_MODEL, help=f"Embedding model (default: {DEFAULT_MODEL})")
     run_p.add_argument("--max-pages", type=int, default=10000)
-    run_p.add_argument("--workers", type=int, default=8)
+    run_p.add_argument("--preset", choices=["technical", "standard", "full-content"], default="standard",
+                       help="Audit preset: technical skips embeddings, standard safeguards large crawls, full-content allows large embeddings")
+    run_p.add_argument("--technical-only", action="store_true",
+                       help="Write crawl/indexability/technical SEO exports and skip semantic embeddings")
+    run_p.add_argument("--allow-large-embeddings", action="store_true",
+                       help="Allow semantic embedding stages even when the crawl exceeds the large-site threshold")
+    run_p.add_argument("--large-site-embedding-threshold", type=int, default=20000,
+                       help="Page count above which standard runs stop after technical exports unless large embeddings are allowed")
+    run_p.add_argument("--embed-max-seq-length", type=int, default=512,
+                       help="Max transformer tokens per embedded text; 0 uses the model default (default: 512)")
+    run_p.add_argument("--embedding-batch-size", type=int, default=32,
+                       help="Page embedding batch size (default: 32)")
+    run_p.add_argument(
+        "--workers",
+        "--max-workers",
+        dest="workers",
+        type=int,
+        default=0,
+        help=(
+            "Maximum worker cap for adaptive crawl/extraction/analysis stages; "
+            "0 auto-selects from CPU count"
+        ),
+    )
+    run_p.add_argument("--link-parse-processes", type=int, default=0,
+                       help="Processes for cached crawl link parsing; 0 auto, 1 disables the process pool")
+    run_p.add_argument("--no-adaptive-concurrency", action="store_true",
+                       help="Disable crawl worker auto-throttling on timeouts, 429s, and server errors")
+    run_p.add_argument("--min-crawl-workers", type=int, default=1,
+                       help="Minimum worker count when adaptive crawl concurrency backs off")
+    run_p.add_argument("--adaptive-success-threshold", type=int, default=50,
+                       help="Successful responses needed before adaptive crawl concurrency increases by one")
+    run_p.add_argument("--adaptive-slow-seconds", type=float, default=3.0,
+                       help="Back off crawl workers when a live response takes longer than this many seconds")
+    run_p.add_argument("--adaptive-max-rss-mb", type=int, default=0,
+                       help="Back off crawl workers when process RSS exceeds this MB; default auto-selects a machine-based limit")
+    run_p.add_argument("--extraction-workers", type=int, default=0,
+                       help="Exact worker override for HTML extraction; 0 lets the adaptive controller choose")
+    run_p.add_argument("--analysis-workers", type=int, default=0,
+                       help="Exact worker override for independent post-extraction analyses; 0 lets the adaptive controller choose")
     run_p.add_argument("--request-delay", type=float, default=0.0, help="Seconds to sleep before each request (slow down for rate-limited sites)")
     run_p.add_argument("--duplicate-threshold", type=float, default=0.92)
     run_p.add_argument("--duplicate-knn", type=int, default=10)
     run_p.add_argument("--scatter-clusters", type=int, default=30)
     run_p.add_argument("--max-chars", type=int, default=4000)
+    run_p.add_argument(
+        "--embed-body-chars",
+        type=int,
+        default=12000,
+        help=(
+            "Maximum extracted body characters used for page-level embeddings; "
+            "0 disables the cap. Can also be overridden with SITE_AUDIT_EMBED_BODY_CHARS."
+        ),
+    )
     run_p.add_argument("--follow-subdomains", action="store_true")
     run_p.add_argument("--ignore-robots", action="store_true", help="Ignore robots.txt (use sparingly)")
     run_p.add_argument("--sitemap-url", action="append", default=[],
@@ -1183,17 +1371,24 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--clean", action="store_true",
                        help="Delete the project's cache directory before running. "
                        "Use after a crawler/extractor/embedder change so every page is re-processed.")
+    run_p.add_argument("--resume", action="store_true",
+                       help="Resume from compatible stage checkpoints when available")
+    run_p.add_argument("--no-checkpoints", action="store_true",
+                       help="Do not write resumable stage checkpoints")
     run_p.add_argument("--no-scatterplot", action="store_true")
     run_p.add_argument("--no-cluster-labels", action="store_true")
     run_p.add_argument("--no-keyword-coverage", action="store_true")
     run_p.add_argument("--no-answerability", action="store_true")
     run_p.add_argument("--no-answer-blocks", action="store_true")
+    run_p.add_argument("--no-chunk-retrievability", action="store_true")
     run_p.add_argument("--no-freshness-impact", action="store_true")
     run_p.add_argument("--no-cannibalization", action="store_true")
     run_p.add_argument("--no-duplicate-fragments", action="store_true")
     run_p.add_argument("--no-template-patterns", action="store_true")
     run_p.add_argument("--no-trust-signals", action="store_true")
     run_p.add_argument("--no-conversion-balance", action="store_true")
+    run_p.add_argument("--no-fix-drafts", action="store_true",
+                       help="Skip generated before/after draft text for top action-plan recommendations")
     run_p.add_argument("--no-linkgraph", action="store_true")
     run_p.add_argument("--no-external-links", action="store_true")
     run_p.add_argument("--no-paragraph-links", action="store_true",
@@ -1205,6 +1400,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--no-information-gain", action="store_true")
     run_p.add_argument("--no-content-quality", action="store_true")
     run_p.add_argument("--no-paragraph-fanout", action="store_true")
+    run_p.add_argument("--no-crux", action="store_true", help="Skip Chrome UX Report Core Web Vitals field data")
+    run_p.add_argument("--crux-refresh", action="store_true",
+                       help="Re-fetch CrUX responses instead of reusing cached ones (28-day rolling window)")
     run_p.add_argument("--check-external", action="store_true", help="HEAD-check every outbound URL (slow, results cached)")
     run_p.add_argument("--search-provider", default="auto",
                        choices=["auto", "all", "combined", "gsc", "google_ads", "ahrefs", "dataforseo", "none"],
@@ -1316,6 +1514,16 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--name", default="latest", help="Subdir under projects/_compare/ to write into (default: latest)")
     cmp_p.set_defaults(func=_compare_command)
 
+    cache_p = sub.add_parser("cache-migrate", help="Move legacy HTTP bodies from SQLite into cache/http_bodies and rebuild the DB")
+    cache_p.add_argument("domain", nargs="?", help="Domain whose projects/<domain>/cache/http.sqlite should be migrated")
+    cache_p.add_argument("--projects-root", default="projects")
+    cache_p.add_argument("--cache-dir", default=None, help="Direct cache directory containing http.sqlite")
+    cache_p.add_argument("--batch-size", type=int, default=500)
+    cache_p.add_argument("--progress-interval", type=int, default=5000)
+    cache_p.add_argument("--delete-original", action="store_true",
+                         help="Delete the legacy SQLite DB after the rebuilt compact DB is in place instead of keeping a .bak")
+    cache_p.set_defaults(func=_cache_migrate_command)
+
     serp_p = sub.add_parser("serp-gap", help="Analyze selected audited pages against live SERP competitors")
     serp_p.add_argument("domain", nargs="?", help="Domain with an existing site-audit report")
     serp_p.add_argument("--projects-root", default="projects")
@@ -1396,6 +1604,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8765)
     serve_p.set_defaults(func=_serve_command)
+
+    bench_p = sub.add_parser("benchmark", help="Benchmark cached report artifact reads without re-crawling")
+    bench_p.add_argument("domain", help="Domain/project slug to benchmark")
+    bench_p.add_argument("--projects-root", default="projects")
+    bench_p.add_argument("--report-dir", default=None, help="Override report directory")
+    bench_p.add_argument("--include", action="append", default=[],
+                         help="Glob of report files to include; repeat for multiple patterns")
+    bench_p.add_argument("--output", default=None, help="Benchmark JSON output path")
+    bench_p.set_defaults(func=_benchmark_command)
 
     settings_p = sub.add_parser("settings", help="Open a local UI for editing .env-backed defaults")
     settings_p.add_argument("--env-file", default=".env", help="Local env file to edit (default: .env)")

@@ -13,6 +13,7 @@ class _Fetched:
     status: int = 200
     content_type: str = "text/html"
     content_length_bytes: int = 0
+    content_encoding: str = ""
 
 
 def test_performance_payload_counts_resources_and_blocking_heuristics() -> None:
@@ -52,6 +53,194 @@ def test_performance_payload_counts_resources_and_blocking_heuristics() -> None:
     assert row["render_blocking_css_count"] == 1
     assert row["render_blocking_script_count"] == 1
     assert payload["summary"]["pages_with_render_blocking"] == 1
+
+
+def test_performance_payload_detects_https_http_mixed_content() -> None:
+    html = """
+    <html><head>
+      <link rel="stylesheet" href="http://cdn.example.com/app.css">
+      <style>.hero{background:url('http://cdn.example.com/hero.jpg')}</style>
+    </head><body>
+      <img src="http://cdn.example.com/one.jpg">
+      <img srcset="https://cdn.example.com/two.jpg 1x, http://cdn.example.com/two-large.jpg 2x">
+      <script src="/safe.js"></script>
+      <a href="http://example.com/not-a-resource">plain link</a>
+    </body></html>
+    """
+
+    payload = to_payload(analyze([_Fetched("https://example.com/", html)]))
+    row = payload["per_page"][0]
+
+    assert row["mixed_content_url_count"] == 4
+    assert "http://cdn.example.com/app.css" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/hero.jpg" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/one.jpg" in row["mixed_content_urls"]
+    assert "http://cdn.example.com/two-large.jpg" in row["mixed_content_urls"]
+    assert "http://example.com/not-a-resource" not in row["mixed_content_urls"]
+    assert payload["summary"]["pages_with_mixed_content"] == 1
+    assert payload["summary"]["total_mixed_content_urls"] == 4
+
+
+def test_performance_payload_detects_content_sizing_issues() -> None:
+    bad_html = """
+    <html><head>
+      <style>
+        .layout { min-width: 960px; }
+        .media { max-width: 1200px; }
+      </style>
+    </head><body>
+      <main style="width:720px"></main>
+      <table width="800"></table>
+    </body></html>
+    """
+    clean_html = """
+    <html><head><style>.media{max-width:1200px}</style></head>
+    <body><main style="width:100%"></main></body></html>
+    """
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["content_sized_correctly"] is False
+    assert rows["https://example.com/bad"]["content_width_exceeds_viewport"] is True
+    assert rows["https://example.com/bad"]["max_fixed_width_px"] == 960
+    assert rows["https://example.com/bad"]["content_sizing_issues"] == [
+        {"source": "inline_style", "tag": "main", "property": "width", "width_px": 720},
+        {"source": "style_block", "tag": "style", "property": "min-width", "width_px": 960},
+        {"source": "width_attribute", "tag": "table", "property": "width", "width_px": 800},
+    ]
+    assert rows["https://example.com/clean"]["content_sized_correctly"] is True
+    assert payload["summary"]["pages_with_content_sizing_issues"] == 1
+    assert payload["summary"]["content_sizing_issue_share"] == 0.5
+
+
+def test_performance_payload_detects_plugin_elements() -> None:
+    bad_html = """
+    <html><body>
+      <object data="/legacy.swf" type="application/x-shockwave-flash"></object>
+      <embed src="/movie.swf" type="application/x-shockwave-flash">
+      <applet code="legacy.class"></applet>
+    </body></html>
+    """
+    clean_html = "<html><body><video src='/movie.mp4'></video></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["plugin_element_count"] == 3
+    assert rows["https://example.com/bad"]["plugin_elements"] == [
+        {"tag": "object", "type": "application/x-shockwave-flash", "source": "/legacy.swf"},
+        {"tag": "embed", "type": "application/x-shockwave-flash", "source": "/movie.swf"},
+        {"tag": "applet", "type": "", "source": "legacy.class"},
+    ]
+    assert rows["https://example.com/clean"]["plugin_element_count"] == 0
+    assert payload["summary"]["pages_with_plugins"] == 1
+    assert payload["summary"]["plugin_usage_share"] == 0.5
+
+
+def test_performance_payload_detects_small_font_sizes() -> None:
+    bad_html = """
+    <html><head>
+      <style>
+        .fine-print { font-size: 11px; }
+        .legal { font-size: 70%; }
+      </style>
+    </head><body>
+      <p style="font-size:0.7rem"></p>
+      <p style="font-size:12px"></p>
+    </body></html>
+    """
+    clean_html = "<html><body><p style='font-size:14px'></p></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["small_font_size_count"] == 3
+    assert rows["https://example.com/bad"]["small_font_size_issues"] == [
+        {"source": "inline_style", "tag": "p", "font_size": "0.7rem", "font_size_px": 11.2},
+        {"source": "style_block", "tag": "style", "font_size": "11px", "font_size_px": 11.0},
+        {"source": "style_block", "tag": "style", "font_size": "70%", "font_size_px": 11.2},
+    ]
+    assert rows["https://example.com/clean"]["small_font_size_count"] == 0
+    assert payload["summary"]["pages_with_small_font_sizes"] == 1
+    assert payload["summary"]["small_font_size_share"] == 0.5
+
+
+def test_performance_payload_detects_uncompressed_html() -> None:
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/plain", "<html></html>"),
+        _Fetched("https://example.com/gzip", "<html></html>", content_encoding="gzip"),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/plain"]["not_compressed"] is True
+    assert rows["https://example.com/plain"]["compressed"] is False
+    assert rows["https://example.com/gzip"]["not_compressed"] is False
+    assert rows["https://example.com/gzip"]["compressed"] is True
+    assert payload["summary"]["pages_not_compressed"] == 1
+    assert payload["summary"]["not_compressed_share"] == 0.5
+
+
+def test_performance_payload_detects_small_tap_targets() -> None:
+    bad_html = """
+    <html><body>
+      <button style="width:32px;height:40px">Go</button>
+      <a href="/x" style="height:30px">Tiny link</a>
+      <input width="36" height="52">
+    </body></html>
+    """
+    clean_html = "<html><body><button style='width:64px;height:52px'>Go</button></body></html>"
+
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/bad", bad_html),
+        _Fetched("https://example.com/clean", clean_html),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/bad"]["small_tap_target_count"] == 3
+    assert rows["https://example.com/bad"]["small_tap_targets"] == [
+        {"tag": "button", "text": "Go", "width_px": 32, "height_px": 40},
+        {"tag": "a", "text": "Tiny link", "height_px": 30},
+        {"tag": "input", "text": "", "width_px": 36},
+    ]
+    assert rows["https://example.com/clean"]["small_tap_target_count"] == 0
+    assert payload["summary"]["pages_with_small_tap_targets"] == 1
+    assert payload["summary"]["small_tap_target_share"] == 0.5
+
+
+def test_performance_payload_detects_missing_viewport() -> None:
+    payload = to_payload(analyze([
+        _Fetched("https://example.com/missing", "<html><head></head><body></body></html>"),
+        _Fetched(
+            "https://example.com/ok",
+            '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head></html>',
+        ),
+    ]))
+    rows = {row["url"]: row for row in payload["per_page"]}
+
+    assert rows["https://example.com/missing"]["viewport_set"] is False
+    assert rows["https://example.com/missing"]["viewport_meta"] == ""
+    assert rows["https://example.com/ok"]["viewport_set"] is True
+    assert rows["https://example.com/ok"]["viewport_meta"] == "width=device-width, initial-scale=1"
+    assert payload["summary"]["pages_missing_viewport"] == 1
+    assert payload["summary"]["missing_viewport_share"] == 0.5
+
+
+def test_performance_payload_does_not_flag_http_pages_as_mixed_content() -> None:
+    html = '<html><body><img src="http://cdn.example.com/one.jpg"></body></html>'
+
+    payload = to_payload(analyze([_Fetched("http://example.com/", html)]))
+
+    assert payload["per_page"][0]["mixed_content_url_count"] == 0
 
 
 def test_performance_payload_buckets_and_heavy_pages() -> None:

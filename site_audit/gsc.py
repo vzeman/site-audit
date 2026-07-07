@@ -22,6 +22,7 @@ import numpy as np
 import requests
 
 from .ahrefs import (
+    MAX_QUERY_PAGES_ROWS,
     AhrefsAnalysis,
     _aggregate_clusters,
     _aggregate_directories,
@@ -333,6 +334,7 @@ def build_analysis(
                 "pages_by_traffic": {},
                 "top_pages": [],
                 "organic_keywords": [],
+                "query_pages": [],
                 "directories": [],
                 "clusters": [],
                 "daily": [],
@@ -381,6 +383,7 @@ def build_analysis(
         )
 
     organic_keywords = query_page_rows or query_rows
+    query_pages = _query_pages_payload(query_page_rows)
     directories = _aggregate_directories(top_pages, organic_keywords)
     clusters = _aggregate_clusters(top_pages, organic_keywords, cluster_lookup)
     metrics = _metrics(raw, top_pages, organic_keywords)
@@ -427,6 +430,7 @@ def build_analysis(
         "pages_by_traffic": _traffic_buckets(top_pages),
         "top_pages": top_pages,
         "organic_keywords": organic_keywords,
+        "query_pages": query_pages,
         "directories": directories,
         "clusters": clusters,
         "position_buckets": _position_buckets(organic_keywords),
@@ -555,6 +559,29 @@ def _normalize_query_rows(raw_rows: list[dict], query_page_rows: list[dict]) -> 
         })
     rows.sort(key=lambda r: (r["clicks"], r["impressions"]), reverse=True)
     return rows
+
+
+def _query_pages_payload(query_page_rows: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for row in query_page_rows:
+        rows.append({
+            "query": row.get("keyword") or "",
+            "url": row.get("matched_url") or row.get("url") or "",
+            "clicks": row.get("clicks", 0),
+            "impressions": row.get("impressions", 0),
+            "ctr": row.get("ctr"),
+            "position": row.get("position", 0),
+            "source": "gsc",
+            "provider": "gsc",
+            "provider_label": "Google Search Console",
+            "matched_url": row.get("matched_url", ""),
+            "page_title": row.get("page_title", ""),
+            "cluster": row.get("cluster"),
+            "cluster_label": row.get("cluster_label", ""),
+            "intents": [],
+        })
+    rows.sort(key=lambda r: _to_float(r.get("impressions")), reverse=True)
+    return rows[:MAX_QUERY_PAGES_ROWS]
 
 
 def _top_query_by_page(query_rows: list[dict]) -> dict[str, dict]:
